@@ -20,7 +20,13 @@ import { type GameLayout, gameLayout, loadLayout } from "./layout.ts";
 import { holdLock } from "./lock.ts";
 import { createRegistry, readRegistry, type Registry, updateRegistry } from "./registry/index.ts";
 import { claudeFixture, RECIPIENT } from "./review/fixtures.ts";
-import { CLAUDE_COORDINATOR, makeFixture, registryInput } from "./testFixtures.ts";
+import {
+  CLAUDE_COORDINATOR,
+  makeFixture,
+  projectConfig,
+  registryInput,
+  writeFixtureJson,
+} from "./testFixtures.ts";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const OPTIONS = { project: "Archie" };
@@ -109,6 +115,24 @@ describe("deliveryMessage", () => {
 });
 
 describe("flushEventsWith", () => {
+  it("delivers past an unknown deploy key and holds events on malformed reports", async () => {
+    const game = setup();
+    const config = projectConfig("Archie");
+    (config.reports as Record<string, unknown>).workerParents = "game-coordinator";
+    writeFixtureJson(game.configFile, config);
+    recordEvent(game, OPTIONS, "push", "one", "first");
+    const adapter = mockAdapter([]);
+    await flushEventsWith({ claude: () => adapter }, game);
+    expect(adapter.deliver).not.toHaveBeenCalled();
+    expect(events(game)[0]?.sent).toBe(false);
+    (config.reports as Record<string, unknown>).workerParents = ["game-coordinator"];
+    (config.deploy as Record<string, unknown>).futureSetting = true;
+    writeFixtureJson(game.configFile, config);
+    await flushEventsWith({ claude: () => adapter }, game);
+    expect(adapter.deliver).toHaveBeenCalledTimes(1);
+    expect(events(game)[0]?.sent).toBe(true);
+  });
+
   it("honours a new recipient decision guard between native event sends", async () => {
     const fixture = claudeFixture();
     updateRegistry(fixture.layout, 1, (draft) => {

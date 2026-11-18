@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { type Layout, loadLayout } from "../../layout.ts";
+import { gameLayout, type Layout, loadLayout } from "../../layout.ts";
 import {
   createRegistry,
   readRegistry,
@@ -14,7 +14,9 @@ import {
   CLAUDE_TECH,
   CODEX_TECH,
   makeFixture,
+  projectConfig,
   registryInput,
+  writeFixtureJson,
 } from "../../testFixtures.ts";
 import { readRoleRoute, RouteError, routeRecipient, routeScope, sendRoute } from "./route.ts";
 
@@ -73,6 +75,21 @@ describe("role-name route", () => {
     expect(() => routeRecipient(layout, route)).toThrow(
       "active route targets must not include the recipient game-coordinator",
     );
+  });
+});
+
+describe("routeRecipient host configuration", () => {
+  it("reads reports past an unknown deploy key and refuses malformed reports", () => {
+    const layout = setup(ROUTE);
+    const route = readRoleRoute(layout)!;
+    const config = projectConfig("Archie");
+    (config.deploy as Record<string, unknown>).futureSetting = true;
+    const file = gameLayout(layout, ROUTE.host).configFile;
+    writeFixtureJson(file, config);
+    expect(routeRecipient(layout, route)).toBe("game-coordinator");
+    (config.reports as Record<string, unknown>).workerParents = "game-coordinator";
+    writeFixtureJson(file, config);
+    expect(() => routeRecipient(layout, route)).toThrow(RouteError);
   });
 });
 

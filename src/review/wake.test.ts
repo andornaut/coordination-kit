@@ -151,6 +151,24 @@ describe("deliverScheduledReview (claude)", () => {
     });
   });
 
+  it("reviews past an unknown deploy key and defers on malformed reports", async () => {
+    const fixture = claudeFixture();
+    useEnv(fixture);
+    const config = projectConfig("Archie");
+    (config.reports as Record<string, unknown>).workerParents = "game-coordinator";
+    writeFixtureJson(fixture.game.configFile, config);
+    expect(await deliverScheduledReview(fixture.layout, fixture.game, SLOT)).toMatch(
+      new RegExp(`^${DEFERRED_PREFIX}review route is unavailable or invalid`),
+    );
+    expect(existsSync(join(fixture.unblock, `${RECIPIENT}-${SLOT}.json`))).toBe(false);
+    (config.reports as Record<string, unknown>).workerParents = ["game-coordinator"];
+    (config.deploy as Record<string, unknown>).futureSetting = true;
+    writeFixtureJson(fixture.game.configFile, config);
+    expect(
+      JSON.parse(await deliverScheduledReview(fixture.layout, fixture.game, SLOT)),
+    ).toMatchObject({ recipient: RECIPIENT, status: "sending" });
+  });
+
   it("does not dispatch from a nonhost project", async () => {
     const fixture = claudeFixture();
     useEnv(fixture);

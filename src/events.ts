@@ -15,7 +15,7 @@ import { eventRequestId, isCanonicalUuid } from "./adapters/shared/ids.ts";
 import { dumpsJson, isRecord, type PyJson } from "./adapters/shared/pyjson.ts";
 import { readRoleRoute, routeRecipient } from "./adapters/shared/route.ts";
 import type { DeliveryReceipt, HarnessAdapter } from "./adapters/types.ts";
-import { loadProjectConfig } from "./config.ts";
+import { loadReportsConfig } from "./config.ts";
 import { readJson, writeDurable } from "./durable.ts";
 import { type GameLayout, type Layout, loadLayout } from "./layout.ts";
 import { holdLock, LockBusy, type LockHandle } from "./lock.ts";
@@ -242,7 +242,7 @@ function destination(adapters: AdapterFactories, game: GameLayout): Destination 
   try {
     const layout = loadLayout(coordinatorRoot(game));
     const registry = readRegistry(layout);
-    const role = loadProjectConfig(game.configFile).reports.recipient;
+    const role = loadReportsConfig(game.configFile).reports.recipient;
     const recipient = resolveConversation(registry, role);
     const harness = resolveHarness(registry, role);
     const factory = adapters[harness];

@@ -36,8 +36,20 @@ route and every role reference must use these keys.
 ## Game `delivery-kit.json`
 
 Each game commits a `delivery-kit.json`, schema 1, owned by its Tech role. delivery-kit documents
-its delivery fields (`git`, `schedule`, `gate`, `resources`, `ci` and `deploy`). This kit
-validates the whole file whenever it reads one, with the same rules, and uses only `reports`:
+its delivery sections: `git`, `schedule`, `gate`, `resources`, `ci` and `deploy`.
+
+| Reader                                                         | Validates                                    |
+| -------------------------------------------------------------- | -------------------------------------------- |
+| coordination-kit commands, scheduled reviews and event flushes | the top-level shape and `reports`            |
+| delivery-kit, through `loadProjectConfig` from `build/shared`  | every section, with the same top-level shape |
+
+The top-level shape is an object holding exactly `schema` (1), the six delivery sections and
+`reports`, with no secret-like key. This kit's readers (`loadReportsConfig`) pass the delivery
+sections through unread, so a new delivery-kit setting does not refuse an inbox snapshot, a
+scheduled review or an event flush. `loadProjectConfig` and `validateProjectConfig` keep the full
+rules that delivery-kit loads its configuration with ([libraries](libraries.md)).
+
+This kit uses only `reports`:
 
 - `project`: the game's display name, matching its `name` in `config.json`.
 - `scheduledTicks`: whether the game's runner reports scheduled departure slots.

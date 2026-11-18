@@ -25,7 +25,7 @@ import {
   TECH,
 } from "../review/fixtures.ts";
 import { persist } from "../review/store.ts";
-import { CODEX_TECH } from "../testFixtures.ts";
+import { CODEX_TECH, projectConfig, writeFixtureJson } from "../testFixtures.ts";
 
 const WORKER = "00000000-0000-4000-8000-000000000080";
 const OTHER_PARENT = "00000000-0000-4000-8000-000000000081";
@@ -498,6 +498,19 @@ describe("inbox effective harness selection", () => {
 });
 
 describe("inbox snapshot (claude)", () => {
+  it("defaults to reports.recipient past an unknown deploy key and refuses malformed reports", async () => {
+    const { fixture, requestId } = await delivered();
+    const config = projectConfig("Archie");
+    (config.deploy as Record<string, unknown>).futureSetting = true;
+    writeFixtureJson(fixture.game.configFile, config);
+    expect((await snapshot(fixture)).queue_ids).toEqual([requestId]);
+    (config.reports as Record<string, unknown>).workerParents = "game-coordinator";
+    writeFixtureJson(fixture.game.configFile, config);
+    const refused = await run(fixture, "inbox", "snapshot", "--game", GAME);
+    expect(refused.code).not.toBe(EXIT_OK);
+    expect(refused.err).toContain("/reports/workerParents");
+  });
+
   it("scopes a Claude route target to its own delivered entries for snapshot and ack", async () => {
     const { fixture, requestId } = await delivered();
     const techRequest = await deliveredTo(fixture, TECH, "tech-message");

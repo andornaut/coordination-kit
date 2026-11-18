@@ -3,7 +3,7 @@
 // recipient is the host game's reports.recipient.
 import { existsSync } from "node:fs";
 
-import { loadProjectConfig } from "../../config.ts";
+import { loadReportsConfig } from "../../config.ts";
 import { readJson } from "../../durable.ts";
 import { type GameCoordinatorConfig, gameLayout, type Layout, roleKeys } from "../../layout.ts";
 import { resolveConversation, resolveHarness, UnknownRole } from "../../registry/resolve.ts";
@@ -84,7 +84,7 @@ export function readRoleRoute(layout: Layout): RoleRoute | null {
 export function routeRecipient(layout: Layout, route: RoleRoute): string {
   let recipient: string;
   try {
-    recipient = loadProjectConfig(gameLayout(layout, route.host).configFile).reports.recipient;
+    recipient = loadReportsConfig(gameLayout(layout, route.host).configFile).reports.recipient;
   } catch {
     throw new RouteError(`the route host ${route.host} has no readable reports.recipient`);
   }

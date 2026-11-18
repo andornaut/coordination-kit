@@ -38,8 +38,9 @@ same class another subpath exports. Each bundle imports only `node:` builtins an
   `PROJECT_CONFIG_FILE`, `Layout`, `GameLayout`;
 - validation: `Issues`, `ValidationError`, the `check*` helpers and the ID, UUID and secret-key
   patterns;
-- game configuration: `loadProjectConfig`, `validateProjectConfig`, `addressedRoles`,
-  `gameRecipients`, `ProjectConfig`;
+- game configuration: `loadProjectConfig` and `validateProjectConfig` (every section),
+  `loadReportsConfig` and `validateReportsConfig` (the top-level shape and `reports` only),
+  `addressedRoles`, `gameRecipients`, `ProjectConfig` and `ReportsConfig`;
 - the command contract: `EXIT_OK`, `EXIT_INVALID`, `EXIT_USAGE`, `EXIT_REFUSED`, `Io`, `Handler`,
   `coordinatorRoot`, and the help synopsis helpers `formSynopsis`, `usageText`, `CommandSpec`;
 - identifiers: `isCanonicalUuid`, `CANONICAL_UUID`, `SHA_PATTERN`, `uuid5`, `slotRequestId`,

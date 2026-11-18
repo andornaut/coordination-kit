@@ -1,16 +1,22 @@
 import { describe, expect, it } from "vitest";
 
-import { validateProjectConfig } from "./config.ts";
-import { projectConfig } from "./testFixtures.ts";
+import { gameRecipients, validateProjectConfig, validateReportsConfig } from "./config.ts";
+import { gameLayout, loadLayout } from "./layout.ts";
+import { makeFixture, projectConfig, writeFixtureJson } from "./testFixtures.ts";
 import { ValidationError } from "./validate.ts";
 
 type Json = Record<string, unknown>;
 
-function issuesFor(mutate: (config: Json) => void): readonly string[] {
+const DELIVERY_SECTIONS = ["git", "schedule", "gate", "resources", "ci", "deploy"];
+
+function issuesFor(
+  mutate: (config: Json) => void,
+  validate: (value: unknown) => unknown = validateProjectConfig,
+): readonly string[] {
   const config = projectConfig("Archie");
   mutate(config);
   try {
-    validateProjectConfig(config);
+    validate(config);
   } catch (error) {
     if (error instanceof ValidationError) {
       return error.issues;
@@ -67,6 +73,11 @@ describe("validateProjectConfig", () => {
       ],
       ["unknown keys", (c: Json) => (c.repo = "../game"), "/repo"],
       [
+        "unknown delivery keys",
+        (c: Json) => (section(c, "deploy").futureSetting = true),
+        "/deploy/futureSetting",
+      ],
+      [
         "the removed maxWorkers key",
         (c: Json) => (section(c, "resources").maxWorkers = 4),
         "/resources/maxWorkers",
@@ -115,5 +126,64 @@ describe("validateProjectConfig", () => {
         `${label}: ${issues.join("\n")}`,
       ).toBe(true);
     }
+  });
+});
+
+describe("validateReportsConfig", () => {
+  it("passes every delivery section through unread", () => {
+    expect(
+      issuesFor((config) => {
+        for (const key of DELIVERY_SECTIONS) {
+          section(config, key).futureSetting = true;
+        }
+        section(config, "resources").cpus = "many";
+        section(config, "deploy").mode = "rsync";
+      }, validateReportsConfig),
+    ).toEqual([]);
+  });
+
+  it("still refuses a malformed reports section and top-level shape", () => {
+    const rows: [string, (c: Json) => unknown, string][] = [
+      [
+        "an unknown reports key",
+        (c: Json) => (section(c, "reports").futureSetting = true),
+        "/reports/futureSetting",
+      ],
+      [
+        "a malformed worker parent list",
+        (c: Json) => (section(c, "reports").workerParents = "game-coordinator"),
+        "/reports/workerParents",
+      ],
+      [
+        "a conversation ID recipient",
+        (c: Json) => (section(c, "reports").recipient = "00000000-0000-4000-8000-000000000001"),
+        "/reports/recipient",
+      ],
+      ["a missing reports section", (c: Json) => delete c.reports, "/reports"],
+      ["a missing delivery section", (c: Json) => delete c.deploy, "/deploy"],
+      ["an unknown top-level key", (c: Json) => (c.repo = "../game"), "/repo"],
+      ["another schema", (c: Json) => (c.schema = 2), "/schema"],
+    ];
+    for (const [label, mutate, pointer] of rows) {
+      const issues = issuesFor(mutate, validateReportsConfig);
+      expect(
+        issues.some((issue) => issue.startsWith(`${pointer}:`)),
+        `${label}: ${issues.join("\n")}`,
+      ).toBe(true);
+    }
+  });
+});
+
+describe("gameRecipients", () => {
+  it("reads reports past an unknown deploy key and refuses malformed reports", () => {
+    const layout = loadLayout(makeFixture().root);
+    const games = ["archies-dog-walks", "chibis-way-home"];
+    const config = projectConfig("Archie");
+    section(config, "deploy").futureSetting = true;
+    writeFixtureJson(gameLayout(layout, "archies-dog-walks").configFile, config);
+    expect(gameRecipients(layout, games)).toEqual(["game-coordinator"]);
+    section(config, "reports").workerParents = "game-coordinator";
+    writeFixtureJson(gameLayout(layout, "archies-dog-walks").configFile, config);
+    expect(() => gameRecipients(layout, games)).toThrow("/reports/workerParents");
   });
 });

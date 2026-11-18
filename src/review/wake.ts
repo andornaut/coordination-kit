@@ -29,7 +29,7 @@ import {
   sendRoute,
 } from "../adapters/shared/route.ts";
 import type { HarnessAdapter, Inventory } from "../adapters/types.ts";
-import { loadProjectConfig } from "../config.ts";
+import { loadReportsConfig } from "../config.ts";
 import { readJson } from "../durable.ts";
 import { recordEvent } from "../events.ts";
 import type { GameLayout, Layout } from "../layout.ts";
@@ -371,7 +371,7 @@ export async function deliverScheduledReview(
         status: "deferred",
       });
     }
-    const config = loadProjectConfig(game.configFile);
+    const config = loadReportsConfig(game.configFile);
     const members = new Set([recipient, ...route.targets]);
     const parentRoles = config.reports.workerParents.map((role) => resolveRole(registry, role));
     if (parentRoles.some((role) => !members.has(role))) {

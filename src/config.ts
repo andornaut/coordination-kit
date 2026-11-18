@@ -217,24 +217,39 @@ function checkReports(issues: Issues, value: unknown): void {
   }
 }
 
+/** The sections this kit reads. The other sections belong to delivery-kit. */
+export type ReportsConfig = Pick<ProjectConfig, "reports" | "schema">;
+
+const SECTIONS = ["schema", "git", "schedule", "gate", "resources", "ci", "deploy", "reports"];
+
+/** Every section present, no other top-level key, and schema 1. */
+function checkShape(issues: Issues, value: unknown): value is Json {
+  if (!checkObject(issues, "", { required: SECTIONS }, value)) {
+    return false;
+  }
+  if (value.schema !== 1) {
+    issues.add("/schema", "must be 1");
+  }
+  return true;
+}
+
+/**
+ * Validate every section with delivery-kit's rules. delivery-kit loads its configuration through
+ * this function and `loadProjectConfig`; coordination commands use `validateReportsConfig`.
+ */
 export function validateProjectConfig(
   value: unknown,
   subject = "delivery-kit.json",
 ): ProjectConfig {
   const issues = new Issues();
-  const required = ["schema", "git", "schedule", "gate", "resources", "ci", "deploy", "reports"];
-  if (checkObject(issues, "", { required }, value)) {
-    const config: Json = value;
-    if (config.schema !== 1) {
-      issues.add("/schema", "must be 1");
-    }
-    checkGit(issues, config.git);
-    checkSchedule(issues, config.schedule);
-    checkGate(issues, config.gate);
-    checkResources(issues, config.resources);
-    checkCi(issues, config.ci);
-    checkDeploy(issues, config.deploy);
-    checkReports(issues, config.reports);
+  if (checkShape(issues, value)) {
+    checkGit(issues, value.git);
+    checkSchedule(issues, value.schedule);
+    checkGate(issues, value.gate);
+    checkResources(issues, value.resources);
+    checkCi(issues, value.ci);
+    checkDeploy(issues, value.deploy);
+    checkReports(issues, value.reports);
   }
   issues.throwIfAny(subject);
   return value as unknown as ProjectConfig;
@@ -244,15 +259,35 @@ export function loadProjectConfig(path: string): ProjectConfig {
   return validateProjectConfig(readJson(path), path);
 }
 
+/**
+ * Validate the top-level shape and `reports` only, the sections coordination commands read. The
+ * delivery sections pass through unread, so a new delivery-kit setting does not refuse them.
+ */
+export function validateReportsConfig(
+  value: unknown,
+  subject = "delivery-kit.json",
+): ReportsConfig {
+  const issues = new Issues();
+  if (checkShape(issues, value)) {
+    checkReports(issues, value.reports);
+  }
+  issues.throwIfAny(subject);
+  return value as unknown as ReportsConfig;
+}
+
+export function loadReportsConfig(path: string): ReportsConfig {
+  return validateReportsConfig(readJson(path), path);
+}
+
 /** Every role name the configuration addresses, for resolution against the registry. */
-export function addressedRoles(config: ProjectConfig): string[] {
+export function addressedRoles(config: Pick<ProjectConfig, "reports">): string[] {
   return [...new Set([config.reports.recipient, ...config.reports.workerParents])];
 }
 
 /** The reports.recipient of each of `games`, each role once, in the order given. */
 export function gameRecipients(layout: Layout, games: readonly string[]): string[] {
   const recipients = games.map(
-    (game) => loadProjectConfig(gameLayout(layout, game).configFile).reports.recipient,
+    (game) => loadReportsConfig(gameLayout(layout, game).configFile).reports.recipient,
   );
   return [...new Set(recipients)];
 }

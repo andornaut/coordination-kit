@@ -16,7 +16,7 @@ import {
   routeScope,
 } from "../adapters/shared/route.ts";
 import type { Disposition } from "../adapters/types.ts";
-import { loadProjectConfig } from "../config.ts";
+import { loadReportsConfig } from "../config.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { type GameLayout, gameLayout, type Layout, loadLayout } from "../layout.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
@@ -140,7 +140,7 @@ function scope(
   }
   const resolvedRecipient =
     worker === null
-      ? conversation(registry, recipient ?? loadProjectConfig(entry.configFile).reports.recipient)
+      ? conversation(registry, recipient ?? loadReportsConfig(entry.configFile).reports.recipient)
       : { harness: worker.harness, id: worker.worker };
   // Worker parents must belong to the active route before any native call.
   if (
