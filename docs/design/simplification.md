@@ -1,0 +1,199 @@
+# Simplification
+
+Approved by the user on 2026-11-18. Each phase is a work item below; deletions need separate user approval.
+
+## Summary
+
+Replace the message store, Claude spool, request ledger, approval ledger and filesystem work protocol with one append-only SQLite event store at the state root, one message lifecycle in which every send is stored first and recipients pull, and one work record per approved task in git. Native transports only wake a recipient; they never carry a payload. Identity and fencing come from the registry binding alone, so epochs, enrollment, adoption, coverage and automatic ledger capture go. Decisions become typed records linked to work, questions, roles and superseded decisions, kept in git with a derived index in the store. The delivery-kit runner keeps cadence and departures, writes its own per-game event log and calls the coordinator-installed CLI for reviews and event delivery, so one code copy owns the store. Five phases follow a baseline; each is reversible until its exit criteria hold, and deletion happens last.
+
+## Target architecture
+
+| Component                                         | Role                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `coordination-kit` CLI (coordinator-installed)    | The only interface for roles: `msg`, `inbox`, `work`, `question`, `hold`, `decision`, `graph`, `review`, `session`, `harness`, `work check`. Same verbs and output in Claude and Codex.                                                                                                                      |
+| Store: `<stateRoot>/coordination.db`              | SQLite through `node:sqlite` (builtin in the pinned Node 24.21, so the bundle still imports only `node:` modules), WAL, `synchronous=FULL`. One `events` table (append-only, hash-chained, unique idempotency key per command) plus projections updated in the same transaction and rebuildable from events. |
+| Artifacts: `<stateRoot>/artifacts/`               | Content-addressed evidence bytes, write-once by rename, no per-artifact lock files.                                                                                                                                                                                                                          |
+| Git: `docs/work/<id>.md`, `docs/design/<area>.md` | Approval, owner, scope, criteria, decisions, milestone, supersedes. Public and durable.                                                                                                                                                                                                                      |
+| Registry: `var/registry.json`                     | Unchanged format. Role, harness and native ID binding; the only write fence.                                                                                                                                                                                                                                 |
+| Wake adapters                                     | Claude: the channel MCP server watches a per-conversation wake file and emits one notification. Codex: one control-socket queue add. Both carry the same fixed text: `N new messages for ROLE: run coordination-kit inbox`.                                                                                  |
+| delivery-kit runner                               | Cadence, departures, locks, slot receipts and runner control state, unchanged. Appends typed events to `var/games/<g>/bus/events.jsonl` (single writer, no shared lock). Calls `coordination-kit review deliver` and `coordination-kit events ingest` as child processes.                                    |
+| game-coordinator                                  | `config.json`, registry, route, `roles.json` and the generated role briefs.                                                                                                                                                                                                                                  |
+
+Message lifecycle (states `sent`, `delivered`, then `handled`, `retained` or `superseded`):
+
+1. `msg send` writes the original (ID, sender, recipient, intent, body, links) in one transaction. Nothing native happens before that commit.
+2. The store marks the recipient wake-pending; the adapter sends at most one outstanding wake, only when the recipient is idle with no open question or hold record. Wake outcomes are logged apart from message state.
+3. The recipient's own `inbox` read records `delivered`. Delivery is observed by the recipient, never inferred from transport.
+4. The recipient closes with one write: `msg done ID [--work W] [--superseded-by ID2]` or `msg retain ID --reason R --next-boundary B`.
+5. Reviews list messages undelivered after one slot, retained past their boundary, or open across two slots.
+
+Work lifecycle:
+
+1. Approval commits `docs/work/<id>.md` (`status: approved`, approval reference, owner, criteria) and its index row on `main`.
+2. `work start <id>` by the owner checks the file is approved on `main` and no hold covers it, then appends `work.started`.
+3. Progress is `work evidence <id> --stage implemented|merged|verified|published|deployed --sha S --ref R`, plus `work block` and `work ready`.
+4. `question open` records a pending prompt; after the user answers, `question answer` writes the decision record and its work-file line.
+5. Integration sets `status: done` in the merge and runs `work finish <id>`; acceptance stages continue in the store until the last clause closes.
+
+## Verdicts on the recommendations
+
+| #   | Recommendation               | Verdict            | Reason                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --- | ---------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Stable channel command       | Adopt with changes | `docs/review.md` and `docs/upgrading.md`: a session reads its MCP command at launch and `/mcp` reconnect reruns that command, so only a changed command string forces relaunch. Point configs at `node <gc>/node_modules/@andornaut/coordination-kit/dist/cli.js --root <gc> claude channel`, which `npm ci` updates in place; then a kit upgrade needs only reconnect. No wrapper is needed. If indirection is wanted, it is a committed Node shim in game-coordinator `bin/` (game-coordinator is neither a game nor a kit); never `var/bin`, which is ignored and unreviewed. The server is also reduced to a wake-file watcher so its code stops changing. |
+| 2   | One message path             | Adopt              | `docs/game-policies.md#communication` still says native first, then coordinator relay, then tmux pane, and `docs/review.md` spools briefs and events straight to the Claude spool without a message original. Every send, including review briefs and runner events, becomes a stored message; `queued`, `sending`, `accepted`, `ambiguous` and `blocked` leave message state.                                                                                                                                                                                                                                                                                 |
+| 3   | One action to close          | Adopt              | Closing today takes `protocol inbox`, `artifact-put`, `protocol role`, a hand-built `message-receipt` JSON with epoch and binding, then `message reconcile --expected-revision` (`docs/work-protocol.md`, Publishing a receipt), plus a ledger cancel: 1631 of 3348 ledger events are `cancel`. `retain` stays a separate verb because it needs owner, reason and boundary.                                                                                                                                                                                                                                                                                    |
+| 4   | One work record              | Adopt with changes | `docs/work/README.md` already defines the file and keeps live progress outside git; keep that split. Git holds approval, owner, criteria, decisions, milestone and supersedes; the store holds claim, block, ready and stage SHAs keyed by work ID, since workers on branches must not edit approved scope. Retire `approval-ledger.json` (single-writer JSON) and the request ledger (79 `register` events in total).                                                                                                                                                                                                                                         |
+| 5   | Automatic decision capture   | Adopt with changes | No harness-neutral hook on structured-prompt answers exists (a Claude tool hook has no Codex counterpart), so capture is one explicit `question answer` command in both harnesses, run in the same turn as the answer. Work files are public: short decision text and approval reference only, no quoted conversation.                                                                                                                                                                                                                                                                                                                                         |
+| 6   | Thin protocol                | Adopt              | Enrollment anchors revoke or stale a receipt on registry, ledger-prefix, epoch or binding drift (`docs/work-protocol.md`, Managed workspace coverage), which is why enrolled roles read as not adopted; `enroll-self` (ck-0002) still writes one UNKNOWN per scope. `src/protocol` and `src/accounting` are 325 KB of 977 KB non-test source. The fence becomes "writer native ID equals the role's effective registry binding", checked per write; `harness select` rotates it.                                                                                                                                                                               |
+| 7   | One fast store               | Adopt with changes | The state root holds 553 MB in 21,705 files about 36 hours after activation; `capture` is 1610 events and 175 MB of the 204 MB ledger journal; 2680 message records each have a lock file. Use SQLite for coordination state, but keep departure-path events in runner-owned per-game logs (delivery-kit requirement: O(1) appends, no shared lock) ingested by cursor. The registry stays JSON.                                                                                                                                                                                                                                                               |
+| 8   | Generated short instructions | Adopt with changes | `roles.json` and `scripts/role-catalog.mjs` already generate `docs/roles.md`. Generate briefs after Phase 4, when the verb set is final; the review brief is a store query capped at one page with `review show` for detail, done in Phase 2.                                                                                                                                                                                                                                                                                                                                                                                                                  |
+
+Three additions:
+
+- **Workers are parent-owned in both harnesses.** ck-0006 was cancelled because Claude worker lineage cannot be verified; drop worker addresses and Codex-only worker verification so like items are treated alike. A worker writes under its parent's binding with an unverified `--worker NAME` attribution.
+- **The review and event seam crosses a process boundary.** The runner spawns the coordinator-installed CLI, so the store format has one code copy and coordination fixes reach runners without a delivery-kit release. See open question 1.
+- **Stop automatic boundary capture now (Phase 1).** It is the main growth source and feeds only coverage, which Phase 4 removes.
+
+## delivery-kit constraints carried into the plan
+
+- The runner keeps: `timezone` and `wakeMinutes` slot selection, minute-start wake, no replay, exactly one call per due slot with an AbortSignal (child killed on abort); `runner.lock` and `loop.lock`; "no delivery claimed" when the seam fails (nonzero exit, timeout or abort); the `bus: scheduled review <slot>: <outcome>` log line and the stderr deferral line; `scheduledTicks` and the per-pass event flush in the same observer pass; the `runner.json` pin and resident-identity-changed reporting; once-per-slot dedupe through the persisted slot receipt.
+- The seam returns typed `{status: "delivered"|"deferred"|"skipped", detail}` on stdout, replacing `DEFERRED_PREFIX`. The brief's message ID derives from `(game, slot)`, so a repeated call after a lost result is a store no-op. The runner never reads brief content.
+- Event log: typed appends `attempt`, `gate`, `push`, `ci`, `deploy`, `runner.started`; `complete` is a projection in the store with a unique `(game, complete, sha)` key, so restart replay never re-emits it. At-most-once per `(kind, key)` by an in-memory key set rebuilt from the log at start, plus a unique key at ingest. A failed append logs to stderr and never stops a departure. This removes `<sha>.state` and the `underLock` seam; `flushEvents` becomes `events ingest` with a per-game cursor in the store.
+- Departure decisions (last push SHA, deploy pending, gate failed) stay runner control state. `status` stays read-only and reads no store.
+- Departures are never gated on enrollment, coverage, protocol or store state. Observer adoption shrinks to the runner appending `runner.started {token, delivery-kit version, cliSha256, coordination-kit version and dist sha256}`; owner attestation is optional and admission depends on neither.
+- Migration of `bus/events/` happens only at an idle runner restart: the new runner imports unsent outbox files into its log before its loop starts; no live rewrite.
+
+## Phases
+
+### Phase 0: baseline and inventory (S)
+
+- **Goal:** a verified restore point and an exact manifest of in-flight state.
+- **Changes:** none in code. game-coordinator takes an independent backup of the state root and `var/`, restores it to scratch and compares hashes; it records counts and IDs of non-terminal messages, ambiguous receipts, open requests, approval-ledger entries, and each role's holds and pending questions from `current.md` and panes.
+- **Migration:** none. Holds and questions are only read.
+- **Compatibility:** n/a. **Risks:** a backup taken mid-write; take it between a review and the next departure. **Rollback:** none needed. **Exit:** restore verified; manifest reviewed by the user.
+
+### Phase 1: stable entry points and growth stop (M)
+
+- **Goal:** no session relaunch for later phases; the ledger stops growing from bookkeeping.
+- **Changes:**
+  - coordination-kit 1.2 (1.1.0 is the backlog release): `claude channel` drains the legacy spool and also watches `<stateRoot>/wake/<conversation>.json` (seq-based, coalesced); `--version` prints version and dist sha256; new `review deliver --game G --slot S` and `events flush --game G` commands with typed JSON results; boundary capture off by default (`--capture` opt-in).
+  - delivery-kit 6.0: the seam spawns the installed CLI resolved from `DELIVERY_KIT_ROOT`; typed result replaces `DEFERRED_PREFIX`.
+    - A missing or out-of-range CLI defers reviews and event flushes only ("deferred: cli unavailable" or "out of range"); the runner still starts and departs, and departures never depend on the seam. `npm ci` at the root briefly removes the CLI; that case defers and never crashes the runner.
+    - Each spawn has a 45 s timeout (under the 60 s pass) with a process-group kill on abort or timeout; a timeout is "no delivery claimed". A spawn never holds `departure.lock` and never delays a departure.
+    - Every seam result carries the CLI version and dist sha256; the runner logs a change and `status` shows the last seen value, since `npm ci` can change the CLI under a live runner.
+    - The bundle keeps durable writes, layout, locks, ids, io, project-config validation and, until 7.0, the protocol read in `src/bus/adoption.ts`.
+    - coordination-kit 1.2 is installed at the root before any 6.0 runner starts; a 6.0 runner on an older root defers safely.
+  - game-coordinator: channel MCP configs use the stable path; README role messaging updated.
+  - game Tech: delivery-kit pin bump, idle runner replacement.
+- **Migration:** game-coordinator checks each Claude session's launch command (`harness doctor`); a session already on the stable path needs only `/mcp` reconnect, others relaunch once by exact ID at a natural idle boundary, preserving IDs, WIP, questions and holds. Runners are replaced one at a time after their own departure (Ada the Navigator :00, Archie :10, Chibi :20) and never across :30.
+- **Compatibility:** 5.0.2 and 6.0 runners coexist (formats and slot receipts unchanged). Old and new channel servers both drain the legacy spool under `unblock.lock`.
+- **Risks:** a missing or out-of-range CLI defers reviews ("no delivery claimed"); capture off weakens coverage reports, which Phase 4 retires.
+- **Rollback:** restore the previous `package.json` and lockfile pins in game-coordinator and the game, `npm ci`, replace the runner idle; restore the previous MCP command and reconnect; re-enable `--capture`.
+- **Exit:** all Claude sessions on the stable path; one coordination-kit patch adopted by `npm ci` plus reconnect with zero relaunches; three runners on 6.0 with 24 consecutive reviews delivered; ledger growth under 20 events a day.
+
+### Phase 2: one store and one message path (L)
+
+- **Goal:** every message durable before any native action, pull delivery, one close action, identical behaviour in both harnesses.
+- **Changes:**
+  - coordination-kit 2.0: SQLite store; `msg send|done|retain|status|history`, `inbox`; wake adapters; briefs and runner events stored as messages from `delivery-kit`; `events ingest`; `store import` and `store export`; brief capped at one page (counts plus exceptions).
+  - delivery-kit 6.1: per-game `events.jsonl` (the runner is the only event writer; atomic line appends), typed appends, `runner.started`.
+    - Ingest quarantines a torn last line and never advances its cursor past it; `events.jsonl` rotates once ingest has passed it; the startup dedupe rebuild covers the unrotated tail, older dedupe relies on the store's unique key.
+    - `events ingest` writes its acknowledged offset back to `bus/` so `status` computes `drained` and `reporter_blockers` without reading the store; the store copy stays authoritative for ingest.
+    - The `complete` projection still produces the stored COMPLETE message to `reports.recipient`.
+  - game-coordinator: rewrite `docs/game-policies.md#communication` and README Role messaging and Monitoring around the five states; remove relay and tmux fallback.
+  - game Tech: pin bump and idle runner replacement.
+- **Migration** (one window after a review, :35 to :55):
+  1. Roles finish in-flight sends and closes; game-coordinator backs up and runs `store import --dry-run`, matching counts and IDs against the Phase 0 manifest refreshed.
+  2. Bump the protocol generation so legacy writers fail closed (existing generation check).
+  3. Import every record with its original ID, body hash, links and evidence: `queued` and `blocked` become `sent`; `accepted` becomes `delivered`; `sending` and `ambiguous` become `delivered` with `unconfirmed: true`, shown to the recipient on pull and never rewoken; terminal states close with their evidence; retention keeps owner, reason and boundary. Unclaimed spool entries were never delivered, so they import as `sent`.
+  4. Send one guarded wake per recipient with undelivered messages. Runners import unsent outbox files at their idle restart.
+  - Native prompts, registry held flags, route state and delivery controls are not touched; recipients with unknown question state get no wake and pull at their next boundary.
+- **Compatibility:** legacy read-only commands (`message status`) read the frozen legacy store; legacy writes are refused by the fence. Phase 1 runners keep working because the seam's typed contract does not change.
+- **Risks:** `node:sqlite` is a release-candidate API in Node 24 (pin the Node version and cover the store with contract cases; JSONL with snapshots is the fallback engine); import mapping errors (dry-run with per-ID diff); SQLite write contention (writes are single-row transactions with `busy_timeout`); recipients that do not pull (review exceptions); sessions without wake support (review catches).
+- **Rollback:** set the fence to refuse new writes; `store export --since-cutover` lists messages and closes made after cutover (no payload was ever sent natively); restore the Phase 2 backup; convert uningested `events.jsonl` lines back to `bus/events` outbox files (or ingest them once with the 1.2 CLI) before any 6.0 runner starts; restore Phase 1 pins and replace runners idle; re-record exported messages with `message send` under their original IDs and dispatch through the legacy guarded path; recipients re-close exported closes.
+- **Exit:** seven days with no native send lacking a stored original (wake log against store); p95 under 200 ms for `send`, `inbox` and `done` on a synthetic store of ten times current volume; no new record in an ambiguous state; two reviews with full classification and a one-page brief; a contract case proving the same lifecycle on both adapters.
+
+### Phase 3: work, decisions, questions and holds (M)
+
+- **Goal:** one work record, persistent decisions, questions and holds visible without pane reads.
+- **Changes:**
+  - coordination-kit 2.1: `work start|evidence|block|ready|finish|show|history`; `question open|answer|cancel` and `hold set|release`, each writable only by the owning role's binding; `decision list`, `graph`; `work check` accepts optional `owner` and the decision line format.
+  - game-coordinator: `docs/work/` for policy decisions (`gc-` prefix); `docs/approval-ledger.md` replaced by a work lifecycle section in `docs/game-policies.md`.
+  - Owners: work files for approved behaviour that has none; record their open questions and holds.
+- **Migration:** each approval-ledger entry maps to a work ID (existing file or a stub committed on that repo's `main` by its owner); stage SHAs and proofs become `work evidence` events; `unresolved` becomes retained items with owner and next boundary; `independentHolds` import as holds owned by their original owner, never released by import. Each owner records its existing pending prompts with `question open` without touching the native prompt. Reviews keep the pane check until store and panes agree for two slots.
+- **Compatibility:** `approval-ledger.json` frozen read-only; `work report` reads the store and legacy protocol publications. Older `work check` pins reject `owner`, so release, then bump every repo's pin, then add fields.
+- **Risks:** missed approval entries (count equality check); owners not recording questions (pane check stays the backstop).
+- **Rollback:** unfreeze the backed-up `approval-ledger.json`, stop using the new verbs; store events remain as history; revert the docs commit.
+- **Exit:** every ledger entry mapped; every hold and question in checkpoints present in the store for two slots; `graph` answers why for three sample decisions.
+
+### Phase 4: thin protocol and retirement (L)
+
+- **Goal:** registry binding plus one session record; start and finish boundaries only.
+- **Changes:**
+  - coordination-kit 3.0: remove epochs, claims, enrollment, adoption, coverage, intake offers, the request ledger, protocol journals, inbox snapshot and ack, spool and `retire-spool`, Codex worker verification; add `session start` (records role, harness, native ID, CLI version).
+  - delivery-kit 7.0: remove the protocol import in `src/bus/adoption.ts`; identity only through `runner.started`; `status` redefines `observer_adoption` (current, stale or unknown) from the latest `runner.started` and seam identity plus the optional owner attestation.
+  - game-coordinator: `work-protocol.json` reduced to `stateRoot`; docs updated.
+- **Migration:** fence and freeze protocol journals and the ledger; map the 79 requests to work IDs or close them; drop pending intake offers (derived captures); archive `roles/`, `accounting/`, `transport/`, `locks/` and `migration/` as a tarball with the coordination-kit 2.1 release for read-only inspection.
+- **Compatibility:** none for writers; history readable from the archive with the archived CLI and `--state-root`.
+- **Risks:** a guarantee that relied on a removed layer; each is mapped in the table below before removal.
+- **Rollback:** restore the archive and pin coordination-kit 2.1 and delivery-kit 6.1; the frozen state restores exactly; store events since remain.
+- **Exit:** non-test source under 400 KB; no command takes a hand-built input file; one role handoff is `harness select` plus `session start`.
+
+### Phase 5: generated instructions (S)
+
+- **Goal:** each role's instructions and the review procedure under one page.
+- **Changes:** game-coordinator `roles.json` adds per-role verbs; `scripts/role-catalog.mjs` generates each startup brief and the review procedure with a drift check in lint; `docs/game-policies.md` Communication shrinks to the lifecycle.
+- **Migration:** new briefs go out with the next orientation; no session restart. **Compatibility:** old briefs stay valid as the verbs are unchanged. **Risks:** a dropped rule; diff each brief against the policy headings. **Rollback:** revert the commit. **Exit:** every brief under 60 lines and 4 KB.
+
+## Guarantees that must not regress
+
+| Guarantee                                    | Mechanism                                                                                                                                                                                                                                             |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Never resend an unreconciled delivery        | Payloads are never sent natively, only pulled. One outstanding wake per recipient; an ambiguous wake is not retried before the recipient's next pull or the next review slot. Imported ambiguous records are flagged `unconfirmed` and never rewoken. |
+| Never clear another owner's question or hold | `question` and `hold` writes require the owner's registry binding; import and reviews never release; native prompts are never touched.                                                                                                                |
+| Delivery distinct from handling              | `delivered` is the recipient's own read; `handled` is its explicit `done`; wake acceptance is a log line only.                                                                                                                                        |
+| Durable original before dispatch             | `msg send` commits before any wake; a wake references stored IDs only.                                                                                                                                                                                |
+| Secrets never in records                     | The CLI reads no environment values or credential paths into records; artifact paths with credential components are refused (as today); `send` refuses bodies matching private-key and token shapes, accepting false positives.                       |
+| No hostnames                                 | Records and work files hold role names, never host names; `work check` refuses the local machine's host name, read at run time and never stored, alongside the existing home-path and UUID rules.                                                     |
+
+## Decisions as a knowledge graph
+
+- **Nodes:** work item (`ck-0006`), decision (`ck-0006/D1`), question (`q-<role>-<n>`, store only), role (registry name), commit (SHA).
+- **Decision record:** a line in the work file's Decisions section, `- D2 (user, 2026-11-18; answers q-coordination-kit-14; supersedes D1): text`, mirrored as a typed store row `{id, work, question, by, at, role, supersedes, text}`.
+- **Edges:** `decides` (decision to work), `answers` (decision to question), `owned-by` (question and work to role), `supersedes` (decision to decision, work to work), `related` (work to work), `implements` (commit to work, from `work evidence`).
+- **Storage:** git is the durable public copy; the store holds questions (private, local) and the derived `edges` table, rebuilt by `graph index` from the repositories named in `config.json`. Deleting the index loses nothing.
+- **Queries:** `decision list --work ID`, `graph --work ID --depth 2 --format json|dot`, `graph why --decision ID` (the supersedes chain with approval references). No service, no daemon.
+- `question answer --id Q --work W --text T` closes the question, writes the store row and appends the D line to the work file in the caller's `main` worktree for the role's next commit; `work check --decisions` reports store decisions missing from git.
+
+## Retired, in deletion order
+
+Each deletion needs its phase's exit criteria plus explicit user approval; archives are kept 30 days.
+
+1. Phase 1: automatic ledger capture (writes stop; nothing deleted).
+2. After Phase 2: Claude spool, receipts and delivered copies under `transport/messages/recipients/`, `message-index/`, per-record lock files, the legacy `var/game-dev` message store, `message dispatch|reconcile|retire-spool`, `inbox snapshot|ack`, the relay and tmux fallback policy, `bus/events/*.json` and `<sha>.state`.
+3. After Phase 3: `var/handoffs/game-coordinator/approval-ledger.json` and `docs/approval-ledger.md` (Art review moves to game policies).
+4. After Phase 4: `accounting/` (events and intake, 352 MB), `roles/` journals, `locks/`, `migration/`, `migration-plan.json`, `var/work-protocol-fence.json` and activation records; code in `src/protocol`, `src/accounting`, `src/commands/protocol*`, `src/commands/accounting.ts`, review snapshot, ack and reconcile, Codex worker inbox.
+5. Archives, 30 days after Phase 4 exit.
+
+## Open questions
+
+| #   | Question                                                                                                                                                                                | Recommended answer                                                                                                                                        |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | How do runners reach coordination code: child process of the installed CLI, keep the bundle with lockstep runner replacement per format change, or unbundle as an exact-URL dependency? | Child process: one code copy, no delivery-kit release for coordination fixes, runner contract unchanged. Accepted by the user and agreed by delivery-kit. |
+| 2   | Store engine: `node:sqlite` or append-only JSONL with snapshots?                                                                                                                        | `node:sqlite`: builtin, indexed, transactional; JSONL only for runner event logs.                                                                         |
+| 3   | Imported `sending` and `ambiguous` messages: show to the recipient flagged `unconfirmed`, or retain for coordinator reconciliation?                                                     | Show flagged to the recipient, who alone can say whether it acted.                                                                                        |
+| 4   | Decision capture: explicit `question answer` in both harnesses, or a Claude-only hook as well?                                                                                          | Explicit command only, to keep the harnesses identical.                                                                                                   |
+| 5   | Decisions with no work item: create a work item, or add a per-repo decisions log?                                                                                                       | Create a work item; one record type.                                                                                                                      |
+| 6   | Workers: parent-owned in both harnesses, or keep Codex worker verification?                                                                                                             | Parent-owned in both.                                                                                                                                     |
+| 7   | Pending-question source for wake guards: store records with the Codex native check kept as an extra guard, or native only?                                                              | Store records primary, native check kept where available.                                                                                                 |
+| 8   | Phase 2 cutover window?                                                                                                                                                                 | :35 to :55 after a review, on a day with no planned handoff.                                                                                              |
+| 9   | Archive retention before deletion?                                                                                                                                                      | 30 days.                                                                                                                                                  |
+
+## Work items
+
+| ID      | Title                                         | Link                                                                                       |
+| ------- | --------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| ck-0016 | Phase 1: stable entry points and growth stop  | [ck-0016.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0016.md) |
+| ck-0017 | Phase 2: one store and one message path       | [ck-0017.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0017.md) |
+| ck-0018 | Phase 3: work, decisions, questions and holds | [ck-0018.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0018.md) |
+| ck-0019 | Phase 4: thin protocol and retirement         | [ck-0019.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0019.md) |
