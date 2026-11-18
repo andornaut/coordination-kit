@@ -1,0 +1,135 @@
+{
+  "name": "@andornaut/delivery-kit",
+  "version": "4.7.0",
+  "description": "Local scheduled Git delivery with an isolated gate, exact-commit CI watch and deployment.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24.21.0"
+  },
+  "bin": {
+    "delivery-kit": "dist/cli.js"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    "./build/registry": {
+      "types": "./dist/registry.d.ts",
+      "import": "./dist/registry.js"
+    },
+    "./build/source-identity": {
+      "types": "./dist/source-identity.d.ts",
+      "import": "./dist/source-identity.js"
+    },
+    "./build/transport": {
+      "types": "./dist/transport.d.ts",
+      "import": "./dist/transport.js"
+    },
+    "./build/accounting": {
+      "types": "./dist/accounting.d.ts",
+      "import": "./dist/accounting.js"
+    },
+    "./build/protocol": {
+      "types": "./dist/protocol.d.ts",
+      "import": "./dist/protocol.js"
+    },
+    "./registry": {
+      "types": "./dist/registry.d.ts",
+      "import": "./dist/registry.js"
+    },
+    "./source-identity": {
+      "types": "./dist/source-identity.d.ts",
+      "import": "./dist/source-identity.js"
+    },
+    "./transport": {
+      "types": "./dist/transport.d.ts",
+      "import": "./dist/transport.js"
+    },
+    "./accounting": {
+      "types": "./dist/accounting.d.ts",
+      "import": "./dist/accounting.js"
+    },
+    "./protocol": {
+      "types": "./dist/protocol.d.ts",
+      "import": "./dist/protocol.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "docs/commands.md",
+    "docs/configuration.md",
+    "docs/libraries.md",
+    "docs/messages.md",
+    "docs/registry.md",
+    "docs/request-accounting.md",
+    "docs/review.md",
+    "docs/runner.md",
+    "docs/state.md",
+    "docs/upgrading.md",
+    "docs/work-protocol.md",
+    "docs/design/README.md",
+    "docs/design/messages.md",
+    "docs/design/packaging.md",
+    "docs/design/registry.md",
+    "docs/design/review.md",
+    "docs/design/runner.md",
+    "docs/design/work-protocol.md",
+    "LICENSE",
+    "SOURCE_COMMIT"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "tsc && npm --prefix tests/contract run check",
+    "contract": "node scripts/contract.ts",
+    "format": "prettier --write . && eslint --fix .",
+    "lint": "npm run lint:node && npm run lint:markdown && npm run lint:shell",
+    "lint:markdown": "markdownlint-cli2",
+    "lint:node": "prettier --check . && eslint --max-warnings 0 .",
+    "lint:shell": "shellcheck -x -P SCRIPTDIR scripts/*.sh tests/contract/run.sh",
+    "pack": "node scripts/pack.ts",
+    "prepare": "husky",
+    "test": "vitest run --maxWorkers=4",
+    "verify": "node scripts/check.ts",
+    "package:check": "node scripts/package-check.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.2",
+    "eslint": "^10.14.0",
+    "eslint-plugin-import-x": "4.17.1",
+    "eslint-plugin-simple-import-sort": "^14.0.0",
+    "eslint-plugin-sort-destructure-keys": "^3.0.0",
+    "globals": "^17.13.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
+    "markdownlint-cli2": "0.24.0",
+    "prettier": "^3.9.10",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/andornaut/delivery-kit.git"
+  },
+  "homepage": "https://github.com/andornaut/delivery-kit#readme",
+  "overrides": {
+    "@eslint/config-array": {
+      "minimatch": "11.0.3"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.3"
+    },
+    "eslint": {
+      "minimatch": "11.0.3"
+    },
+    "eslint-plugin-import-x": {
+      "minimatch": "11.0.3"
+    },
+    "markdownlint-cli2@0.24.0": {
+      "markdownlint": "0.42.1",
+      "katex": "0.19.1"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "schema": 2,
+  "state": "active",
+  "host": "archies-dog-walks",
+  "targets": ["archies-dog-walks/tech", "chibis-way-home/tech", "art-kit"]
+}

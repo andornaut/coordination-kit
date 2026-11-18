@@ -1,0 +1,4 @@
+{
+  "*": "prettier --write --ignore-unknown",
+  "*.{js,mjs}": "eslint --fix --max-warnings 0"
+}
