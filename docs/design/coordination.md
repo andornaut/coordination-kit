@@ -23,6 +23,7 @@ Reference: [review](../review.md#scheduled-review-seam), [libraries](../librarie
 
 ## Work items
 
-| ID      | Title                                          | Link                             |
-| ------- | ---------------------------------------------- | -------------------------------- |
-| ck-0001 | Extract the coordination kit from delivery-kit | [ck-0001.md](../work/ck-0001.md) |
+| ID      | Title                                                   | Link                             |
+| ------- | ------------------------------------------------------- | -------------------------------- |
+| ck-0001 | Extract the coordination kit from delivery-kit          | [ck-0001.md](../work/ck-0001.md) |
+| ck-0010 | Validate only the configuration sections this kit reads | [ck-0010.md](../work/ck-0010.md) |

@@ -15,7 +15,8 @@ Reference: [messages](../messages.md), [commands](../commands.md#command-semanti
 
 ## Work items
 
-| ID      | Title                   | Link                             |
-| ------- | ----------------------- | -------------------------------- |
-| ck-0004 | Scale the message store | [ck-0004.md](../work/ck-0004.md) |
-| ck-0005 | Retry a busy transport  | [ck-0005.md](../work/ck-0005.md) |
+| ID      | Title                                     | Link                             |
+| ------- | ----------------------------------------- | -------------------------------- |
+| ck-0004 | Scale the message store                   | [ck-0004.md](../work/ck-0004.md) |
+| ck-0005 | Retry a busy transport                    | [ck-0005.md](../work/ck-0005.md) |
+| ck-0009 | Fix the recipient status binding conflict | [ck-0009.md](../work/ck-0009.md) |

@@ -15,4 +15,7 @@ Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
 
 ## Work items
 
-No work items yet.
+| ID      | Title                                                 | Link                             |
+| ------- | ----------------------------------------------------- | -------------------------------- |
+| ck-0011 | Check packaged docs on docs-only changes              | [ck-0011.md](../work/ck-0011.md) |
+| ck-0012 | Link packaged docs to unpackaged work files on GitHub | [ck-0012.md](../work/ck-0012.md) |
