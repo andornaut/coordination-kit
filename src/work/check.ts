@@ -194,6 +194,14 @@ function indexFindings(
   for (const design of designs) {
     for (const row of design.rows) {
       const at = { line: row.line, path: row.path };
+      if (row.resolved === null) {
+        findings.push({
+          ...at,
+          code: "index-link-unresolved",
+          message: `link ${row.target} is outside this repository`,
+        });
+        continue;
+      }
       if (!existsSync(join(root, row.resolved))) {
         findings.push({
           ...at,

@@ -1,7 +1,7 @@
 // Work files (docs/work/<id>.md) and design index tables (docs/design/*.md) as written by the
 // work-file convention. Reads only; nothing here writes the repository.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 export const WORK_DIR = join("docs", "work");
 export const DESIGN_DIR = join("docs", "design");
@@ -40,8 +40,11 @@ export interface IndexRow {
   readonly title: string;
   /** The link target as written. */
   readonly target: string;
-  /** Repository-relative path the target resolves to. */
-  readonly resolved: string;
+  /**
+   * Repository-relative path the target resolves to, or null when it is a URL outside this
+   * repository's blob URLs or a path outside the repository.
+   */
+  readonly resolved: string | null;
 }
 
 export interface DesignFile {
@@ -137,12 +140,63 @@ function cells(line: string): string[] | null {
 }
 
 const LINK = /^\[[^\]]*\]\(([^)\s]+)\)$/;
+const SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
+
+/**
+ * The blob URL prefix of the repository's default branch, `https://github.com/OWNER/REPO/blob/main/`,
+ * from the `repository` field of its package.json; null without one or for a non-GitHub repository.
+ */
+export function repositoryBlobBase(root: string): string | null {
+  let repository: unknown;
+  try {
+    repository = (
+      JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+        repository?: unknown;
+      }
+    ).repository;
+  } catch {
+    return null;
+  }
+  const url =
+    typeof repository === "string"
+      ? repository
+      : typeof repository === "object" && repository !== null && "url" in repository
+        ? repository.url
+        : undefined;
+  if (typeof url !== "string") {
+    return null;
+  }
+  const match =
+    /^(?:git\+)?https:\/\/github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(url) ??
+    /^(?:github:)?([\w.-]+)\/([\w.-]+)$/.exec(url);
+  return match === null ? null : `https://github.com/${match[1]}/${match[2]}/blob/main/`;
+}
+
+/** The repository-relative path a link target names, or null when it is outside the repository. */
+function resolveTarget(
+  root: string,
+  base: string | null,
+  path: string,
+  target: string,
+): string | null {
+  const [location = ""] = target.split("#");
+  let resolved: string;
+  if (SCHEME.test(location)) {
+    if (base === null || !location.startsWith(base)) {
+      return null;
+    }
+    resolved = relative(root, resolve(root, location.slice(base.length)));
+  } else {
+    resolved = relative(root, resolve(root, dirname(path), location));
+  }
+  return resolved === ".." || resolved.startsWith("../") || isAbsolute(resolved) ? null : resolved;
+}
 
 /**
  * The rows of every table whose header is exactly `ID | Title | Link`, the work item index of a
  * design area. Other tables, such as the area table in docs/design/README.md, are not indexes.
  */
-function indexRows(root: string, path: string, text: string): IndexRow[] {
+function indexRows(root: string, base: string | null, path: string, text: string): IndexRow[] {
   const rows: IndexRow[] = [];
   const lines = text.split("\n");
   let inIndex = false;
@@ -165,7 +219,7 @@ function indexRows(root: string, path: string, text: string): IndexRow[] {
       id,
       line: index + 1,
       path,
-      resolved: relative(root, resolve(root, dirname(path), target.split("#")[0] ?? "")),
+      resolved: resolveTarget(root, base, path, target),
       target,
       title,
     });
@@ -176,10 +230,11 @@ function indexRows(root: string, path: string, text: string): IndexRow[] {
 /** Every docs/design/*.md file with its work item index rows, in name order. */
 export function readDesignFiles(root: string): DesignFile[] {
   const directory = join(root, DESIGN_DIR);
+  const base = repositoryBlobBase(root);
   return markdownFiles(directory).map((name) => {
     const path = join(DESIGN_DIR, name);
     const text = readFileSync(join(directory, name), "utf8");
-    return { area: basename(name, ".md"), path, rows: indexRows(root, path, text), text };
+    return { area: basename(name, ".md"), path, rows: indexRows(root, base, path, text), text };
   });
 }
 

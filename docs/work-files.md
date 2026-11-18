@@ -2,7 +2,8 @@
 
 `work check` validates a repository's design index tables and work files against the work-file
 convention; `work report` lists each work item's milestone, joined with live protocol state when
-a coordinator root is available. The convention itself is in [docs/work/](work/README.md). Both
+a coordinator root is available. The convention itself is in
+[docs/work/](https://github.com/andornaut/coordination-kit/blob/main/docs/work/README.md). Both
 commands only read.
 
 `--root DIR` names the repository (default: the working directory). The coordinator root comes
@@ -16,12 +17,16 @@ coordination-kit work check --root /path/to/repository
 ```
 
 The repository's work items are `docs/work/*.md` other than `docs/work/README.md`. A design index
-is any table in `docs/design/*.md` whose header is exactly `ID | Title | Link`. The check reports:
+is any table in `docs/design/*.md` whose header is exactly `ID | Title | Link`. A row links its
+work file by a path relative to the design file, or by the repository's blob URL on `main`,
+`https://github.com/OWNER/REPO/blob/main/docs/work/<id>.md`, where `OWNER/REPO` comes from the
+`repository` field of the repository's `package.json`. A URL of another location does not
+resolve. The check reports:
 
 | Code                                                  | Rule                                                                                                                                 |
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `unindexed`, `index-duplicate`, `index-area-mismatch` | Every work file is indexed exactly once, in the table of its `design` area.                                                          |
-| `index-link-unresolved`, `index-id-mismatch`          | Every indexed link resolves, and the row's ID is the linked item's `id`.                                                             |
+| `index-link-unresolved`, `index-id-mismatch`          | Every indexed link resolves within the repository, and the row's ID is the linked item's `id`.                                       |
 | `front-matter-missing`, `front-matter-invalid`        | The file opens with a `---` block of `key: value` lines; a list is `[a, b]`.                                                         |
 | `field-missing`, `field-invalid`, `field-unknown`     | `id`, `title`, `status`, `approved` and `design` are present and non-empty; `related` and `supersedes` are the only optional fields. |
 | `status-invalid`                                      | `status` is `approved`, `done`, `cancelled` or `superseded`.                                                                         |

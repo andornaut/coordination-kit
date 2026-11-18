@@ -104,6 +104,63 @@ describe("checkWork", () => {
     );
   });
 
+  it("accepts index links as this repository's blob URLs and refuses other locations", () => {
+    const root = copy();
+    const base = "https://github.com/example/fixture-kit/blob/main";
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify({
+        repository: { type: "git", url: "git+https://github.com/example/fixture-kit.git" },
+      }),
+    );
+    edit(root, "docs/design/runner.md", (text) =>
+      text
+        .replace("(../work/dk-0016.md)", `(${base}/docs/work/dk-0016.md)`)
+        .replace("(../work/dk-0017.md)", `(${base}/docs/work/dk-9999.md)`),
+    );
+    edit(root, "docs/design/review.md", (text) =>
+      text.replace(
+        "(../work/dk-0005.md)",
+        "(https://github.com/example/other-kit/blob/main/docs/work/dk-0005.md)",
+      ),
+    );
+    const findings = checkWork(root).findings;
+    expect(findings.map(({ code, message, path }) => ({ code, message, path }))).toEqual([
+      {
+        code: "index-link-unresolved",
+        message:
+          "link https://github.com/example/other-kit/blob/main/docs/work/dk-0005.md is outside this repository",
+        path: "docs/design/review.md",
+      },
+      {
+        code: "index-link-unresolved",
+        message: `link ${base}/docs/work/dk-9999.md does not resolve`,
+        path: "docs/design/runner.md",
+      },
+      {
+        code: "unindexed",
+        message: "is not listed in any design index table",
+        path: "docs/work/dk-0005.md",
+      },
+      {
+        code: "unindexed",
+        message: "is not listed in any design index table",
+        path: "docs/work/dk-0017.md",
+      },
+    ]);
+  });
+
+  it("refuses a blob URL in a repository whose package.json names no GitHub repository", () => {
+    const root = copy();
+    edit(root, "docs/design/runner.md", (text) =>
+      text.replace(
+        "(../work/dk-0016.md)",
+        "(https://github.com/example/fixture-kit/blob/main/docs/work/dk-0016.md)",
+      ),
+    );
+    expect(codes(root)).toEqual(["index-link-unresolved", "unindexed"]);
+  });
+
   it("requires the front-matter fields, a valid status, a known design and the file's ID", () => {
     const root = copy();
     edit(root, "docs/work/dk-0001.md", (text) =>
