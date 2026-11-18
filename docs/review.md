@@ -55,7 +55,8 @@ paths and formats delivery-kit 4.7.0 wrote.
   the recipient session, records the delivery, marks the receipt `accepted`, then removes the
   entry. A `sending` receipt with no spool entry becomes `ambiguous` and is never resent. The
   channel server is configured in the recipient session's MCP settings; see
-  `examples/claude-channel.mcp.json`. A brief or event is spooled only while
+  `examples/claude-channel.mcp.json`. A session reads that configuration only at launch: `/mcp`
+  reconnect restarts the launch-time command, so a configuration change needs a relaunch. A brief or event is spooled only while
   `claude agents --json` lists the recipient as an interactive session with status `idle`,
   `busy`, `shell` or `waiting` and no `state`; the brief queues in the channel until the session
   reads it. A missing or blocked session, or any other reported status or state, defers delivery,

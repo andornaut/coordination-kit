@@ -18,7 +18,8 @@ keeps the game operations (`run`, `runner unit`, `status`, `control`, `check-con
   precedence over `DELIVERY_KIT_ROOT`.
 - Channel MCP configuration: run `coordination-kit ... claude channel` instead of
   `delivery-kit ... claude channel`. The server still identifies itself as
-  `delivery-kit-channel`, so an existing server key needs no change.
+  `delivery-kit-channel`, so an existing server key needs no change. Relaunch each session after
+  the change; `/mcp` reconnect reruns the command the session launched with.
 - Library imports: `@andornaut/delivery-kit/build/registry`, `/build/transport`,
   `/build/accounting` and `/build/protocol`, and their unprefixed aliases, become
   `@andornaut/coordination-kit/build/registry`, `/build/transport`, `/build/accounting` and
