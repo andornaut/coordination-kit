@@ -146,7 +146,7 @@ import {
 import {
   deliverScheduledReview, readRoleRoute, type RoleRoute,
 } from "@andornaut/coordination-kit/build/review";
-import { flushEvents, recordEvent, type BusEvent, type EmitOptions } from "@andornaut/coordination-kit/build/events";
+import { flushEvents, recordEvent, type BusEvent, type EmitOptions, type FlushResult } from "@andornaut/coordination-kit/build/events";
 import {
   holdLock, loadProjectConfig, writeJsonDurable, type LockHandle, type ProjectConfig, type GameLayout,
 } from "@andornaut/coordination-kit/build/shared";
@@ -208,7 +208,7 @@ const review = (layout: Layout, game: GameLayout): Promise<string> => deliverSch
 // @ts-expect-error A review slot is an epoch-seconds number.
 deliverScheduledReview({} as Layout, {} as GameLayout, "0");
 const route = (layout: Layout): RoleRoute | null => readRoleRoute(layout);
-const flush = (game: GameLayout): Promise<void> => flushEvents(game);
+const flush = (game: GameLayout): Promise<FlushResult> => flushEvents(game);
 const emit: EmitOptions = { project: "Fixture", underLock: (directory: string) => void directory };
 const record = (game: GameLayout) => recordEvent(game, emit, "push", "key", "message");
 const sent = (event: BusEvent): boolean => event.sent;
