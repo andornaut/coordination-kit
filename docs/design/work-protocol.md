@@ -20,3 +20,4 @@ Reference: [work-protocol](../work-protocol.md), [request-accounting](../request
 | ck-0007 | Add path and commit fields to work plan artifacts     | [ck-0007.md](../work/ck-0007.md) |
 | ck-0008 | Remove ledger writer contention                       | [ck-0008.md](../work/ck-0008.md) |
 | ck-0013 | Stop restated intake from appearing as new references | [ck-0013.md](../work/ck-0013.md) |
+| ck-0014 | Report closed historical work as done                 | [ck-0014.md](../work/ck-0014.md) |
