@@ -459,6 +459,44 @@ describe("protocol work publications", () => {
     expect(reader(completed).report().unknownRetained).toEqual(retained);
   });
 
+  it("accepts an optional plan path and commit as references that grant no approval", async () => {
+    const f = await fixture(["check"]);
+    await f.publish();
+    expect(f.work.read(ROLE, f.definition.id)!.definition.plan).toEqual(f.definition.plan);
+    const reference = { commit: "e".repeat(40), path: "docs/work/ck-0007.md" };
+    const pointed = {
+      ...f.definition,
+      id: "work-pointed",
+      plan: { ...f.definition.plan, ...reference },
+    };
+    const input = { expectedWorkRevision: 0, ready: false, replaces: null };
+    await f.work.publish(f.context(), { ...input, definition: pointed });
+    const read = f.work.read(ROLE, pointed.id)!;
+    expect(read.definition.plan).toEqual(pointed.plan);
+    expect(read.definitionHash).not.toBe(f.work.read(ROLE, f.definition.id)!.definitionHash);
+    expect(
+      new WorkStore({ protocol: f.protocol, readRequest: () => null }).evaluate(ROLE, pointed.id),
+    ).toMatchObject({ authorization: "unknown", historicallyClosed: false });
+    for (const plan of [
+      { ...f.definition.plan, commit: reference.commit },
+      { ...f.definition.plan, path: "/docs/work/ck-0007.md" },
+      { ...f.definition.plan, path: "docs/../ck-0007.md" },
+      { ...f.definition.plan, path: "docs//work" },
+      { ...f.definition.plan, path: 7 },
+      { ...f.definition.plan, ...reference, commit: "E".repeat(40) },
+      { ...f.definition.plan, ...reference, title: "extra" },
+    ]) {
+      // Each refusal leaves the journal unchanged, so the same expected revision applies.
+      // eslint-disable-next-line no-await-in-loop
+      await expect(
+        f.work.publish(f.context(), {
+          ...input,
+          definition: { ...f.definition, id: "work-invalid", plan } as unknown as WorkDefinition,
+        }),
+      ).rejects.toMatchObject({ code: expect.stringMatching(/^invalid-(work|artifact)$/u) });
+    }
+  });
+
   it("bounds report reads and refreshes role, request and artifact views between operations", async () => {
     const f = await fixture(["check"]);
     await f.publish();

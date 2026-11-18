@@ -40,12 +40,23 @@ export interface WorkCriterion {
   readonly consumers: readonly string[];
 }
 
+/**
+ * The plan's content-addressed bytes, optionally pointing at the repository work file. The path
+ * and commit are references only: they grant no approval and are not compared with the bytes.
+ */
+export interface WorkPlanRef extends ArtifactRef {
+  /** Repository-relative path of the work file, for example docs/work/ck-0007.md. */
+  readonly path?: string;
+  /** The 40-hex commit at which `path` is read; it requires `path`. */
+  readonly commit?: string;
+}
+
 export interface WorkDefinition {
   readonly id: string;
   readonly requestIds: readonly string[];
   readonly clauseIds: readonly string[];
   readonly messageIds: readonly string[];
-  readonly plan: ArtifactRef;
+  readonly plan: WorkPlanRef;
   readonly artifacts: readonly ArtifactRef[];
   readonly criteria: readonly WorkCriterion[];
   readonly source: WorkSource | null;
@@ -244,6 +255,28 @@ function artifact(value: unknown): asserts value is ArtifactRef {
   );
 }
 
+function repositoryPath(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    value.length <= 512 &&
+    /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/u.test(value) &&
+    value.split("/").every((segment) => segment !== "." && segment !== "..")
+  );
+}
+
+/** The plan's content reference, after checking its optional work-file path and commit. */
+function planContent(value: unknown): ArtifactRef {
+  demand(isRecord(value), "invalid-artifact");
+  const { commit, path, ...content } = value;
+  demand(!Object.hasOwn(value, "path") || repositoryPath(path));
+  demand(
+    !Object.hasOwn(value, "commit") ||
+      (typeof commit === "string" && SHA.test(commit) && Object.hasOwn(value, "path")),
+  );
+  artifact(content);
+  return content;
+}
+
 function source(value: unknown): void {
   if (value === null) {
     return;
@@ -283,7 +316,7 @@ function definition(value: WorkDefinition): void {
       Array.isArray(value.criteria) &&
       value.criteria.length > 0,
   );
-  artifact(value.plan);
+  planContent(value.plan);
   value.artifacts.forEach(artifact);
   source(value.source);
   demand(new Set(value.criteria.map((criterion) => criterion.id)).size === value.criteria.length);
@@ -457,7 +490,7 @@ export class WorkStore {
       new Set(value.receipts.map((receipt) => receipt.id)).size === value.receipts.length,
       "receipt-exists",
     );
-    this.#verify(view, value.definition.plan);
+    this.#verify(view, planContent(value.definition.plan));
     value.receipts.forEach((receipt) =>
       this.#receipt(view, value.definition, value.definitionHash, receipt),
     );
@@ -520,7 +553,7 @@ export class WorkStore {
     work: WorkDefinition,
     receipts: readonly WorkReceipt[],
   ): void {
-    this.#verify(view, work.plan);
+    this.#verify(view, planContent(work.plan));
     work.artifacts.forEach((ref) => this.#verify(view, ref));
     demand(covered(work, receipts, ["execution", "check"]), "ready-evidence-missing");
   }
@@ -576,7 +609,7 @@ export class WorkStore {
     if (prior !== undefined && prior.definitionHash !== definitionHash) {
       demand(input.replaces === prior.publication.hash, "explicit-replacement-required");
     }
-    this.#verify(undefined, input.definition.plan);
+    this.#verify(undefined, planContent(input.definition.plan));
     const receipts = prior?.definitionHash === definitionHash ? prior.receipts : [];
     if (input.ready) {
       this.#ready(undefined, input.definition, receipts);

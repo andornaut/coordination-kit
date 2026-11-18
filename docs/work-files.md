@@ -53,12 +53,17 @@ front-matter milestone) and `design`. `coordinator.status` is:
 - `absent`: no coordinator root was named; the report is front matter only.
 - `unconfigured`: the coordinator has no work protocol configuration; front matter only.
 - `available`: each item adds `publications`, every work publication in any claimed role whose
-  definition ID equals the item's `id`. Each lists its `role`, `revision`, `ready`,
+  definition ID equals the item's `id` or whose plan `path` is the item's `path`. Each lists
+  `joinedBy` (`id`, `path` or both), the plan's `path` and `commit` (null when absent), its
+  `role`, `revision`, `ready`,
   `receiptsSatisfied` (every criterion phase and consumer has a passed receipt; null when the
   publication cannot be evaluated) and `requests`, each linked request's ledger `state` or
   `unknown`. An empty list means no publication uses that ID.
 - `unavailable`, with a `reason`: the coordinator or its protocol state could not be read; front
   matter only, and the command exits 1. Unavailable state is never reported as absent work.
 
-A work publication is joined only when its definition ID is the work file's `id`. The front matter
-carries no protocol work reference, so a publication under another ID is not listed.
+A work publication is joined when its definition ID is the work file's `id`, or when its plan
+names the work file by repository-relative `path`; see
+[work definitions and receipts](work-protocol.md#work-definitions-and-receipts). The `commit` is
+reported, not checked against the repository, and neither field grants approval. A publication
+under another ID without a plan path is not listed.

@@ -254,6 +254,13 @@ none of those operations.
 - The plan does not count as cleanup evidence. `before-cleanup` and `cleanup` require
   `definition.artifacts` to list at least one nonempty artifact whose hash differs from
   `definition.plan`.
+- `definition.plan` is `{ hash, size }` and may add `path`, the repository-relative path of the
+  work file (`docs/work/ck-0007.md`), and `commit`, the 40-hex commit it is read at, which
+  requires `path`. A path has no leading slash, empty, `.` or `..` segment. The fields are part of
+  the definition, so they change its hash, but they are references only: they grant no approval,
+  are not compared with the plan bytes and need no schema change. Publications without them stay
+  valid. `work report` joins a publication to a work file by its definition ID or by its plan
+  path.
 
 ### Lifecycle boundaries and repair
 

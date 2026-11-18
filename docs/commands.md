@@ -53,7 +53,8 @@ every form and flag.
   own registered role from its journal, registry binding and canonical references, refusing any
   other role. The native ID defaults to `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`; see
   [declaration, enrollment and rollout](work-protocol.md#declaration-enrollment-and-rollout).
-- `work check` and `work report`: `--root` names the repository, not the coordinator. See
+- `work check` and `work report`: `--root` names the repository, not the coordinator.
+  `work report` joins a work publication by its definition ID or its plan `path`. See
   [work files](work-files.md).
 
 ## Worker inbox reconciliation

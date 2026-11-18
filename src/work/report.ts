@@ -15,6 +15,10 @@ import { WorkStore } from "../protocol/work.ts";
 import { field, readWorkFiles, type WorkFile } from "./files.ts";
 
 export interface WorkPublicationState {
+  /** How the publication names this work file: its definition ID, its plan path or both. */
+  readonly joinedBy: readonly ("id" | "path")[];
+  /** The plan's work-file reference; references only, never approval. */
+  readonly plan: { readonly path: string | null; readonly commit: string | null };
   readonly role: string;
   readonly revision: number;
   readonly ready: boolean;
@@ -62,32 +66,55 @@ function requestStates(
   return ids.map((id) => ({ id, state: requests?.get(id)?.state ?? "unknown" }));
 }
 
+/** Publications keyed by the work file path they join, by definition ID or by plan path. */
 function publications(
   protocol: ProtocolStore,
   requests: ReadonlyMap<string, LedgerRequest> | null,
-  ids: ReadonlySet<string>,
+  items: readonly WorkReportItem[],
 ): Map<string, WorkPublicationState[]> {
   const work = new WorkStore({ protocol, readRequest: (id) => requests?.get(id) });
+  const byId = new Map<string, string[]>();
+  for (const item of items) {
+    if (item.id !== null) {
+      byId.set(item.id, [...(byId.get(item.id) ?? []), item.path]);
+    }
+  }
+  const paths = new Set(items.map((item) => item.path));
   const found = new Map<string, WorkPublicationState[]>();
   for (const role of protocol.listRoles()) {
-    for (const entry of work.index(role).items.filter((item) => ids.has(item.id))) {
+    for (const entry of work.index(role).items) {
       const publication = work.read(role, entry.id);
+      const plan = publication?.definition.plan;
+      const joined = new Map<string, ("id" | "path")[]>();
+      for (const path of byId.get(entry.id) ?? []) {
+        joined.set(path, ["id"]);
+      }
+      if (plan?.path !== undefined && paths.has(plan.path)) {
+        joined.set(plan.path, [...(joined.get(plan.path) ?? []), "path"]);
+      }
+      if (joined.size === 0) {
+        continue;
+      }
       let receiptsSatisfied: boolean | null;
       try {
         receiptsSatisfied = work.evaluate(role, entry.id).criteriaSatisfied;
       } catch {
         receiptsSatisfied = null;
       }
-      found.set(entry.id, [
-        ...(found.get(entry.id) ?? []),
-        {
-          ready: entry.ready,
-          receiptsSatisfied,
-          requests: requestStates(requests, publication?.definition.requestIds ?? []),
-          revision: entry.revision,
-          role,
-        },
-      ]);
+      for (const [path, joinedBy] of joined) {
+        found.set(path, [
+          ...(found.get(path) ?? []),
+          {
+            joinedBy,
+            plan: { commit: plan?.commit ?? null, path: plan?.path ?? null },
+            ready: entry.ready,
+            receiptsSatisfied,
+            requests: requestStates(requests, publication?.definition.requestIds ?? []),
+            revision: entry.revision,
+            role,
+          },
+        ]);
+      }
     }
   }
   return found;
@@ -99,7 +126,8 @@ function failure(error: unknown): string {
 
 /**
  * Report `repository`'s work items. With `coordinatorRoot`, each item also lists the work
- * publications whose definition ID equals its front-matter `id`, in every published role.
+ * publications, in every published role, whose definition ID equals its front-matter `id` or whose
+ * plan path names its file.
  */
 export function reportWork(
   io: Pick<Io, "env">,
@@ -132,11 +160,7 @@ export function reportWork(
   }
   let found: Map<string, WorkPublicationState[]>;
   try {
-    found = publications(
-      protocol,
-      requests,
-      new Set(items.flatMap((item) => (item.id === null ? [] : [item.id]))),
-    );
+    found = publications(protocol, requests, items);
   } catch (error) {
     return {
       coordinator: { reason: failure(error), root: layout.root, status: "unavailable" },
@@ -147,7 +171,7 @@ export function reportWork(
     coordinator: { root: layout.root, status: "available" },
     items: items.map((item) => ({
       ...item,
-      publications: item.id === null ? [] : (found.get(item.id) ?? []),
+      publications: found.get(item.path) ?? [],
     })),
   };
 }

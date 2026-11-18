@@ -35,7 +35,11 @@ function coordinator(): string {
 }
 
 /** An active protocol fixture whose coordinator publishes work `id` for ledger request `request`. */
-async function published(id: string, request: string): Promise<string> {
+async function published(
+  id: string,
+  request: string,
+  reference: { readonly path?: string; readonly commit?: string } = {},
+): Promise<string> {
   const root = coordinator();
   const stateRoot = activateProtocolFixture(loadLayout(root));
   const protocol = new ProtocolStore({ directory: stateRoot, resolveBinding: () => true });
@@ -94,7 +98,7 @@ async function published(id: string, request: string): Promise<string> {
         criteria: [{ consumers: [], id: "check", phases: ["check"], targetId: "target" }],
         id,
         messageIds: [],
-        plan: await protocol.putArtifact(Buffer.from("fixture plan")),
+        plan: { ...(await protocol.putArtifact(Buffer.from("fixture plan"))), ...reference },
         requestIds: [request],
         retention: null,
         source: null,
@@ -136,6 +140,8 @@ describe("reportWork", () => {
     expect(report.coordinator).toEqual({ root, status: "available" });
     expect(report.items.find((item) => item.id === "dk-0018")?.publications).toEqual([
       {
+        joinedBy: ["id"],
+        plan: { commit: null, path: null },
         ready: false,
         receiptsSatisfied: false,
         requests: [{ id: "request-split", state: expect.any(String) }],
@@ -147,6 +153,34 @@ describe("reportWork", () => {
       ?.state;
     expect(state).not.toBe("unknown");
     expect(report.items.find((item) => item.id === "dk-0001")?.publications).toEqual([]);
+  });
+
+  it("joins a publication by its plan path and commit as well as by ID", async () => {
+    const commit = "e".repeat(40);
+    const byPath = await published("split-work", "request-split", {
+      commit,
+      path: "docs/work/dk-0018.md",
+    });
+    const report = reportWork({ env: {} }, byPath, FIXTURE);
+    expect(report.items.find((item) => item.id === "dk-0018")?.publications).toMatchObject([
+      { joinedBy: ["path"], plan: { commit, path: "docs/work/dk-0018.md" }, role: ROLE },
+    ]);
+    expect(report.items.flatMap((item) => item.publications ?? [])).toHaveLength(1);
+
+    const both = await published("dk-0018", "request-split", { path: "docs/work/dk-0018.md" });
+    expect(
+      reportWork({ env: {} }, both, FIXTURE).items.find((item) => item.id === "dk-0018")
+        ?.publications,
+    ).toMatchObject([{ joinedBy: ["id", "path"], plan: { commit: null } }]);
+
+    const elsewhere = await published("dk-0018", "request-split", { path: "docs/work/dk-0001.md" });
+    const split = reportWork({ env: {} }, elsewhere, FIXTURE).items;
+    expect(split.find((item) => item.id === "dk-0018")?.publications).toMatchObject([
+      { joinedBy: ["id"] },
+    ]);
+    expect(split.find((item) => item.id === "dk-0001")?.publications).toMatchObject([
+      { joinedBy: ["path"] },
+    ]);
   });
 
   it("reports an unreadable coordinator as unavailable, never as absent work", async () => {
