@@ -182,4 +182,84 @@ describe("durable immutable accounting intake", () => {
     expect(reloaded.offer(test.input)).toEqual(pending[0]);
     expect(readdirSync(test.directory)).toEqual([`${pending[0]!.id}.json`]);
   });
+
+  it("treats only entries already pending or current as restated, whatever the offer source", async () => {
+    const test = setup();
+    const boundary = (parts: readonly string[]) => ({
+      native: null,
+      origin: "unknown" as const,
+      reference: `accounting-boundary:${JSON.stringify(parts)}`,
+      wordingHash: null,
+    });
+    // An offer written before the change names the boundary phase in its source.
+    const legacy = test.store.offer({
+      ...test.input,
+      source: boundary(["game-coordinator", "codex", "thread-observed", "startup"]),
+    });
+    const ledger = new LedgerStore({ directory: test.accounting });
+    const capture = (command: Partial<IntakeInput["command"]>): IntakeInput => ({
+      ...test.input,
+      command: { ...test.input.command, ...command },
+      source: boundary(["game-coordinator", "codex", "thread-observed"]),
+    });
+    const [request] = test.input.command.requests;
+    const [window] = test.input.command.coverage;
+    expect(test.store.restated(ledger.snapshot(), capture({}))).toBe(true);
+    expect(test.store.restated(ledger.snapshot(), capture({ requests: [] }))).toBe(true);
+    const added = { ...request!, id: "intake-new-request" };
+    expect(test.store.restated(ledger.snapshot(), capture({ requests: [request!, added] }))).toBe(
+      false,
+    );
+    const gap = { ...window!, gaps: [...window!.gaps, { ...window!.range, reason: "new-gap" }] };
+    expect(test.store.restated(ledger.snapshot(), capture({ coverage: [gap] }))).toBe(false);
+    expect(
+      test.store.restated(ledger.snapshot(), {
+        ...capture({ coverage: [] }),
+        actor: "delivery-kit",
+      }),
+    ).toBe(false);
+    await ledger.apply({
+      ...test.input,
+      at: "2026-11-16T03:00:00.000Z",
+      commandId: `intake-${legacy.id}`,
+      expectedRevision: 0,
+      schema: 1,
+      source: legacy.source,
+    });
+    expect(test.store.pending(ledger.history())).toEqual([]);
+    expect(test.store.restated(ledger.snapshot(), capture({}))).toBe(true);
+    // A restatement of a window the journal has since changed is new coverage.
+    await ledger.apply({
+      actor: "game-coordinator",
+      at: "2026-11-16T03:01:00.000Z",
+      command: { coverage: gap, type: "coverage" },
+      commandId: "changed-window",
+      expectedRevision: 1,
+      schema: 1,
+      source: legacy.source,
+    });
+    expect(test.store.restated(ledger.snapshot(), capture({}))).toBe(false);
+    const attested = {
+      native: null,
+      origin: "owner-attested" as const,
+      reference: "fixture-owner-window",
+      wordingHash: null,
+    };
+    await ledger.apply({
+      actor: "game-coordinator",
+      at: "2026-11-16T03:02:00.000Z",
+      command: {
+        coverage: { ...window!, gaps: [], source: attested, state: "covered" },
+        type: "coverage",
+      },
+      commandId: "attested-window",
+      expectedRevision: 2,
+      schema: 1,
+      source: attested,
+    });
+    expect(test.store.restated(ledger.snapshot(), capture({ coverage: [gap] }))).toBe(true);
+    expect(() =>
+      test.store.restated(ledger.snapshot(), capture({ requests: [], coverage: [] })),
+    ).toThrowError("invalid-intake");
+  });
 });

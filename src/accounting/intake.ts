@@ -16,7 +16,13 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import { fsyncDirectory, writeDurable } from "../durable.ts";
-import type { LedgerCommand, LedgerCoverage, LedgerEvent, LedgerSource } from "./types.ts";
+import type {
+  LedgerCommand,
+  LedgerCoverage,
+  LedgerEvent,
+  LedgerProjection,
+  LedgerSource,
+} from "./types.ts";
 
 export interface IntakeInput {
   readonly actor: string;
@@ -359,6 +365,52 @@ export class IntakeStore {
     } catch (error) {
       throw safeError(error);
     }
+  }
+
+  /**
+   * True when admitting `value` would change nothing: each request and coverage entry equals one
+   * in a pending offer of the same actor, or one the current projection already holds. Offer
+   * sources are not compared, so a capture under another boundary phase is not new.
+   */
+  restated(
+    ledger: { readonly events: readonly LedgerEvent[]; readonly projection: LedgerProjection },
+    value: IntakeInput,
+  ): boolean {
+    if (!input(value)) {
+      throw new IntakeError("invalid-intake");
+    }
+    const offers = this.pending(ledger.events, [value.actor]);
+    const requests = offers.flatMap((offer) => offer.command.requests);
+    const coverage = offers.flatMap((offer) => offer.command.coverage);
+    return (
+      value.command.requests.every(
+        (request) =>
+          requests.some((pending) => isDeepStrictEqual(pending, request)) ||
+          ledger.projection.requests.some(
+            (admitted) =>
+              admitted.id === request.id &&
+              admitted.createdBy === value.actor &&
+              isDeepStrictEqual(admitted.source, request.source),
+          ),
+      ) &&
+      value.command.coverage.every((entry) => {
+        if (coverage.some((pending) => isDeepStrictEqual(pending, entry))) {
+          return true;
+        }
+        const current = ledger.projection.coverage.find((admitted) => admitted.id === entry.id);
+        // Admission keeps a matching owner-attested window, so restating it changes nothing.
+        return (
+          current !== undefined &&
+          (isDeepStrictEqual(current, entry) ||
+            (current.state === "covered" &&
+              current.gaps.length === 0 &&
+              current.source.origin === "owner-attested" &&
+              current.source.reference !== null &&
+              current.ownerRole === entry.ownerRole &&
+              isDeepStrictEqual(current.range, entry.range)))
+        );
+      })
+    );
   }
 
   pending(events: readonly LedgerEvent[], ownerRoles?: readonly string[]): readonly IntakeOffer[] {

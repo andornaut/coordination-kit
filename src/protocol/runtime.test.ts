@@ -377,4 +377,100 @@ describe("external protocol at existing runtime boundaries (isolated fixtures)",
       failingReport.mockRestore();
     }
   });
+
+  it("reports only new requests and coverage gaps as uncovered intake after enrollment", async () => {
+    const fixture = claudeFixture();
+    const stateRoot = activateProtocolFixture(fixture.layout);
+    const protocol = runtimeProtocolStore(fixture.layout)!;
+    await protocol.claim({
+      at: AT,
+      binding: BINDING,
+      evidence: "fixture-owner",
+      expectedEpoch: 0,
+      role: "coordinator",
+    });
+    const capture = (snapshot: Record<string, unknown>, phase: "startup" | "resume" | "review") =>
+      captureAccounting(
+        fixture.layout,
+        { harness: "claude", history: {}, ...snapshot },
+        phase,
+        "snapshot",
+        ["game-coordinator"],
+      );
+    const offers = () =>
+      accountingIntake(fixture.layout)
+        .pending([])
+        .map((offer) => offer.id);
+    const input = { generation: 1, phase: "active" as const, stateRoot, workspaceId: "fixture" };
+    const base = { queues: { [RECIPIENT]: [] } };
+    await capture(base, "startup");
+    expect(offers()).toHaveLength(1);
+    const scope = resolveEnrollmentScope(fixture.layout, protocol, input);
+    const owner = scope.participants.find((participant) => participant.role === "coordinator")!;
+    expect(owner.knownReferences).toContainEqual({ key: offers()[0], kind: "intake" });
+    const evidence = await protocol.putArtifact(Buffer.from("fixture owner inspection"));
+    const enrollment = new EnrollmentStore({ protocol });
+    await enrollment.publish(
+      {
+        at: AT,
+        binding: BINDING,
+        epoch: 1,
+        expectedRevision: protocol.read(owner.role).revision,
+        id: "owner-enrollment",
+        role: owner.role,
+      },
+      {
+        evidence: [evidence],
+        generation: 1,
+        inspectedAt: AT,
+        ledger: scope.ledgerAnchors.at(-1)!,
+        phase: "active",
+        references: owner.knownReferences,
+        registryRevision: scope.registryRevision,
+        unknowns: owner.requiredUnknownScopes.map((value) => ({
+          evidence: [evidence],
+          id: `fixture-${value}`,
+          nextBoundary: "next owner review",
+          parentRole: owner.role,
+          participantRole: owner.role,
+          reason: "bounded fixture evidence only",
+          scope: value,
+        })),
+        workspaceId: "fixture",
+      },
+      scope,
+    );
+    const uncovered = () => {
+      const report = enrollment.report(resolveEnrollmentScope(fixture.layout, protocol, input));
+      expect(report.participants.find((row) => row.role === "coordinator")).toMatchObject({
+        adopted: true,
+      });
+      return report.uncovered
+        .filter((entry) => entry.role === "coordinator" && entry.reference.kind === "intake")
+        .map((entry) => entry.reference.key)
+        .sort();
+    };
+    const known = offers();
+    for (const phase of ["resume", "review"] as const) {
+      // Each restatement must follow the previous capture.
+      // eslint-disable-next-line no-await-in-loop
+      await capture(base, phase);
+      expect(offers()).toEqual(known);
+      expect(uncovered()).toEqual([]);
+    }
+    await capture(
+      {
+        queues: { [RECIPIENT]: [{ clientUserMessageId: "later-original", id: "later-original" }] },
+      },
+      "resume",
+    );
+    const request = offers().filter((id) => !known.includes(id));
+    expect(request).toHaveLength(1);
+    expect(uncovered()).toEqual(request);
+    // A missing queue inventory is a new coverage gap without a new request.
+    await capture({}, "resume");
+    const gap = offers().filter((id) => !known.includes(id) && !request.includes(id));
+    expect(gap).toHaveLength(1);
+    expect(uncovered()).toEqual([...request, ...gap].sort());
+  });
 });

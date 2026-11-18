@@ -203,4 +203,44 @@ describe("accounting at existing ingress boundaries (isolated fixtures)", () => 
     );
     expect(result.accounting_ready).toBe(false);
   });
+
+  it("adds no offer or event for a restated capture and keeps any new request or gap", async () => {
+    const fixture = claudeFixture();
+    const accounting = join(fixture.layout.varDir, "accounting");
+    const capture = (snapshot: Record<string, unknown>, phase: "startup" | "resume" | "review") =>
+      captureAccounting(
+        fixture.layout,
+        { harness: "claude", history: {}, ...snapshot },
+        phase,
+        "snapshot",
+        ["game-coordinator"],
+      );
+    const state = () => ({
+      offers: readdirSync(join(accounting, "intake")).sort(),
+      revision: new LedgerStore({ directory: accounting }).read().revision,
+    });
+    const base = { queues: { [RECIPIENT]: [] } };
+    await capture(base, "startup");
+    const first = state();
+    expect(first.offers).toHaveLength(1);
+    for (const phase of ["resume", "review"] as const) {
+      // Each restatement must follow the previous capture.
+      // eslint-disable-next-line no-await-in-loop
+      expect((await capture(base, phase)).status).toBe("available");
+      expect(state()).toEqual(first);
+    }
+    await capture(
+      {
+        queues: { [RECIPIENT]: [{ clientUserMessageId: "later-original", id: "later-original" }] },
+      },
+      "resume",
+    );
+    const request = state();
+    expect(request.offers).toHaveLength(2);
+    expect(request.revision).toBe(first.revision + 1);
+    // A missing queue inventory is a new coverage gap for the same requests.
+    await capture({}, "resume");
+    expect(state().offers).toHaveLength(3);
+    expect(state().revision).toBe(request.revision + 1);
+  });
 });

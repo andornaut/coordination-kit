@@ -172,13 +172,16 @@ CAS; a conflicting source rejects the whole owner batch. Matching existing recor
 owner's classification and history. This is per-owner atomicity, not one transaction across all
 registered roles.
 
-Before reading the event journal, automatic boundary intake durably retains primitive offers in
+Before locking the event journal, automatic boundary intake durably retains primitive offers in
 the selected accounting directory's `intake` child (`<coordinator-root>/var/accounting/intake`
 without protocol configuration). Construct `IntakeStore` with that `directory`; its
 `offer({ actor, source, command })` method accepts an unknown-reference `capture` payload and
 returns an immutable content-addressed offer. Its
 fixed summaries and unknown-question metadata contain no native message body, question text or
 choices. Offer presence proves input retention, not journal admission, approval or completion.
+`restated({ events, projection }, input)` is true when every request and coverage entry already
+equals one pending for the same actor or held by the projection; automatic intake then adds no
+offer, and keeps offering whenever the journal or intake directory is unreadable.
 Events remain the sole current projection; there is no separate mutable processed marker.
 
 In unmanaged compatibility mode, existing boundaries replay pending offers for selected owners,

@@ -20,7 +20,7 @@ import { captureProtocolSelection } from "../protocol/selection.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
 import { type IntakeContext, messageIntake, snapshotIntake } from "./ingress.ts";
-import { IntakeError } from "./intake.ts";
+import { IntakeError, type IntakeInput, type IntakeStore } from "./intake.ts";
 import { type OwnerBinding, projectOwnerBinding } from "./ownership.ts";
 import { LedgerError, LedgerStore } from "./store.ts";
 import type { LedgerCommand, LedgerSource } from "./types.ts";
@@ -275,6 +275,22 @@ async function captureCommand(
   throw new Error("accounting-concurrent-update");
 }
 
+/** A capture whose entries are all pending or current adds no offer; any doubt keeps it. */
+function restated(
+  intake: IntakeStore,
+  ledger: ReturnType<LedgerStore["snapshot"]> | null,
+  value: IntakeInput,
+): boolean {
+  if (ledger === null) {
+    return false;
+  }
+  try {
+    return intake.restated(ledger, value);
+  } catch {
+    return false;
+  }
+}
+
 /** Capture only supported metadata, never infer human origin from a native item or message. */
 export async function captureAccounting(
   layout: Layout,
@@ -314,6 +330,13 @@ export async function captureAccounting(
     if (selectedRoles.some((role) => !Object.hasOwn(registry.roles, role))) {
       throw new Error("accounting-owner-unavailable");
     }
+    let ledger: ReturnType<LedgerStore["snapshot"]> | null;
+    try {
+      // A lock-free replay; an unreadable journal still retains every offer below.
+      ledger = store.snapshot();
+    } catch {
+      ledger = null;
+    }
     const contexts: { context: IntakeContext; nativeContext: IntakeContext }[] = [];
     for (const ownerRole of [...new Set(selectedRoles)].sort()) {
       const harness = resolveHarness(registry, ownerRole);
@@ -350,19 +373,21 @@ export async function captureAccounting(
           }
         }
       }
-      if (requests.length > 0 || coverage.length > 0) {
-        // Persist immutable primitive references before reading or locking the event journal.
+      // The phase stays out of the source, so a restated capture keeps its content address.
+      const offer = {
+        actor: ownerRole,
+        command: { coverage, requests, type: "capture" as const },
+        source: {
+          native: null,
+          origin: "unknown" as const,
+          reference: `accounting-boundary:${JSON.stringify([ownerRole, harness, nativeId])}`,
+          wordingHash: null,
+        },
+      };
+      if ((requests.length > 0 || coverage.length > 0) && !restated(input, ledger, offer)) {
+        // Persist immutable primitive references before locking the event journal.
         // eslint-disable-next-line no-await-in-loop
-        await offerAccounting(layout, {
-          actor: ownerRole,
-          command: { coverage, requests, type: "capture" },
-          source: {
-            native: null,
-            origin: "unknown",
-            reference: `accounting-boundary:${JSON.stringify([ownerRole, harness, nativeId, phase])}`,
-            wordingHash: null,
-          },
-        });
+        await offerAccounting(layout, offer);
       }
     }
     if (captureProtocolSelection(layout).management.status !== "unmanaged") {

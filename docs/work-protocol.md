@@ -128,6 +128,14 @@ an earlier CLI, treats every omitted reference as revoking. Generation, phase, l
 registry revision, epoch, binding and parent epoch checks still mark a receipt stale, and a fresh
 enrollment publishes a new anchor.
 
+An intake reference is a pending offer, keyed by its content-addressed offer ID. Automatic
+capture names no boundary phase in the offer source and adds no offer when each of its requests
+and coverage entries already equals one in a pending offer of the same role or in the current
+ledger projection. A capture restated under another phase therefore creates no new reference,
+while any new request or any changed coverage, such as a new gap, creates one that stays uncovered
+until the role lists it. Offers retained before this rule keep their IDs and remain references
+until admitted.
+
 Runtime enrollment admission is role-local: the selected owner needs its own current active
 adopted row, not global `allAdopted` or `coverageComplete`. Explicit UNKNOWNs in that own receipt
 do not prevent startup or adoption. Missing participants elsewhere remain rollout blockers,
