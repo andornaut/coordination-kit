@@ -432,8 +432,10 @@ if (reference !== null) {
 const inbox = messages.inbox({ recipientRole: protocolNamespace("game-kit"), includeBody: true });
 ```
 
-Read views cache committed role state only within the synchronous operation. They are not
-long-lived route or native guard caches, and writes are refused inside them. Separate roles are
+Read views cache committed role state only within the synchronous operation, and verify each
+original once per view. An inbox verifies only the originals whose target is the listing role or
+its parent. Read views are not long-lived route or native guard caches, and writes are refused
+inside them. Separate roles are
 not read or committed as one cross-role transaction.
 
 The CLI exposes the same filesystem fallback with explicit canonical recipient and sender scopes:

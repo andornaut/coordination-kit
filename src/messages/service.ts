@@ -1,6 +1,6 @@
 // Durable local delivery is independent of native admission. Only explicit dispatch consults
 // current registered ownership and the existing recipient guards.
-import { mkdirSync } from "node:fs";
+import { lstatSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { isDeepStrictEqual } from "node:util";
@@ -36,7 +36,6 @@ import {
   type TransportReceipt,
 } from "./transports.ts";
 import type {
-  MessageAttemptIndexEntry,
   MessageAttemptSource,
   MessageEnvelope,
   MessageOwner,
@@ -55,7 +54,7 @@ export interface MessageClearance {
   readonly status: "clear" | "blocked" | "unavailable";
 }
 
-type MessageAttemptIndex = ReadonlyMap<string, readonly MessageAttemptIndexEntry[]>;
+type MessageAttemptIndex = ReturnType<MessageStore["attemptLookup"]>;
 
 /** Resolve the current registered owner without probing a session or manufacturing lineage. */
 export function currentMessageOwner(
@@ -136,13 +135,19 @@ function bindingCurrent(
   return isDeepStrictEqual(currentMessageOwner(layout, record.envelope), source.owner);
 }
 
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
 function terminalState(state: MessageRecord["state"]): boolean {
   return state === "handled" || state === "superseded";
 }
 
 /**
  * Generic channel consumption uses exact durable source and fresh supported guards. `drain()`
- * opens one store index for a consumer drain; calling the guard directly opens a fresh index.
+ * opens one request lookup for a consumer drain; calling the guard directly opens a fresh one.
  */
 export function messageConsumeGuard(layout: Layout, env: NodeJS.ProcessEnv): MessageChannelGuard {
   // A terminal record never takes another attempt, so its latest request ID stays undeliverable.
@@ -158,7 +163,7 @@ export function messageConsumeGuard(layout: Layout, env: NodeJS.ProcessEnv): Mes
             layout,
             resolveOwner: (_role, envelope) => currentMessageOwner(layout, envelope),
           });
-          view = { index: store.attemptIndex(), store };
+          view = { index: store.attemptLookup(), store };
         } catch {
           view = null;
         }
@@ -256,7 +261,11 @@ export interface MessageServiceContext {
     source: MessageAttemptSource,
     directory: string,
   ) => MessageTransport;
+  /** Waits before the single retry of a busy transport; defaults to one second. */
+  readonly busyRetryWait?: () => Promise<void>;
 }
+
+const BUSY_RETRY_MS = 1000;
 
 export interface SpoolRetirementReport {
   readonly dryRun: boolean;
@@ -707,9 +716,47 @@ export class MessageService {
     };
   }
 
-  /** Dispatch is explicit. Unknown prior admission never reaches a new attempt or request ID. */
+  /**
+   * Dispatch is explicit. Unknown prior admission never reaches a new attempt or request ID. A
+   * busy transport refusal proven to precede native admission is retried once, as a new guarded
+   * attempt with its own request ID and receipt.
+   */
   async dispatch(id: string): Promise<MessageRecord> {
-    let record = this.record(id);
+    const record = this.record(id);
+    const result = await this.dispatchOnce(record);
+    if (!this.busyBeforeAdmission(result, record.attempts.length)) {
+      return result;
+    }
+    await (this.context.busyRetryWait ?? (() => wait(BUSY_RETRY_MS)))();
+    return this.dispatchOnce(this.record(id));
+  }
+
+  /**
+   * Only the attempt this dispatch added, completed as transport-busy, with no receipt at its
+   * bound path: the transport refused it before writing a receipt or spool entry.
+   */
+  private busyBeforeAdmission(record: MessageRecord, priorAttempts: number): boolean {
+    const last = record.attempts.at(-1);
+    if (
+      last === undefined ||
+      record.attempts.length !== priorAttempts + 1 ||
+      record.state !== "blocked" ||
+      record.reason !== "transport-busy" ||
+      last.state !== "blocked" ||
+      last.reason !== "transport-busy"
+    ) {
+      return false;
+    }
+    try {
+      return lstatSync(this.receiptPath(last.source), { throwIfNoEntry: false }) === undefined;
+    } catch {
+      return false;
+    }
+  }
+
+  private async dispatchOnce(initial: MessageRecord): Promise<MessageRecord> {
+    const id = initial.envelope.id;
+    let record = initial;
     if (record.state === "sending" || record.state === "ambiguous") {
       return this.reconcileReceipt(id);
     }
@@ -829,7 +876,7 @@ export class MessageService {
         });
       }
       if (result.status === "busy") {
-        // A busy transport wrote nothing; the blocked attempt permits a guarded re-dispatch.
+        // A busy transport wrote nothing; dispatch retries it once as a new guarded attempt.
         return lease.complete({
           diagnostic: diagnostic ?? {
             category: "busy",

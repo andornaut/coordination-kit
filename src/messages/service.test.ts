@@ -26,7 +26,12 @@ import { CLAUDE_COORDINATOR, CODEX_TECH, makeFixture, registryInput } from "../t
 import { messageChannelStateDir } from "./paths.ts";
 import { messageConsumeGuard, messageGuardDirectory, MessageService } from "./service.ts";
 import { messageExpectation, MessageStore } from "./store.ts";
-import { claudeMessageTransport, type MessageTransport, type NativeMessage } from "./transports.ts";
+import {
+  claudeMessageTransport,
+  type MessageTransport,
+  type NativeMessage,
+  type TransportReceipt,
+} from "./transports.ts";
 
 const GAME = "archies-dog-walks";
 const ROLE = `${GAME}/tech`;
@@ -509,15 +514,20 @@ describe("message service", () => {
     const directory = join(test.layout.reviewDir, "messages");
     const file = readdirSync(directory).find((name) => name.endsWith(".json"))!;
     const path = join(directory, file);
-    // The index observes the refused attempt; a concurrent sender then persists its successor.
+    // The lookup observes the refused attempt; a concurrent sender then persists its successor.
     writeJsonDurable(path, first);
-    const attemptIndex = MessageStore.prototype.attemptIndex;
-    vi.spyOn(MessageStore.prototype, "attemptIndex").mockImplementationOnce(function (
+    const attemptLookup = MessageStore.prototype.attemptLookup;
+    vi.spyOn(MessageStore.prototype, "attemptLookup").mockImplementationOnce(function (
       this: MessageStore,
     ) {
-      const snapshot = attemptIndex.call(this);
-      writeJsonDurable(path, second);
-      return snapshot;
+      const lookup = attemptLookup.call(this);
+      return {
+        get: (requestId: string) => {
+          const entries = lookup.get(requestId);
+          writeJsonDurable(path, second);
+          return entries;
+        },
+      };
     });
     const outcome = await messageConsumeGuard(
       test.layout,
@@ -573,7 +583,7 @@ function deliverableEnv(test: ReturnType<typeof fixture>) {
 }
 
 describe("channel consumer guard cost", () => {
-  it("indexes the store once per drain and skips terminal parents without claiming or rescanning", async () => {
+  it("reads only each entry's hinted record and skips terminal parents without claiming or rescanning", async () => {
     const test = fixture();
     const env = deliverableEnv(test);
     const service = new MessageService({ layout: test.layout, env });
@@ -594,6 +604,10 @@ describe("channel consumer guard cost", () => {
     const busDir = dirname(messageChannelStateDir(test.layout, CLAUDE_COORDINATOR));
     const summary = vi.spyOn(MessageStore.prototype, "summary");
     const scans = vi.spyOn(MessageStore.prototype, "attemptIndex");
+    const reads = vi.spyOn(
+      MessageStore.prototype as unknown as Record<"load", (name: string) => unknown>,
+      "load",
+    );
     const lines: string[] = [];
     const guard = messageConsumeGuard(test.layout, env);
     const drain = () =>
@@ -601,9 +615,10 @@ describe("channel consumer guard cost", () => {
         beforeMessage: guard,
       });
     expect(await drain()).toBe(true);
-    expect(scans).toHaveBeenCalledTimes(1);
+    expect(reads).toHaveBeenCalledTimes(terminal.length);
+    reads.mockClear();
     expect(await drain()).toBe(true);
-    expect(scans).toHaveBeenCalledTimes(1);
+    expect(reads).not.toHaveBeenCalled();
     expect(summary).not.toHaveBeenCalled();
     expect(lines).toEqual([]);
     const spool = readdirSync(spoolDir(busDir)).sort();
@@ -613,8 +628,11 @@ describe("channel consumer guard cost", () => {
     }
     // Between drains a sender's non-blocking unblock.lock attempt succeeds.
     const live = await spooledEntry(test, service, WORKER, "deliverable original\n");
+    reads.mockClear();
     expect(await drain()).toBe(true);
-    expect(scans).toHaveBeenCalledTimes(2);
+    // The live entry's hinted record, its exact re-read and the final unchanged check.
+    expect(reads).toHaveBeenCalledTimes(3);
+    expect(scans).not.toHaveBeenCalled();
     expect(lines.map((line) => JSON.parse(line).params.content)).toEqual([
       "deliverable original\n",
     ]);
@@ -703,7 +721,16 @@ describe("busy Claude spool", () => {
       `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(listing)});\n`,
     );
     chmodSync(executable, 0o700);
-    const service = new MessageService({ layout: test.layout, env: { CLAUDE_BIN: executable } });
+    let waits = 0;
+    let release = () => {};
+    const service = new MessageService({
+      busyRetryWait: async () => {
+        waits++;
+        release();
+      },
+      layout: test.layout,
+      env: { CLAUDE_BIN: executable },
+    });
     await service.send(input("game-coordinator"));
     const stateDir = messageChannelStateDir(test.layout, CLAUDE_COORDINATOR);
     mkdirSync(stateDir, { recursive: true });
@@ -715,25 +742,129 @@ describe("busy Claude spool", () => {
       held.release();
     }
     const diagnostic = { category: "busy", classification: "unavailable", stage: "receipt" };
+    expect(waits).toBe(1);
     expect(busy).toMatchObject({ reason: "transport-busy", state: "blocked", diagnostic });
-    expect(busy.attempts).toHaveLength(1);
-    expect(busy.attempts[0]).toMatchObject({ reason: "transport-busy", state: "blocked" });
+    expect(busy.attempts).toHaveLength(2);
+    expect(busy.attempts.map((attempt) => [attempt.state, attempt.reason])).toEqual([
+      ["blocked", "transport-busy"],
+      ["blocked", "transport-busy"],
+    ]);
     expect(service.status({ id: ID })[0]).toMatchObject({
       diagnostic,
-      outbox: [{ diagnostic, state: "blocked" }],
+      outbox: [
+        { diagnostic, state: "blocked" },
+        { diagnostic, state: "blocked" },
+      ],
       reason: "transport-busy",
     });
-    const first = busy.attempts[0]!.source.requestId;
-    expect(existsSync(join(stateDir, `${first}.json`))).toBe(false);
-    expect(existsSync(join(spoolDir(dirname(stateDir)), `${first}.json`))).toBe(false);
-    const retried = await service.dispatch(ID);
+    const refused = busy.attempts.map((attempt) => attempt.source.requestId);
+    expect(new Set(refused).size).toBe(2);
+    for (const requestId of refused) {
+      expect(existsSync(join(stateDir, `${requestId}.json`))).toBe(false);
+      expect(existsSync(join(spoolDir(dirname(stateDir)), `${requestId}.json`))).toBe(false);
+    }
+    // The spool frees during the wait, so the single retry is admitted.
+    const next = "00000000-0000-4000-8000-000000000014";
+    await service.send(input("game-coordinator", next));
+    const again = holdLock(join(stateDir, "unblock.lock"));
+    release = () => again.release();
+    const retried = await service.dispatch(next);
+    expect(waits).toBe(2);
     // The queued spool leaves its receipt at sending, so the attempt stays ambiguous until consumed.
     expect(retried.state).toBe("ambiguous");
-    expect(retried.reason).not.toBe("transport-busy");
-    expect(retried.attempts).toHaveLength(2);
-    const second = retried.attempts[1]!.source.requestId;
+    expect(retried.attempts.map((attempt) => attempt.state)).toEqual(["blocked", "ambiguous"]);
+    expect(retried.attempts[0]?.reason).toBe("transport-busy");
+    const [first, second] = retried.attempts.map((attempt) => attempt.source.requestId);
     expect(second).not.toBe(first);
+    expect(existsSync(join(stateDir, `${first}.json`))).toBe(false);
+    expect(existsSync(join(stateDir, `${second}.json`))).toBe(true);
     expect(existsSync(join(spoolDir(dirname(stateDir)), `${second}.json`))).toBe(true);
+  });
+});
+
+describe("busy transport retry", () => {
+  type Outcome = "busy" | "accepted" | "ambiguous" | "rejected" | "unavailable" | "throw";
+
+  async function dispatched(
+    outcomes: Outcome[],
+    options: { receipt?: boolean; hold?: boolean } = {},
+  ) {
+    const test = fixture();
+    codex(test);
+    const directory = messageGuardDirectory(test.layout, ROLE)!;
+    marker(directory, CODEX_TECH);
+    const paths: string[] = [];
+    let waits = 0;
+    const service = new MessageService({
+      busyRetryWait: async () => {
+        waits++;
+        if (options.hold === true) {
+          marker(directory, CODEX_TECH, "pending");
+        }
+      },
+      layout: test.layout,
+      env: {},
+      transport: () => ({
+        send: async (path, message): Promise<TransportReceipt> => {
+          paths.push(path);
+          const outcome = outcomes[paths.length - 1];
+          if (outcome === undefined || outcome === "throw") {
+            throw new Error("lost response");
+          }
+          if (options.receipt === true) {
+            receipt(path, { status: "deferred" });
+          }
+          return { requestId: message.requestId, status: outcome };
+        },
+      }),
+    });
+    await service.send(input());
+    const record = await service.dispatch(ID);
+    return { paths, record, stateDir: messageChannelStateDir(test.layout, CODEX_TECH), waits };
+  }
+
+  it("retries a busy refusal once as a new attempt with its own request ID and receipt", async () => {
+    const { paths, record, stateDir, waits } = await dispatched(["busy", "accepted"]);
+    expect(waits).toBe(1);
+    expect(record.state).toBe("accepted");
+    expect(record.attempts.map((attempt) => [attempt.state, attempt.reason])).toEqual([
+      ["blocked", "transport-busy"],
+      ["accepted", null],
+    ]);
+    expect(paths).toEqual(
+      record.attempts.map((attempt) => join(stateDir, `${attempt.source.requestId}.json`)),
+    );
+    expect(new Set(paths).size).toBe(2);
+  });
+
+  it("retries only once and re-runs the recipient guards first", async () => {
+    const twice = await dispatched(["busy", "busy", "accepted"]);
+    expect(twice.waits).toBe(1);
+    expect(twice.paths).toHaveLength(2);
+    expect(twice.record).toMatchObject({ reason: "transport-busy", state: "blocked" });
+    const held = await dispatched(["busy", "accepted"], { hold: true });
+    expect(held.paths).toHaveLength(1);
+    expect(held.record).toMatchObject({ reason: "guarded", state: "blocked" });
+    expect(held.record.attempts).toHaveLength(1);
+  });
+
+  it("never retries an ambiguous, refused, unavailable, lost or receipt-bearing outcome", async () => {
+    const cases: [Outcome[], { receipt?: boolean }, string, string][] = [
+      [["ambiguous"], {}, "ambiguous", "lost-response"],
+      [["throw"], {}, "ambiguous", "lost-response"],
+      [["rejected"], {}, "blocked", "refused"],
+      [["unavailable"], {}, "blocked", "transport-unavailable"],
+      [["busy"], { receipt: true }, "blocked", "transport-busy"],
+    ];
+    for (const [outcomes, options, state, reason] of cases) {
+      // Each case is an isolated fixture; sequential runs keep the assertions attributable.
+      // eslint-disable-next-line no-await-in-loop
+      const result = await dispatched([...outcomes, "accepted"], options);
+      expect(result.waits).toBe(0);
+      expect(result.paths).toHaveLength(1);
+      expect(result.record).toMatchObject({ reason, state });
+      expect(result.record.attempts).toHaveLength(1);
+    }
   });
 });
 

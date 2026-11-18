@@ -1,7 +1,7 @@
 // Callers authorize inbox reads, attempts and evidence. This store performs no transport or
 // question lifecycle operations; native acceptance and explicit recipient handling are distinct.
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, readdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual as same } from "node:util";
 
@@ -22,6 +22,7 @@ import {
 import { ID_PATTERN } from "../validate.ts";
 import { messageEnvelope } from "./envelope.ts";
 import { MessageError } from "./errors.ts";
+import { MessageLookup } from "./lookup.ts";
 import { messageLayout } from "./paths.ts";
 import type {
   MessageAttempt,
@@ -40,6 +41,7 @@ import type {
   MessageRetention,
   MessageStatus,
   MessageSummary,
+  MessageSummarySelection,
 } from "./types.ts";
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
@@ -218,6 +220,15 @@ export function messageExpectation(record: MessageRecord): MessageExpectation {
   };
 }
 
+function attemptEntry(record: MessageRecord, position: number): MessageAttemptIndexEntry {
+  return {
+    id: record.envelope.id,
+    latest: position === record.attempts.length - 1,
+    revision: record.revision,
+    state: record.state,
+  };
+}
+
 function terminal(record: MessageRecord): boolean {
   return record.state === "handled" || record.state === "superseded";
 }
@@ -262,9 +273,22 @@ function publicStatus(record: MessageRecord): MessageStatus {
   };
 }
 
-/** Read-only operational inventory for the existing review pass; creates no state or wake. */
-export function messageSummary(layout: MessageContext["layout"]): MessageSummary {
-  return new MessageStore({ layout, resolveOwner: () => null }).summary();
+/**
+ * Read-only operational inventory for the existing review pass; creates no message state or
+ * wake. A selection limits it to one message ID or to the given recipients.
+ */
+export function messageSummary(
+  layout: MessageContext["layout"],
+  selection: MessageSummarySelection = {},
+): MessageSummary {
+  return new MessageStore({ layout, resolveOwner: () => null }).summary(selection);
+}
+
+function byCreated(a: MessageRecord, b: MessageRecord): number {
+  return (
+    a.envelope.created.localeCompare(b.envelope.created) ||
+    a.envelope.id.localeCompare(b.envelope.id)
+  );
 }
 
 /** Local role inbox, independent of optional notifications or native transport availability. */
@@ -275,6 +299,8 @@ export class MessageStore {
   private readonly protocol: ProtocolLayout | null;
   private readonly selection: ProtocolSelection | null;
   private readonly canonicalMessages: ProtocolMessages | null;
+  private readonly lookup: MessageLookup;
+  private views = 0;
 
   constructor(context: MessageContext) {
     this.context = context;
@@ -282,6 +308,7 @@ export class MessageStore {
     this.selection = this.layout === null ? null : captureProtocolSelection(this.layout);
     this.protocol = this.selection?.protocol ?? null;
     this.directory = this.protocol?.messagesDir ?? join(context.layout.reviewDir, "messages");
+    this.lookup = new MessageLookup(this.directory);
     this.canonicalMessages =
       this.protocol === null
         ? null
@@ -296,12 +323,26 @@ export class MessageStore {
     return value;
   }
 
-  private path(id: string): string {
-    if (this.layout !== null) {
+  /** A read view checks the selection on entry and exit instead of on every record. */
+  private checkSelection(): void {
+    if (this.layout !== null && this.views === 0) {
       checkProtocolSelection(this.layout, this.selection!);
     }
+  }
+
+  private path(id: string): string {
+    this.checkSelection();
     requireThat(typeof id === "string" && ID.test(id), "invalid-id");
     return join(this.directory, `${hash(id)}.json`);
+  }
+
+  /** Hints precede the record write, so a stored attempt is always findable or uncovered. */
+  private hint(record: MessageRecord): void {
+    const name = hash(record.envelope.id);
+    this.lookup.add("recipient", record.envelope.toRole, name);
+    for (const attempt of record.attempts) {
+      this.lookup.add("request", attempt.source.requestId, name);
+    }
   }
 
   private async lock(id: string): Promise<LockHandle> {
@@ -338,7 +379,9 @@ export class MessageStore {
     this.checkOriginal(record.envelope);
     const next = { ...record, revision: record.revision + 1 };
     validRecord(next);
-    writeJsonDurable(this.path(next.envelope.id), next);
+    const path = this.path(next.envelope.id);
+    this.hint(next);
+    writeJsonDurable(path, next);
     return clone(next);
   }
 
@@ -351,9 +394,25 @@ export class MessageStore {
 
   /** Private payload read. Public callers must deliberately opt into authorized inbox access. */
   read(id: string): MessageRecord | undefined {
+    return this.readView(() => {
+      this.path(id);
+      const record = this.load(hash(id), true);
+      if (record === undefined) {
+        return undefined;
+      }
+      requireThat(record.envelope.id === id, "binding-conflict");
+      return record;
+    });
+  }
+
+  /**
+   * Every stored record is read and validated here, by its file base name. Without `originals`
+   * the protocol original check is skipped, so callers must re-read a selected record.
+   */
+  private load(name: string, originals: boolean): MessageRecord | undefined {
     let record: unknown;
     try {
-      record = readJsonIfExists(this.path(id));
+      record = readJsonIfExists(join(this.directory, `${name}.json`));
     } catch {
       throw new MessageError("unreadable-record");
     }
@@ -361,21 +420,32 @@ export class MessageStore {
       return undefined;
     }
     validRecord(record);
-    requireThat(record.envelope.id === id, "binding-conflict");
-    this.checkOriginal(record.envelope);
-    return clone(record);
+    requireThat(hash(record.envelope.id) === name, "binding-conflict");
+    if (originals) {
+      this.checkOriginal(record.envelope);
+    }
+    return record;
   }
 
   private originals(): ProtocolMessages | null {
-    if (this.layout !== null) {
-      checkProtocolSelection(this.layout, this.selection!);
-    }
+    this.checkSelection();
     return this.canonicalMessages;
   }
 
   private readView<T>(read: () => T): T {
+    if (this.views > 0) {
+      return read();
+    }
     const messages = this.originals();
-    return messages === null ? read() : messages.withReadView(read);
+    this.views++;
+    let value: T;
+    try {
+      value = messages === null ? read() : messages.withReadView(read);
+    } finally {
+      this.views--;
+    }
+    this.checkSelection();
+    return value;
   }
 
   /** Transport records are projections of this original after explicit protocol activation. */
@@ -397,7 +467,45 @@ export class MessageStore {
   /** Explicit recipient inbox read returns full original payloads, never abbreviated bodies. */
   inbox(toRole: string): readonly MessageRecord[] {
     requireThat(role(toRole), "invalid-role");
-    return this.records().filter((record) => record.envelope.toRole === toRole);
+    return this.readView(() => this.recipients([toRole]));
+  }
+
+  /**
+   * Reads only the hinted records of these recipients plus any record without a recipient hint.
+   * An uncovered record is read, hinted and kept only when it belongs to a selected recipient.
+   */
+  private recipients(toRoles: readonly string[]): readonly MessageRecord[] {
+    this.checkSelection();
+    const stored = this.stored();
+    const covered = this.lookup.covered();
+    const selected = new Set(toRoles);
+    const names = new Set<string>();
+    for (const toRole of selected) {
+      for (const name of this.lookup.hinted("recipient", toRole)) {
+        if (stored.has(name)) {
+          names.add(name);
+        }
+      }
+    }
+    for (const name of stored) {
+      if (!covered.has(name)) {
+        names.add(name);
+      }
+    }
+    const records: MessageRecord[] = [];
+    for (const name of [...names].sort()) {
+      const record = this.load(name, true);
+      if (record === undefined) {
+        continue;
+      }
+      if (!covered.has(name)) {
+        this.hint(record);
+      }
+      if (selected.has(record.envelope.toRole)) {
+        records.push(record);
+      }
+    }
+    return records.sort(byCreated);
   }
 
   /**
@@ -417,71 +525,88 @@ export class MessageStore {
   }
 
   /**
-   * One scan mapping every attempt request ID to its records. It skips the per-record protocol
-   * original check, so callers must re-read a selected record through `read`.
+   * One scan mapping every attempt request ID to its records, restoring any missing request hint.
+   * It skips the per-record protocol original check, so callers must re-read a selected record
+   * through `read`.
    */
   attemptIndex(): ReadonlyMap<string, readonly MessageAttemptIndexEntry[]> {
     const index = new Map<string, MessageAttemptIndexEntry[]>();
     for (const record of this.readRecords(false)) {
+      this.hint(record);
       record.attempts.forEach((attempt, position) => {
         const entries = index.get(attempt.source.requestId) ?? [];
-        entries.push({
-          id: record.envelope.id,
-          latest: position === record.attempts.length - 1,
-          revision: record.revision,
-          state: record.state,
-        });
+        entries.push(attemptEntry(record, position));
         index.set(attempt.source.requestId, entries);
       });
     }
     return index;
   }
 
-  private readRecords(originals = true): readonly MessageRecord[] {
-    if (this.layout !== null) {
-      checkProtocolSelection(this.layout, this.selection!);
-    }
-    let names: string[];
+  /**
+   * Request lookup for one consumer drain: it reads only the records hinted for a request ID. A
+   * request with no verified hinted record falls back to one `attemptIndex` scan per lookup,
+   * so an absent or stale hint costs a scan, never a different answer.
+   */
+  attemptLookup(): {
+    readonly get: (requestId: string) => readonly MessageAttemptIndexEntry[];
+  } {
+    let index: ReadonlyMap<string, readonly MessageAttemptIndexEntry[]> | undefined;
+    return {
+      get: (requestId) => {
+        const entries = this.hintedAttempts(requestId);
+        if (entries.length > 0) {
+          return entries;
+        }
+        index ??= this.attemptIndex();
+        return index.get(requestId) ?? [];
+      },
+    };
+  }
+
+  private stored(): Set<string> {
     try {
-      names = readdirSync(this.directory);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return [];
-      }
+      return this.lookup.stored();
+    } catch {
       throw new MessageError("unreadable-inbox");
     }
-    return names
-      .filter((name) => /^[0-9a-f]{64}\.json$/.test(name))
-      .map((name) => {
-        let record: unknown;
-        try {
-          record = readJsonIfExists(join(this.directory, name));
-        } catch {
-          throw new MessageError("unreadable-record");
+  }
+
+  private hintedAttempts(requestId: string): MessageAttemptIndexEntry[] {
+    this.checkSelection();
+    const entries: MessageAttemptIndexEntry[] = [];
+    for (const name of this.lookup.hinted("request", requestId).sort()) {
+      const record = this.load(name, false);
+      record?.attempts.forEach((attempt, position) => {
+        if (attempt.source.requestId === requestId) {
+          entries.push(attemptEntry(record, position));
         }
-        validRecord(record);
-        if (originals) {
-          this.checkOriginal(record.envelope);
+      });
+    }
+    return entries;
+  }
+
+  private readRecords(originals = true): readonly MessageRecord[] {
+    this.checkSelection();
+    const stored = this.stored();
+    const covered = this.lookup.covered();
+    const records: MessageRecord[] = [];
+    for (const name of stored) {
+      const record = this.load(name, originals);
+      if (record !== undefined) {
+        if (!covered.has(name)) {
+          this.hint(record);
         }
-        requireThat(
-          this.path(record.envelope.id) === join(this.directory, name),
-          "binding-conflict",
-        );
-        return record;
-      })
-      .sort(
-        (a, b) =>
-          a.envelope.created.localeCompare(b.envelope.created) ||
-          a.envelope.id.localeCompare(b.envelope.id),
-      );
+        records.push(record);
+      }
+    }
+    return records.sort(byCreated);
   }
 
   status(id: string): MessageStatus | undefined {
-    const record = this.read(id);
-    if (record === undefined) {
-      return undefined;
-    }
-    return this.publicRecord(record);
+    return this.readView(() => {
+      const record = this.read(id);
+      return record === undefined ? undefined : this.publicRecord(record);
+    });
   }
 
   private publicRecord(record: MessageRecord): MessageStatus {
@@ -502,10 +627,19 @@ export class MessageStore {
     };
   }
 
-  summary(): MessageSummary {
+  summary(selection: MessageSummarySelection = {}): MessageSummary {
     try {
       return this.readView(() => {
-        const messages = this.records().map((record) => this.publicRecord(record));
+        let records: readonly MessageRecord[];
+        if (selection.id !== undefined) {
+          const record = this.read(selection.id);
+          records = record === undefined ? [] : [record];
+        } else if (selection.recipients !== undefined) {
+          records = this.recipients(selection.recipients);
+        } else {
+          records = this.records();
+        }
+        const messages = records.map((record) => this.publicRecord(record));
         const counts = Object.fromEntries([...STATES].map((state) => [state, 0])) as Record<
           MessageRecord["state"],
           number

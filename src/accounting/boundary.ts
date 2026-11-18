@@ -308,7 +308,15 @@ export async function captureAccounting(
     const input = accountingIntake(layout);
     let inventory: MessageSummary;
     try {
-      inventory = messageSummary(layout);
+      // Intake reads only the captured message or the selected owners' messages.
+      inventory = messageSummary(
+        layout,
+        typeof snapshot.message_id === "string"
+          ? { id: snapshot.message_id }
+          : roles === undefined
+            ? {}
+            : { recipients: roles },
+      );
     } catch {
       inventory = {
         counts: null,

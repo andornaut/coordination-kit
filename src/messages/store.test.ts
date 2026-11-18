@@ -1,9 +1,19 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { LockBusy } from "../lock.ts";
 import { messageChannelStateDir } from "./paths.ts";
@@ -37,6 +47,7 @@ const OWNER: MessageOwner = {
 };
 const roots: string[] = [];
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true });
   }
@@ -377,5 +388,157 @@ describe("durable role inbox", () => {
       attempts: [blocked.attempts[0]],
     });
     expect(restarted.status(input.id)).toMatchObject({ workerId: CHILD, parentRole: "game-kit" });
+  });
+});
+
+/** Every stored record file read goes through the store's private `load`. */
+function recordReads() {
+  return vi.spyOn(
+    MessageStore.prototype as unknown as Record<"load", (name: string) => unknown>,
+    "load",
+  );
+}
+
+function fileName(id: string): string {
+  return createHash("sha256").update(id, "utf8").digest("hex");
+}
+
+/** A record as an earlier release wrote it: bytes only, with no lookup hints beside it. */
+function legacyRecord(directory: string, input: MessageInput, requestIds: readonly string[]) {
+  const envelope = messageEnvelope(input);
+  const record = {
+    schema: 1,
+    revision: requestIds.length + 1,
+    envelope,
+    state: requestIds.length === 0 ? "queued" : "blocked",
+    attempts: requestIds.map((requestId) => ({
+      source: { owner: { ...OWNER, parentBinding: null }, hop: "recipient", requestId },
+      state: "blocked",
+      started: NOW,
+      completed: NOW,
+      reason: "refused",
+    })),
+    evidence: [],
+    retention: null,
+    reason: requestIds.length === 0 ? null : "refused",
+  };
+  mkdirSync(directory, { recursive: true });
+  const path = join(directory, `${fileName(input.id)}.json`);
+  const bytes = `${JSON.stringify(record, null, 2)}\n`;
+  writeFileSync(path, bytes, { mode: 0o600 });
+  return { bytes, path };
+}
+
+describe("message lookup", () => {
+  it("bounds the records read per operation by the selection, not by the stored total", async () => {
+    const { context, store } = setup();
+    const own = ["own:1", "own:2", "own:3"];
+    for (const id of own) {
+      // Sequential enqueues keep each message lock ordered.
+      // eslint-disable-next-line no-await-in-loop
+      await store.enqueue({ ...INPUT, id });
+    }
+    const lease = await store.beginAttempt(expected(store.read(own[0]!)!));
+    lease.complete({ source: lease.source, state: "blocked", reason: "refused" });
+    const observed = [];
+    let others = 0;
+    for (const total of [4, 40]) {
+      for (; others < total; others++) {
+        // eslint-disable-next-line no-await-in-loop
+        await store.enqueue({ ...INPUT, id: `other:${others}`, toRole: "game-kit" });
+      }
+      const reads = recordReads();
+      const count = (operation: () => unknown) => {
+        reads.mockClear();
+        operation();
+        return reads.mock.calls.length;
+      };
+      observed.push({
+        inbox: count(() => expect(store.inbox(INPUT.toRole)).toHaveLength(3)),
+        lookup: count(() =>
+          expect(store.attemptLookup().get(lease.source.requestId)).toEqual([
+            { id: own[0], latest: true, revision: 3, state: "blocked" },
+          ]),
+        ),
+        read: count(() => expect(store.status(own[1]!)?.id).toBe(own[1])),
+        recipientSummary: count(() =>
+          expect(messageSummary(context.layout, { recipients: [INPUT.toRole] })).toMatchObject({
+            counts: { blocked: 1, queued: 2 },
+            messages: own.map((id) => ({ id })),
+          }),
+        ),
+        idSummary: count(() =>
+          expect(messageSummary(context.layout, { id: own[2]! }).messages).toHaveLength(1),
+        ),
+      });
+      reads.mockRestore();
+    }
+    expect(observed[0]).toEqual({
+      inbox: 3,
+      lookup: 1,
+      read: 1,
+      recipientSummary: 3,
+      idSummary: 1,
+    });
+    expect(observed[1]).toEqual(observed[0]);
+    expect(messageSummary(context.layout).messages).toHaveLength(43);
+  });
+
+  it("reads records written without hints byte for byte and restores their hints", async () => {
+    const { context, directory } = setup();
+    const request = "00000000-0000-4000-8000-000000000011";
+    const legacy = legacyRecord(directory, { ...INPUT, id: "legacy:1" }, [request]);
+    const other = legacyRecord(directory, { ...INPUT, id: "legacy:2", toRole: "game-kit" }, []);
+    const lookup = join(context.layout.reviewDir, "message-index");
+    expect(existsSync(lookup)).toBe(false);
+    const store = new MessageStore(context);
+    const reads = recordReads();
+    expect(store.inbox(INPUT.toRole).map((record) => record.envelope.id)).toEqual(["legacy:1"]);
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(store.status("legacy:1")).toMatchObject({ state: "blocked", attempts: 1 });
+    expect(existsSync(lookup)).toBe(true);
+    reads.mockClear();
+    expect(store.inbox("game-kit").map((record) => record.envelope.id)).toEqual(["legacy:2"]);
+    expect(reads).toHaveBeenCalledTimes(1);
+    reads.mockClear();
+    expect(store.attemptLookup().get(request)).toEqual([
+      { id: "legacy:1", latest: true, revision: 2, state: "blocked" },
+    ]);
+    expect(reads).toHaveBeenCalledTimes(1);
+    // An earlier writer adds a record and an attempt without hints; neither is missed.
+    const later = "00000000-0000-4000-8000-000000000012";
+    const rewritten = legacyRecord(directory, { ...INPUT, id: "legacy:1" }, [request, later]);
+    const added = legacyRecord(directory, { ...INPUT, id: "legacy:3" }, []);
+    expect(store.inbox(INPUT.toRole).map((record) => record.envelope.id)).toEqual([
+      "legacy:1",
+      "legacy:3",
+    ]);
+    expect(store.attemptLookup().get(later)).toEqual([
+      { id: "legacy:1", latest: true, revision: 3, state: "blocked" },
+    ]);
+    expect(legacy.path).toBe(rewritten.path);
+    for (const record of [rewritten, other, added]) {
+      expect(readFileSync(record.path, "utf8")).toBe(record.bytes);
+    }
+    expect(readdirSync(directory).filter((name) => name.endsWith(".json"))).toHaveLength(3);
+  });
+
+  it("verifies each hinted record and rebuilds the lookup after it is removed", async () => {
+    const { context, directory, store } = setup();
+    const queued = await store.enqueue(INPUT);
+    const foreign = legacyRecord(directory, { ...INPUT, id: "foreign:1", toRole: "game-kit" }, []);
+    const lookup = join(context.layout.reviewDir, "message-index");
+    const hints = join(lookup, "recipient", fileName(INPUT.toRole));
+    writeFileSync(join(hints, fileName("foreign:1")), "");
+    writeFileSync(join(hints, fileName("missing:1")), "");
+    const request = join(lookup, "request", fileName("unknown-request"));
+    mkdirSync(request, { recursive: true });
+    writeFileSync(join(request, fileName(INPUT.id)), "");
+    expect(store.inbox(INPUT.toRole)).toEqual([queued]);
+    expect(store.attemptLookup().get("unknown-request")).toEqual([]);
+    rmSync(lookup, { recursive: true });
+    expect(store.inbox("game-kit").map((record) => record.envelope.id)).toEqual(["foreign:1"]);
+    expect(store.inbox(INPUT.toRole)).toEqual([queued]);
+    expect(readFileSync(foreign.path, "utf8")).toBe(foreign.bytes);
   });
 });

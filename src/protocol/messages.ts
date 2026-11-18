@@ -229,6 +229,19 @@ function originalReference(role: string, entry: ProtocolObject): OriginalRef {
     senderRole: role,
   };
 }
+/** Only an original whose stated target is this role or its parent can reach this role. */
+function addressedTo(value: Record<string, unknown>, recipient: string): boolean {
+  if (!object(value.envelope) || typeof value.envelope.toRole !== "string") {
+    return true;
+  }
+  let target: string;
+  try {
+    target = protocolRole(value.envelope.toRole);
+  } catch {
+    return true;
+  }
+  return target === recipient || recipient.startsWith(`${target}/workers/`);
+}
 function publicationReference(role: string, entry: ProtocolObject): ProtocolMessageRef {
   return { hash: digest(entry.value), id: entry.id, revision: entry.revision, role };
 }
@@ -236,6 +249,7 @@ function publicationReference(role: string, entry: ProtocolObject): ProtocolMess
 export class ProtocolMessages {
   readonly #store: ProtocolStore;
   #view: Map<string, ProtocolState> | null = null;
+  #originals: Map<string, { entry: ProtocolObject; value: ProtocolMessageOriginal }> | null = null;
   #parents: readonly string[] | null = null;
   #allRoles: readonly string[] | null = null;
   constructor(options: { readonly store: ProtocolStore }) {
@@ -247,12 +261,14 @@ export class ProtocolMessages {
       return action();
     }
     this.#view = new Map();
+    this.#originals = new Map();
     try {
       const value = action();
       demand(!(value instanceof Promise), "invalid-message-read-view");
       return value;
     } finally {
       this.#view = null;
+      this.#originals = null;
       this.#parents = null;
       this.#allRoles = null;
     }
@@ -317,8 +333,15 @@ export class ProtocolMessages {
         /^[a-f0-9]{64}$/u.test(ref.hash),
       "invalid-original-reference",
     );
+    // A read view validates each original, including its legacy record, once.
+    const memo = canonical(ref);
+    const known = this.#originals?.get(memo);
+    if (known !== undefined) {
+      return known;
+    }
+    const id = originalKey(ref.messageId);
     const entry = this.#state(ref.senderRole).objects.find(
-      (row) => row.collection === "messages" && row.id === originalKey(ref.messageId),
+      (row) => row.collection === "messages" && row.id === id,
     );
     demand(entry !== undefined, "message-missing");
     demand(
@@ -346,6 +369,7 @@ export class ProtocolMessages {
       );
       this.#legacy(value.imported.legacyRecord, value.envelope);
     }
+    this.#originals?.set(memo, { entry, value });
     return { entry, value };
   }
   read(ref: OriginalRef): ProtocolMessageOriginal {
@@ -354,8 +378,9 @@ export class ProtocolMessages {
   find(senderRole: string, messageId: string): OriginalRef | null {
     demand(text(senderRole) && text(messageId), "invalid-original-reference");
     const role = namespace(senderRole);
+    const id = originalKey(messageId);
     const entry = this.#state(role).objects.find(
-      (row) => row.collection === "messages" && row.id === originalKey(messageId),
+      (row) => row.collection === "messages" && row.id === id,
     );
     if (entry === undefined) {
       return null;
@@ -485,9 +510,10 @@ export class ProtocolMessages {
     readonly value: ProtocolReceipt;
   } | null {
     const original = this.read(ref);
+    const id = receiptKey(ref);
     for (const role of this.#recipientRoles(original)) {
       const row = this.#state(role).objects.find(
-        (entry) => entry.collection === "receipts" && entry.id === receiptKey(ref),
+        (entry) => entry.collection === "receipts" && entry.id === id,
       );
       if (row === undefined) {
         continue;
@@ -717,7 +743,8 @@ export class ProtocolMessages {
         if (
           entry.collection !== "messages" ||
           !object(entry.value) ||
-          entry.value.kind !== "message-original"
+          entry.value.kind !== "message-original" ||
+          !addressedTo(entry.value, recipient)
         ) {
           continue;
         }

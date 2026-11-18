@@ -25,6 +25,16 @@ coordination-kit message status --recipient game-kit --include-body --root /path
 Status requires exactly one of `--id UUID` or `--recipient ROLE`; `--include-body` opts into
 full original text. Reading does not acknowledge, dispatch or modify the message.
 
+Reads stay proportional to what they return. `--id` reads one record, and `--recipient` reads
+that recipient's records plus any record without a lookup hint, never the other recipients'
+records. The hints live in `message-index/` beside the records directory: empty marker files
+named by record file, written from each record's immutable recipient and attempt request IDs
+before the record is saved. Every hinted record is re-read and verified, a record without a
+recipient hint is read and hinted, and a request lookup miss falls back to a full scan, so a
+missing or dangling hint changes only what is read, never the result. Records keep their exact bytes, and
+removing `message-index/` rebuilds it. Accounting capture at a boundary reads only the captured
+message or the selected owners' records.
+
 For local blocker diagnosis, `message status --id UUID --include-retention` returns a cloned
 retention view, including its owner, reason and next review boundary, or null. This opt-in does
 not include the body or evidence. Default status and scheduled health remain metadata-only;
@@ -38,18 +48,19 @@ pending work, not native acceptance. Native acceptance is not handling. A queued
 also does not prove channel acceptance. Inspect the returned state: exit 0 reports a completed
 operation, including a guarded or still-pending result, not proof of delivery.
 
-The Claude channel consumer checks each queued message entry under `unblock.lock` with one
-message-store index per drain, then rereads the exact record, binding, decision clearance and
+The Claude channel consumer checks each queued message entry under `unblock.lock` by reading
+only the record its request ID hints at; a request with no verified hinted record falls back to
+one store scan per drain. It then rereads the exact record, binding, decision clearance and
 recipient readiness before claiming it. An entry whose parent message is `handled` or
-`superseded` stays blocked and unclaimed without another store scan, because a terminal message
+`superseded` stays blocked and unclaimed without another read, because a terminal message
 takes no further attempt.
 
 `message retire-spool --recipient ROLE_OR_UUID [--dry-run]` retires unclaimed Claude spool
 entries of terminal messages for one conversation: a role selects its registered Claude
 conversation, and a canonical UUID selects that conversation directly, including an earlier one.
-It holds the generation lease and then `unblock.lock`, as the consumer does. An entry is retired
-only when its receipt matches the entry at `sending` and exactly one message record holds its
-request ID, is `handled` or `superseded`, and binds the same Claude recipient and transport text.
+It holds the generation lease and then `unblock.lock`, as the consumer does. It scans every
+message record once. An entry is retired only when its receipt matches the entry at `sending`
+and exactly one message record holds its request ID, is `handled` or `superseded`, and binds the same Claude recipient and transport text.
 Every other entry is retained with a reason such as `parent-not-terminal`, `parent-missing`,
 `receipt-mismatch` or `receipt-not-sending`. Retired entries move by rename, with identical
 bytes, to `unblock/claude-retired/` beside `claude-delivered/`; receipts stay at their bound path
@@ -71,9 +82,13 @@ sends nothing new. An `unchanged` receipt sent nothing and stays `blocked` with 
 diagnostic. Both use classification `guarded` and stage `receipt`.
 
 A Claude spool held by another sender or the channel consumer refuses the attempt before
-writing a receipt or spool entry. The message is `blocked` with reason `transport-busy` and a
-`busy` diagnostic (classification `unavailable`, stage `receipt`); a later `message dispatch`
-starts a new guarded attempt, as for `transport-unavailable`.
+writing a receipt or spool entry. The attempt is `blocked` with reason `transport-busy` and a
+`busy` diagnostic (classification `unavailable`, stage `receipt`). When that attempt's bound
+receipt path is still absent, `message dispatch` waits one second and retries once: it rechecks
+ownership, routing and decision guards and starts a new attempt with its own request ID and
+receipt. A second busy refusal stays `blocked` for a later `message dispatch`, as for
+`transport-unavailable`. An ambiguous, unknown, refused or receipt-bearing outcome is never
+retried.
 
 The CLI creates receipt storage before delivery. A failure proven to occur before native
 admission sends nothing and permits a guarded retry of the same unchanged original. A failure

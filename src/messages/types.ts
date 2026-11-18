@@ -139,6 +139,12 @@ export interface MessageStatus {
   readonly nextBoundary: string | null;
 }
 
+/** Limits a summary to one message ID or to the given recipient roles. */
+export interface MessageSummarySelection {
+  readonly id?: string;
+  readonly recipients?: readonly string[];
+}
+
 export type MessageSummary =
   | {
       readonly schema: 1;

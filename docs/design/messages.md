@@ -3,8 +3,13 @@
 `message send` stores a common message locally and never dispatches it. `message dispatch` is an
 explicit guarded delivery request: it checks ownership, routing and recipient decision guards
 before any native send. Each attempt writes a bound receipt first. A failure proven to occur
-before native admission permits a guarded retry; any other uncertain outcome is ambiguous and
-is reconciled before a retry. Native or channel acceptance is delivery, not handling.
+before native admission permits a guarded retry, and a busy transport is retried once within
+the same dispatch; any other uncertain outcome is ambiguous and is reconciled before a retry.
+Native or channel acceptance is delivery, not handling.
+
+Records are one file each. Derived lookup hints beside them map a recipient or attempt request
+ID to record files, so status, the channel consumer and accounting capture read only the
+records they select. Hints are verified on every read and rebuilt from the records.
 
 The Claude transport is a per-recipient spool under `unblock.lock`, drained by the
 `claude channel` consumer, which rechecks each entry before claiming it. Status reports an

@@ -22,6 +22,7 @@ import type {
   ProtocolCollection,
   ProtocolEvent,
   ProtocolMutation,
+  ProtocolObject,
   ProtocolParent,
   ProtocolRoleListOptions,
   ProtocolState,
@@ -315,6 +316,9 @@ function regular(path: string): Buffer | undefined {
 interface Replay {
   readonly events: ProtocolEvent[];
   state: ProtocolState;
+  /** Current objects by key; `state.objects` is materialized from it after projection. */
+  readonly objects: Map<string, ProtocolObject>;
+  readonly transactions: Set<string>;
 }
 
 function key(collection: ProtocolCollection, id: string): string {
@@ -350,24 +354,32 @@ function project(replay: Replay, event: ProtocolEvent): void {
       input.expectedRevision === current.revision,
     "corrupt-history",
   );
-  const objects = new Map(current.objects.map((o) => [key(o.collection, o.id), o]));
   for (const mutation of input.mutations) {
-    const previous = objects.get(key(mutation.collection, mutation.id));
-    demand(mutation.expectedRevision === (previous?.revision ?? 0), "object-conflict");
-    objects.set(key(mutation.collection, mutation.id), {
+    demand(
+      mutation.expectedRevision ===
+        (replay.objects.get(key(mutation.collection, mutation.id))?.revision ?? 0),
+      "object-conflict",
+    );
+  }
+  for (const mutation of input.mutations) {
+    replay.objects.set(key(mutation.collection, mutation.id), {
       collection: mutation.collection,
       id: mutation.id,
       revision: mutation.expectedRevision + 1,
       value: structuredClone(mutation.value),
     });
   }
+  replay.transactions.add(input.id);
+  replay.state = { ...current, hash: event.hash, revision: event.revision };
+}
+
+/** Objects in key order, sorted once per replay or publication rather than once per event. */
+function materialize(replay: Replay): void {
   replay.state = {
-    ...current,
-    hash: event.hash,
-    objects: [...objects.values()].sort((a, b) =>
-      key(a.collection, a.id).localeCompare(key(b.collection, b.id)),
-    ),
-    revision: event.revision,
+    ...replay.state,
+    objects: [...replay.objects.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([, object]) => object),
   };
 }
 
@@ -394,7 +406,9 @@ export class ProtocolStore {
   #replay(role: string): Replay {
     const replay: Replay = {
       events: [],
+      objects: new Map(),
       state: { binding: null, epoch: 0, hash: null, objects: [], parent: null, revision: 0, role },
+      transactions: new Set(),
     };
     const path = join(this.#roleDirectory(role), "events");
     if (!directory(path)) {
@@ -438,11 +452,7 @@ export class ProtocolStore {
             "corrupt-history",
           );
           demand(
-            !replay.events.some(
-              (e) =>
-                e.type === "transaction" &&
-                (value.transaction as ProtocolTransaction).id === e.transaction.id,
-            ),
+            !replay.transactions.has((value.transaction as ProtocolTransaction).id),
             "corrupt-history",
           );
         }
@@ -454,6 +464,7 @@ export class ProtocolStore {
         project(replay, event);
         replay.events.push(event);
       }
+      materialize(replay);
       const parent = parentOf(role);
       if (parent !== null && replay.state.epoch > 0) {
         demand(this.#replay(parent.role).state.epoch >= parent.epoch, "corrupt-history");
@@ -551,6 +562,7 @@ export class ProtocolStore {
     const priorAt = previous?.type === "claim" ? previous.claim.at : previous?.transaction.at;
     demand(priorAt === undefined || Date.parse(at) >= Date.parse(priorAt), "stale-time");
     project(replay, event);
+    materialize(replay);
     const path = join(this.#roleDirectory(replay.state.role), "events");
     directory(path, true);
     const target = join(path, `${String(event.revision).padStart(12, "0")}.json`);

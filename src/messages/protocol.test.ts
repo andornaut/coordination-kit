@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { captureAccounting } from "../accounting/boundary.ts";
 import { holdLock, LockBusy } from "../lock.ts";
 import { ProtocolStore } from "../protocol/core.ts";
 import { type MessageWriter, ProtocolMessages } from "../protocol/messages.ts";
@@ -13,6 +14,7 @@ import { MessageService } from "./service.ts";
 import { messageExpectation, MessageStore } from "./store.ts";
 
 const AT = "2026-11-16T04:00:00.000Z";
+const ROLE = "archies-dog-walks/tech";
 const GUARDS = {
   artifacts: [],
   hold: "clear" as const,
@@ -159,6 +161,92 @@ describe("protocol originals and legacy transport projections (isolated fixtures
     const roles = read.mock.calls.map(([role]) => role);
     expect(roles.length).toBeGreaterThan(0);
     expect(new Set(roles).size).toBe(roles.length);
+  });
+
+  it("validates only the originals addressed to the listing role, each once per read view", async () => {
+    const f = await fixture();
+    const evidence = await f.protocol.putArtifact(Buffer.from("Fixture guard evidence"));
+    const guards = { ...GUARDS, artifacts: [evidence] };
+    let revision = 2;
+    const publish = (id: string, toRole: string) =>
+      f.messages.publish(
+        { ...f.writer, expectedRevision: revision, id: `publish-${revision++}` },
+        {
+          envelope: { ...f.envelope, id, toRole },
+          guards,
+          links: { clauseIds: [], messageIds: [], requestIds: [], workIds: [] },
+        },
+      );
+    await publish("00000000-0000-4000-8000-000000000080", "game-coordinator");
+    const reads = vi.spyOn(ProtocolStore.prototype, "readArtifact");
+    const observed = [];
+    let others = 0;
+    for (const total of [1, 5]) {
+      for (; others < total; others++) {
+        // Sequential publications keep the sender journal revisions ordered.
+        // eslint-disable-next-line no-await-in-loop
+        await publish(`00000000-0000-4000-8000-00000000009${others}`, "game-kit");
+      }
+      reads.mockClear();
+      const inbox = f.messages.inbox({
+        recipientRole: "coordinator",
+        senders: ["games/archies-dog-walks/tech"],
+      });
+      observed.push([inbox.messages.length, reads.mock.calls.length]);
+    }
+    expect(observed).toEqual([
+      [2, 1],
+      [2, 1],
+    ]);
+  });
+
+  it("captures owner accounting from that owner's records alone, however many others are stored", async () => {
+    const f = await fixture();
+    await f.service.send(f.input);
+    const binding = { harness: "claude" as const, nativeId: RECIPIENT };
+    await f.protocol.claim({
+      at: AT,
+      binding,
+      evidence: "fixture-recipient",
+      expectedEpoch: 0,
+      role: "coordinator",
+    });
+    const reads = vi.spyOn(
+      MessageStore.prototype as unknown as Record<"load", (name: string) => unknown>,
+      "load",
+    );
+    const observed = [];
+    let sent = 0;
+    for (const total of [1, 4]) {
+      for (; sent < total; sent++) {
+        const id = `00000000-0000-4000-8000-00000000010${sent}`;
+        const body = `Fixture coordinator original ${sent}`;
+        // Each publication is followed by its local send before the next revision.
+        // eslint-disable-next-line no-await-in-loop
+        await f.messages.publish(
+          {
+            at: AT,
+            binding,
+            epoch: 1,
+            expectedRevision: sent + 1,
+            id: `out-${sent}`,
+            role: "coordinator",
+          },
+          {
+            envelope: { ...f.envelope, body, fromRole: "game-coordinator", id, toRole: ROLE },
+            guards: GUARDS,
+            links: { clauseIds: [], messageIds: [], requestIds: [], workIds: [] },
+          },
+        );
+        // eslint-disable-next-line no-await-in-loop
+        await f.service.send({ body, fromRole: "game-coordinator", id, recipient: ROLE });
+      }
+      reads.mockClear();
+      // eslint-disable-next-line no-await-in-loop
+      await captureAccounting(f.layout, {}, "review", "message", ["game-coordinator"]);
+      observed.push(reads.mock.calls.length);
+    }
+    expect(observed).toEqual([1, 1]);
   });
 
   it("pins the generation through an active attempt while preserving per-message exclusion and ambiguity", async () => {
