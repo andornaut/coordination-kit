@@ -61,7 +61,7 @@ export function inspectPackage(
   root: string,
 ): void {
   const context = inspectionContext(env);
-  const proof = mkdtempSync(join(tmpdir(), "delivery-kit-package-check-"));
+  const proof = mkdtempSync(join(tmpdir(), "coordination-kit-package-check-"));
   const packed = spawnSync(
     "npm",
     ["pack", "--offline", "--ignore-scripts", "--json", "--pack-destination", proof],
@@ -88,49 +88,37 @@ export function inspectPackage(
   });
   if (version.status !== 0 || version.stdout.trim() !== manifest.version)
     throw new Error("package CLI version differs from package.json");
-  const modules = ["registry", "source-identity", "transport", "accounting", "protocol"];
-  const expectedExports = [
-    "./package.json",
-    ...modules.flatMap((name) => [`./build/${name}`, `./${name}`]),
-  ].sort();
+  const modules = ["accounting", "events", "protocol", "registry", "review", "shared", "transport"];
+  const expectedExports = ["./package.json", ...modules.map((name) => `./build/${name}`)].sort();
   if (JSON.stringify(Object.keys(manifest.exports).sort()) !== JSON.stringify(expectedExports))
-    throw new Error(
-      "package must export only explicit build APIs, compatibility aliases and metadata",
-    );
+    throw new Error("package must export only explicit build APIs and metadata");
   if (manifest.exports["./package.json"] !== "./package.json")
     throw new Error("package metadata export differs");
   for (const name of modules) {
-    for (const path of [`./build/${name}`, `./${name}`]) {
-      const entry = manifest.exports[path];
-      if (
-        entry === undefined ||
-        typeof entry === "string" ||
-        entry.types !== `./dist/${name}.d.ts` ||
-        entry.import !== `./dist/${name}.js` ||
-        JSON.stringify(Object.keys(entry).sort()) !== JSON.stringify(["import", "types"]) ||
-        !existsSync(join(pkg, entry.types)) ||
-        !existsSync(join(pkg, entry.import))
-      ) {
-        throw new Error("package build API or compatibility target differs: " + path);
-      }
+    const path = `./build/${name}`;
+    const entry = manifest.exports[path];
+    if (
+      entry === undefined ||
+      typeof entry === "string" ||
+      entry.types !== `./dist/${name}.d.ts` ||
+      entry.import !== `./dist/${name}.js` ||
+      JSON.stringify(Object.keys(entry).sort()) !== JSON.stringify(["import", "types"]) ||
+      !existsSync(join(pkg, entry.types)) ||
+      !existsSync(join(pkg, entry.import))
+    ) {
+      throw new Error("package build API target differs: " + path);
     }
   }
   node(pkg, "--input-type=module", [
     "-e",
-    `for (const name of ${JSON.stringify(modules)}) {
-      const canonical = await import('@andornaut/delivery-kit/build/' + name);
-      const alias = await import('@andornaut/delivery-kit/' + name);
-      if (canonical !== alias) throw new Error('compatibility alias has a separate module: ' + name);
-    }`,
+    "import { readRegistry, resolveConversation, updateRegistry, LockBusy } from '@andornaut/coordination-kit/build/registry'; " +
+      "import * as shared from '@andornaut/coordination-kit/build/shared'; " +
+      "if (![readRegistry, resolveConversation, updateRegistry].every(value => typeof value === 'function')) process.exit(1); " +
+      "if (shared.LockBusy !== LockBusy) throw new Error('API subpaths must share module instances');",
   ]);
   node(pkg, "--input-type=module", [
     "-e",
-    "import { readRegistry, resolveConversation, updateRegistry } from '@andornaut/delivery-kit/build/registry'; " +
-      "if (![readRegistry, resolveConversation, updateRegistry].every(value => typeof value === 'function')) process.exit(1);",
-  ]);
-  node(pkg, "--input-type=module", [
-    "-e",
-    "import * as transport from '@andornaut/delivery-kit/build/transport'; " +
+    "import * as transport from '@andornaut/coordination-kit/build/transport'; " +
       "if (JSON.stringify(Object.keys(transport).sort()) !== JSON.stringify(['messageChannelStateDir', 'resolveCodexControlSocket'])) process.exit(1); " +
       "const { resolveCodexControlSocket, messageChannelStateDir } = transport; " +
       "const endpoint = resolveCodexControlSocket({ env: {}, home: '/fixture' }); " +
@@ -140,40 +128,43 @@ export function inspectPackage(
   ]);
   node(pkg, "--input-type=module", [
     "-e",
-    "import { snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError } " +
-      "from '@andornaut/delivery-kit/build/source-identity'; " +
-      "if (![snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError]" +
-      ".every(value => typeof value === 'function')) process.exit(1);",
+    "import { LedgerStore, LedgerError, snapshotIntake, messageIntake, auditIntake, " +
+      "captureAccounting, accountingStatus } from '@andornaut/coordination-kit/build/accounting'; " +
+      "if (![LedgerStore, LedgerError, snapshotIntake, messageIntake, auditIntake, " +
+      "captureAccounting, accountingStatus].every(value => typeof value === 'function')) process.exit(1);",
   ]);
   node(pkg, "--input-type=module", [
     "-e",
-    "import { LedgerStore, LedgerError, snapshotIntake, messageIntake, auditIntake, " +
-      "captureAccounting, accountingStatus } from '@andornaut/delivery-kit/build/accounting'; " +
-      "if (![LedgerStore, LedgerError, snapshotIntake, messageIntake, auditIntake, " +
-      "captureAccounting, accountingStatus].every(value => typeof value === 'function')) process.exit(1);",
+    "import { deliverScheduledReview, readRoleRoute, routeRecipient, DEFERRED_PREFIX } from '@andornaut/coordination-kit/build/review'; " +
+      "import { flushEvents, recordEvent, enqueueEvent, eventsDir } from '@andornaut/coordination-kit/build/events'; " +
+      "if (![deliverScheduledReview, readRoleRoute, routeRecipient, flushEvents, recordEvent, enqueueEvent, eventsDir]" +
+      ".every(value => typeof value === 'function') || DEFERRED_PREFIX !== 'bus: review deferred: ') process.exit(1);",
   ]);
   const consumer = join(proof, "consumer");
   const scope = join(consumer, "node_modules", "@andornaut");
   mkdirSync(scope, { recursive: true });
-  symlinkSync(pkg, join(scope, "delivery-kit"), "dir");
+  symlinkSync(pkg, join(scope, "coordination-kit"), "dir");
   const source = join(consumer, "consumer.mts");
   const consumerSource = `import {
   readRegistry, updateRegistry, RevisionConflict, type Registry, type Layout,
-} from "@andornaut/delivery-kit/build/registry";
+} from "@andornaut/coordination-kit/build/registry";
 import {
   resolveCodexControlSocket, messageChannelStateDir, type CodexControlSocketEndpoint,
   type DeliveryDiagnostic, type NativeRpcCode,
-} from "@andornaut/delivery-kit/build/transport";
+} from "@andornaut/coordination-kit/build/transport";
 import {
-  snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError,
-  type SourceIdentityManifest, type SourceIdentityStatus,
-} from "@andornaut/delivery-kit/build/source-identity";
+  deliverScheduledReview, readRoleRoute, type RoleRoute,
+} from "@andornaut/coordination-kit/build/review";
+import { flushEvents, recordEvent, type BusEvent, type EmitOptions } from "@andornaut/coordination-kit/build/events";
+import {
+  holdLock, loadProjectConfig, writeJsonDurable, type LockHandle, type ProjectConfig, type GameLayout,
+} from "@andornaut/coordination-kit/build/shared";
 import {
   LedgerStore, LedgerError, snapshotIntake, accountingStatus,
   type LedgerTransaction, type LedgerState, type IntakeContext,
-} from "@andornaut/delivery-kit/build/accounting";
+} from "@andornaut/coordination-kit/build/accounting";
 import { ProtocolStore, WorkStore, ProtocolMessages, resolveProtocolLayout, EnrollmentStore, resolveProtocolManagement, resolveEnrollmentScope,
- type ProtocolWriter, type WorkEvaluation, type ProtocolLayout } from "@andornaut/delivery-kit/build/protocol";
+ type ProtocolWriter, type WorkEvaluation, type ProtocolLayout } from "@andornaut/coordination-kit/build/protocol";
 const protocolClaim = (store: ProtocolStore, writer: ProtocolWriter) => store.withWriter(writer, () => 1);
 const protocolLayout: ProtocolLayout | null = null;
 // @ts-expect-error Writer epochs remain numeric.
@@ -222,22 +213,23 @@ const wrongRevision: (registry: Registry) => string = registry => registry.revis
 const wrongSource: "other" = endpoint.source;
 // @ts-expect-error The named transport export requires a string conversation ID.
 messageChannelStateDir({ reviewDir: "/review" }, 42);
-const commit = (manifest: SourceIdentityManifest): string => manifest.commit;
-const dirty = (status: SourceIdentityStatus): boolean => status.dirty;
-// @ts-expect-error Source identity must preserve a string expected commit, not any.
-snapshotSourceIdentity({ sourceRoot: "/source", artifactDir: "/artifact" }, { expectedCommit: 42, approvedPaths: [] });
-// @ts-expect-error Restore requires an independently pinned digest.
-restoreSourceIdentity({ workRoot: "/work", artifactDir: "/artifact" }, { expectedCommit: "", expectedTree: "" });
+const review = (layout: Layout, game: GameLayout): Promise<string> => deliverScheduledReview(layout, game, 0);
+// @ts-expect-error A review slot is an epoch-seconds number.
+deliverScheduledReview({} as Layout, {} as GameLayout, "0");
+const route = (layout: Layout): RoleRoute | null => readRoleRoute(layout);
+const flush = (game: GameLayout): Promise<void> => flushEvents(game);
+const emit: EmitOptions = { project: "Fixture", underLock: (directory: string) => void directory };
+const record = (game: GameLayout) => recordEvent(game, emit, "push", "key", "message");
+const sent = (event: BusEvent): boolean => event.sent;
+const lock: (path: string) => LockHandle = (path) => holdLock(path);
+const project = (path: string): ProjectConfig["reports"] => loadProjectConfig(path).reports;
+const durable = (path: string) => writeJsonDurable(path, {});
 export { channel, endpoint, revision, wrongRevision, wrongSource, readRegistry, updateRegistry, RevisionConflict,
-  commit, dirty, snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError,
+  review, route, flush, record, sent, lock, project, durable,
   diagnostic, localDiagnostic, diagnosticFields, rpcCode };
 `;
   writeFileSync(source, consumerSource);
-  const aliasSource = join(consumer, "compatibility.mts");
-  writeFileSync(
-    aliasSource,
-    consumerSource.replaceAll("@andornaut/delivery-kit/build/", "@andornaut/delivery-kit/"),
-  );
+
   node(consumer, join(root, "node_modules/typescript/bin/tsc"), [
     "--noEmit",
     "--strict",
@@ -252,7 +244,6 @@ export { channel, endpoint, revision, wrongRevision, wrongSource, readRegistry, 
     "--typeRoots",
     join(root, "node_modules/@types"),
     source,
-    aliasSource,
   ]);
   const result = {
     version: 1,
@@ -263,9 +254,7 @@ export { channel, endpoint, revision, wrongRevision, wrongSource, readRegistry, 
     cliVersion: version.stdout.trim(),
     nodeNextExports: {
       source: "extracted-package",
-      canonicalSpecifiers: modules.map((name) => `@andornaut/delivery-kit/build/${name}`),
-      compatibilitySpecifiers: modules.map((name) => `@andornaut/delivery-kit/${name}`),
-      compatibilityModuleIdentity: "equal",
+      canonicalSpecifiers: modules.map((name) => `@andornaut/coordination-kit/build/${name}`),
       classification: "node-build-operations-only",
       status: "passed",
     },

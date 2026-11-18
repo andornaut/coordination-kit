@@ -73,7 +73,7 @@ function required(values: Values, key: string): string {
 }
 
 function usage(io: Io, command: string): number {
-  io.err(`delivery-kit: invalid_message_options (${command})\n`);
+  io.err(`coordination-kit: invalid_message_options (${command})\n`);
   return EXIT_USAGE;
 }
 
@@ -92,7 +92,7 @@ async function operate(
       error instanceof MessageError && /^[a-z][a-z-]{0,63}$/.test(error.code)
         ? error.code
         : "message_operation_failed";
-    io.err(`delivery-kit: ${code}\n`);
+    io.err(`coordination-kit: ${code}\n`);
     return EXIT_INVALID;
   }
 }

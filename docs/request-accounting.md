@@ -24,12 +24,12 @@ Run the installed CLI with an explicit coordinator root, including from another 
 directory. JSON input files carry the full transaction rather than actor or provenance flags.
 
 ```sh
-delivery-kit --root /path/to/game-coordinator ledger intake --input-file intake.json
-delivery-kit --root /path/to/game-coordinator ledger apply --input-file update.json
-delivery-kit --root /path/to/game-coordinator ledger show --id REQUEST_ID
-delivery-kit --root /path/to/game-coordinator ledger history --id REQUEST_ID
-delivery-kit --root /path/to/game-coordinator ledger report --at 2026-11-16T00:00:00Z
-delivery-kit --root /path/to/game-coordinator ledger coverage --owner game-kit
+coordination-kit --root /path/to/game-coordinator ledger intake --input-file intake.json
+coordination-kit --root /path/to/game-coordinator ledger apply --input-file update.json
+coordination-kit --root /path/to/game-coordinator ledger show --id REQUEST_ID
+coordination-kit --root /path/to/game-coordinator ledger history --id REQUEST_ID
+coordination-kit --root /path/to/game-coordinator ledger report --at 2026-11-16T00:00:00Z
+coordination-kit --root /path/to/game-coordinator ledger coverage --owner game-kit
 ```
 
 `intake` accepts a `register` transaction. `apply` and `reconcile` accept the same transaction
@@ -51,7 +51,7 @@ audited in the committed event; it is optional only on the unconfigured compatib
 Unknown or unsupported native bindings remain unknown, not permission to invent a writer.
 
 The reusable `LedgerStore` and transaction types are exposed through
-`@andornaut/delivery-kit/build/accounting`. Its constructor accepts a `directory` and an optional
+`@andornaut/coordination-kit/build/accounting`. Its constructor accepts a `directory` and an optional
 `resolveOwner` callback. In unmanaged compatibility mode, the CLI uses
 `<coordinator-root>/var/accounting`; an active work protocol uses `<stateRoot>/accounting`,
 with intake offers in its `intake` child directory. Assignment requires

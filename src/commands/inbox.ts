@@ -1,4 +1,4 @@
-// `delivery-kit inbox snapshot` and `inbox ack` for a registered recipient or a verified
+// `coordination-kit inbox snapshot` and `inbox ack` for a registered recipient or a verified
 // Codex worker with one registered parent. Registered recipients default to reports.recipient.
 import { parseArgs } from "node:util";
 
@@ -411,11 +411,11 @@ async function guarded(io: Io, body: () => Promise<number>): Promise<number> {
     return await body();
   } catch (error) {
     if (error instanceof UsageError) {
-      io.err(`delivery-kit: ${error.message}\n`);
+      io.err(`coordination-kit: ${error.message}\n`);
       return EXIT_USAGE;
     }
     // stdout keeps the JSON consumers parse; stderr names the cause for the operator.
-    io.err(`delivery-kit: ${error instanceof Error ? error.message : String(error)}\n`);
+    io.err(`coordination-kit: ${error instanceof Error ? error.message : String(error)}\n`);
     if (error instanceof TransportUnavailable) {
       io.out(`${pyJsonDumps({ reason: error.message, status: "unavailable" })}\n`);
       return EXIT_INVALID;
@@ -449,22 +449,22 @@ export const inboxAck: Handler = (io, root, args) => {
   const queueIds = values["queue-id"] ?? [];
   const disposition = values.disposition as Disposition | undefined;
   if (values.snapshot === undefined || queueIds.length === 0 || disposition === undefined) {
-    io.err("delivery-kit: inbox ack requires --snapshot, --queue-id and --disposition\n");
+    io.err("coordination-kit: inbox ack requires --snapshot, --queue-id and --disposition\n");
     return EXIT_USAGE;
   }
   if (!DISPOSITIONS.includes(disposition)) {
-    io.err("delivery-kit: --disposition must be handled, superseded or retained\n");
+    io.err("coordination-kit: --disposition must be handled, superseded or retained\n");
     return EXIT_USAGE;
   }
   if (disposition === "retained" && (values.reason === undefined || values.reason.trim() === "")) {
-    io.err("delivery-kit: retained requires --reason\n");
+    io.err("coordination-kit: retained requires --reason\n");
     return EXIT_USAGE;
   }
   let snapshotId: string;
   try {
     snapshotId = canonicalUuid(values.snapshot);
   } catch {
-    io.err("delivery-kit: --snapshot must be a canonical UUID\n");
+    io.err("coordination-kit: --snapshot must be a canonical UUID\n");
     return EXIT_USAGE;
   }
   return guarded(io, async () => {

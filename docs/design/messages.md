@@ -15,9 +15,7 @@ Reference: [messages](../messages.md), [commands](../commands.md#command-semanti
 
 ## Work items
 
-| ID      | Title                                                                | Link                             |
-| ------- | -------------------------------------------------------------------- | -------------------------------- |
-| dk-0002 | Report deduplicated and unchanged delivery receipts with diagnostics | [dk-0002.md](../work/dk-0002.md) |
-| dk-0007 | Bound the Claude channel consumer guard to one store index per drain | [dk-0007.md](../work/dk-0007.md) |
-| dk-0008 | Record a busy Claude spool as a retryable transport-busy refusal     | [dk-0008.md](../work/dk-0008.md) |
-| dk-0009 | Retire terminal Claude spool entries with `message retire-spool`     | [dk-0009.md](../work/dk-0009.md) |
+| ID      | Title                   | Link                             |
+| ------- | ----------------------- | -------------------------------- |
+| ck-0004 | Scale the message store | [ck-0004.md](../work/ck-0004.md) |
+| ck-0005 | Retry a busy transport  | [ck-0005.md](../work/ck-0005.md) |

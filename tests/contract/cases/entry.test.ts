@@ -1,16 +1,11 @@
-// CLI entry, usage and offline configuration validation.
+// CLI entry, usage and coordinator root resolution.
 
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "vitest";
 
-import { cli, execute, impl } from "../lib/adapter.ts";
-import { contract, EXIT_INVALID, suite, workspaces } from "../lib/cases.ts";
-import type { Workspace } from "../lib/workspace.ts";
-
-const FIRST = "00000000-0000-0000-0000-000000000001";
-// The one-off request command.
-const REQUEST_WORD = "request";
+import { execute, impl } from "../lib/adapter.ts";
+import { contract, suite, workspaces } from "../lib/cases.ts";
 
 function tree(root: string): string[] {
   const out: string[] = [];
@@ -29,103 +24,8 @@ function tree(root: string): string[] {
   return out;
 }
 
-function minimal(ws: Workspace): void {
-  ws.config = {
-    schema: 1,
-    git: { main: "main", remote: "origin", github: "" },
-    schedule: { departures: ["00"] },
-    gate: { image: "unused", install: "", steps: [] },
-    resources: { cpus: 4, loadLimit: 24, memoryMiB: 4096 },
-    deploy: { mode: "none", skipPattern: "" },
-    reports: {},
-  };
-}
-
-function roles(ws: Workspace, ids: Record<string, string>): void {
-  ws.writeRegistry({
-    schema: 1,
-    revision: 1,
-    harness: "claude",
-    roles: Object.fromEntries(
-      Object.entries(ids).map(([role, id]) => [role, { conversations: { claude: id } }]),
-    ),
-  });
-}
-
 suite("entry", () => {
   const workspace = workspaces();
-
-  contract("control explicitly adopts a missing record without starting a runner", async () => {
-    const ws = workspace({ deliveryState: null });
-    minimal(ws);
-    ws.writeRegistry({
-      schema: 1,
-      revision: 1,
-      harness: "claude",
-      roles: { "game-coordinator": { conversations: {} } },
-    });
-    const result = await cli(ws, [
-      "control",
-      "--state",
-      "paused",
-      "--reason",
-      "operator pause",
-      "--requester",
-      "game-coordinator",
-    ]);
-    expect(result.code, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      state: "paused",
-      requester: "game-coordinator",
-      reason: "operator pause",
-      revision: 1,
-    });
-    expect(ws.readJson("delivery-control.json")).toMatchObject({
-      schema: 1,
-      desired: { state: "paused" },
-      observed: null,
-      activities: {},
-    });
-    expect(ws.exists("runner.lock")).toBe(false);
-    expect(ws.exists("runner.identity.json")).toBe(false);
-    expect(ws.calls()).toEqual([]);
-  });
-
-  contract(
-    "control requires explicit options and registered role names and preserves corrupt state",
-    async () => {
-      const ws = workspace({ deliveryState: null });
-      minimal(ws);
-      roles(ws, { "game-coordinator": FIRST });
-      const valid = [
-        "control",
-        "--state",
-        "enabled",
-        "--reason",
-        "operator enable",
-        "--requester",
-        "game-coordinator",
-      ];
-      for (const flag of ["--state", "--reason", "--requester"]) {
-        const words = [...valid];
-        words.splice(words.indexOf(flag), 2);
-        expect((await cli(ws, words)).code).toBe(2);
-      }
-      for (const requester of ["unknown-role", FIRST]) {
-        const words = [...valid];
-        words[words.length - 1] = requester;
-        expect((await cli(ws, words)).code).toBe(1);
-      }
-      expect(ws.exists("delivery-control.json")).toBe(false);
-      const corrupt = '{"desired":{"state":"paused"}}\n';
-      ws.write("delivery-control.json", corrupt);
-      const refused = await cli(ws, valid);
-      expect(refused.code).toBe(1);
-      expect(refused.stdout).toBe("");
-      expect(ws.read("delivery-control.json")).toBe(corrupt);
-      expect(ws.calls()).toEqual([]);
-    },
-  );
 
   contract("help requires no configuration, state or runtime writes", async () => {
     const ws = workspace();
@@ -135,12 +35,18 @@ suite("entry", () => {
     for (const command of commands) {
       const result = await execute(command);
       expect(result.code, result.stderr).toBe(0);
-      expect(result.stdout).toContain(REQUEST_WORD);
+      expect(result.stdout).toContain("usage: coordination-kit COMMAND");
       expect(result.stdout).toContain("--parent UUID");
+      expect(result.stdout).toContain("work check");
+      expect(result.stdout).not.toContain("check-config");
       expect(result.stderr).toBe("");
     }
     expect(tree(ws.root)).toEqual(before);
-    for (const command of [impl.bare(ws, ["invalid"]), impl.command(ws, ["invalid"])]) {
+    for (const command of [
+      impl.bare(ws, ["invalid"]),
+      impl.bare(ws, ["run", "--game", ws.game]),
+      impl.command(ws, ["invalid", "verb"]),
+    ]) {
       const result = await execute(command);
       expect(result.code).toBe(2);
       expect(result.stdout).toBe("");
@@ -148,25 +54,30 @@ suite("entry", () => {
     }
   });
 
-  contract("manual departure and unpinned revision flags are rejected", async () => {
-    const ws = workspace();
-    minimal(ws);
-    expect((await cli(ws, ["depart"])).code).toBe(2);
-    const command = impl.checkConfig(ws);
-    const index = command.argv.indexOf("check-config");
-    command.argv.splice(index, 0, "--revision", "a".repeat(40));
-    expect((await execute(command)).code).toBe(2);
-  });
-
-  contract("missing memoryMiB rejects runner startup before any container activity", async () => {
-    const ws = workspace();
-    minimal(ws);
-    delete ws.config.resources!.memoryMiB;
-    const before = ws.list();
-    const result = await execute(impl.run(ws));
-    expect(result.code, result.stderr).toBe(EXIT_INVALID);
-    expect(result.stderr).toContain("/resources/memoryMiB: is required");
-    expect(ws.list()).toEqual(before);
-    expect(ws.calls()).toEqual([]);
-  });
+  contract(
+    "the coordinator root is --root, then COORDINATION_KIT_ROOT, then DELIVERY_KIT_ROOT",
+    async () => {
+      const ws = workspace();
+      const status = ["message", "status", "--recipient", "game-coordinator"];
+      const ok = impl.command(ws, ["harness", "ready"]);
+      const run = (env: Record<string, string>, extra: string[] = []) =>
+        execute({
+          ...ok,
+          argv: [process.execPath, ok.argv[1]!, ...status, ...extra],
+          cwd: ws.root,
+          env,
+        });
+      const base = ws.baseEnv();
+      const absent = join(ws.root, "absent");
+      expect((await run({ ...base, COORDINATION_KIT_ROOT: ws.coordinator })).code).toBe(0);
+      expect((await run({ ...base, DELIVERY_KIT_ROOT: ws.coordinator })).code).toBe(0);
+      expect(
+        (await run({ ...base, COORDINATION_KIT_ROOT: absent, DELIVERY_KIT_ROOT: ws.coordinator }))
+          .code,
+      ).not.toBe(0);
+      expect(
+        (await run({ ...base, COORDINATION_KIT_ROOT: absent }, ["--root", ws.coordinator])).code,
+      ).toBe(0);
+    },
+  );
 });

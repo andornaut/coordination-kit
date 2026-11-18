@@ -1,7 +1,7 @@
 {
-  "name": "delivery-kit-contract-harness",
+  "name": "coordination-kit-contract-harness",
   "private": true,
-  "description": "Black-box CLI contract cases for the built delivery-kit bundle.",
+  "description": "Black-box CLI contract cases for the built coordination-kit bundle.",
   "license": "MIT",
   "type": "module",
   "engines": {

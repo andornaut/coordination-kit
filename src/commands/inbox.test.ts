@@ -577,11 +577,11 @@ describe("inbox snapshot (claude)", () => {
       reason: "inspect local inbox state and retry explicit reconciliation",
       status: "unavailable",
     });
-    expect(result.err).toBe("delivery-kit: recipient must be the active route's recipient\n");
+    expect(result.err).toBe("coordination-kit: recipient must be the active route's recipient\n");
     const id = (await snapshot(fixture)).snapshot_id as string;
     const refused = await ack(fixture, requestId, "handled", "--recipient", "game-kit")(id);
     expect(refused.code).toBe(EXIT_INVALID);
-    expect(refused.err).toBe("delivery-kit: recipient must be the active route's recipient\n");
+    expect(refused.err).toBe("coordination-kit: recipient must be the active route's recipient\n");
     expect((await snapshot(fixture)).queue_ids).toEqual([requestId]);
     expect((await run(fixture, "inbox", "snapshot")).code).toBe(EXIT_USAGE);
   });

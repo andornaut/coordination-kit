@@ -4,7 +4,7 @@ import { afterEach, expect } from "vitest";
 
 import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
 import { ART, CHILD, emptyQueue, GAMEPLAY, type NativeWorld, TECH } from "../lib/unblock-native.ts";
-import { confirmedAt, decide, Reviewed, wake } from "../lib/unblock-runner.ts";
+import { confirmedAt, decide, Reviewed, wake } from "../lib/unblock-review.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
 const TITLE = "Choose the local path";

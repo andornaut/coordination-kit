@@ -1,13 +1,28 @@
 # Configuration
 
-The committed configuration files: game-coordinator's `config.json` and each game's `delivery-kit.json`.
+The coordinator root, game-coordinator's `config.json`, the fields of a game's `delivery-kit.json`
+that coordination reads, and where the kit keeps mutable state.
 
-Configuration never holds secret values. Use the operator's existing authentication and
-credential references.
+Configuration never holds secret values. Use the operator's existing authentication and credential
+references.
+
+## Coordinator root
+
+Every command except `work check` and `work report` resolves the game-coordinator root from, in
+order:
+
+1. `--root DIR`, anywhere on the command line, at most once;
+2. `COORDINATION_KIT_ROOT`;
+3. `DELIVERY_KIT_ROOT`, the variable delivery-kit's runners and existing sessions already set;
+4. the working directory.
+
+The `work` commands read `--root` as the repository to inspect (default: the working directory)
+and take the coordinator root only from `COORDINATION_KIT_ROOT`, else `DELIVERY_KIT_ROOT`.
 
 ## game-coordinator `config.json`
 
-Committed in game-coordinator, schema 1. Every path is relative to game-coordinator. See `examples/config.json`.
+Committed in game-coordinator, schema 1. Every path is relative to game-coordinator. See
+`examples/config.json`.
 
 - `timezone` and `wakeMinutes` (integers 0 to 59): the scheduled review minutes. An empty
   `wakeMinutes` schedules no review.
@@ -20,34 +35,37 @@ route and every role reference must use these keys.
 
 ## Game `delivery-kit.json`
 
-Committed in each game, schema 1, and owned by its Tech role. See `examples/delivery-kit.json`.
+Each game commits a `delivery-kit.json`, schema 1, owned by its Tech role. delivery-kit documents
+its delivery fields (`git`, `schedule`, `gate`, `resources`, `ci` and `deploy`). This kit
+validates the whole file whenever it reads one, with the same rules, and uses only `reports`:
 
-- `git`: `main`, `remote` and the GitHub `owner/name`.
-- `schedule`: `departures`, a non-empty list of two-digit minute strings such as `"00"`, and
-  `timezone`, which defaults to the `config.json` timezone.
-- `gate`: `image`, `install` and ordered `steps` (`name`, `run`). Any image and install command
-  are accepted, provided the image has `sh`, `git`, `tar`, `ls` and `tail`; a departure names
-  the tool an image lacks. An empty `install` skips the install step, and an empty `steps` list
-  gates with no checks. A command that assigns a secret-like variable inline (for example `TOKEN=x npm ci`) is
-  rejected. Every step is treated alike: each needs a unique name (a letter or digit, then up
-  to 63 letters, digits, `_`, `.` or `-`), steps run in list order, and the first failure stops
-  the gate. No step name has special meaning. The
-  canonical order is `check`, `lint`, `test`, `build`, then any game-specific steps (such as
-  `art`), so every game lists the shared steps the same way and opts into extras by adding them.
-- `resources`: `cpus` (integer 1 to 4), required `memoryMiB` (integer 6 to 8192) and
-  `loadLimit` (0 to 30). Gate containers receive `--memory <memoryMiB>m`, in MiB. CPU and memory
-  limits cap execution; only the one-minute load controls admission. A departure starts only below
-  `loadLimit`. At or above it, the departure re-checks the one-minute load every 60 seconds and
-  starts once the load is below the limit, up to 15 minutes after its scheduled slot; a load still
-  at or above the limit then skips the slot with `blocked-load`. A `loadLimit` of 0 holds every
-  departure, each after the full 15 minutes.
-- `ci`: `requiredNames` (a non-empty list of check names that must exist and pass for the exact
-  pushed commit), `pollSeconds` (1 to 3600) and `timeoutSeconds` (1 to 86400).
-- `deploy`: `mode` is `wrangler` or `none`; the optional `skipPattern` is a regular expression
-  over the paths changed in the pushed range (the previous remote `main` to the pushed SHA, both
-  sides of a rename). A push whose every changed path matches it skips deployment. A range that
-  changes only `docs/` paths departs without a gate or a deployment whatever this pattern says
-  (see [runner.md](runner.md#departures)).
-- `reports`: `project` (must equal the game's `name` in `config.json`), `scheduledTicks`, and
-  `recipient` and `workerParents`, each a registered role key. `recipient` receives the game's
-  events and, when the game hosts the route, its scheduled reviews.
+- `project`: the game's display name, matching its `name` in `config.json`.
+- `scheduledTicks`: whether the game's runner reports scheduled departure slots.
+- `recipient`: a registered role key. It receives the game's events and, when the game hosts the
+  route, its scheduled reviews. `inbox snapshot`, `inbox ack` and `claude channel` default to it.
+- `workerParents`: registered role keys whose verified workers the scheduled review covers. Each
+  must belong to the active review route.
+
+## State
+
+The legacy default is game-coordinator's ignored `var/`. These paths remain there even when the
+work protocol is active:
+
+- `registry.json` and `registry.lock`.
+- `route.json`: the review route.
+- `handoffs/<scope>/`: checkpoints the registry references.
+- `game-dev/`: review and inbox snapshots, health history, acknowledgements, retentions and the
+  legacy message store. This persisted directory keeps its name.
+- `games/<g>/bus/events/`: the event outbox (see [review](review.md#event-outbox)) and
+  `games/<g>/bus/unblock/`: the scheduled review slot receipts, the Claude spool and recipient
+  decision records. The rest of `games/<g>/bus/` belongs to delivery-kit's runner.
+- `work-protocol.json` and `work-protocol-fence.json`: the work protocol's configuration pointer
+  and cutover fence.
+
+An active work protocol uses its external `stateRoot` for publications and artifacts,
+`<stateRoot>/accounting` for the request ledger and intake, and `<stateRoot>/transport/messages`
+for derived message transport state and recipient spools.
+
+Every state write is a temp file, fsync, rename, then a directory fsync. Locks are `flock(1)` on
+files under the selected state directories. The kit writes nothing under any `.claude/`
+directory.

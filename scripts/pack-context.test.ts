@@ -62,8 +62,8 @@ if (args[0] === 'volume') {
   const out = args.at(-1);
   fs.mkdirSync(out, {recursive: true});
   fs.writeFileSync(path.join(out, 'SOURCE_COMMIT'), process.env.PACK_TEST_SHA + '\\n');
-  fs.writeFileSync(path.join(out, 'delivery-kit-fixture.tgz'), 'fixture archive');
-  const names = ['SOURCE_COMMIT', 'delivery-kit-fixture.tgz'];
+  fs.writeFileSync(path.join(out, 'coordination-kit-fixture.tgz'), 'fixture archive');
+  const names = ['SOURCE_COMMIT', 'coordination-kit-fixture.tgz'];
   fs.writeFileSync(path.join(out, 'SHA256SUMS'), names.map(name =>
     crypto.createHash('sha256')
       .update(fs.readFileSync(path.join(out, name)))
@@ -77,7 +77,7 @@ if (args[0] === 'volume') {
 
 function run(fixture: ReturnType<typeof setup>, env: Readonly<Record<string, string>> = {}) {
   const inherited = { ...process.env };
-  delete inherited.DELIVERY_KIT_NPM_VOLUME;
+  delete inherited.COORDINATION_KIT_NPM_VOLUME;
   const result = spawnSync(
     process.execPath,
     [join(fixture.root, "scripts/pack.ts"), fixture.sha, fixture.output],
@@ -105,11 +105,15 @@ describe("offline pack", () => {
     const fixture = setup();
     const result = run(fixture);
     expect(result.status, result.stderr).toBe(0);
-    expect(result.calls[0]?.slice(0, 3)).toEqual(["volume", "inspect", "delivery-kit-npm-check"]);
+    expect(result.calls[0]?.slice(0, 3)).toEqual([
+      "volume",
+      "inspect",
+      "coordination-kit-npm-check",
+    ]);
     const create = result.calls.find((call) => call[0] === "create")!;
     expect(create).toContain("node:24.21.0");
     expect(create).toContain("PACK_NPM_CACHE=/var/tmp/npm");
-    expect(create).toContain("type=volume,src=delivery-kit-npm-check,dst=/var/tmp,readonly");
+    expect(create).toContain("type=volume,src=coordination-kit-npm-check,dst=/var/tmp,readonly");
     expect(create).toContain(`SOURCE_REVISION=${fixture.sha}`);
     expect(create.some((arg) => /^SOURCE_DATE_EPOCH=\d+$/.test(arg))).toBe(true);
     expect(create[create.indexOf("--network") + 1]).toBe("none");
@@ -122,9 +126,9 @@ describe("offline pack", () => {
     expect(program).toContain("node scripts/build.mjs");
     expect(program).not.toContain("npm run build");
     expect(readFileSync(join(fixture.output, "SOURCE_COMMIT"), "utf8")).toBe(`${fixture.sha}\n`);
-    const archive = readFileSync(join(fixture.output, "delivery-kit-fixture.tgz"));
+    const archive = readFileSync(join(fixture.output, "coordination-kit-fixture.tgz"));
     expect(readFileSync(join(fixture.output, "SHA256SUMS"), "utf8")).toContain(
-      `${createHash("sha256").update(archive).digest("hex")}  delivery-kit-fixture.tgz`,
+      `${createHash("sha256").update(archive).digest("hex")}  coordination-kit-fixture.tgz`,
     );
   });
 
@@ -132,7 +136,7 @@ describe("offline pack", () => {
     const fixture = setup();
     const result = run(fixture, { PACK_TEST_MISSING: "1" });
     expect(result.status).toBe(2);
-    expect(result.stderr).toContain("prepare cache volume delivery-kit-npm-check");
+    expect(result.stderr).toContain("prepare cache volume coordination-kit-npm-check");
     expect(result.calls).toHaveLength(1);
     expect(existsSync(fixture.output)).toBe(false);
   });

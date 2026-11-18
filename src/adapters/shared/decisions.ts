@@ -1,5 +1,5 @@
 // Recipient-bound user-decision clearance. The marker is written by the
-// recipient's owner; delivery-kit only reads it. A missing or invalid marker is never clearance.
+// recipient's owner; this kit only reads it. A missing or invalid marker is never clearance.
 import { join } from "node:path";
 
 import { readJsonIfExists } from "../../durable.ts";

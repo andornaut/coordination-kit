@@ -8,7 +8,7 @@ import { isAbsolute, join, relative } from "node:path";
 /** The uid and gid every container runs as; nothing on the host is owned by them. */
 export const CONTAINER_ID = 19001;
 export const LOAD_LIMIT = 24;
-export const DEFAULT_VOLUME = "delivery-kit-npm-check";
+export const DEFAULT_VOLUME = "coordination-kit-npm-check";
 
 export class GuardError extends Error {
   constructor(message: string) {
@@ -244,7 +244,7 @@ export function run(
 ): number {
   const result = spawnSync(command, args, { stdio: "inherit", ...options });
   if (result.error !== undefined) {
-    process.stderr.write(`delivery-kit: ${command}: ${result.error.message}\n`);
+    process.stderr.write(`coordination-kit: ${command}: ${result.error.message}\n`);
     return 1;
   }
   return result.status ?? 1;

@@ -1,0 +1,28 @@
+# Coordination
+
+The kit owns the role registry, durable role messages and their transports, the harness
+adapters, inbox snapshots and acknowledgements, the scheduled review brief, the event outbox, the
+request ledger, the filesystem work protocol and the work-file checks. delivery-kit owns the
+resident runner, departures, the gate container, CI watches, deployment, scheduled delivery,
+resource sampling, the pin guard, status and source and gate identity.
+
+The dependency runs one way: delivery-kit imports this kit and this kit never imports
+delivery-kit. The runner decides when a scheduled review slot is due and calls
+`deliverScheduledReview`; the brief composition, inventory and delivery happen here. Events are
+produced by the runner through `recordEvent`, with its own commit tracking under the outbox lock,
+and delivered here by `flushEvents`. The utilities both kits need (durable files, locks, the
+layout, validation, `delivery-kit.json` loading and the command contract) are exported once from
+`build/shared`, and the API bundles share module instances so locks and error classes are the
+same across subpaths. Every on-disk format stays byte-compatible with delivery-kit 4.7.0.
+
+`work check` and `work report` apply the work-file convention to any repository's docs and join
+its milestones with live protocol state.
+
+Reference: [review](../review.md#scheduled-review-seam), [libraries](../libraries.md),
+[work files](../work-files.md), [upgrading](../upgrading.md).
+
+## Work items
+
+| ID      | Title                                          | Link                             |
+| ------- | ---------------------------------------------- | -------------------------------- |
+| ck-0001 | Extract the coordination kit from delivery-kit | [ck-0001.md](../work/ck-0001.md) |

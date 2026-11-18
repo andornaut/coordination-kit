@@ -29,29 +29,8 @@ if (!/^[0-9a-f]{40}\n$/.test(commit)) {
 
 mkdirSync(staging);
 cpSync("dist", join(staging, "dist"), { recursive: true });
-for (const file of [
-  "README.md",
-  "LICENSE",
-  "SOURCE_COMMIT",
-  "docs/commands.md",
-  "docs/configuration.md",
-  "docs/libraries.md",
-  "docs/messages.md",
-  "docs/registry.md",
-  "docs/request-accounting.md",
-  "docs/review.md",
-  "docs/runner.md",
-  "docs/state.md",
-  "docs/upgrading.md",
-  "docs/work-protocol.md",
-  "docs/design/README.md",
-  "docs/design/messages.md",
-  "docs/design/packaging.md",
-  "docs/design/registry.md",
-  "docs/design/review.md",
-  "docs/design/runner.md",
-  "docs/design/work-protocol.md",
-]) {
+// Every other packaged file, as package.json lists it.
+for (const file of manifest.files.filter((path) => path !== "dist")) {
   mkdirSync(dirname(join(staging, file)), { recursive: true });
   copyFileSync(file, join(staging, file));
 }
@@ -60,7 +39,7 @@ delete manifest.overrides;
 delete manifest.scripts;
 writeFileSync(join(staging, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 
-const archive = `delivery-kit-${version}.tgz`;
+const archive = `coordination-kit-${version}.tgz`;
 if (existsSync(join(output, archive))) {
   throw new Error(`${archive} already exists`);
 }
@@ -68,7 +47,7 @@ execFileSync("npm", ["pack", "--offline", "--ignore-scripts", "--pack-destinatio
   cwd: staging,
   stdio: ["ignore", "ignore", "inherit"],
 });
-renameSync(join(output, `andornaut-delivery-kit-${version}.tgz`), join(output, archive));
+renameSync(join(output, `andornaut-coordination-kit-${version}.tgz`), join(output, archive));
 writeFileSync(join(output, "SOURCE_COMMIT"), commit);
 const sums = [archive, "SOURCE_COMMIT"]
   .map(

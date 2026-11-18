@@ -50,7 +50,7 @@ describe("actual release package", () => {
       cwd: test.source,
       stdio: "pipe",
     });
-    const archive = join(test.output, `delivery-kit-${test.version}.tgz`);
+    const archive = join(test.output, `coordination-kit-${test.version}.tgz`);
     const extracted = join(test.base, "extracted");
     mkdirSync(extracted);
     execFileSync("tar", ["-xzf", archive, "-C", extracted]);
@@ -69,14 +69,14 @@ describe("actual release package", () => {
         "--input-type=module",
         "-e",
         `
-      const canonical = await import('@andornaut/delivery-kit/build/accounting');
-      const alias = await import('@andornaut/delivery-kit/accounting');
-      const protocol = await import('@andornaut/delivery-kit/build/protocol');
-      const protocolAlias = await import('@andornaut/delivery-kit/protocol');
+      const accounting = await import('@andornaut/coordination-kit/build/accounting');
+      const protocol = await import('@andornaut/coordination-kit/build/protocol');
+      const review = await import('@andornaut/coordination-kit/build/review');
       const required = ['ProtocolStore', 'WorkStore', 'ProtocolMessages', 'resolveProtocolLayout'];
-      if (protocol !== protocolAlias || !required.every(name => typeof protocol[name] === 'function')) process.exit(1);
-      if (canonical !== alias || !['LedgerStore', 'IntakeStore', 'projectOwnerBinding']
-        .every(name => typeof canonical[name] === 'function')) process.exit(1);
+      if (!required.every(name => typeof protocol[name] === 'function')) process.exit(1);
+      if (typeof review.deliverScheduledReview !== 'function') process.exit(1);
+      if (!['LedgerStore', 'IntakeStore', 'projectOwnerBinding']
+        .every(name => typeof accounting[name] === 'function')) process.exit(1);
     `,
       ],
       { cwd: pkg, stdio: "pipe" },
@@ -91,7 +91,7 @@ describe("actual release package", () => {
     });
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("docs/commands.md");
-    expect(existsSync(join(test.output, `delivery-kit-${test.version}.tgz`))).toBe(false);
+    expect(existsSync(join(test.output, `coordination-kit-${test.version}.tgz`))).toBe(false);
     expect(readdirSync(test.output)).toEqual([]);
   });
 });

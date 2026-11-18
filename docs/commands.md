@@ -1,27 +1,29 @@
 # Commands
 
-Per-command semantics for the `delivery-kit` CLI, beyond the command table in the [README](../README.md#commands), and worker inbox reconciliation.
+Per-command semantics for the `coordination-kit` CLI, beyond the group table in the
+[README](../README.md#usage), and worker inbox reconciliation. `coordination-kit --help` lists
+every form and flag.
+
+## Command forms
+
+| Command                                                                                                                                                  | Purpose                                                                                     |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `inbox snapshot --game ID [--recipient ROLE] [--parent ROLE]... [--history-cursor CURSOR]`                                                               | Capture the recipient's inbox snapshot.                                                     |
+| `inbox ack --game ID --snapshot UUID --queue-id ID... --disposition handled\|superseded\|retained [--reason TEXT] [--recipient ROLE] [--parent ROLE]...` | Acknowledge queue items from that snapshot. `retained` requires a reason.                   |
+| `message send`, `dispatch`, `status`, `reconcile`, `retire-spool`                                                                                        | Durable role messages; see [messages](messages.md).                                         |
+| `ledger intake`, `apply`, `show`, `report`, `history`, `coverage`, `reconcile`, `boundary`                                                               | The request ledger; see [request accounting](request-accounting.md).                        |
+| `claude ready`, `codex ready`                                                                                                                            | The handoff readiness probe (see [Readiness probe](registry.md#readiness-probe)).           |
+| `claude ready [--game ID]... [--role ROLE]...`, `codex ready [--game ID]... [--role ROLE]...`                                                            | Probe the requested target adapter and conversations for an explicit subset.                |
+| `harness ready [--game ID]... [--role ROLE]...`                                                                                                          | Read-only readiness using each selected role's effective harness.                           |
+| `harness select --harness claude\|codex\|default --expected-revision N [--game ID]... [--role ROLE]...`                                                  | Atomic selection for at least one explicit game or role, without activation.                |
+| `harness doctor --game ID ... [--role ROLE ...]`, `harness doctor --role ROLE ...`                                                                       | Diagnose explicitly selected roles without sending or activating.                           |
+| `claude channel [--game ID]... [--conversation UUID] [--state-dir DIR]... [--poll-seconds N]`                                                            | The stdio MCP server the Claude recipient session starts.                                   |
+| `protocol ...`                                                                                                                                           | The explicit filesystem work protocol; see [work protocol](work-protocol.md).               |
+| `work check [--root DIR]`, `work report [--root DIR]`                                                                                                    | Validate a repository's work files and report their state; see [work files](work-files.md). |
+| `help`, `--help`, `--version`                                                                                                                            | Usage and version.                                                                          |
 
 ## Command semantics
 
-- `request`: `SAFE_ID` is 1 to 64 ASCII letters, digits, underscores or hyphens.
-- `control`: `game-coordinator` writes desired control; Tech owns runner adoption. The command changes
-  admission for subsequent departures without starting a runner or terminating an active batch.
-  `reason` must be non-empty and `requester` resolves through the registry to a role. Stdout is
-  the desired record as one JSON line.
-- `status --game`: an unreadable `ci/`, `events/`, `requests/` or `gate-failed/` directory is a
-  blocker, never an empty one, and a corrupt `runner.identity.json` reports `identity_status`
-  `unreadable` with the `identity_unreadable` blocker. The runner loads `delivery-kit.json` once
-  at startup; `config_status` is `loaded` while the file still matches, `changed` when it differs
-  (the runner keeps the loaded copy until an idle restart), `unknown` when either digest is
-  unavailable, and `null` without a current runner.
-  `observer_adoption` compares the running identity token with the last observer adoption; see
-  [Observer adoption](runner.md#observer-adoption).
-- `runner unit`: prints the systemd user unit for the game's resident runner to stdout and writes
-  nothing: no unit file, no `systemctl` call. It resolves the coordinator root, the game's
-  canonical checkout and installed `dist/cli.js`, the running Node binary and the directories of
-  `gh`, `docker`, `git`, `flock` and `claude` on `PATH`. A missing installed CLI or tool exits 1
-  with no stdout. Install and upgrade steps are in [Supervision](runner.md#supervision).
 - `claude channel`: by default it drains every game's spool (or each `--game`) for the
   conversation of the `reports.recipient` those games name, and requires that role's effective
   harness to be `claude`. Games that name different recipients stop it with exit 1; select games
@@ -29,7 +31,8 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   `--state-dir STATE/unblock` paths select the conversation and spools explicitly; `--state-dir`
   excludes `--game`. `--poll-seconds` defaults to 5. It creates no state directory and drains only
   spools that already exist, so it can start before any game state. Without `--conversation`, an
-  absent registry stops it with exit 1.
+  absent registry stops it with exit 1. The server identifies itself to the session as
+  `delivery-kit-channel`, the name existing channel configurations use.
 - `message retire-spool --recipient ROLE_OR_UUID [--dry-run]`: moves unclaimed Claude spool
   entries whose parent message is `handled` or `superseded` from
   `<stateRoot>/transport/messages/recipients/<uuid>/unblock/claude-spool/` to the sibling
@@ -44,21 +47,21 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   delivered entries and retentions, with no peer or target rows, and its snapshot accepts no other
   conversation as a parent. Any other Claude recipient is refused. With Codex every parent must
   belong to the active route. `--history-cursor` applies to Codex. An unreadable Claude channel
-  spool is reported under the snapshot's `errors`, with
-  `complete` false and exit 1; only a missing spool counts as empty.
+  spool is reported under the snapshot's `errors`, with `complete` false and exit 1; only a
+  missing spool counts as empty. Both keep their JSON result on stdout and also name an error on
+  stderr.
+- `work check` and `work report`: `--root` names the repository, not the coordinator. See
+  [work files](work-files.md).
 
 ## Worker inbox reconciliation
 
-The 4.1.0 candidate adds worker inbox reconciliation; using it requires a reviewed package pin
-containing this support. Public 4.0.0 lacks the supported worker path and rejects unregistered
-worker UUIDs. Candidate status does not establish publication or adoption.
 Use the existing inbox commands with a canonical worker UUID and exactly one registered parent
 role whose current Codex conversation belongs to the active review route:
 
 ```bash
-delivery-kit inbox snapshot --game GAME_ID \
+coordination-kit inbox snapshot --game GAME_ID \
   --recipient WORKER_UUID --parent REGISTERED_ROLE
-delivery-kit inbox ack --game GAME_ID \
+coordination-kit inbox ack --game GAME_ID \
   --recipient WORKER_UUID --parent REGISTERED_ROLE \
   --snapshot SNAPSHOT_UUID --queue-id QUEUE_ID --disposition handled
 ```
@@ -68,6 +71,6 @@ worker/parent binding. ACK requires the same binding and uses one connection to 
 open, inspect the current queue and recheck lineage immediately before deletion. Wrong parents,
 reparenting or refused reads fail closed and preserve originals. Unchanged-payload and ambiguous
 acknowledgement guards remain in force. Use `handled` or `superseded` only with evidence; use
-`--disposition retained --reason TEXT` for retained work. This is explicit owner reconciliation, not automatic
-worker deletion; it never forces session loads or mutates native question state. Unavailable
-visibility remains unknown and must be reported, without bypassing refusals.
+`--disposition retained --reason TEXT` for retained work. This is explicit owner reconciliation,
+not automatic worker deletion; it never forces session loads or mutates native question state.
+Unavailable visibility remains unknown and must be reported, without bypassing refusals.

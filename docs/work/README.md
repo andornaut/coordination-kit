@@ -6,7 +6,7 @@ progress (claims, blocks, receipts and acceptance) stays in the work protocol st
 
 | Front matter | Content                                                                         |
 | ------------ | ------------------------------------------------------------------------------- |
-| `id`         | `dk-` and a zero-padded sequence (`dk-0001`), allocated in chronological order. |
+| `id`         | `ck-` and a zero-padded sequence (`ck-0001`), allocated in chronological order. |
 | `title`      | A short imperative title.                                                       |
 | `status`     | `approved`, `done`, `cancelled` or `superseded`.                                |
 | `approved`   | A short approval reference, such as `user, 2026-11-18`.                         |
@@ -25,5 +25,7 @@ decided or delivered, and why, in a line or two each.
   is never rewritten.
 - Work files are public: no session IDs, hostnames, local home-directory paths or quoted
   conversation, only short approval references.
-- Docs-only changes run only the attribution and lint checks ([dk-0014](dk-0014.md)).
+- `coordination-kit work check` enforces this convention in `make lint` and CI
+  ([work files](../work-files.md)).
+- Docs-only changes run only the attribution and lint checks.
 - Work files are not part of the npm package.

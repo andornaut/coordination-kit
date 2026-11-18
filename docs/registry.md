@@ -2,7 +2,7 @@
 
 The shared role registry `var/registry.json`, scoped harness selection, send-time conversation resolution, the readiness probe and the scoped harness doctor.
 
-`var/registry.json` (schema 1) is shared by delivery-kit and the game-sessions skills. It records
+`var/registry.json` (schema 1) is shared by coordination-kit, delivery-kit and the game-sessions skills. It records
 ownership and the conversation ID of each role per harness. It never proves activation on its
 own: `transfers` carries the hold, acceptance and activation markers.
 
@@ -49,10 +49,10 @@ After explicit approval and the reader upgrades, probe the selected target and a
 revision-checked selection, using the freshly read registry revision for `N`:
 
 ```sh
-delivery-kit claude ready \
+coordination-kit claude ready \
   --game archies-dog-walks \
   --game chibis-way-home
-delivery-kit harness select \
+coordination-kit harness select \
   --harness claude \
   --expected-revision N \
   --game archies-dog-walks \
@@ -81,7 +81,7 @@ restart or delivery-state change. The other harness's IDs stay in place. Activat
 its separate hold, acceptance and activation checks.
 
 Recipient decision records (`unblock/decisions/<conversation>.json`) stay keyed by conversation
-ID, because a pending question belongs to one conversation. Their owner writes them; delivery-kit
+ID, because a pending question belongs to one conversation. Their owner writes them; coordination-kit
 only reads them, and a missing or invalid record is never clearance.
 
 ## Readiness probe
@@ -122,7 +122,7 @@ cannot be read. Malformed command options exit 2. It sends nothing and activates
 
 ## Scoped harness doctor
 
-`delivery-kit harness doctor --role ROLE` diagnoses only the role's current effective harness.
+`coordination-kit harness doctor --role ROLE` diagnoses only the role's current effective harness.
 Repeat `--role` or `--game ID` to select more roles. At least one nonempty explicit scope is
 required; an invalid selection fails before any probe. It sends nothing, performs no queue
 writes, starts no frontend and changes no registry, HOLD, activation or draft state.

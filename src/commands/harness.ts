@@ -25,9 +25,8 @@ export const harnessSelect: Handler = (io, root, args) => {
     }
     values = parsed.values;
   } catch (error) {
-    io.err(
-      `delivery-kit: ${error instanceof Error ? error.message : String(error)}\n${commandUsage("harness select")}\n`,
-    );
+    const message = error instanceof Error ? error.message : String(error);
+    io.err(`coordination-kit: ${message}\n${commandUsage("harness select")}\n`);
     return EXIT_USAGE;
   }
   const { "expected-revision": revision, game, harness, role } = values;
@@ -50,7 +49,7 @@ export const harnessSelect: Handler = (io, root, args) => {
     io.out(`${dumpsJson(registry)}\n`);
     return EXIT_OK;
   } catch (error) {
-    io.err(`delivery-kit: ${error instanceof Error ? error.message : String(error)}\n`);
+    io.err(`coordination-kit: ${error instanceof Error ? error.message : String(error)}\n`);
     return EXIT_INVALID;
   }
 };

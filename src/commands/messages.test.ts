@@ -90,13 +90,13 @@ describe("common message command handlers", () => {
     await run(test, messageSend, ...sendArgs());
     writeFileSync(test.bodyFile, "PRIVATE_BODY");
     const conflicting = await run(test, messageSend, ...sendArgs());
-    expect(conflicting).toEqual({ code: 1, out: "", err: "delivery-kit: id-conflict\n" });
+    expect(conflicting).toEqual({ code: 1, out: "", err: "coordination-kit: id-conflict\n" });
     const args = sendArgs();
     args[args.length - 1] = "PRIVATE_MISSING_FILE";
     expect(await run(test, messageSend, ...args)).toEqual({
       code: 1,
       out: "",
-      err: "delivery-kit: message_operation_failed\n",
+      err: "coordination-kit: message_operation_failed\n",
     });
     const pulled = await run(test, messageStatus, "--id", ID, "--include-body");
     expect(JSON.parse(pulled.out)[0].body).toBe(BODY);
@@ -111,7 +111,7 @@ describe("common message command handlers", () => {
     expect(await run(test, messageSend, ...sendArgs())).toEqual({
       code: 1,
       out: "",
-      err: "delivery-kit: invalid-body-encoding\n",
+      err: "coordination-kit: invalid-body-encoding\n",
     });
     expect(existsSync(join(test.layout.reviewDir, "messages"))).toBe(false);
     const empty = await run(test, messageStatus, "--recipient", ROLE, "--include-body");
@@ -192,7 +192,7 @@ describe("common message command handlers", () => {
       "--evidence",
       "claim:1",
     );
-    expect(claimed).toEqual({ code: 1, out: "", err: "delivery-kit: acceptance-unproven\n" });
+    expect(claimed).toEqual({ code: 1, out: "", err: "coordination-kit: acceptance-unproven\n" });
     const current = await run(test, messageStatus, "--id", ID);
     expect(JSON.parse(current.out)[0]).toEqual(JSON.parse(sent.out));
   });
@@ -246,7 +246,7 @@ describe("common message command handlers", () => {
       "--evidence",
       "reply:1",
     );
-    expect(stale).toEqual({ code: 1, out: "", err: "delivery-kit: binding-conflict\n" });
+    expect(stale).toEqual({ code: 1, out: "", err: "coordination-kit: binding-conflict\n" });
   });
 
   it("rejects conflicting forms, repeated options, invalid revisions and unauthorized dispositions", async () => {
@@ -344,7 +344,7 @@ it("reports exact empty retirement counts and refuses a recipient without a Clau
   });
   expect(await run(test, messageRetireSpool, "--recipient", ROLE)).toEqual({
     code: 1,
-    err: "delivery-kit: recipient-unavailable\n",
+    err: "coordination-kit: recipient-unavailable\n",
     out: "",
   });
 });

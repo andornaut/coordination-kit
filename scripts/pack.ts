@@ -2,7 +2,7 @@
 // as uid 19001. The host writes the committed tree with git archive to a group-readable file
 // outside the checkout, bound read-only (--group-add its group); the npm cache comes read-only
 // from a Docker volume; the host user copies artifacts with docker cp.
-// Output: delivery-kit-VERSION.tgz, SOURCE_COMMIT and SHA256SUMS.
+// Output: coordination-kit-VERSION.tgz, SOURCE_COMMIT and SHA256SUMS.
 // Usage: pack.ts EXACT_COMMIT_SHA NEW_ABSOLUTE_DIRECTORY
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -60,9 +60,9 @@ function main(args: string[]): number {
   if (revision.status !== 0 || revision.stdout.trim() !== sha) {
     return 2;
   }
-  const volume = process.env.DELIVERY_KIT_NPM_VOLUME ?? DEFAULT_VOLUME;
+  const volume = process.env.COORDINATION_KIT_NPM_VOLUME ?? DEFAULT_VOLUME;
   if (quiet("docker", ["volume", "inspect", volume]) !== 0) {
-    console.error(`delivery-kit: prepare cache volume ${volume}`);
+    console.error(`coordination-kit: prepare cache volume ${volume}`);
     return 2;
   }
   const image = checkImage(root);
@@ -70,9 +70,9 @@ function main(args: string[]): number {
   const cachePath = "/var/tmp/npm";
 
   // Deterministic per revision, so a leftover container from an interrupted pack is replaced.
-  const name = `delivery-kit-pack-${sha.slice(0, 12)}`;
+  const name = `coordination-kit-pack-${sha.slice(0, 12)}`;
   quiet("docker", ["rm", "--force", name]);
-  const scratch = mkdtempSync(join(tmpdir(), "delivery-kit-pack-"));
+  const scratch = mkdtempSync(join(tmpdir(), "coordination-kit-pack-"));
   const archive = join(scratch, "source.tar");
   try {
     capture("git", ["-C", root, "archive", "-o", archive, sha]);
@@ -126,7 +126,7 @@ function main(args: string[]): number {
     if (copied !== 0) {
       return copied;
     }
-    console.log(`delivery-kit: release artifacts in ${output}`);
+    console.log(`coordination-kit: release artifacts in ${output}`);
     return 0;
   } finally {
     quiet("docker", ["rm", "--force", name]);
@@ -137,6 +137,6 @@ function main(args: string[]): number {
 try {
   process.exitCode = main(process.argv.slice(2));
 } catch (error) {
-  console.error(`delivery-kit: ${error instanceof GuardError ? error.message : String(error)}`);
+  console.error(`coordination-kit: ${error instanceof GuardError ? error.message : String(error)}`);
   process.exitCode = 1;
 }

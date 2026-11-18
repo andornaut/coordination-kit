@@ -1,4 +1,5 @@
-// Shared helpers for every contract file. Each case drives the built 1.0 CLI (dist/cli.js).
+// Shared helpers for every contract file. Each case drives the built CLI (dist/cli.js) or the
+// built public seam.
 import { afterEach, describe, it } from "vitest";
 
 import { impl } from "./adapter.ts";
@@ -27,11 +28,8 @@ export const ROUTE_INVALID_MESSAGE =
 export const WORKER_PARENTS_ROUTE_MESSAGE =
   "workerParents requires parents in the active review route";
 
-/** check-config's exit status for invalid configuration. */
+/** The exit status for invalid configuration, a failed precondition or an unavailable read. */
 export const EXIT_INVALID = 1;
-
-/** run's exit status when another runner holds runner.lock or loop.lock. */
-export const EXIT_REFUSED = 3;
 
 /** A fresh workspace per case, removed afterwards. */
 export function workspaces(): (options?: GameOptions) => Workspace {

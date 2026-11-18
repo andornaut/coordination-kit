@@ -93,7 +93,7 @@ function writeJson(path: string, value: unknown): void {
 
 /** A scratch tree: base/game-coordinator with config.json and base/<game>/delivery-kit.json per game. */
 export function makeFixture(): Fixture {
-  const base = mkdtempSync(join(tmpdir(), "delivery-kit-"));
+  const base = mkdtempSync(join(tmpdir(), "coordination-kit-"));
   const root = join(base, "game-coordinator");
   mkdirSync(root);
   writeJson(join(root, "config.json"), coordinatorConfig());

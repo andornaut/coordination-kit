@@ -1,5 +1,7 @@
-// Build self-contained CLI and public API bundles with declarations. Each imports only node:
-// builtins, so a running process never reads its package again after startup.
+// Build the self-contained CLI bundle and the public API bundles with declarations. dist/cli.js
+// imports only node: builtins, so a running process never reads its package again after startup.
+// The API bundles share their common modules through dist/chunks/, so a consumer importing several
+// subpaths gets one instance of each module, its classes and its locks.
 import { execFileSync } from "node:child_process";
 import { chmodSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -7,38 +9,59 @@ import { join } from "node:path";
 import { build } from "vite";
 
 const { version } = JSON.parse(readFileSync("package.json", "utf8"));
-const ENTRIES = [
-  { entry: "src/bin.ts", name: "cli" },
-  { entry: "src/registry/index.ts", name: "registry" },
-  { entry: "src/source-identity.ts", name: "source-identity" },
-  { entry: "src/transport.ts", name: "transport" },
-  { entry: "src/accounting.ts", name: "accounting" },
-  { entry: "src/protocol.ts", name: "protocol" },
-];
+const LIBRARIES = {
+  accounting: "src/accounting.ts",
+  events: "src/events.ts",
+  protocol: "src/protocol.ts",
+  registry: "src/registry/index.ts",
+  review: "src/review.ts",
+  shared: "src/shared.ts",
+  transport: "src/transport.ts",
+};
+const COMMON = {
+  configFile: false,
+  define: { __CK_VERSION__: JSON.stringify(version) },
+  logLevel: "warn",
+  ssr: { noExternal: true, target: "node" },
+};
+const OUTPUT = {
+  copyPublicDir: false,
+  minify: false,
+  outDir: "dist",
+  reportCompressedSize: false,
+  sourcemap: false,
+  target: "node24",
+};
 
-for (const [index, { entry, name }] of ENTRIES.entries()) {
-  // Sequential: the first build empties dist/ and later builds add to it.
-  // eslint-disable-next-line no-await-in-loop
-  await build({
-    build: {
-      copyPublicDir: false,
-      emptyOutDir: index === 0,
-      minify: false,
-      outDir: "dist",
-      reportCompressedSize: false,
-      rolldownOptions: {
-        output: { codeSplitting: false, entryFileNames: `${name}.js`, format: "es" },
-      },
-      sourcemap: false,
-      ssr: entry,
-      target: "node24",
+await build({
+  ...COMMON,
+  build: {
+    ...OUTPUT,
+    emptyOutDir: true,
+    rolldownOptions: {
+      output: { codeSplitting: false, entryFileNames: "cli.js", format: "es" },
     },
-    configFile: false,
-    define: { __DK_VERSION__: JSON.stringify(version) },
-    logLevel: "warn",
-    ssr: { noExternal: true, target: "node" },
-  });
-}
+    ssr: "src/bin.ts",
+  },
+});
+await build({
+  ...COMMON,
+  build: {
+    ...OUTPUT,
+    emptyOutDir: false,
+    rolldownOptions: {
+      input: LIBRARIES,
+      // Each entry exports exactly its own API; shared code moves to chunks, never an entry.
+      preserveEntrySignatures: "strict",
+      output: {
+        chunkFileNames: "chunks/[name]-[hash].js",
+        entryFileNames: "[name].js",
+        format: "es",
+      },
+    },
+    ssr: true,
+  },
+});
 chmodSync("dist/cli.js", 0o755);
 
 execFileSync(process.execPath, ["node_modules/typescript/bin/tsc", "-p", "tsconfig.types.json"], {
@@ -51,8 +74,7 @@ for (const name of readdirSync("dist/types", { recursive: true })) {
     writeFileSync(path, readFileSync(path, "utf8").replace(/"(\.{1,2}\/[^"]+)\.ts"/g, '"$1.js"'));
   }
 }
-writeFileSync("dist/registry.d.ts", 'export * from "./types/registry/index.js";\n');
-writeFileSync("dist/source-identity.d.ts", 'export * from "./types/source-identity.js";\n');
-writeFileSync("dist/transport.d.ts", 'export * from "./types/transport.js";\n');
-writeFileSync("dist/accounting.d.ts", 'export * from "./types/accounting.js";\n');
-writeFileSync("dist/protocol.d.ts", 'export * from "./types/protocol.js";\n');
+for (const [name, entry] of Object.entries(LIBRARIES)) {
+  const types = entry.replace(/^src\//, "./types/").replace(/\.ts$/, ".js");
+  writeFileSync(`dist/${name}.d.ts`, `export * from "${types}";\n`);
+}

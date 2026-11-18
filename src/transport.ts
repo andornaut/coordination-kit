@@ -1,4 +1,4 @@
-// @andornaut/delivery-kit/transport: endpoint selection without probing or activation.
+// @andornaut/coordination-kit/build/transport: endpoint selection without probing or activation.
 export {
   type CodexControlSocketEndpoint,
   type CodexControlSocketOptions,

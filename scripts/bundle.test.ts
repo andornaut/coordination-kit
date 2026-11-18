@@ -10,14 +10,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { packagedDocs } from "./package-check.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const BUNDLES = [
-  "dist/cli.js",
-  "dist/registry.js",
-  "dist/source-identity.js",
-  "dist/transport.js",
-  "dist/accounting.js",
-  "dist/protocol.js",
-];
+const LIBRARIES = ["accounting", "events", "protocol", "registry", "review", "shared", "transport"];
+const BUNDLES = ["dist/cli.js", ...LIBRARIES.map((name) => `dist/${name}.js`)];
 const METADATA = ["LICENSE", "README.md", "SOURCE_COMMIT", "package.json", ...packagedDocs(root)];
 
 beforeAll(() => {
@@ -36,8 +30,65 @@ describe("dist/cli.js", () => {
       version: string;
     };
     expect(execFileSync(cli, ["--version"], { encoding: "utf8" })).toBe(`${version}\n`);
-    const run = spawnSync(cli, ["run"], { encoding: "utf8" });
-    expect([run.status, run.stderr]).toEqual([2, "usage: delivery-kit run --game ID\n"]);
+    const run = spawnSync(cli, ["work", "check", "--bogus"], { encoding: "utf8" });
+    expect([run.status, run.stderr]).toEqual([
+      2,
+      "coordination-kit: usage: coordination-kit work check [--root DIR]\n",
+    ]);
+  });
+
+  it("imports only node: builtins, and each API bundle only builtins and shared chunks", () => {
+    const specifiers = (path: string) =>
+      [
+        ...readFileSync(join(root, path), "utf8").matchAll(
+          /^(?:import|export)\b[^;]*?from\s*"([^"]+)"/gms,
+        ),
+      ].map((match) => match[1]);
+    expect(specifiers("dist/cli.js").filter((name) => !name?.startsWith("node:"))).toEqual([]);
+    const chunks = readdirSync(join(root, "dist/chunks")).map((name) => `dist/chunks/${name}`);
+    for (const path of [...LIBRARIES.map((name) => `dist/${name}.js`), ...chunks]) {
+      expect(
+        specifiers(path).filter(
+          (name) => !name?.startsWith("node:") && !/^\.\.?\//.test(name ?? ""),
+        ),
+        path,
+      ).toEqual([]);
+    }
+  });
+
+  it("exports from each API bundle exactly the names its source entry exports", async () => {
+    const events = (await import(join(root, "dist/events.js"))) as Record<string, unknown>;
+    expect(Object.keys(events).sort()).toEqual([
+      "DELIVERY_BUDGET",
+      "QUIET_KINDS",
+      "clean",
+      "deliveryMessage",
+      "enqueueEvent",
+      "eventId",
+      "eventsDir",
+      "flushEvents",
+      "flushEventsWith",
+      "recordEvent",
+      "writeEventState",
+    ]);
+    const apis = await Promise.all(
+      LIBRARIES.map(
+        async (name) => (await import(join(root, `dist/${name}.js`))) as Record<string, unknown>,
+      ),
+    );
+    apis.forEach((api, index) =>
+      expect(
+        Object.keys(api).filter((key) => key.length < 3),
+        LIBRARIES[index],
+      ).toEqual([]),
+    );
+  });
+
+  it("gives every API subpath one shared instance of each common module", async () => {
+    const registry = (await import(join(root, "dist/registry.js"))) as Record<string, unknown>;
+    const shared = (await import(join(root, "dist/shared.js"))) as Record<string, unknown>;
+    expect(registry.LockBusy).toBe(shared.LockBusy);
+    expect(registry.loadLayout).toBe(shared.loadLayout);
   });
 });
 
@@ -146,35 +197,27 @@ describe("packed package", () => {
       [],
     );
     expect(files.filter((path) => path.startsWith("docs/work/"))).toEqual([]);
-    expect(dist.filter((path) => !path.startsWith("dist/types/"))).toEqual([
-      "dist/accounting.d.ts",
-      "dist/accounting.js",
-      "dist/cli.js",
-      "dist/protocol.d.ts",
-      "dist/protocol.js",
-      "dist/registry.d.ts",
-      "dist/registry.js",
-      "dist/source-identity.d.ts",
-      "dist/source-identity.js",
-      "dist/transport.d.ts",
-      "dist/transport.js",
-    ]);
+    expect(
+      dist.filter((path) => !path.startsWith("dist/types/") && !path.startsWith("dist/chunks/")),
+    ).toEqual(
+      [
+        "dist/cli.js",
+        ...LIBRARIES.flatMap((name) => [`dist/${name}.d.ts`, `dist/${name}.js`]),
+      ].sort(),
+    );
     expect(
       dist.filter((path) => path.startsWith("dist/types/") && !path.endsWith(".d.ts")),
     ).toEqual([]);
-    expect(readdirSync(join(root, "dist")).sort()).toEqual([
-      "accounting.d.ts",
-      "accounting.js",
-      "cli.js",
-      "protocol.d.ts",
-      "protocol.js",
-      "registry.d.ts",
-      "registry.js",
-      "source-identity.d.ts",
-      "source-identity.js",
-      "transport.d.ts",
-      "transport.js",
-      "types",
-    ]);
+    expect(dist.filter((path) => path.startsWith("dist/chunks/") && !path.endsWith(".js"))).toEqual(
+      [],
+    );
+    expect(readdirSync(join(root, "dist")).sort()).toEqual(
+      [
+        "chunks",
+        "cli.js",
+        "types",
+        ...LIBRARIES.flatMap((name) => [`${name}.d.ts`, `${name}.js`]),
+      ].sort(),
+    );
   });
 });

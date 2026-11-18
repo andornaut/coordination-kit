@@ -8,7 +8,7 @@ Discovery is read-only; it does not deliver native input, acknowledge queues or 
 
 The work protocol provides fenced role publications, canonical message originals and separate
 recipient handling receipts. Discover supported
-commands with `delivery-kit --help`; `protocol status` reports configuration and
+commands with `coordination-kit --help`; `protocol status` reports configuration and
 `protocol inbox --role kits/game-kit --sender kits/delivery-kit` reads an explicit filesystem
 scope without native delivery. Bodies require `--include-body`.
 
@@ -16,7 +16,7 @@ Activation requires an explicit external `stateRoot`, reviewed readers and write
 independent backup and verified restore. Unmanaged callers retain the optional protocol contract;
 a declared managed workspace covers all current, upcoming and future work for registered owners
 and verified workers, preserving explicit parent-owned UNKNOWN gaps. Representation, active
-adoption and coverage completeness are separate. Existing 4.5 pins do not enforce managed
+adoption and coverage completeness are separate. Existing delivery-kit 4.5 pins do not enforce managed
 enrollment; publication alone does not establish rollout or adoption.
 
 Missing configuration retains legacy compatibility only outside required managed mode and
@@ -36,9 +36,9 @@ or generation disagreement also fails closed. A required declaration awaiting ac
 managed-pending, not legacy; ordinary admission reports `protocol-enrollment-pending`.
 Deleting the pointer does not roll back activation or enable a second writable backend.
 
-Import the public SDK APIs and types from `@andornaut/delivery-kit/build/protocol`, including
+Import the public SDK APIs and types from `@andornaut/coordination-kit/build/protocol`, including
 `runtimeProtocolStore`, `ProtocolMessages` and `protocolNamespace`. See the
-[public build API list](libraries.md#public-build-apis) for canonical subpaths and compatibility aliases.
+[public build API list](libraries.md#public-build-apis) for the canonical subpaths.
 
 Stable namespaces are `coordinator`, `kits/<kit>` and `games/<game>/<role>`.
 The core registry-key mapper, exported publicly as `protocolNamespace(registryRole)`, maps those
@@ -101,7 +101,7 @@ cutover. A represented UNKNOWN is not actual adoption, question clearance or per
 delete sole WIP. Per-owner blockers remain visible until the responsible owner supplies actual
 evidence or retains the exact gap with a next boundary.
 
-Existing 4.5 pins retain their published optional filesystem contract; they do not enforce
+Existing delivery-kit 4.5 pins retain their published optional filesystem contract; they do not enforce
 managed all-work enrollment. Publishing a newer SDK does not declare a workspace managed,
 upgrade resident readers or writers, create owner receipts or establish consumer adoption.
 The operator owns declaration, audit/backfill and per-owner rollout.
@@ -147,9 +147,9 @@ Activation carries `required: { authorityRef }` into the pointer, fence and work
 use the supported declaration and migration APIs rather than editing those records directly.
 
 ```sh
-delivery-kit --root /path/to/game-coordinator protocol declare --input-file declaration.json
-delivery-kit --root /path/to/game-coordinator protocol enrollment-report --state-root /path/to/prepared-state
-delivery-kit --root /path/to/game-coordinator protocol enroll \
+coordination-kit --root /path/to/game-coordinator protocol declare --input-file declaration.json
+coordination-kit --root /path/to/game-coordinator protocol enrollment-report --state-root /path/to/prepared-state
+coordination-kit --root /path/to/game-coordinator protocol enroll \
   --input-file enrollment.json --state-root /path/to/prepared-state
 ```
 
@@ -328,9 +328,9 @@ not read or committed as one cross-role transaction.
 The CLI exposes the same filesystem fallback with explicit canonical recipient and sender scopes:
 
 ```sh
-delivery-kit --root /path/to/game-coordinator protocol inbox \
+coordination-kit --root /path/to/game-coordinator protocol inbox \
   --role kits/game-kit --sender kits/delivery-kit --include-body
-delivery-kit --root /path/to/game-coordinator protocol message-original \
+coordination-kit --root /path/to/game-coordinator protocol message-original \
   --input-file original-ref.json --include-body
 ```
 
@@ -364,7 +364,7 @@ claimed. Ambiguous delivery requires reconciliation before retrying any native o
 
 ## Migration and recovery
 
-Without protocol configuration, the existing caller-agnostic 4.4 reconcile contract remains
+Without protocol configuration, the existing caller-agnostic delivery-kit 4.4 reconcile contract remains
 compatible. Protocol activation is a distinct reviewed migration, not an automatic reinterpretation
 of historical caller authority.
 

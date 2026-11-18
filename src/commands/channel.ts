@@ -1,4 +1,4 @@
-// `delivery-kit claude channel`: the Claude channel consumer, a stdio MCP server that the recipient
+// `coordination-kit claude channel`: the Claude channel consumer, a stdio MCP server that the recipient
 // session launches from game-coordinator's node_modules. By default it drains every game's spool (or each
 // `--game`) plus the resolved conversation's generic message spool. `--conversation UUID` and
 // repeatable `--state-dir STATE/unblock` select them explicitly. It creates no state directory:
@@ -187,7 +187,7 @@ export async function runChannel(
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    io.err(`delivery-kit: ${message}\n`);
+    io.err(`coordination-kit: ${message}\n`);
     return error instanceof ChannelUsage ||
       (error as { code?: string }).code?.startsWith("ERR_PARSE_ARGS")
       ? EXIT_USAGE

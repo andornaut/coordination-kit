@@ -28,14 +28,14 @@ async function run(root: string, ...args: string[]) {
 
 describe("harness doctor handler", () => {
   it("requires nonempty explicit scope and does not echo invalid arguments", async () => {
-    const forms = synopsis("harness doctor").map((form) => `delivery-kit ${form}`);
+    const forms = synopsis("harness doctor").map((form) => `coordination-kit ${form}`);
     const usage = forms.join("\n");
     for (const args of [[], ["--role", " "], ["--unknown", "DO_NOT_PRINT"], ["--role"]]) {
       // eslint-disable-next-line no-await-in-loop
       const result = await run("/not/read", ...args);
       expect(result).toMatchObject({ code: 2, out: "" });
       expect(result.err).not.toContain("DO_NOT_PRINT");
-      expect(result.err).toBe(`delivery-kit: invalid_doctor_scope\n${usage}\n`);
+      expect(result.err).toBe(`coordination-kit: invalid_doctor_scope\n${usage}\n`);
     }
   });
 
@@ -56,7 +56,7 @@ describe("harness doctor handler", () => {
     expect(invalid).toEqual({
       code: 1,
       out: "",
-      err: "delivery-kit: doctor_configuration_unavailable\n",
+      err: "coordination-kit: doctor_configuration_unavailable\n",
     });
   });
 });

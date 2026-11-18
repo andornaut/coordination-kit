@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "./cli.ts";
 import { loadLayout } from "./layout.ts";
 import { createRegistry, type Registry } from "./registry/index.ts";
-import { makeFixture, projectConfig, registryInput, writeFixtureJson } from "./testFixtures.ts";
+import { makeFixture, registryInput } from "./testFixtures.ts";
 
 async function run(
   root: string,
@@ -28,62 +28,6 @@ function withRegistry(root: string): void {
   );
 }
 
-describe("check-config", () => {
-  it("accepts config.json and every game before a registry exists", async () => {
-    const { root } = makeFixture();
-    const result = await run(root, "check-config");
-    expect(result).toMatchObject({ code: EXIT_OK, err: "" });
-    expect(result.out).toContain("archies-dog-walks, chibis-way-home; registry absent");
-  });
-
-  it("resolves addressed role names against the registry", async () => {
-    const { base, root } = makeFixture();
-    withRegistry(root);
-    expect((await run(root, "check-config")).out).toContain("registry revision 1");
-    const config = projectConfig("Chibi");
-    (config.reports as Record<string, unknown>).workerParents = [
-      "game-coordinator",
-      "chibis-way-home/tech",
-    ];
-    writeFixtureJson(join(base, "chibis-way-home/delivery-kit.json"), config);
-    const result = await run(root, "check-config");
-    expect(result.code).toBe(EXIT_INVALID);
-    expect(result.err).toContain("no registered role named chibis-way-home/tech");
-  });
-
-  it("validates var/route.json and names the exact edit for a schema 1 route", async () => {
-    const { root } = makeFixture();
-    withRegistry(root);
-    const layout = loadLayout(root);
-    mkdirSync(layout.varDir, { recursive: true });
-    const route = {
-      host: "archies-dog-walks",
-      state: "active",
-      targets: ["archies-dog-walks/tech"],
-    };
-    writeFixtureJson(layout.routeFile, { ...route, schema: 2 });
-    expect((await run(root, "check-config")).code).toBe(EXIT_OK);
-    writeFixtureJson(layout.routeFile, { ...route, monitor: "game-coordinator", schema: 1 });
-    const legacy = await run(root, "check-config");
-    expect(legacy.code).toBe(EXIT_INVALID);
-    expect(legacy.err).toContain(
-      'var/route.json schema 1 is not supported: remove "monitor" and set "schema" to 2',
-    );
-    writeFixtureJson(layout.routeFile, { ...route, schema: 2, targets: ["game-coordinator"] });
-    expect((await run(root, "check-config")).err).toContain(
-      "active route targets must not include the recipient game-coordinator",
-    );
-  });
-
-  it("rejects a project name that differs from config.json and limits checks with --game", async () => {
-    const { base, root } = makeFixture();
-    writeFixtureJson(join(base, "chibis-way-home/delivery-kit.json"), projectConfig("Archie"));
-    expect((await run(root, "check-config")).err).toContain("/reports/project must be Chibi");
-    expect((await run(root, "check-config", "--game", "archies-dog-walks")).code).toBe(EXIT_OK);
-    expect((await run(root, "check-config", "--game", "nope")).code).toBe(EXIT_USAGE);
-  });
-});
-
 describe("dispatcher", () => {
   it("prints usage for help and rejects unknown commands", async () => {
     const { root } = makeFixture();
@@ -97,8 +41,13 @@ describe("dispatcher", () => {
     expect(help.out).not.toContain("harness doctor [");
     expect(help.out).toContain("[--parent ROLE]");
     expect(help.out).toContain("message status --recipient ROLE [--include-body]");
+    expect(help.out).toContain("work check\n");
+    expect(help.out).not.toContain("check-config");
     expect(await run(root, "scheduled-once")).toMatchObject({ code: EXIT_USAGE });
-    expect((await run(root, "check-config", "--unknown")).code).toBe(EXIT_USAGE);
+    expect(await run(root, "run", "--game", "archies-dog-walks")).toMatchObject({
+      code: EXIT_USAGE,
+    });
+    expect((await run(root, "work", "check", "--unknown")).code).toBe(EXIT_USAGE);
   });
 });
 
@@ -150,10 +99,36 @@ describe("claude ready and codex ready", () => {
     const absent = await run(root, "codex", "ready");
     expect(absent.code).toBe(EXIT_INVALID);
     expect(absent.out).toBe("");
-    expect(absent.err).toMatch(/^delivery-kit: /);
+    expect(absent.err).toMatch(/^coordination-kit: /);
     const missing = await run(join(base, "no-game-coordinator"), "claude", "ready");
     expect(missing.code).toBe(EXIT_INVALID);
-    expect(missing.err).toMatch(/^delivery-kit: /);
+    expect(missing.err).toMatch(/^coordination-kit: /);
     expect((await run(root, "claude", "ready", "--extra")).code).toBe(EXIT_USAGE);
+  });
+});
+
+describe("coordinator root", () => {
+  async function status(env: NodeJS.ProcessEnv, ...argv: string[]): Promise<number> {
+    return main({ cwd: "/nonexistent", env, err: () => undefined, out: () => undefined }, [
+      "message",
+      "status",
+      "--recipient",
+      "archies-dog-walks/tech",
+      ...argv,
+    ]);
+  }
+
+  it("takes --root, then COORDINATION_KIT_ROOT, then DELIVERY_KIT_ROOT", async () => {
+    const { base, root } = makeFixture();
+    withRegistry(root);
+    const missing = join(base, "absent");
+    expect(await status({ COORDINATION_KIT_ROOT: root })).toBe(EXIT_OK);
+    expect(await status({ DELIVERY_KIT_ROOT: root })).toBe(EXIT_OK);
+    expect(await status({ COORDINATION_KIT_ROOT: root, DELIVERY_KIT_ROOT: missing })).toBe(EXIT_OK);
+    expect(await status({ COORDINATION_KIT_ROOT: missing, DELIVERY_KIT_ROOT: root })).not.toBe(
+      EXIT_OK,
+    );
+    expect(await status({ COORDINATION_KIT_ROOT: missing }, "--root", root)).toBe(EXIT_OK);
+    expect(await status({})).not.toBe(EXIT_OK);
   });
 });

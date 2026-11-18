@@ -1,30 +1,12 @@
-// Drive the resident runner's scheduled review and departure ticks under the virtual clock.
-// The clock runs at wall speed with short real sleeps; a slot is reached by jumping the clock
-// one second past it, so each observer iteration sees exactly one new minute.
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-
-import { type Resident, startRunner } from "./adapter.ts";
+// Drive scheduled review slots through the built seam, one observer pass per slot, as
+// delivery-kit's runner reaches them. A pass is a fresh process, so stopping and starting again
+// is a restart that keeps only durable state.
+import { execute, impl } from "./adapter.ts";
 import { CodexSocket } from "./codex-socket.ts";
-import { at, sleep } from "./time.ts";
+import { at } from "./time.ts";
 import { ART, GAMEPLAY, NativeWorld, TECH } from "./unblock-native.ts";
 import type { Workspace } from "./workspace.ts";
 import { roleRoute } from "./routes.ts";
-
-export function virtualNow(ws: Workspace): number {
-  const clock = JSON.parse(readFileSync(ws.clockFile, "utf8")) as {
-    epoch: number;
-    realStartMs: number;
-    speed: number;
-  };
-  let offset = 0;
-  const offsets = join(ws.fakeDir, "clock-offsets");
-  if (existsSync(offsets)) {
-    for (const line of readFileSync(offsets, "utf8").split("\n"))
-      if (line.trim()) offset += Number(line);
-  }
-  return Math.floor(clock.epoch + offset + ((Date.now() - clock.realStartMs) * clock.speed) / 1000);
-}
 
 /** The Codex review route from Tech to Art and Gameplay, hosted by this game. */
 export function codexRoute(
@@ -62,24 +44,22 @@ export function confirmedAt(): string {
 export interface Tick {
   /** Parsed `bus: scheduled review SLOT: {...}` JSON, when the helper ran. */
   result: Record<string, unknown> | undefined;
-  /** Runner output produced for this tick. */
+  /** Observer output produced for this tick. */
   output: string;
 }
 
 export class Reviewed {
   readonly world = new NativeWorld();
   readonly socket: CodexSocket;
-  runner: Resident | undefined;
   private output = "";
 
   constructor(readonly ws: Workspace) {
     this.socket = new CodexSocket(ws);
   }
 
-  /** Route-mode setup: registry, route, clear recipient decision and departures that never fire. */
+  /** Route-mode setup: registry, route and a clear recipient decision. */
   static async routed(ws: Workspace, route: Record<string, unknown> = {}): Promise<Reviewed> {
     codexRegistry(ws);
-    ws.config.schedule = { departures: ["05"], timezone: "America/Toronto" };
     ws.writeRoute(codexRoute(ws, route));
     decide(ws, TECH, { thread_id: TECH, state: "clear" });
     const reviewed = new Reviewed(ws);
@@ -93,50 +73,24 @@ export class Reviewed {
     this.ws.env.CODEX_CONTROL_SOCKET = this.socket.path;
   }
 
-  /** Start one runner at local 19:00 of HOUR's previous hour (minute 0, hour -1). */
-  async start(epoch = at(0, 0, -1)): Promise<void> {
-    this.ws.updateControl((c) => (c.maxRealSleep = 0.2));
-    this.ws.setClock(epoch, 1);
+  /** Begin a run of slots; the output so far is cleared. */
+  async start(): Promise<void> {
     this.output = "";
-    const runner = startRunner(this.ws);
-    runner.child.stdout.on("data", (chunk: Buffer) => (this.output += chunk.toString()));
-    runner.child.stderr.on("data", (chunk: Buffer) => (this.output += chunk.toString()));
-    this.runner = runner;
-    // The observer has recorded its first `previous` time before any jump.
-    await runner.armed();
   }
 
-  async stop(): Promise<void> {
-    await this.runner?.stop();
-    this.runner = undefined;
-  }
+  async stop(): Promise<void> {}
 
   async close(): Promise<void> {
-    await this.stop();
     await this.socket.close();
   }
 
-  /** Jump the clock to second 1 of the epoch's minute and wait for `predicate` on new output. */
-  async jump(
-    epoch: number,
-    predicate: (output: string) => boolean,
-    // A slot runs the native helper, whose own deadline is 25 seconds; leave room under load.
-    timeoutMs = 45_000,
-  ): Promise<string> {
-    // A departure still finishing when the clock jumps would cross the slot, which the loop
-    // never replays; wait for the previous one to end first.
-    await this.runner!.until(
-      () => !this.ws.exists("active-departure") || this.ws.read("active-departure") === "",
-      timeoutMs,
-    );
-    const mark = this.output.length;
-    const now = virtualNow(this.ws);
-    if (epoch + 1 <= now) throw new Error(`clock already past ${epoch}`);
-    this.ws.advanceClock(epoch + 1 - now);
-    await this.runner!.until(() => predicate(this.output.slice(mark)), timeoutMs);
-    // Let the helper finish writing receipts after it reported.
-    await sleep(100);
-    return this.output.slice(mark);
+  /** Run the observer pass for `epoch` and return its output; `predicate` must hold for it. */
+  async jump(epoch: number, predicate: (output: string) => boolean): Promise<string> {
+    const pass = await execute(impl.review(this.ws, epoch));
+    const output = pass.stdout + pass.stderr;
+    this.output += output;
+    if (!predicate(output)) throw new Error(`slot ${epoch} output did not match:\n${output}`);
+    return output;
   }
 
   /** Reach a review slot and return the helper's reported status. */
@@ -156,7 +110,7 @@ export class Reviewed {
     return { result, output };
   }
 
-  /** Output written so far by the current runner. */
+  /** Output written so far in this run. */
   text(): string {
     return this.output;
   }

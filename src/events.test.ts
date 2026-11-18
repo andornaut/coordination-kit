@@ -10,11 +10,11 @@ import type { DeliveryReceipt } from "./adapters/types.ts";
 import {
   DELIVERY_BUDGET,
   deliveryMessage,
-  emitEvent,
   type EventAdapter,
   eventId,
   eventsDir,
   flushEventsWith,
+  recordEvent,
 } from "./events.ts";
 import { type GameLayout, gameLayout, loadLayout } from "./layout.ts";
 import { holdLock } from "./lock.ts";
@@ -58,12 +58,12 @@ function mockAdapter(statuses: DeliveryReceipt["status"][]): MockAdapter {
   } as unknown as MockAdapter;
 }
 
-describe("emitEvent", () => {
+describe("recordEvent", () => {
   it("records an event once per identity and folds every blocked-* kind together", () => {
     const game = setup();
-    emitEvent(game, OPTIONS, "blocked-gate", "abc", "gate failed");
-    emitEvent(game, OPTIONS, "blocked-ci", "abc", "ci failed");
-    emitEvent(game, OPTIONS, "blocked-gate", "abc", "gate failed again");
+    recordEvent(game, OPTIONS, "blocked-gate", "abc", "gate failed");
+    recordEvent(game, OPTIONS, "blocked-ci", "abc", "ci failed");
+    recordEvent(game, OPTIONS, "blocked-gate", "abc", "gate failed again");
     const id = "19d395c3c05e17f202c8406010e2cebb9c35619d6f08da9b641caa39f926f4a8";
     expect(eventId("blocked-ci", "abc")).toBe(id);
     expect(events(game)).toEqual([
@@ -80,40 +80,20 @@ describe("emitEvent", () => {
     expect(text.endsWith('"sent": false}\n')).toBe(true);
   });
 
-  it("never records quiet kinds but tracks commit state to completion", () => {
+  it("never records quiet kinds and runs the producer step under state.lock", () => {
     const game = setup();
-    emitEvent(game, OPTIONS, "push", SHA, "pushed");
-    emitEvent(game, OPTIONS, "ci_pending", SHA, "pending");
-    emitEvent(game, OPTIONS, "ci_success", SHA, "CI green");
-    emitEvent(game, OPTIONS, "ci_running", SHA, "late progress");
-    const state = () =>
-      JSON.parse(readFileSync(join(eventsDir(game), `${SHA}.state`), "utf8")) as unknown;
-    expect(state()).toEqual({ ci: "success", deploy: "pending", pushed: true });
-    expect(events(game).map((event) => event.kind)).toEqual(
-      expect.arrayContaining(["push", "ci_success"]),
-    );
-    emitEvent(game, OPTIONS, "deploy_skipped", SHA, "docs only");
-    const complete = events(game).find((event) => event.kind === "complete");
-    expect(complete?.message).toBe(
-      `Archie bus: COMPLETE ${SHA}: full gate passed; CI success; deployment skipped.`,
-    );
-    expect(
-      events(game)
-        .map((event) => event.kind)
-        .sort(),
-    ).toEqual(["ci_success", "complete", "deploy_skipped", "push"]);
-  });
-
-  it("reports a docs-only push as complete without claiming a gate", () => {
-    const game = setup();
-    emitEvent(game, OPTIONS, "gate_skipped", SHA, "gate skipped");
-    emitEvent(game, OPTIONS, "push", SHA, "pushed");
-    emitEvent(game, OPTIONS, "deploy_skipped", SHA, "docs only");
-    emitEvent(game, OPTIONS, "ci_success", SHA, "CI green");
-    expect(events(game).find((event) => event.kind === "complete")?.message).toBe(
-      `Archie bus: COMPLETE ${SHA}: docs-only, gate skipped; CI success; deployment skipped.`,
-    );
-    expect(events(game).map((event) => event.kind)).not.toContain("gate_skipped");
+    const seen: string[] = [];
+    const options = {
+      ...OPTIONS,
+      underLock: (directory: string) => {
+        expect(() => holdLock(join(directory, "state.lock"), { nonBlocking: true })).toThrow();
+        seen.push(directory);
+      },
+    };
+    recordEvent(game, options, "ci_pending", SHA, "pending");
+    recordEvent(game, options, "push", SHA, "pushed");
+    expect(seen).toEqual([eventsDir(game), eventsDir(game)]);
+    expect(events(game).map((event) => event.kind)).toEqual(["push"]);
   });
 });
 
@@ -156,8 +136,8 @@ describe("flushEventsWith", () => {
       return { result: { data: [] } };
     });
     try {
-      emitEvent(fixture.game, OPTIONS, "push", "one", "first");
-      emitEvent(fixture.game, OPTIONS, "push", "two", "second");
+      recordEvent(fixture.game, OPTIONS, "push", "one", "first");
+      recordEvent(fixture.game, OPTIONS, "push", "two", "second");
       await flushEventsWith(
         {
           codex: (layout) => codexAdapter(layout, { controlSocket: control.path }),
@@ -182,7 +162,7 @@ describe("flushEventsWith", () => {
     async (status, attemptStatus) => {
       const game = setup();
       const layout = loadLayout(resolve(game.stateDir, "..", "..", ".."));
-      emitEvent(game, OPTIONS, "push", "one", "first");
+      recordEvent(game, OPTIONS, "push", "one", "first");
       const id = eventId("push", "one");
       const directory = join(eventsDir(game), "native");
       mkdirSync(directory);
@@ -221,7 +201,7 @@ describe("flushEventsWith", () => {
     async (attempt) => {
       const game = setup();
       const layout = loadLayout(resolve(game.stateDir, "..", "..", ".."));
-      emitEvent(game, OPTIONS, "push", "one", "first");
+      recordEvent(game, OPTIONS, "push", "one", "first");
       const id = eventId("push", "one");
       const directory = join(eventsDir(game), "native");
       mkdirSync(directory);
@@ -257,7 +237,7 @@ describe("flushEventsWith", () => {
   it("reconciles an accepted receipt from the previous provider without another send", async () => {
     const game = setup();
     const layout = loadLayout(resolve(game.stateDir, "..", "..", ".."));
-    emitEvent(game, OPTIONS, "push", "one", "first");
+    recordEvent(game, OPTIONS, "push", "one", "first");
     const id = eventId("push", "one");
     const directory = join(eventsDir(game), "native");
     mkdirSync(directory);
@@ -298,8 +278,8 @@ describe("flushEventsWith", () => {
       });
       return Promise.resolve({ requestId, status: "accepted" });
     });
-    emitEvent(game, OPTIONS, "push", "one", "first");
-    emitEvent(game, OPTIONS, "push", "two", "second");
+    recordEvent(game, OPTIONS, "push", "one", "first");
+    recordEvent(game, OPTIONS, "push", "two", "second");
     await flushEventsWith({ claude: () => claude, codex: () => codex }, game);
     expect(claude.deliver.mock.calls.map((call) => [call[2], call[3]])).toEqual([
       [CLAUDE_COORDINATOR, expect.stringContaining("first")],
@@ -318,7 +298,7 @@ describe("flushEventsWith", () => {
       draft.roles["game-coordinator"]!.harness = "codex";
     });
     const adapter = mockAdapter([]);
-    emitEvent(game, OPTIONS, "push", "one", "first");
+    recordEvent(game, OPTIONS, "push", "one", "first");
     await flushEventsWith({ claude: () => adapter, codex: () => adapter }, game);
     expect(adapter.deliver).not.toHaveBeenCalled();
     expect(events(game)[0]?.sent).toBe(false);
@@ -326,9 +306,9 @@ describe("flushEventsWith", () => {
 
   it("delivers in creation order to the recipient and marks only accepted events", async () => {
     const game = setup();
-    emitEvent(game, OPTIONS, "push", "one", "first");
-    emitEvent(game, OPTIONS, "push", "two", "second");
-    emitEvent(game, OPTIONS, "push", "three", "third");
+    recordEvent(game, OPTIONS, "push", "one", "first");
+    recordEvent(game, OPTIONS, "push", "two", "second");
+    recordEvent(game, OPTIONS, "push", "three", "third");
     const adapter = mockAdapter(["accepted", "deferred"]);
     await flushEventsWith({ claude: () => adapter }, game);
     expect(adapter.deliver).toHaveBeenCalledTimes(2);
@@ -354,7 +334,7 @@ describe("flushEventsWith", () => {
 
   it("does nothing while another flush holds dispatch.lock", async () => {
     const game = setup();
-    emitEvent(game, OPTIONS, "push", "one", "first");
+    recordEvent(game, OPTIONS, "push", "one", "first");
     const adapter = mockAdapter([]);
     const lock = holdLock(join(eventsDir(game), "dispatch.lock"));
     try {
@@ -367,7 +347,7 @@ describe("flushEventsWith", () => {
 
   it("defers every event when the active harness has no adapter", async () => {
     const game = setup();
-    emitEvent(game, OPTIONS, "push", "one", "first");
+    recordEvent(game, OPTIONS, "push", "one", "first");
     await flushEventsWith({}, game);
     expect(events(game)[0]).toMatchObject({ sent: false });
   });
@@ -392,12 +372,12 @@ describe("flushEventsWith", () => {
     const claude = mockAdapter([]);
     const codex = mockAdapter([]);
     const adapters = { claude: () => claude, codex: () => codex };
-    emitEvent(game, OPTIONS, "push", "one", "first");
+    recordEvent(game, OPTIONS, "push", "one", "first");
     await flushEventsWith(adapters, game);
     updateRegistry(layout, 2, (draft) => {
       draft.harness = "codex";
     });
-    emitEvent(game, OPTIONS, "push", "two", "second");
+    recordEvent(game, OPTIONS, "push", "two", "second");
     await flushEventsWith(adapters, game);
     expect(claude.deliver.mock.calls.map((call) => [call[2], call[3]])).toEqual([
       [CLAUDE_COORDINATOR, expect.stringContaining("first")],

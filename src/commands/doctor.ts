@@ -12,8 +12,8 @@ export const DOCTOR_OPTIONS = {
 } as const;
 
 const USAGE =
-  "delivery-kit harness doctor --game ID ... [--role ROLE ...]\n" +
-  "delivery-kit harness doctor --role ROLE ...";
+  "coordination-kit harness doctor --game ID ... [--role ROLE ...]\n" +
+  "coordination-kit harness doctor --role ROLE ...";
 
 export const harnessDoctor: Handler = async (io, root, args) => {
   let values;
@@ -30,7 +30,7 @@ export const harnessDoctor: Handler = async (io, root, args) => {
       throw new Error("scope required");
     }
   } catch {
-    io.err(`delivery-kit: invalid_doctor_scope\n${USAGE}\n`);
+    io.err(`coordination-kit: invalid_doctor_scope\n${USAGE}\n`);
     return EXIT_USAGE;
   }
   try {
@@ -42,7 +42,7 @@ export const harnessDoctor: Handler = async (io, root, args) => {
     io.out(`${JSON.stringify(report)}\n`);
     return report.roles.some((row) => row.failed_layer !== null) ? EXIT_INVALID : EXIT_OK;
   } catch {
-    io.err("delivery-kit: doctor_configuration_unavailable\n");
+    io.err("coordination-kit: doctor_configuration_unavailable\n");
     return EXIT_INVALID;
   }
 };

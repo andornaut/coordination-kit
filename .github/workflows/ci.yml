@@ -81,7 +81,7 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           npm --prefix tests/contract ci --ignore-scripts --no-audit --no-fund
       - name: Types and lint
-        run: npm run check && npm run lint:node && npm run lint:markdown
+        run: npm run check && npm run lint:node && npm run lint:markdown && npm run lint:work
   build:
     needs: changes
     if: needs.changes.outputs.code == 'true'
@@ -151,7 +151,7 @@ jobs:
       - name: Build the npm release asset offline
         run: |
           docker run --rm --user 19001:19001 --env HOME=/tmp \
-            --mount type=volume,src=delivery-kit-npm-check,dst=/var/tmp \
+            --mount type=volume,src=coordination-kit-npm-check,dst=/var/tmp \
             --mount type=bind,src="$PWD",dst=/source,readonly \
             "node:$(sed 's/^v//' .nvmrc)" sh -ec \
             'cp /source/package.json /source/package-lock.json /tmp && cd /tmp && npm ci --ignore-scripts --no-audit --no-fund --cache /var/tmp/npm'

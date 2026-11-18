@@ -60,7 +60,7 @@ export interface GameLayout {
   readonly configFile: string;
   /** var/games/<g>/ */
   readonly stateDir: string;
-  /** var/games/<g>/bus/: the bus state directory (file names in bus/state.ts). */
+  /** var/games/<g>/bus/: the bus state directory; delivery-kit names its runner files there. */
   readonly busDir: string;
 }
 

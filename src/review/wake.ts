@@ -31,7 +31,7 @@ import {
 import type { HarnessAdapter, Inventory } from "../adapters/types.ts";
 import { loadProjectConfig } from "../config.ts";
 import { readJson } from "../durable.ts";
-import { emitEvent } from "../events.ts";
+import { recordEvent } from "../events.ts";
 import type { GameLayout, Layout } from "../layout.ts";
 import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
 import { resolveRole } from "../registry/resolve.ts";
@@ -308,7 +308,7 @@ async function codexSlot(
   const state = await runSlot({
     busDir: game.busDir,
     claude: claudeAdapter(process.env, game),
-    emit: (kind, key, message) => emitEvent(game, { project }, kind, key, message),
+    emit: (kind, key, message) => recordEvent(game, { project }, kind, key, message),
     harnesses:
       scope.harnesses ??
       Object.fromEntries(
@@ -331,7 +331,7 @@ async function codexSlot(
  * now. A route this runner does not host, a held route or no route returns "" before any native
  * call.
  */
-export async function deliverScheduledWake(
+export async function deliverScheduledReview(
   layout: Layout,
   game: GameLayout,
   slot: number,

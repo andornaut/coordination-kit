@@ -1,4 +1,4 @@
-// @andornaut/delivery-kit/registry: the typed public registry module.
+// @andornaut/coordination-kit/build/registry: the typed public registry module.
 export {
   type GameCoordinatorConfig,
   type GameEntry,

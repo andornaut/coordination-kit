@@ -6,7 +6,7 @@ import { afterEach, expect } from "vitest";
 import { CodexSocket, type RpcCall } from "../lib/codex-socket.ts";
 import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
 import { ART, emptyQueue, GAMEPLAY, STALE, TECH } from "../lib/unblock-native.ts";
-import { Reviewed, wake } from "../lib/unblock-runner.ts";
+import { Reviewed, wake } from "../lib/unblock-review.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
 const STDOUT_KEYS = [

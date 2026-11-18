@@ -4,7 +4,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 
-import { type Command, impl, type Resident, type Result, start, startRunnerAt } from "./adapter.ts";
+import { type Command, execute, impl, type Resident, type Result, start } from "./adapter.ts";
 import type { CodexSocket } from "./codex-socket.ts";
 import type { Workspace } from "./workspace.ts";
 import type { Json } from "./json.ts";
@@ -135,32 +135,9 @@ function parseReview(stdout: string): Tick["review"] {
   return rows;
 }
 
-/**
- * Run the resident runner from `lead` virtual seconds before `slot` until the observer reports
- * that slot (or `done` holds), then stop it. The clock is held until the runner is armed, and the
- * default lead of one observer interval puts the observer's first wakeup at the slot itself, so
- * the whole wall minute absorbs scheduling lag. The observer dispatches only the current wall
- * minute; a negative lead starts the runner after the slot has begun, which it never replays.
- * Without a report it settles for `settle` virtual seconds, enough for two observer passes.
- */
-export async function tick(
-  ws: Workspace,
-  slot: number,
-  options: {
-    done?: (out: { stdout: string; stderr: string }) => boolean;
-    settle?: number;
-    lead?: number;
-  } = {},
-): Promise<Tick> {
-  const runner = await startRunnerAt(ws, slot - (options.lead ?? 60));
-  const done =
-    options.done ??
-    (({ stdout, stderr }) =>
-      stdout.includes(`bus: scheduled review ${slot}`) ||
-      /review (deferred|\d+ unavailable)/.test(stderr));
-  const settle = slot + (options.settle ?? 150);
-  await runner.until(() => done(runner.output()) || virtualNow(ws) >= settle, 30_000);
-  const result = await runner.stop();
+/** One scheduled review pass at `slot` through the built seam, as the runner observer makes it. */
+export async function tick(ws: Workspace, slot: number): Promise<Tick> {
+  const result = await execute(impl.review(ws, slot));
   return { ...result, review: parseReview(result.stdout) };
 }
 

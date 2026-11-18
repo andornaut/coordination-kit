@@ -12,7 +12,7 @@ import { MessageStore } from "../messages/store.ts";
 import { readRegistry, updateRegistry } from "../registry/index.ts";
 import { projectConfig, writeFixtureJson } from "../testFixtures.ts";
 import { type ClaudeFixture, claudeFixture, GAME, RECIPIENT, SLOT, TECH } from "./fixtures.ts";
-import { DEFERRED_PREFIX, deliverScheduledWake } from "./wake.ts";
+import { DEFERRED_PREFIX, deliverScheduledReview } from "./wake.ts";
 
 function useEnv(fixture: ClaudeFixture): void {
   for (const [key, value] of Object.entries(fixture.env)) {
@@ -48,7 +48,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("deliverScheduledWake (claude)", () => {
+describe("deliverScheduledReview (claude)", () => {
   it("spools one brief for the configured recipient and deduplicates the slot", async () => {
     const fixture = claudeFixture();
     useEnv(fixture);
@@ -67,7 +67,7 @@ describe("deliverScheduledWake (claude)", () => {
     });
     const lock = holdLock(join(fixture.unblock, "unblock.lock"));
     try {
-      expect(JSON.parse(await deliverScheduledWake(fixture.layout, fixture.game, SLOT))).toEqual({
+      expect(JSON.parse(await deliverScheduledReview(fixture.layout, fixture.game, SLOT))).toEqual({
         status: "busy",
       });
       expect(existsSync(join(fixture.unblock, `${RECIPIENT}-${SLOT}.json`))).toBe(false);
@@ -76,7 +76,7 @@ describe("deliverScheduledWake (claude)", () => {
     } finally {
       lock.release();
     }
-    const first = await deliverScheduledWake(fixture.layout, fixture.game, SLOT);
+    const first = await deliverScheduledReview(fixture.layout, fixture.game, SLOT);
     expect(JSON.parse(first)).toMatchObject({
       status: "sending",
       recipient: RECIPIENT,
@@ -84,7 +84,7 @@ describe("deliverScheduledWake (claude)", () => {
       message_backlog_slots: 1,
       message_health_status: "ok",
     });
-    expect(JSON.parse(await deliverScheduledWake(fixture.layout, fixture.game, SLOT))).toEqual({
+    expect(JSON.parse(await deliverScheduledReview(fixture.layout, fixture.game, SLOT))).toEqual({
       status: "deduplicated",
       previousStatus: "sending",
       reason: null,
@@ -112,7 +112,7 @@ describe("deliverScheduledWake (claude)", () => {
     );
     await deliverPending(() => undefined, fixture.game.busDir, RECIPIENT);
     expect(
-      JSON.parse(await deliverScheduledWake(fixture.layout, fixture.game, SLOT + 1800)),
+      JSON.parse(await deliverScheduledReview(fixture.layout, fixture.game, SLOT + 1800)),
     ).toMatchObject({
       status: "sending",
       message_backlog_slots: 2,
@@ -126,7 +126,7 @@ describe("deliverScheduledWake (claude)", () => {
     const fixture = claudeFixture();
     useEnv(fixture);
     breakLocalInbox(fixture);
-    const first = JSON.parse(await deliverScheduledWake(fixture.layout, fixture.game, SLOT));
+    const first = JSON.parse(await deliverScheduledReview(fixture.layout, fixture.game, SLOT));
     expect(first).toMatchObject({
       status: "sending",
       message_health_status: "unknown",
@@ -143,7 +143,7 @@ describe("deliverScheduledWake (claude)", () => {
     expect(queuedBrief(fixture, SLOT)).toContain("unavailable/unknown");
     await deliverPending(() => undefined, fixture.game.busDir, RECIPIENT);
     expect(
-      JSON.parse(await deliverScheduledWake(fixture.layout, fixture.game, SLOT + 1800)),
+      JSON.parse(await deliverScheduledReview(fixture.layout, fixture.game, SLOT + 1800)),
     ).toMatchObject({
       status: "sending",
       message_health_status: "unknown",
@@ -155,7 +155,7 @@ describe("deliverScheduledWake (claude)", () => {
     const fixture = claudeFixture();
     useEnv(fixture);
     fixture.route({ host: "chibis-way-home" });
-    expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toBe("");
+    expect(await deliverScheduledReview(fixture.layout, fixture.game, SLOT)).toBe("");
   });
 
   it("defers when the host's recipient has no conversation for the active harness", async () => {
@@ -164,7 +164,7 @@ describe("deliverScheduledWake (claude)", () => {
     const config = projectConfig("Archie");
     (config.reports as Record<string, unknown>).recipient = "art-kit";
     writeFixtureJson(fixture.game.configFile, config);
-    expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toContain(
+    expect(await deliverScheduledReview(fixture.layout, fixture.game, SLOT)).toContain(
       "recipient has no conversation for the active harness",
     );
     expect(existsSync(join(fixture.unblock, `${RECIPIENT}-${SLOT}.json`))).toBe(false);
@@ -174,7 +174,7 @@ describe("deliverScheduledWake (claude)", () => {
     const fixture = claudeFixture();
     useEnv(fixture);
     fixture.route({ targets: [RECIPIENT] });
-    expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toBe(
+    expect(await deliverScheduledReview(fixture.layout, fixture.game, SLOT)).toBe(
       `${DEFERRED_PREFIX}review route is unavailable or invalid; ` +
         "its owner must verify identities and ownership",
     );
@@ -182,7 +182,7 @@ describe("deliverScheduledWake (claude)", () => {
   });
 });
 
-describe("deliverScheduledWake (codex)", () => {
+describe("deliverScheduledReview (codex)", () => {
   function codexFixture(): ClaudeFixture {
     const fixture = claudeFixture();
     const registry = readRegistry(fixture.layout);
@@ -273,7 +273,7 @@ describe("deliverScheduledWake (codex)", () => {
     const control = await startFakeControl(fixture.base, handler(steers));
     vi.stubEnv("CODEX_CONTROL_SOCKET", control.path);
     try {
-      const first = JSON.parse(await deliverScheduledWake(fixture.layout, game, SLOT)) as Record<
+      const first = JSON.parse(await deliverScheduledReview(fixture.layout, game, SLOT)) as Record<
         string,
         unknown
       >;
@@ -298,20 +298,19 @@ describe("deliverScheduledWake (codex)", () => {
       expect(
         control.calls.flatMap((call) => [call.params.threadId, call.params.parentThreadId]),
       ).not.toContain(claudeTech);
-      const repeated = JSON.parse(await deliverScheduledWake(fixture.layout, game, SLOT)) as Record<
-        string,
-        unknown
-      >;
+      const repeated = JSON.parse(
+        await deliverScheduledReview(fixture.layout, game, SLOT),
+      ) as Record<string, unknown>;
       expect(repeated.status).toBe("deduplicated");
       const next = JSON.parse(
-        await deliverScheduledWake(fixture.layout, game, SLOT + 1800),
+        await deliverScheduledReview(fixture.layout, game, SLOT + 1800),
       ) as Record<string, unknown>;
       expect(next.status).toBe("accepted");
       expect(steers).toHaveLength(2);
       expect(control.calls.filter((call) => call.method === "initialize")).toHaveLength(3);
       writeFileSync(clearance, JSON.stringify({ state: "pending", thread_id: RECIPIENT }));
       const guarded = JSON.parse(
-        await deliverScheduledWake(fixture.layout, game, SLOT + 3600),
+        await deliverScheduledReview(fixture.layout, game, SLOT + 3600),
       ) as Record<string, unknown>;
       expect(guarded.status).toBe("deferred");
       expect(steers).toHaveLength(2);
@@ -346,7 +345,7 @@ describe("deliverScheduledWake (codex)", () => {
     vi.stubEnv("CODEX_CONTROL_SOCKET", control.path);
     try {
       const first = JSON.parse(
-        await deliverScheduledWake(fixture.layout, fixture.game, SLOT),
+        await deliverScheduledReview(fixture.layout, fixture.game, SLOT),
       ) as Record<string, unknown>;
       expect(first).toMatchObject({
         review_status: "ok",
@@ -369,12 +368,12 @@ describe("deliverScheduledWake (codex)", () => {
       ) as Record<string, unknown>;
       expect(receipt).toMatchObject({ attempt: 1, method: "turn/steer", status: "accepted" });
       const second = JSON.parse(
-        await deliverScheduledWake(fixture.layout, fixture.game, SLOT),
+        await deliverScheduledReview(fixture.layout, fixture.game, SLOT),
       ) as Record<string, unknown>;
       expect(second).toMatchObject({ previousStatus: "accepted", status: "deduplicated" });
       expect(steers).toHaveLength(1);
       const next = JSON.parse(
-        await deliverScheduledWake(fixture.layout, fixture.game, SLOT + 1800),
+        await deliverScheduledReview(fixture.layout, fixture.game, SLOT + 1800),
       );
       expect(next).toMatchObject({
         status: "accepted",
@@ -401,9 +400,9 @@ describe("deliverScheduledWake (codex)", () => {
     const control = await startFakeControl(fixture.base, handler(steers));
     vi.stubEnv("CODEX_CONTROL_SOCKET", control.path);
     try {
-      const first = JSON.parse(await deliverScheduledWake(fixture.layout, fixture.game, SLOT));
+      const first = JSON.parse(await deliverScheduledReview(fixture.layout, fixture.game, SLOT));
       const second = JSON.parse(
-        await deliverScheduledWake(fixture.layout, fixture.game, SLOT + 1800),
+        await deliverScheduledReview(fixture.layout, fixture.game, SLOT + 1800),
       );
       expect(first).toMatchObject({
         status: "accepted",
@@ -430,7 +429,7 @@ describe("deliverScheduledWake (codex)", () => {
     vi.stubEnv("CODEX_CONTROL_SOCKET", control.path);
     try {
       fixture.clear("pending");
-      expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toContain(
+      expect(await deliverScheduledReview(fixture.layout, fixture.game, SLOT)).toContain(
         '"status": "deferred"',
       );
       expect(steers).toEqual([]);
@@ -438,11 +437,11 @@ describe("deliverScheduledWake (codex)", () => {
       await control.close();
     }
     vi.stubEnv("CODEX_CONTROL_SOCKET", join(fixture.base, "missing.sock"));
-    expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT + 60)).toContain(
+    expect(await deliverScheduledReview(fixture.layout, fixture.game, SLOT + 60)).toContain(
       "CODEX_CONTROL_SOCKET",
     );
     vi.stubEnv("CODEX_CONTROL_SOCKET", "relative.sock");
-    expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT + 120)).toBe(
+    expect(await deliverScheduledReview(fixture.layout, fixture.game, SLOT + 120)).toBe(
       `${DEFERRED_PREFIX}provide CODEX_CONTROL_SOCKET and the installed unblock helper`,
     );
   });

@@ -1,24 +1,20 @@
 {
-  "name": "@andornaut/delivery-kit",
-  "version": "4.7.0",
-  "description": "Local scheduled Git delivery with an isolated gate, exact-commit CI watch and deployment.",
+  "name": "@andornaut/coordination-kit",
+  "version": "1.0.0",
+  "description": "Role registry, durable role messages and their transports, harness adapters, the request ledger, the filesystem work protocol and work-file checks for the game and kit roles.",
   "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=24.21.0"
   },
   "bin": {
-    "delivery-kit": "dist/cli.js"
+    "coordination-kit": "dist/cli.js"
   },
   "exports": {
     "./package.json": "./package.json",
     "./build/registry": {
       "types": "./dist/registry.d.ts",
       "import": "./dist/registry.js"
-    },
-    "./build/source-identity": {
-      "types": "./dist/source-identity.d.ts",
-      "import": "./dist/source-identity.js"
     },
     "./build/transport": {
       "types": "./dist/transport.d.ts",
@@ -32,25 +28,17 @@
       "types": "./dist/protocol.d.ts",
       "import": "./dist/protocol.js"
     },
-    "./registry": {
-      "types": "./dist/registry.d.ts",
-      "import": "./dist/registry.js"
+    "./build/review": {
+      "types": "./dist/review.d.ts",
+      "import": "./dist/review.js"
     },
-    "./source-identity": {
-      "types": "./dist/source-identity.d.ts",
-      "import": "./dist/source-identity.js"
+    "./build/events": {
+      "types": "./dist/events.d.ts",
+      "import": "./dist/events.js"
     },
-    "./transport": {
-      "types": "./dist/transport.d.ts",
-      "import": "./dist/transport.js"
-    },
-    "./accounting": {
-      "types": "./dist/accounting.d.ts",
-      "import": "./dist/accounting.js"
-    },
-    "./protocol": {
-      "types": "./dist/protocol.d.ts",
-      "import": "./dist/protocol.js"
+    "./build/shared": {
+      "types": "./dist/shared.d.ts",
+      "import": "./dist/shared.js"
     }
   },
   "files": [
@@ -63,16 +51,15 @@
     "docs/registry.md",
     "docs/request-accounting.md",
     "docs/review.md",
-    "docs/runner.md",
-    "docs/state.md",
     "docs/upgrading.md",
+    "docs/work-files.md",
     "docs/work-protocol.md",
     "docs/design/README.md",
+    "docs/design/coordination.md",
     "docs/design/messages.md",
     "docs/design/packaging.md",
     "docs/design/registry.md",
     "docs/design/review.md",
-    "docs/design/runner.md",
     "docs/design/work-protocol.md",
     "LICENSE",
     "SOURCE_COMMIT"
@@ -82,10 +69,11 @@
     "check": "tsc && npm --prefix tests/contract run check",
     "contract": "node scripts/contract.ts",
     "format": "prettier --write . && eslint --fix .",
-    "lint": "npm run lint:node && npm run lint:markdown && npm run lint:shell",
+    "lint": "npm run lint:node && npm run lint:markdown && npm run lint:work && npm run lint:shell",
     "lint:markdown": "markdownlint-cli2",
     "lint:node": "prettier --check . && eslint --max-warnings 0 .",
     "lint:shell": "shellcheck -x -P SCRIPTDIR scripts/*.sh tests/contract/run.sh",
+    "lint:work": "node src/bin.ts work check",
     "pack": "node scripts/pack.ts",
     "prepare": "husky",
     "test": "vitest run --maxWorkers=4",
@@ -111,9 +99,9 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/andornaut/delivery-kit.git"
+    "url": "https://github.com/andornaut/coordination-kit.git"
   },
-  "homepage": "https://github.com/andornaut/delivery-kit#readme",
+  "homepage": "https://github.com/andornaut/coordination-kit#readme",
   "overrides": {
     "@eslint/config-array": {
       "minimatch": "11.0.3"

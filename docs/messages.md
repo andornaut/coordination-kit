@@ -19,8 +19,8 @@ is not child delivery or handling.
 Pull full stored payloads explicitly:
 
 ```bash
-delivery-kit --root /path/to/game-coordinator message status --id UUID --include-body
-delivery-kit message status --recipient game-kit --include-body --root /path/to/game-coordinator
+coordination-kit --root /path/to/game-coordinator message status --id UUID --include-body
+coordination-kit message status --recipient game-kit --include-body --root /path/to/game-coordinator
 ```
 
 Status requires exactly one of `--id UUID` or `--recipient ROLE`; `--include-body` opts into
@@ -64,7 +64,7 @@ do not count accepted native sends. A local or question-guard refusal is distinc
 native-send rejection or an unknown send outcome. Raw native messages, context and unknown
 codes are not exposed. Older receipts without diagnostics remain readable; absence supplies
 no historical cause or clearance. `DeliveryDiagnostic` and `NativeRpcCode` are type-only
-exports from `@andornaut/delivery-kit/build/transport` and its compatibility alias.
+exports from `@andornaut/coordination-kit/build/transport` and its compatibility alias.
 A `pending-question` diagnostic means clearance was not proved, not that a user question is
 necessarily unanswered. An adapter receipt of `deduplicated` means the recipient already holds
 that exact request: the transport reports it as `accepted` with a `deduplicated` diagnostic and

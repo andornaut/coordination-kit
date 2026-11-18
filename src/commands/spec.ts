@@ -1,7 +1,5 @@
 // Every command's options: the one source for argument parsing and for the help text, so a flag a
-// command accepts always appears in `delivery-kit --help`.
-import type { ParseArgsConfig } from "node:util";
-
+// command accepts always appears in `coordination-kit --help`.
 import {
   LEDGER_BOUNDARY_OPTIONS,
   LEDGER_COVERAGE_OPTIONS,
@@ -27,17 +25,10 @@ import {
   PROTOCOL_ROLE_OPTIONS,
   PROTOCOL_ROOT_OPTIONS,
 } from "./protocol.ts";
-export type Options = NonNullable<ParseArgsConfig["options"]>;
-export interface CommandSpec {
-  readonly summary: string;
-  readonly values?: Readonly<Record<string, string>>;
-  readonly options: Options;
-  /**
-   * The accepted forms. Each lists the options it takes in help order; a trailing `?` marks one
-   * as optional. Every option appears in at least one form.
-   */
-  readonly forms: readonly (readonly string[])[];
-}
+import { type CommandSpec, formSynopsis, usageText } from "./usage.ts";
+import { WORK_OPTIONS } from "./work.ts";
+export type { CommandSpec, Options } from "./usage.ts";
+export const BINARY = "coordination-kit";
 /** The placeholder each string option shows in help. */
 const VALUES: Readonly<Record<string, string>> = {
   at: "ISO_TIMESTAMP",
@@ -62,20 +53,18 @@ const VALUES: Readonly<Record<string, string>> = {
   "queue-id": "ID",
   reason: "TEXT",
   recipient: "ROLE|UUID",
-  requester: "ROLE",
   role: "ROLE",
   snapshot: "UUID",
-  state: "enabled|paused",
   "state-dir": "STATE/unblock",
 };
 /** Help groups, in help order. */
 export const GROUPS = {
-  game: "game operations",
   harness: "harness (claude, codex)",
   inbox: "inbox (recipient)",
   ledger: "request accounting",
   message: "durable role messages",
   protocol: "explicit filesystem work protocol",
+  work: "repository work files",
 } as const;
 export interface GroupedSpec extends CommandSpec {
   readonly group: keyof typeof GROUPS;
@@ -97,14 +86,8 @@ const READY = {
   summary:
     "probe whether this harness can deliver now; prints one JSON line, exits 0 when ready, 1 when not",
 } as const satisfies GroupedSpec;
-/** Commands by their words: a top-level game verb, or a noun group and its verb. */
+/** Commands by their words: a noun group and its verb. */
 export const SPECS = {
-  "check-config": {
-    forms: [["game?"]],
-    group: "game",
-    options: GAME,
-    summary: "validate config.json, var/registry.json, var/route.json and each delivery-kit.json",
-  },
   "claude channel": {
     forms: [["game?", "conversation?", "state-dir?", "poll-seconds?"]],
     group: "harness",
@@ -118,17 +101,6 @@ export const SPECS = {
   },
   "claude ready": READY,
   "codex ready": READY,
-  control: {
-    forms: [["game", "state", "reason", "requester"]],
-    group: "game",
-    options: {
-      ...GAME,
-      reason: { type: "string" },
-      requester: { type: "string" },
-      state: { type: "string" },
-    },
-    summary: "persist the requested delivery state without starting a runner",
-  },
   "harness doctor": {
     forms: [["game", "role?"], ["role"]],
     group: "harness",
@@ -443,54 +415,26 @@ export const SPECS = {
     options: PROTOCOL_INPUT_OPTIONS,
     summary: "Explicit protocol work-submit operation; no native delivery or owner activation",
   },
-  request: {
-    forms: [["game", "id"]],
-    group: "game",
-    options: { ...GAME, id: { type: "string" } },
-    summary: "record a user-authorized one-off departure request",
-  },
-  run: {
-    forms: [["game"]],
-    group: "game",
-    options: GAME,
-    summary: "run one game's resident delivery runner",
-  },
-  "runner unit": {
-    forms: [["game"]],
-    group: "game",
-    options: GAME,
+  "work check": {
+    forms: [[]],
+    group: "work",
+    options: WORK_OPTIONS,
     summary:
-      "print the optional systemd user unit for the game's resident runner; installs nothing",
+      "validate docs/design index tables and docs/work front matter in the --root repository",
   },
-  status: {
-    forms: [["game", "resources?"]],
-    group: "game",
-    options: { ...GAME, resources: { type: "boolean" } },
-    summary:
-      "print the read-only runner and delivery status, or with --resources the resource report",
+  "work report": {
+    forms: [[]],
+    group: "work",
+    options: WORK_OPTIONS,
+    summary: "print each work item's milestone, with live protocol state when a coordinator is set",
   },
 } as const satisfies Readonly<Record<string, GroupedSpec>>;
 export type Command = keyof typeof SPECS;
-function flag(spec: CommandSpec, token: string): string {
-  const optional = token.endsWith("?");
-  const name = optional ? token.slice(0, -1) : token;
-  const option = spec.options[name];
-  if (option === undefined) {
-    throw new Error(`help names an unknown option --${name}`);
-  }
-  const value =
-    option.type === "string" ? ` ${spec.values?.[name] ?? VALUES[name] ?? "VALUE"}` : "";
-  const text = `--${name}${value}${option.multiple === true ? " ..." : ""}`;
-  return optional ? `[${text}]` : text;
-}
-/** One `delivery-kit COMMAND ...` line per accepted form. */
+/** One `coordination-kit COMMAND ...` line per accepted form. */
 export function synopsis(command: Command): string[] {
-  const spec: GroupedSpec = SPECS[command];
-  return spec.forms.map((form) => [command, ...form.map((token) => flag(spec, token))].join(" "));
+  return formSynopsis(VALUES, command, SPECS[command]);
 }
 /** The usage line a command prints with a usage error. */
 export function commandUsage(command: Command): string {
-  return synopsis(command)
-    .map((line, index) => `${index === 0 ? "usage:" : "      "} delivery-kit ${line}`)
-    .join("\n");
+  return usageText(BINARY, synopsis(command));
 }

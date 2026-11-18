@@ -1,4 +1,4 @@
-// Shared command contract: exit codes, process I/O and handler shape.
+// Shared command contract: exit codes, process I/O, handler shape and coordinator root lookup.
 export const EXIT_OK = 0;
 export const EXIT_INVALID = 1;
 export const EXIT_USAGE = 2;
@@ -13,3 +13,8 @@ export interface Io {
 }
 
 export type Handler = (io: Io, root: string, args: string[]) => number | Promise<number>;
+
+/** The coordinator root the environment names: COORDINATION_KIT_ROOT, else DELIVERY_KIT_ROOT. */
+export function coordinatorRoot(env: NodeJS.ProcessEnv): string | undefined {
+  return env.COORDINATION_KIT_ROOT ?? env.DELIVERY_KIT_ROOT;
+}

@@ -10,10 +10,12 @@
   },
   "include": [],
   "files": [
-    "src/registry/index.ts",
-    "src/source-identity.ts",
-    "src/transport.ts",
     "src/accounting.ts",
-    "src/protocol.ts"
+    "src/events.ts",
+    "src/protocol.ts",
+    "src/registry/index.ts",
+    "src/review.ts",
+    "src/shared.ts",
+    "src/transport.ts"
   ]
 }

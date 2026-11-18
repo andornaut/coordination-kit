@@ -4,17 +4,15 @@ import { rmSync } from "node:fs";
 
 import { afterEach, expect } from "vitest";
 
-import { execute, impl } from "../lib/adapter.ts";
 import {
   contract,
-  EXIT_INVALID,
   ROUTE_INVALID_MESSAGE,
   suite,
   WORKER_PARENTS_ROUTE_MESSAGE,
   workspaces,
 } from "../lib/cases.ts";
 import { ART, type Params, TECH } from "../lib/unblock-native.ts";
-import { decide, Reviewed, wake } from "../lib/unblock-runner.ts";
+import { decide, Reviewed, wake } from "../lib/unblock-review.ts";
 import type { Workspace } from "../lib/workspace.ts";
 import { routeRole, setRecipient } from "../lib/routes.ts";
 
@@ -467,37 +465,34 @@ suite("unblock guards", () => {
     },
   );
 
-  contract(
-    "duplicate or noncanonical worker parents stop the runner before any native connection",
-    async () => {
-      const ws = workspace();
-      const m = await routed(ws);
-      const registry = (parents: string[]) =>
-        ws.writeRegistry({
-          schema: 1,
-          revision: 1,
-          harness: "codex",
-          roles: Object.fromEntries(
-            parents.map((id, i) => [`parent-${i}`, { conversations: { codex: id } }]),
-          ),
-        });
-      // 1.0 addresses parents by role: two roles sharing a conversation are outside the
-      // active route, so the wake defers with the workerParents wording. A noncanonical
-      // conversation makes the registry invalid, so the runner does not start.
-      registry([ART, ART]);
-      ws.config.reports = { workerParents: ["parent-0", "parent-1"] };
-      await m.start();
-      const output = await m.jump(wake(0), (text) => text.includes("review deferred"));
-      expect(output).toContain(WORKER_PARENTS_ROUTE_MESSAGE);
-      await m.stop();
-      registry(["ABCDEFAB-0000-0000-0000-000000000002"]);
-      ws.config.reports = { workerParents: ["parent-0"] };
-      // Bounded: a runner that starts anyway is killed at the wait ceiling and fails here.
-      const result = await execute(impl.run(ws));
-      expect(result.code, result.stderr).toBe(EXIT_INVALID);
-      expect(result.stderr).toContain("registry.json");
+  contract("duplicate or noncanonical worker parents never reach a native connection", async () => {
+    const ws = workspace();
+    const m = await routed(ws);
+    const registry = (parents: string[]) =>
+      ws.writeRegistry({
+        schema: 1,
+        revision: 1,
+        harness: "codex",
+        roles: Object.fromEntries(
+          parents.map((id, i) => [`parent-${i}`, { conversations: { codex: id } }]),
+        ),
+      });
+    // Parents are addressed by role: two roles sharing a conversation are outside the active
+    // route, so the review defers with the workerParents wording. A noncanonical conversation
+    // makes the registry invalid, so the review is blocked before any native call.
+    registry([ART, ART]);
+    ws.config.reports = { workerParents: ["parent-0", "parent-1"] };
+    await m.start();
+    const output = await m.jump(wake(0), (text) => text.includes("review deferred"));
+    expect(output).toContain(WORKER_PARENTS_ROUTE_MESSAGE);
+    await m.stop();
+    registry(["ABCDEFAB-0000-0000-0000-000000000002"]);
+    ws.config.reports = { workerParents: ["parent-0"] };
+    expect((await m.slot(wake(1))).result).toEqual({
+      reason: "review route or state unavailable",
+      status: "blocked",
+    });
 
-      expect(m.socket.connections).toEqual([]);
-    },
-  );
+    expect(m.socket.connections).toEqual([]);
+  });
 });

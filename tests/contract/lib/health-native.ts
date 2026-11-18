@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach } from "vitest";
 
-import { cli, type Result, startRunnerAt } from "./adapter.ts";
+import { cli, execute, impl, type Result } from "./adapter.ts";
 import { CodexSocket, type RpcCall } from "./codex-socket.ts";
 import { sleep } from "./time.ts";
 import type { Workspace } from "./workspace.ts";
@@ -89,9 +89,9 @@ export interface Scheduled {
 }
 
 /**
- * One scheduled review slot through the resident runner. The collector compares the slot
- * with the real wall clock, so the virtual slot is the current real minute (lag 0) or an
- * earlier one (lag in seconds). Waits for the slot's health record, then stops the runner.
+ * One scheduled review slot through the built seam, as the runner observer makes it. The
+ * collector compares the slot with the real wall clock, so the slot is the current real minute
+ * (lag 0) or an earlier one (lag in seconds).
  */
 export async function scheduled(
   ws: Workspace,
@@ -99,7 +99,7 @@ export async function scheduled(
   lag = 0,
   prepare: (slot: number) => void = () => undefined,
 ): Promise<Scheduled> {
-  let slot = 0;
+  let slot: number;
   for (;;) {
     const now = Date.now() / 1000;
     const minute = Math.floor(now / 60) * 60;
@@ -110,26 +110,11 @@ export async function scheduled(
     await sleep((minute + 60 - now) * 1000 + 200);
   }
   prepare(slot);
-  const wake = Math.floor(slot / 60) % 60;
-  ws.updateCoordinatorConfig({ wakeMinutes: [wake] });
-  ws.config.schedule = {
-    departures: [String((wake + 30) % 60).padStart(2, "0")],
-    timezone: "America/Toronto",
-  };
   ws.env.CODEX_CONTROL_SOCKET = socket.path;
-  // Arm the runner one virtual minute early: the observer's first wakeup lands on the slot.
-  const runner = await startRunnerAt(ws, slot - 60);
+  const pass = await execute(impl.review(ws, slot));
   const healthName = `unblock/health/${M}.json`;
-  try {
-    await runner.until(() => {
-      try {
-        return (ws.readJson<{ seen_slots?: number[] }>(healthName).seen_slots ?? []).includes(slot);
-      } catch {
-        return false;
-      }
-    }, 40_000);
-  } finally {
-    await runner.stop();
+  if (!(ws.readJson<{ seen_slots?: number[] }>(healthName).seen_slots ?? []).includes(slot)) {
+    throw new Error(`slot ${slot} recorded no health\n${pass.stdout}${pass.stderr}`);
   }
   const receipt = ws.readJson(`unblock/${M}-${slot}.json`);
   const text = readFileSync(String(receipt.snapshot_path), "utf8");

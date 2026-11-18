@@ -1,17 +1,17 @@
-// Bus events: durable enqueue with sha256(kind:key) dedupe and bounded delivery.
+// Bus event outbox: durable enqueue with sha256(kind:key) dedupe and bounded delivery.
 //
-// emitEvent records an event once under events/state.lock and tracks per-SHA CI and deployment
-// state, adding a `complete` event when a pushed commit has CI success and a finished deployment.
-// flushEvents delivers unsent events in creation order under the non-blocking dispatch.lock,
-// through the recipient's selected adapter, and marks an event sent only after its delivery is
-// accepted. The first event not accepted stops the flush; a later flush resumes there.
+// recordEvent records an event once under events/state.lock; a producer may derive further state
+// under the same lock (delivery-kit tracks per-SHA CI and deployment state there). flushEvents
+// delivers unsent events in creation order under the non-blocking dispatch.lock, through the
+// recipient's selected adapter, and marks an event sent only after its delivery is accepted. The
+// first event not accepted stops the flush; a later flush resumes there.
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { claudeAdapter } from "./adapters/claude/index.ts";
 import { codexAdapter, type ReceiptSeed } from "./adapters/codex/index.ts";
-import { eventRequestId, isCanonicalUuid, SHA_PATTERN } from "./adapters/shared/ids.ts";
+import { eventRequestId, isCanonicalUuid } from "./adapters/shared/ids.ts";
 import { dumpsJson, isRecord, type PyJson } from "./adapters/shared/pyjson.ts";
 import { readRoleRoute, routeRecipient } from "./adapters/shared/route.ts";
 import type { DeliveryReceipt, HarnessAdapter } from "./adapters/types.ts";
@@ -25,10 +25,12 @@ import { readRegistry } from "./registry/store.ts";
 
 export interface EmitOptions {
   readonly project: string;
+  /** Runs under events/state.lock after the enqueue, for state the producer derives. */
+  readonly underLock?: ((directory: string) => void) | undefined;
 }
 
 /** Progress kinds that never notify; flush marks any already queued as suppressed. */
-const QUIET_KINDS: ReadonlySet<string> = new Set([
+export const QUIET_KINDS: ReadonlySet<string> = new Set([
   "ci_pending",
   "ci_running",
   "deploy_pending",
@@ -49,15 +51,6 @@ export interface BusEvent {
   message: string;
   sent: boolean;
   suppressed?: boolean;
-}
-
-interface CommitState {
-  [key: string]: PyJson | undefined;
-  ci: string;
-  deploy: string;
-  /** "skipped" for a docs-only departure, pushed without a gate. */
-  gate?: string;
-  pushed?: boolean;
 }
 
 export function eventsDir(game: GameLayout): string {
@@ -99,11 +92,13 @@ function nowNanoseconds(): bigint {
   return EPOCH_OFFSET + process.hrtime.bigint();
 }
 
-function writeState(path: string, value: PyJson): void {
+/** Replace one outbox file durably, in the outbox's JSON form. */
+export function writeEventState(path: string, value: PyJson): void {
   writeDurable(path, `${dumpsJson(value)}\n`);
 }
 
-function enqueue(
+/** Enqueue one event unless it is quiet or already recorded. The caller holds state.lock. */
+export function enqueueEvent(
   directory: string,
   project: string,
   kind: string,
@@ -126,45 +121,11 @@ function enqueue(
     message: clean(`${project} bus: ${message}`),
     sent: false,
   };
-  writeState(path, event);
+  writeEventState(path, event);
 }
 
-function deployFinished(state: CommitState): boolean {
-  return state.deploy === "success" || state.deploy === "skipped";
-}
-
-function trackCommit(directory: string, project: string, kind: string, key: string): void {
-  const path = join(directory, `${key}.state`);
-  const initial = { ci: "pending", deploy: "pending" };
-  const state = (existsSync(path) ? readJson(path) : initial) as CommitState;
-  const quiet = QUIET_KINDS.has(kind);
-  if (kind.startsWith("ci_") && !(quiet && state.ci === "success")) {
-    state.ci = kind.slice(3);
-  }
-  if (kind.startsWith("deploy_") && !(quiet && deployFinished(state))) {
-    state.deploy = kind.slice(7);
-  }
-  if (kind === "push") {
-    state.pushed = true;
-  }
-  if (kind === "gate_skipped") {
-    state.gate = "skipped";
-  }
-  writeState(path, state);
-  if (state.pushed === true && state.ci === "success" && deployFinished(state)) {
-    const gate = state.gate === "skipped" ? "docs-only, gate skipped" : "full gate passed";
-    enqueue(
-      directory,
-      project,
-      "complete",
-      key,
-      `COMPLETE ${key}: ${gate}; CI success; deployment ${state.deploy}.`,
-    );
-  }
-}
-
-/** Record one event, at most once per identity. A 40-hex key also updates that commit's state. */
-export function emitEvent(
+/** Record one event, at most once per identity, then run the producer's `underLock` step. */
+export function recordEvent(
   game: GameLayout,
   options: EmitOptions,
   kind: string,
@@ -175,10 +136,8 @@ export function emitEvent(
   mkdirSync(directory, { recursive: true });
   const lock = holdLock(join(directory, "state.lock"));
   try {
-    enqueue(directory, options.project, kind, key, message);
-    if (SHA_PATTERN.test(key)) {
-      trackCommit(directory, options.project, kind, key);
-    }
+    enqueueEvent(directory, options.project, kind, key, message);
+    options.underLock?.(directory);
   } finally {
     lock.release();
   }
@@ -396,7 +355,7 @@ export async function flushEventsWith(adapters: AdapterFactories, game: GameLayo
       const path = join(directory, `${event.id}.json`);
       if (QUIET_KINDS.has(event.kind)) {
         event.suppressed = true;
-        writeState(path, event);
+        writeEventState(path, event);
         continue;
       }
       const target = destination(adapters, game);
@@ -405,6 +364,7 @@ export async function flushEventsWith(adapters: AdapterFactories, game: GameLayo
       }
       const previous = previousDelivery(receipts, target, event);
       if (previous === "blocked") {
+        // The flush runs in delivery-kit's resident runner, whose stderr names that kit.
         process.stderr.write(
           `delivery-kit: event ${event.id} held: reconcile prior native receipt before retargeting\n`,
         );
@@ -412,7 +372,7 @@ export async function flushEventsWith(adapters: AdapterFactories, game: GameLayo
       }
       if (previous === "accepted") {
         event.sent = true;
-        writeState(path, event);
+        writeEventState(path, event);
         continue;
       }
       const requestId = eventRequestId(event.id, target.recipient);
@@ -429,7 +389,7 @@ export async function flushEventsWith(adapters: AdapterFactories, game: GameLayo
         return;
       }
       event.sent = true;
-      writeState(path, event);
+      writeEventState(path, event);
     }
   } finally {
     lock.release();
