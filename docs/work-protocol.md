@@ -16,8 +16,8 @@ Activation requires an explicit external `stateRoot`, reviewed readers and write
 independent backup and verified restore. Unmanaged callers retain the optional protocol contract;
 a declared managed workspace covers all current, upcoming and future work for registered owners
 and verified workers, preserving explicit parent-owned UNKNOWN gaps. Representation, active
-adoption and coverage completeness are separate. Existing delivery-kit 4.5 pins do not enforce managed
-enrollment; publication alone does not establish rollout or adoption.
+adoption and coverage completeness are separate. Publication alone does not establish rollout or
+adoption.
 
 Missing configuration retains legacy compatibility only outside required managed mode and
 when no cutover fence exists; invalid configuration, a missing pointer after cutover or
@@ -101,10 +101,9 @@ cutover. A represented UNKNOWN is not actual adoption, question clearance or per
 delete sole WIP. Per-owner blockers remain visible until the responsible owner supplies actual
 evidence or retains the exact gap with a next boundary.
 
-Existing delivery-kit 4.5 pins retain their published optional filesystem contract; they do not enforce
-managed all-work enrollment. Publishing a newer SDK does not declare a workspace managed,
-upgrade resident readers or writers, create owner receipts or establish consumer adoption.
-The operator owns declaration, audit/backfill and per-owner rollout.
+Publishing a newer SDK does not declare a workspace managed, upgrade resident readers or writers,
+create owner receipts or establish consumer adoption. The operator owns declaration,
+audit/backfill and per-owner rollout.
 
 `EnrollmentStore({ protocol })` uses `publish(context, input, scope)`, `read(role)` and
 `report(scope)`. The context is a fenced role transaction without mutations. Input records the
@@ -420,9 +419,9 @@ coordination-kit --root /path/to/game-coordinator message reconcile --id MESSAGE
 
 ## Migration and recovery
 
-Without protocol configuration, the existing caller-agnostic delivery-kit 4.4 reconcile contract remains
-compatible. Protocol activation is a distinct reviewed migration, not an automatic reinterpretation
-of historical caller authority.
+Without protocol configuration, `message reconcile` records the caller's handled, superseded or
+retained evidence at the expected revision without a recipient receipt. Protocol activation is a
+distinct reviewed migration, not an automatic reinterpretation of historical caller authority.
 
 Imported originals retain the exact legacy ID, envelope hash and opaque record artifact, with an
 explicit import evidence reference. That artifact is historical evidence; the sender publication
