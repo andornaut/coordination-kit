@@ -129,7 +129,7 @@ registry revision, epoch, binding and parent epoch checks still mark a receipt s
 enrollment publishes a new anchor.
 
 An intake reference is a pending offer, keyed by its content-addressed offer ID. Automatic
-capture names no boundary phase in the offer source and adds no offer when each of its requests
+capture, which runs only with `--capture` ([request accounting](request-accounting.md#automatic-capture)), names no boundary phase in the offer source and adds no offer when each of its requests
 and coverage entries already equals one in a pending offer of the same role or in the current
 ledger projection. A capture restated under another phase therefore creates no new reference,
 while any new request or any changed coverage, such as a new gap, creates one that stays uncovered

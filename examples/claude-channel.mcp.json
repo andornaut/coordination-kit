@@ -1,10 +1,9 @@
 {
   "mcpServers": {
     "delivery-kit-channel": {
-      "command": "npx",
+      "command": "node",
       "args": [
-        "--no-install",
-        "coordination-kit",
+        "/absolute/path/to/game-coordinator/node_modules/@andornaut/coordination-kit/dist/cli.js",
         "--root",
         "/absolute/path/to/game-coordinator",
         "claude",

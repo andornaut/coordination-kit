@@ -10,7 +10,8 @@ this kit to compose and deliver it.
 The package is `@andornaut/coordination-kit`. Its operator tool is the `coordination-kit` CLI,
 bundled into `dist/cli.js`. The bundle imports only `node:` builtins, has no dynamic `import()`,
 relative `require`, worker threads or source maps, never spawns its own files, and reads nothing
-from disk after startup except configuration and state. Its child processes are `flock` and
+from disk after startup except configuration, state and, for `--version --json` and the runner
+seam, its own bytes to hash them. Its child processes are `flock` and
 `claude agents --json`.
 
 The on-disk formats are those of delivery-kit 4.7.0: the `var/` layout, the registry, the route,
@@ -24,7 +25,7 @@ commit the lockfile integrity:
 
 ```json
 "devDependencies": {
-  "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v1.1.0/coordination-kit-1.1.0.tgz"
+  "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v1.2.0/coordination-kit-1.2.0.tgz"
 }
 ```
 
@@ -47,6 +48,8 @@ take the coordinator root only from `COORDINATION_KIT_ROOT` or `DELIVERY_KIT_ROO
 | `harness`  | `ready`, `select`, `doctor`                                                              | Readiness by effective harness, scoped harness selection and diagnosis.                          |
 | `claude`   | `ready`, `channel`                                                                       | The Claude readiness probe and the stdio MCP channel server.                                     |
 | `codex`    | `ready`                                                                                  | The Codex readiness probe.                                                                       |
+| `review`   | `deliver`                                                                                | The runner seam: one slot's scheduled review, as one typed JSON line.                            |
+| `events`   | `flush`                                                                                  | The runner seam: one event outbox flush, as one typed JSON line.                                 |
 | `protocol` | `status`, `enroll`, `boundary`, `work-publish`, `message-publish`, `inbox`, and the rest | The explicit filesystem work protocol.                                                           |
 | `work`     | `check`, `report`                                                                        | Validate a repository's work files; join their milestones with live protocol state.              |
 
@@ -54,25 +57,26 @@ take the coordinator root only from `COORDINATION_KIT_ROOT` or `DELIVERY_KIT_ROO
 options. Per-command semantics are in [docs/commands.md](docs/commands.md).
 
 Exit status is 0 on success, 1 for invalid configuration, a failed precondition, an unavailable
-read or work-check findings, and 2 for a usage error or an unexpected failure. Errors go to stderr
-prefixed `coordination-kit:`. Commands with a JSON result keep it on stdout.
+read or work-check findings, and 2 for a usage error or an unexpected failure. `review deliver`
+and `events flush` exit 0 for every typed result, 2 for a usage error and 1 for any other failure.
+Errors go to stderr prefixed `coordination-kit:`. Commands with a JSON result keep it on stdout.
 
 ## Documentation
 
-| Doc                                                      | Covers                                                                                                           |
-| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| [docs/commands.md](docs/commands.md)                     | Per-command semantics and worker inbox reconciliation                                                            |
-| [docs/configuration.md](docs/configuration.md)           | The coordinator root, `config.json`, the `reports` fields of `delivery-kit.json` and the state layout            |
-| [docs/registry.md](docs/registry.md)                     | `var/registry.json`, scoped harness selection, send-time resolution, the readiness probe and the harness doctor  |
-| [docs/messages.md](docs/messages.md)                     | Common message send, status, dispatch, delivery guards and reconciliation                                        |
-| [docs/review.md](docs/review.md)                         | The review route, the scheduled review seam, the Claude and Codex adapters, inbox snapshots and the event outbox |
-| [docs/request-accounting.md](docs/request-accounting.md) | Requested outcomes tracked separately from message delivery and handling                                         |
-| [docs/work-protocol.md](docs/work-protocol.md)           | Fenced role publications, message originals, recipient handling receipts and external `stateRoot` activation     |
-| [docs/work-files.md](docs/work-files.md)                 | `work check` and `work report`                                                                                   |
-| [docs/libraries.md](docs/libraries.md)                   | The public build API subpaths and their main symbols                                                             |
-| [docs/upgrading.md](docs/upgrading.md)                   | Moving from delivery-kit 4.7 to coordination-kit 1.0                                                             |
-| [docs/design/](docs/design/README.md)                    | Design area summaries, each linking its topic docs and indexing its work items                                   |
-| [docs/work/][work-files]                                 | The work-file convention and one file per approved task (repository only, not packaged)                          |
+| Doc                                                      | Covers                                                                                                             |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| [docs/commands.md](docs/commands.md)                     | Per-command semantics and worker inbox reconciliation                                                              |
+| [docs/configuration.md](docs/configuration.md)           | The coordinator root, `config.json`, the `reports` fields of `delivery-kit.json` and the state layout              |
+| [docs/registry.md](docs/registry.md)                     | `var/registry.json`, scoped harness selection, send-time resolution, the readiness probe and the harness doctor    |
+| [docs/messages.md](docs/messages.md)                     | Common message send, status, dispatch, delivery guards and reconciliation                                          |
+| [docs/review.md](docs/review.md)                         | The review route, the runner seam, the Claude and Codex adapters, inbox snapshots, wake files and the event outbox |
+| [docs/request-accounting.md](docs/request-accounting.md) | Requested outcomes tracked separately from message delivery and handling                                           |
+| [docs/work-protocol.md](docs/work-protocol.md)           | Fenced role publications, message originals, recipient handling receipts and external `stateRoot` activation       |
+| [docs/work-files.md](docs/work-files.md)                 | `work check` and `work report`                                                                                     |
+| [docs/libraries.md](docs/libraries.md)                   | The public build API subpaths and their main symbols                                                               |
+| [docs/upgrading.md](docs/upgrading.md)                   | Moving from coordination-kit 1.1 to 1.2, and from delivery-kit 4.7 to coordination-kit 1.0                         |
+| [docs/design/](docs/design/README.md)                    | Design area summaries, each linking its topic docs and indexing its work items                                     |
+| [docs/work/][work-files]                                 | The work-file convention and one file per approved task (repository only, not packaged)                            |
 
 [work-files]: https://github.com/andornaut/coordination-kit/blob/main/docs/work/README.md
 

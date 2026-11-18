@@ -32,8 +32,8 @@ named by record file, written from each record's immutable recipient and attempt
 before the record is saved. Every hinted record is re-read and verified, a record without a
 recipient hint is read and hinted, and a request lookup miss falls back to a full scan, so a
 missing or dangling hint changes only what is read, never the result. Records keep their exact bytes, and
-removing `message-index/` rebuilds it. Accounting capture at a boundary reads only the captured
-message or the selected owners' records.
+removing `message-index/` rebuilds it. Accounting capture at a boundary, which runs only with
+`--capture`, reads only the captured message or the selected owners' records.
 
 For local blocker diagnosis, `message status --id UUID --include-retention` returns a cloned
 retention view, including its owner, reason and next review boundary, or null. This opt-in does

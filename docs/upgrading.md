@@ -1,6 +1,30 @@
 # Upgrading
 
-Moving from delivery-kit 4.7 to coordination-kit 1.0.
+Moving from coordination-kit 1.1 to 1.2, and from delivery-kit 4.7 to coordination-kit 1.0.
+
+## From 1.1
+
+On-disk formats are unchanged; 1.2 adds files beside them. Runners that bundle 1.1 and the 1.2 CLI
+work against the same state.
+
+- Capture: automatic accounting capture at inbox snapshots, scheduled reviews, `message send`,
+  `protocol boundary` and the mutating `protocol work-*` and `message-*` commands is off. Pass
+  `--capture` to restore it for a call; `ledger boundary` still captures. The ledger and intake
+  then grow only from explicit commands, coverage reports list fewer references, and enrollment
+  and adoption are not refused for it. The library seam `deliverScheduledReview` takes
+  `options.capture`; without it a bundled runner's reviews do not capture either.
+- Runner seam: `review deliver --game G --slot S` and `events flush --game G` print one typed JSON
+  line each ([review](review.md#cli-seam)). They replace parsing `DEFERRED_PREFIX` and
+  `flushEvents` calls in the runner. Recorded results are new files under
+  `games/<g>/bus/unblock/review-deliver/`. `flushEvents` now returns its result.
+- Identity: `--version --json` prints the version and the sha256 of `dist/cli.js`; every seam result
+  carries the same pair. Plain `--version` is unchanged.
+- Channel: `claude channel` drains the legacy spools as before and also watches the conversation's
+  [wake file](review.md#wake-files); no wake file is written yet. A channel configuration that runs
+  `node <gc>/node_modules/@andornaut/coordination-kit/dist/cli.js --root <gc> claude channel` keeps
+  the same command across releases, so after this one-time change `npm ci` plus `/mcp` reconnect
+  adopts each later release without a relaunch. A session started with another command needs one
+  relaunch onto that path.
 
 ## From delivery-kit 4.7
 

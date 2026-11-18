@@ -8,7 +8,7 @@ every form and flag.
 
 | Command                                                                                                                                                  | Purpose                                                                                       |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `inbox snapshot --game ID [--recipient ROLE] [--parent ROLE]... [--history-cursor CURSOR]`                                                               | Capture the recipient's inbox snapshot.                                                       |
+| `inbox snapshot --game ID [--recipient ROLE] [--parent ROLE]... [--history-cursor CURSOR] [--capture]`                                                   | Capture the recipient's inbox snapshot.                                                       |
 | `inbox ack --game ID --snapshot UUID --queue-id ID... --disposition handled\|superseded\|retained [--reason TEXT] [--recipient ROLE] [--parent ROLE]...` | Acknowledge queue items from that snapshot. `retained` requires a reason.                     |
 | `message send`, `dispatch`, `status`, `reconcile`, `retire-spool`                                                                                        | Durable role messages; see [messages](messages.md).                                           |
 | `ledger intake`, `apply`, `show`, `report`, `history`, `coverage`, `reconcile`, `boundary`                                                               | The request ledger; see [request accounting](request-accounting.md).                          |
@@ -17,9 +17,11 @@ every form and flag.
 | `harness select --harness claude\|codex\|default --expected-revision N [--game ID]... [--role ROLE]...`                                                  | Atomic selection for at least one explicit game or role, without activation.                  |
 | `harness doctor --game ID ... [--role ROLE ...]`, `harness doctor --role ROLE ...`                                                                       | Diagnose explicitly selected roles without sending or activating.                             |
 | `claude channel [--game ID]... [--conversation UUID] [--state-dir DIR]... [--poll-seconds N]`                                                            | The stdio MCP server the Claude recipient session starts.                                     |
+| `review deliver --game ID --slot ISO_TIMESTAMP [--capture]`                                                                                              | Deliver one slot's scheduled review once; see [review](review.md#cli-seam).                   |
+| `events flush --game ID`                                                                                                                                 | Flush the game's event outbox; see [review](review.md#cli-seam).                              |
 | `protocol ...`                                                                                                                                           | The explicit filesystem work protocol; see [work protocol](work-protocol.md).                 |
 | `work check [--root DIR]`, `work report [--root DIR]`                                                                                                    | Validate a repository's work files and report their state; see [work files](work-files.md).   |
-| `help`, `--help`, `--version`                                                                                                                            | Usage and version.                                                                            |
+| `help`, `--help`, `--version`, `--version --json`                                                                                                        | Usage, the version, and the version with the `dist/cli.js` sha256 as one JSON line.           |
 
 ## Command semantics
 
@@ -32,6 +34,19 @@ every form and flag.
   spools that already exist, so it can start before any game state. Without `--conversation`, an
   absent registry stops it with exit 1. The server identifies itself to the session as
   `delivery-kit-channel`, the name existing channel configurations use.
+- `claude channel` also watches the conversation's [wake file](review.md#wake-files) and emits one
+  notification per seq increase, after the spools drain.
+- `review deliver` and `events flush`: the runner seam. Each prints exactly one typed JSON line
+  and exits 0 for every typed result, 2 for a usage error and 1 for an internal failure, with
+  nothing on stdout. `--slot` is an ISO 8601 minute start with an offset. A repeated
+  `review deliver` for a slot prints the recorded result. SIGTERM aborts it with exit 1 and no
+  result. See [review](review.md#cli-seam).
+- `--version --json` prints `{"schema":1,"version":V,"distSha256":H}`, where `H` is the sha256 of
+  the running `dist/cli.js` bytes, or 64 zeros from source. Plain `--version` prints `V` alone.
+- `--capture` on `inbox snapshot`, `review deliver`, `message send`, `protocol boundary` and the
+  mutating `protocol work-*` and `message-*` commands turns automatic accounting capture on for
+  that call; it is off otherwise. `ledger boundary` always captures. See
+  [request accounting](request-accounting.md#automatic-capture).
 - `message retire-spool --recipient ROLE_OR_UUID [--dry-run]`: moves unclaimed Claude spool
   entries whose parent message is `handled` or `superseded` from
   `<stateRoot>/transport/messages/recipients/<uuid>/unblock/claude-spool/` to the sibling

@@ -56,9 +56,7 @@ suite("runner seam", () => {
     await deliver(ws);
     const repeat = await cli(ws, ["review", "deliver", "--slot", SLOT]);
     expect(repeat.stdout).toBe(first.stdout);
-    expect(ws.list("unblock", "claude-spool").filter((name) => name.endsWith(".json"))).toEqual(
-      [],
-    );
+    expect(ws.list("unblock", "claude-spool").filter((name) => name.endsWith(".json"))).toEqual([]);
     const usage = await cli(ws, ["review", "deliver", "--slot", "not-a-time"]);
     expect(usage).toMatchObject({ code: 2, stdout: "" });
   });

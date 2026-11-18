@@ -166,6 +166,16 @@ original provenance or merging records by text similarity.
 Pending or unknown questions remain listed in `protectedQuestions`, including on cancelled or
 superseded work. A work cancellation is not evidence that the native question was answered.
 
+## Automatic capture
+
+Automatic capture is opt-in. An inbox snapshot, a scheduled review (`review deliver`, or
+`deliverScheduledReview` with `options.capture`), `message send`, `protocol boundary` and the
+mutating `protocol work-*` and `message-*` commands capture accounting only with `--capture`.
+Without it they write no intake offer and no ledger event; snapshots and reviews record the
+read-only `accountingStatus` instead. `ledger boundary` always captures. Enrollment and adoption
+do not depend on capture: a role enrolls with the references that exist, and none is refused for
+an absent capture.
+
 ## Capture and adoption limits
 
 An inventory of known requests is not proof that every historical human request was captured.
@@ -185,8 +195,8 @@ coverage as `missingOwners` with `accounting_ready: false`. A role-scoped bounda
 unselected roles. Full native human history remains unattested even when a returned page is
 complete.
 
-Existing snapshot and message-ingress hooks register unreviewed candidates and explicit coverage
-gaps. Native snapshots are persisted before accounting admission. Automatic intake admits one
+With [automatic capture](#automatic-capture) on, snapshot and message-ingress hooks register
+unreviewed candidates and explicit coverage gaps. Native snapshots are persisted before accounting admission. Automatic intake admits one
 owner's unknown references and coverage together as one atomic `capture` event under revision
 CAS; a conflicting source rejects the whole owner batch. Matching existing records retain their
 owner's classification and history. This is per-owner atomicity, not one transaction across all

@@ -69,14 +69,16 @@ work protocol is active:
 - `game-dev/`: review and inbox snapshots, health history, acknowledgements, retentions and the
   legacy message store. This persisted directory keeps its name.
 - `games/<g>/bus/events/`: the event outbox (see [review](review.md#event-outbox)) and
-  `games/<g>/bus/unblock/`: the scheduled review slot receipts, the Claude spool and recipient
-  decision records. The rest of `games/<g>/bus/` belongs to delivery-kit's runner.
+  `games/<g>/bus/unblock/`: the scheduled review slot receipts, the recorded `review deliver`
+  results in `review-deliver/`, the Claude spool and recipient decision records. The rest of
+  `games/<g>/bus/` belongs to delivery-kit's runner.
 - `work-protocol.json` and `work-protocol-fence.json`: the work protocol's configuration pointer
   and cutover fence.
 
 An active work protocol uses its external `stateRoot` for publications and artifacts,
-`<stateRoot>/accounting` for the request ledger and intake, and `<stateRoot>/transport/messages`
-for derived message transport state and recipient spools.
+`<stateRoot>/accounting` for the request ledger and intake, `<stateRoot>/transport/messages`
+for derived message transport state and recipient spools, and `<stateRoot>/wake/` for
+[wake files](review.md#wake-files). Without one, wake files are in `var/wake/`.
 
 Every state write is a temp file, fsync, rename, then a directory fsync. Locks are `flock(1)` on
 files under the selected state directories. The kit writes nothing under any `.claude/`
