@@ -3,6 +3,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -18,6 +19,7 @@ import type {
   LedgerAssignment,
   LedgerCommand,
   LedgerEvidence,
+  LedgerReplayStats,
   LedgerRequestInput,
   LedgerSource,
   LedgerStoreOptions,
@@ -828,5 +830,93 @@ describe("request accounting journal", () => {
     expect(() => new LedgerStore(f.options).read()).toThrow("corrupt-ledger");
     mkdirSync(join(f.directory, "ignored-snapshot"));
     expect(() => f.store.history()).toThrow("corrupt-ledger");
+  });
+});
+
+describe("journal checkpoint", () => {
+  async function journal(size: number) {
+    const f = fixture();
+    const stats: LedgerReplayStats[] = [];
+    const store = new LedgerStore({ ...f.options, onReplay: (value) => stats.push(value) });
+    for (let index = 0; index < size; index += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await f.register(request(`request-${String(index).padStart(3, "0")}`));
+    }
+    const checkpoint = join(f.directory, "checkpoint.json");
+    const files = () =>
+      readdirSync(join(f.directory, "events")).map((file) =>
+        readFileSync(join(f.directory, "events", file)),
+      );
+    return { ...f, checkpoint, files, stats, store };
+  }
+
+  it("bounds apply to verifying only the events committed after the checkpoint", async () => {
+    const j = await journal(40);
+    const other = new LedgerStore(j.options);
+    // An identical journal built to revision 10 yields a valid checkpoint of this journal's prefix,
+    // as a writer that never refreshes the checkpoint would leave it.
+    const stale = await (async () => {
+      const f = fixture();
+      for (let index = 0; index < 10; index += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        await f.register(request(`request-${String(index).padStart(3, "0")}`));
+      }
+      return readFileSync(join(f.directory, "checkpoint.json"));
+    })();
+    await j.store.apply(j.transaction({ request: request("next"), type: "register" }));
+    expect(j.stats.at(-1)).toEqual({ checkpointRevision: 40, revision: 40, verifiedEvents: 0 });
+    expect(j.store.read()).toEqual(other.read());
+    expect(j.stats.at(-1)).toEqual({ checkpointRevision: 41, revision: 41, verifiedEvents: 0 });
+
+    writeFileSync(j.checkpoint, stale);
+    const full = (() => {
+      const copy = join(mkdtempSync(join(tmpdir(), "accounting-copy-")), "accounting");
+      mkdirSync(join(copy, "events"), { recursive: true });
+      for (const file of readdirSync(join(j.directory, "events"))) {
+        writeFileSync(join(copy, "events", file), readFileSync(join(j.directory, "events", file)));
+      }
+      return new LedgerStore({ directory: copy }).read();
+    })();
+    expect(j.store.read()).toEqual(full);
+    expect(j.stats.at(-1)).toEqual({ checkpointRevision: 10, revision: 41, verifiedEvents: 31 });
+    await j.store.apply(j.transaction({ request: request("after-stale"), type: "register" }));
+    expect(j.stats.at(-1)).toEqual({ checkpointRevision: 10, revision: 41, verifiedEvents: 31 });
+    j.store.read();
+    expect(j.stats.at(-1)).toEqual({ checkpointRevision: 42, revision: 42, verifiedEvents: 0 });
+  });
+
+  it("replays in full when the checkpoint or a file it covers differs", async () => {
+    const j = await journal(5);
+    const expected = j.store.read();
+    const intact = readFileSync(j.checkpoint, "utf8");
+    writeFileSync(j.checkpoint, intact.replace('"request-001"', '"request-009"'));
+    expect(j.store.read()).toEqual(expected);
+    expect(j.stats.at(-1)).toEqual({ checkpointRevision: 0, revision: 5, verifiedEvents: 5 });
+    rmSync(j.checkpoint);
+    symlinkSync(join(j.directory, "events", "000000000001.json"), j.checkpoint);
+    expect(j.store.read()).toEqual(expected);
+    expect(j.stats.at(-1)).toEqual({ checkpointRevision: 0, revision: 5, verifiedEvents: 5 });
+    const history = j.store.history();
+    rmSync(j.checkpoint);
+    writeFileSync(j.checkpoint, intact);
+    expect(j.store.history()).toEqual(history);
+    expect(j.stats.at(-1)).toEqual({ checkpointRevision: 5, revision: 5, verifiedEvents: 0 });
+    const event = join(j.directory, "events", "000000000002.json");
+    writeFileSync(event, `${readFileSync(event, "utf8").trimEnd()}  \n`);
+    expect(() => j.store.read()).toThrow("corrupt-ledger");
+    expect(() => j.store.history("request-001")).toThrow("corrupt-ledger");
+  });
+
+  it("reads a journal written without a checkpoint and never rewrites its events", async () => {
+    const j = await journal(6);
+    const expected = { history: j.store.history(), projection: j.store.read() };
+    const before = j.files();
+    rmSync(j.checkpoint);
+    expect(j.store.read()).toEqual(expected.projection);
+    expect(j.store.history()).toEqual(expected.history);
+    expect(j.stats.at(-1)).toEqual({ checkpointRevision: 0, revision: 6, verifiedEvents: 6 });
+    await j.store.apply(j.transaction({ request: request("next"), type: "register" }));
+    expect(j.files().slice(0, 6)).toEqual(before);
+    expect(j.store.history().slice(0, 6)).toEqual(expected.history);
   });
 });

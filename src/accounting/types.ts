@@ -283,4 +283,16 @@ export interface LedgerStoreOptions {
   readonly resolveOwner?: (
     assignment: LedgerAssignment,
   ) => LedgerAssignment | null | Promise<LedgerAssignment | null>;
+  /** Diagnostics: called after each successful journal replay. */
+  readonly onReplay?: (stats: LedgerReplayStats) => void;
+}
+
+/** The work one journal replay did. Counts are deterministic for a given journal and checkpoint. */
+export interface LedgerReplayStats {
+  /** The journal revision. */
+  readonly revision: number;
+  /** Revisions restored from the checkpoint after a byte digest check; zero without one. */
+  readonly checkpointRevision: number;
+  /** Events parsed, validated, hashed and projected individually. */
+  readonly verifiedEvents: number;
 }

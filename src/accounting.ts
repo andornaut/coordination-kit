@@ -39,6 +39,7 @@ export type {
   LedgerKind,
   LedgerProjection,
   LedgerQuestion,
+  LedgerReplayStats,
   LedgerReport,
   LedgerReportOptions,
   LedgerRequest,

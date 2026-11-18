@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import { isCanonicalUuid } from "../adapters/shared/ids.ts";
-import { fsyncDirectory, writeJsonDurable } from "../durable.ts";
+import { fsyncDirectory, writeDurable, writeJsonDurable } from "../durable.ts";
 import { holdLockAsync, LockBusy, type LockHandle } from "../lock.ts";
 import type {
   LedgerAssignment,
@@ -487,10 +487,120 @@ function attested(source: LedgerSource): boolean {
   return source.origin === "owner-attested" && source.reference !== null;
 }
 
+/** Projected journal state. Every field is derived from the events, in journal order. */
 interface Replay {
-  readonly events: LedgerEvent[];
   readonly requests: Map<string, LedgerRequest>;
   readonly coverage: Map<string, LedgerCoverage>;
+  /** Command ID to the revision that committed it. */
+  readonly commands: Map<string, number>;
+  /** Request ID to the type of the latest command naming it by `id`. */
+  readonly latest: Map<string, LedgerCommand["type"]>;
+  /** SHA-256 of each event file's exact bytes, by revision. */
+  readonly digests: string[];
+  revision: number;
+  hash: string | null;
+  at: string | null;
+}
+
+function empty(): Replay {
+  return {
+    at: null,
+    commands: new Map(),
+    coverage: new Map(),
+    digests: [],
+    hash: null,
+    latest: new Map(),
+    requests: new Map(),
+    revision: 0,
+  };
+}
+
+/** Advance the derived journal fields after `event` is projected. */
+function record(state: Replay, event: LedgerEvent, fileDigest: string): void {
+  state.commands.set(event.commandId, event.revision);
+  if ("id" in event.command) {
+    state.latest.set(event.command.id, event.command.type);
+  }
+  state.digests.push(fileDigest);
+  state.revision = event.revision;
+  state.hash = event.hash;
+  state.at = event.at;
+}
+
+function bytesDigest(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+/** An event file's exact bytes; a symlink or non-regular file is corrupt. */
+function eventBytes(path: string): Buffer {
+  const stat = lstatSync(path);
+  demand(stat.isFile() && !stat.isSymbolicLink(), "corrupt-ledger");
+  return readFileSync(path);
+}
+
+// The checkpoint caches the projection of a verified journal prefix. It is derived data: a
+// missing, stale or mismatched checkpoint falls back to a full replay. Bump the schema whenever
+// replay validation or projection changes, so older checkpoints are not trusted.
+const CHECKPOINT = "checkpoint.json";
+const CHECKPOINT_SCHEMA = 1;
+
+interface CheckpointState {
+  readonly revision: number;
+  readonly hash: string | null;
+  readonly at: string | null;
+  readonly digests: string[];
+  readonly commands: string[];
+  readonly latest: [string, LedgerCommand["type"]][];
+  readonly requests: LedgerRequest[];
+  readonly coverage: LedgerCoverage[];
+}
+
+function checkpointText(state: Replay): string {
+  const value: CheckpointState = {
+    at: state.at,
+    commands: [...state.commands.keys()],
+    coverage: [...state.coverage.values()],
+    digests: state.digests,
+    hash: state.hash,
+    latest: [...state.latest],
+    requests: [...state.requests.values()],
+    revision: state.revision,
+  };
+  const body = JSON.stringify(value);
+  const sum = createHash("sha256").update(body).digest("hex");
+  return `{"schema":${CHECKPOINT_SCHEMA},"digest":"${sum}","state":${body}}\n`;
+}
+
+/** The checkpoint's state when it is intact and covers at most `files` revisions. */
+function restore(raw: string, files: number): Replay | undefined {
+  const value: unknown = JSON.parse(raw);
+  if (!object(value, ["schema", "digest", "state"]) || value.schema !== CHECKPOINT_SCHEMA) {
+    return undefined;
+  }
+  const body = JSON.stringify(value.state);
+  if (value.digest !== createHash("sha256").update(body).digest("hex")) {
+    return undefined;
+  }
+  const s = value.state as CheckpointState;
+  if (
+    !Number.isSafeInteger(s.revision) ||
+    s.revision < 1 ||
+    s.revision > files ||
+    s.digests.length !== s.revision ||
+    s.commands.length !== s.revision
+  ) {
+    return undefined;
+  }
+  return {
+    at: s.at,
+    commands: new Map(s.commands.map((id, index) => [id, index + 1])),
+    coverage: new Map(s.coverage.map((entry) => [entry.id, entry])),
+    digests: [...s.digests],
+    hash: s.hash,
+    latest: new Map(s.latest),
+    requests: new Map(s.requests.map((entry) => [entry.id, entry])),
+    revision: s.revision,
+  };
 }
 
 function get(state: Replay, id: string): LedgerRequest {
@@ -776,10 +886,7 @@ function project(state: Replay, event: LedgerEvent): void {
     case "amend":
       demand(attested(event.source), "unreviewed-source");
       if (request.evidence.length > 0 && !retainsScope(request, c)) {
-        const previous = state.events.findLast(
-          (e) => "id" in e.command && e.command.id === request.id,
-        );
-        demand(previous?.command.type === "reopen", "scope-reopen-required");
+        demand(state.latest.get(request.id) === "reopen", "scope-reopen-required");
       }
       Object.assign(next, {
         dependencies: [...c.dependencies],
@@ -940,16 +1047,38 @@ function projection(state: Replay): LedgerProjection {
     coverage: structuredClone(
       [...state.coverage.values()].sort((a, b) => a.id.localeCompare(b.id)),
     ),
-    hash: state.events.at(-1)?.hash ?? null,
-    initialized: state.events.length > 0,
+    hash: state.hash,
+    initialized: state.revision > 0,
     requests: structuredClone(
       [...state.requests.values()].sort((a, b) => a.id.localeCompare(b.id)),
     ),
-    revision: state.events.length,
+    revision: state.revision,
   };
 }
 
-/** Append-only journal is authoritative. Projections are rebuilt on each read and transaction. */
+/** True when `event` belongs to the history of request or coverage `id`. */
+function concerns(event: LedgerEvent, id: string): boolean {
+  const c = event.command;
+  if (c.type === "capture") {
+    return (
+      c.requests.some((request) => request.id === id) ||
+      c.coverage.some((coverage) => coverage.id === id)
+    );
+  }
+  if (c.type === "register") {
+    return c.request.id === id || c.request.parentId === id;
+  }
+  if (c.type === "coverage") {
+    return c.coverage.id === id;
+  }
+  return c.id === id || (c.type === "cancel" && c.descendants.includes(id));
+}
+
+/**
+ * The append-only journal is authoritative. Each read verifies every event file: files after the
+ * checkpoint are parsed, validated, hashed and projected; files it covers must match its recorded
+ * byte digests.
+ */
 export class LedgerStore {
   readonly #options: LedgerStoreOptions;
 
@@ -958,34 +1087,76 @@ export class LedgerStore {
     this.#options = options;
   }
 
-  #replay(): Replay {
-    this.#options.checkRead?.();
-    const state: Replay = { coverage: new Map(), events: [], requests: new Map() };
+  /** Event file names in revision order, or null when the journal does not exist yet. */
+  #files(): string[] | null {
+    const root = lstatSync(this.#options.directory, { throwIfNoEntry: false });
+    demand(root === undefined || (root.isDirectory() && !root.isSymbolicLink()), "corrupt-ledger");
+    if (root === undefined) {
+      return null;
+    }
     const directory = join(this.#options.directory, "events");
+    const stat = lstatSync(directory, { throwIfNoEntry: false });
+    if (stat === undefined) {
+      return null;
+    }
+    demand(stat.isDirectory() && !stat.isSymbolicLink(), "corrupt-ledger");
+    const files: string[] = [];
+    for (const file of readdirSync(directory).sort()) {
+      if (/^\.\d{12}\.json\.\d+\.[a-f0-9]{12}\.tmp$/u.test(file)) {
+        continue;
+      }
+      demand(/^\d{12}\.json$/u.test(file), "corrupt-ledger");
+      demand(file === `${String(files.length + 1).padStart(12, "0")}.json`, "corrupt-ledger");
+      files.push(join(directory, file));
+    }
+    return files;
+  }
+
+  /** The checkpoint's state, or undefined when it is absent, damaged or ahead of the journal. */
+  #checkpoint(files: number): Replay | undefined {
     try {
-      const root = lstatSync(this.#options.directory, { throwIfNoEntry: false });
-      demand(
-        root === undefined || (root.isDirectory() && !root.isSymbolicLink()),
-        "corrupt-ledger",
-      );
-      if (root === undefined) {
-        return state;
+      const path = join(this.#options.directory, CHECKPOINT);
+      const stat = lstatSync(path, { throwIfNoEntry: false });
+      if (stat === undefined || !stat.isFile() || stat.isSymbolicLink()) {
+        return undefined;
       }
-      const stat = lstatSync(directory, { throwIfNoEntry: false });
-      if (stat === undefined) {
-        return state;
+      return restore(readFileSync(path, "utf8"), files);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Verify the checkpoint's prefix byte for byte; false when any covered file differs. */
+  #prefix(files: readonly string[], base: Replay, events: LedgerEvent[] | null): boolean {
+    for (const [index, path] of files.slice(0, base.revision).entries()) {
+      const bytes = eventBytes(path);
+      if (bytesDigest(bytes) !== base.digests[index]) {
+        return false;
       }
-      demand(stat.isDirectory() && !stat.isSymbolicLink(), "corrupt-ledger");
-      for (const file of readdirSync(directory).sort()) {
-        if (/^\.\d{12}\.json\.\d+\.[a-f0-9]{12}\.tmp$/u.test(file)) {
-          continue;
-        }
-        demand(/^\d{12}\.json$/u.test(file), "corrupt-ledger");
-        const revision = state.events.length + 1;
-        demand(file === `${String(revision).padStart(12, "0")}.json`, "corrupt-ledger");
-        const path = join(directory, file);
-        demand(lstatSync(path).isFile() && !lstatSync(path).isSymbolicLink(), "corrupt-ledger");
-        const raw = readFileSync(path, "utf8");
+      events?.push(JSON.parse(bytes.toString("utf8")) as LedgerEvent);
+    }
+    return true;
+  }
+
+  #replay(keepEvents = false): { state: Replay; events: LedgerEvent[] | null } {
+    this.#options.checkRead?.();
+    let state = empty();
+    let events = keepEvents ? ([] as LedgerEvent[]) : null;
+    let checkpointRevision = 0;
+    let verifiedEvents = 0;
+    try {
+      const files = this.#files() ?? [];
+      const base = files.length === 0 ? undefined : this.#checkpoint(files.length);
+      if (base !== undefined && this.#prefix(files, base, events)) {
+        state = base;
+        checkpointRevision = base.revision;
+      } else {
+        events = keepEvents ? [] : null;
+      }
+      for (const path of files.slice(state.revision)) {
+        const revision = state.revision + 1;
+        const bytes = eventBytes(path);
+        const raw = bytes.toString("utf8");
         const value: unknown = JSON.parse(raw);
         demand(raw === `${JSON.stringify(value, null, 2)}\n`, "corrupt-ledger");
         demand(
@@ -1003,58 +1174,58 @@ export class LedgerStore {
         demand(
           eventRevision === revision &&
             transaction.expectedRevision === revision - 1 &&
-            previousHash === (state.events.at(-1)?.hash ?? null) &&
+            previousHash === state.hash &&
             hash === digest({ ...transaction, previousHash, revision }) &&
-            !state.events.some((e) => e.commandId === transaction.commandId) &&
-            (state.events.length === 0 ||
-              Date.parse(transaction.at) >= Date.parse(state.events.at(-1)!.at)),
+            !state.commands.has(transaction.commandId) &&
+            (state.at === null || Date.parse(transaction.at) >= Date.parse(state.at)),
           "corrupt-ledger",
         );
         const event = value as unknown as LedgerEvent;
         project(state, event);
-        state.events.push(event);
+        record(state, event, bytesDigest(bytes));
+        events?.push(event);
+        verifiedEvents += 1;
       }
     } catch {
       throw new LedgerError("corrupt-ledger");
     }
-    return state;
+    this.#options.onReplay?.({ checkpointRevision, revision: state.revision, verifiedEvents });
+    return { events, state };
+  }
+
+  /** One committed event, checked against the digest this replay verified. */
+  #event(state: Replay, revision: number): LedgerEvent {
+    try {
+      const path = join(
+        this.#options.directory,
+        "events",
+        `${String(revision).padStart(12, "0")}.json`,
+      );
+      const bytes = eventBytes(path);
+      demand(bytesDigest(bytes) === state.digests[revision - 1], "corrupt-ledger");
+      return JSON.parse(bytes.toString("utf8")) as LedgerEvent;
+    } catch {
+      throw new LedgerError("corrupt-ledger");
+    }
   }
 
   read(): LedgerProjection;
   read(id: string): LedgerRequest | undefined;
   read(id?: string): LedgerProjection | LedgerRequest | undefined {
-    const state = this.#replay();
+    const { state } = this.#replay();
     return id === undefined ? projection(state) : structuredClone(state.requests.get(id));
   }
 
   /** The projection and the events it was built from, from one replay. */
   snapshot(): { readonly projection: LedgerProjection; readonly events: readonly LedgerEvent[] } {
-    const state = this.#replay();
-    return { events: structuredClone(state.events), projection: projection(state) };
+    const { events, state } = this.#replay(true);
+    // Replay parses each event afresh and retains no reference to it, so no copy is needed.
+    return { events: events!, projection: projection(state) };
   }
 
   history(id?: string): readonly LedgerEvent[] {
-    return structuredClone(
-      this.#replay().events.filter((e) => {
-        const c = e.command;
-        if (id === undefined) {
-          return true;
-        }
-        if (c.type === "capture") {
-          return (
-            c.requests.some((request) => request.id === id) ||
-            c.coverage.some((coverage) => coverage.id === id)
-          );
-        }
-        if (c.type === "register") {
-          return c.request.id === id || c.request.parentId === id;
-        }
-        if (c.type === "coverage") {
-          return c.coverage.id === id;
-        }
-        return c.id === id || (c.type === "cancel" && c.descendants.includes(id));
-      }),
-    );
+    const events = this.#replay(true).events!;
+    return id === undefined ? events : events.filter((event) => concerns(event, id));
   }
 
   coverage(owner?: string): readonly LedgerCoverage[] {
@@ -1164,9 +1335,10 @@ export class LedgerStore {
       throw error;
     }
     try {
-      const state = this.#replay();
-      const previous = state.events.find((e) => e.commandId === transaction.commandId);
-      if (previous !== undefined) {
+      const { state } = this.#replay();
+      const committed = state.commands.get(transaction.commandId);
+      if (committed !== undefined) {
+        const previous = this.#event(state, committed);
         const original: LedgerTransaction = {
           actor: previous.actor,
           at: previous.at,
@@ -1178,14 +1350,10 @@ export class LedgerStore {
           ...(previous.writer === undefined ? {} : { writer: previous.writer }),
         };
         demand(isDeepStrictEqual(original, transaction), "command-conflict");
-        return structuredClone(previous);
+        return previous;
       }
-      demand(transaction.expectedRevision === state.events.length, "stale-revision");
-      demand(
-        state.events.length === 0 ||
-          Date.parse(transaction.at) >= Date.parse(state.events.at(-1)!.at),
-        "stale-time",
-      );
+      demand(transaction.expectedRevision === state.revision, "stale-revision");
+      demand(state.at === null || Date.parse(transaction.at) >= Date.parse(state.at), "stale-time");
       const command = transaction.command;
       if (
         command.type !== "register" &&
@@ -1228,8 +1396,8 @@ export class LedgerStore {
       await this.#verify(bindings);
       const base = {
         ...transaction,
-        previousHash: state.events.at(-1)?.hash ?? null,
-        revision: state.events.length + 1,
+        previousHash: state.hash,
+        revision: state.revision + 1,
       };
       const event: LedgerEvent = { ...base, hash: digest(base) };
       project(state, event);
@@ -1240,6 +1408,13 @@ export class LedgerStore {
       const path = join(directory, `${String(event.revision).padStart(12, "0")}.json`);
       demand(!existsSync(path), "corrupt-ledger");
       writeJsonDurable(path, event);
+      try {
+        // The commit is durable here; a failed checkpoint only leaves the next read slower.
+        record(state, event, bytesDigest(eventBytes(path)));
+        writeDurable(join(root, CHECKPOINT), checkpointText(state));
+      } catch {
+        // The previous checkpoint, if any, still covers a verified prefix.
+      }
       return structuredClone(event);
     } finally {
       lock.release();

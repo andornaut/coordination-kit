@@ -45,6 +45,14 @@ at revision zero. Reuse the exact transaction to reconcile an uncertain result: 
 command replay returns its event, while conflicting reuse or a stale new command is refused.
 The revision belongs to the whole ledger, including updates to other requests.
 
+The `events` journal is authoritative. Each committed mutation also writes `checkpoint.json`
+beside it: the projection, the command index and the SHA-256 digest of every event file through
+that revision. A read checks the covered files against those digests and parses, validates,
+hashes and projects only the later events. A missing, damaged or mismatched checkpoint falls
+back to a full replay. The checkpoint is derived data: deleting it is safe, and a writer that
+does not refresh it only makes the next read verify more events. The `onReplay` store option
+reports each replay's `checkpointRevision` and `verifiedEvents`.
+
 When the work protocol is active, every ledger mutation additionally requires
 `writer: { harness, nativeId, epoch }` from the actor's current protocol claim. The writer is
 audited in the committed event; it is optional only on the unconfigured compatibility path.
