@@ -362,6 +362,62 @@ The statement records the recipient revision observed, or null when its namespac
 Concurrent recipient handling remains separate; no cross-role atomic recall or automatic ACK is
 claimed. Ambiguous delivery requires reconciliation before retrying any native operation.
 
+### Publishing a receipt from the CLI
+
+In active protocol mode a handled, superseded or retained reconcile needs the recipient receipt
+first:
+
+1. Find the original with `protocol inbox --role OWN --sender SENDER` (`--sender` repeats) and
+   copy the entry's `reference`. `protocol message-original --input-file REF` reads it back.
+2. Publish evidence once with `protocol artifact-put --file FILE` and reuse its `{ hash, size }`.
+3. Read the expected revision from `protocol role --role OWN`, then run
+   `protocol message-receipt --input-file receipt.json`:
+
+```json
+{
+  "writer": {
+    "role": "kits/game-kit",
+    "epoch": 1,
+    "binding": { "harness": "claude", "nativeId": "CONVERSATION_ID" },
+    "id": "receipt-MESSAGE_ID",
+    "expectedRevision": 7,
+    "at": "2026-11-18T12:00:00.000Z"
+  },
+  "input": {
+    "id": "handled-MESSAGE_ID",
+    "original": {
+      "senderRole": "kits/delivery-kit",
+      "messageId": "MESSAGE_ID",
+      "revision": 1,
+      "hash": "ORIGINAL_HASH"
+    },
+    "disposition": "handled",
+    "evidence": [{ "hash": "ARTIFACT_HASH", "size": 690 }],
+    "retention": null,
+    "guards": { "question": "unknown", "hold": "unknown", "references": [], "artifacts": [] }
+  }
+}
+```
+
+Then reflect it into the transport record, taking `N` from `message status --id MESSAGE_ID` and
+`RECEIPT_HASH` from the receipt result:
+
+```sh
+coordination-kit --root /path/to/game-coordinator message reconcile --id MESSAGE_ID \
+  --expected-revision N --disposition handled --evidence protocol-receipt:RECEIPT_HASH
+```
+
+- `writer.role` is the recipient's own namespace (`coordinator`, `games/GAME/ROLE` or
+  `kits/KIT`). Its `epoch` and `binding` must match the current claim, or the write is refused
+  `writer-fenced`.
+- `original` is the exact `OriginalRef` from the inbox entry.
+- `disposition` is `handled`, `superseded` or `retained`. Only `retained` takes
+  `retention: { ownerRole, reason, nextBoundary }`; the others take `null`.
+- `guards.question` is `unknown`, `pending`, `clear` or `unavailable`; `guards.hold` is
+  `unknown`, `held`, `clear` or `unavailable`. They record what was observed and authorize
+  nothing.
+- `evidence` needs at least one published artifact.
+
 ## Migration and recovery
 
 Without protocol configuration, the existing caller-agnostic delivery-kit 4.4 reconcile contract remains
