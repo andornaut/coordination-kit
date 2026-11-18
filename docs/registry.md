@@ -86,7 +86,7 @@ only reads them, and a missing or invalid record is never clearance.
 
 ## Readiness probe
 
-`claude ready` and `codex ready` send nothing and reports whether that adapter can deliver now:
+`claude ready` and `codex ready` send nothing and report whether that adapter can deliver now:
 
 - Claude: `claude agents --json` returns a listing.
 - Codex: `CODEX_CONTROL_SOCKET` names an absolute socket path that accepts a connection.

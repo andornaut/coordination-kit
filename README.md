@@ -126,8 +126,9 @@ Package inspection always reports `immutableCommitClaim: false`. Snapshot metada
 without that metadata invents no commit or source hash. Inspection writes its archive and
 `CHECK_CONTEXT.json` to a fresh temporary directory and prints that location.
 
-The thin wrappers `scripts/check.sh` and `tests/contract/run.sh` invoke native Node helpers. The
-separately invoked `npm run pack -- EXACT_COMMIT_SHA /new/absolute/directory` is the explicit host
+The thin wrappers `scripts/check.sh`, `scripts/pack.sh` and `tests/contract/run.sh` invoke
+native Node helpers. The separately invoked
+`npm run pack -- EXACT_COMMIT_SHA /new/absolute/directory` is the explicit host
 release-controller exception: it archives the requested commit and starts its own offline release
 container with the pinned Node image and the read-only `coordination-kit-npm-check` cache volume
 (`COORDINATION_KIT_NPM_VOLUME` names another); a missing volume or dependency fails without

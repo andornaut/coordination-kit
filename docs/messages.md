@@ -2,9 +2,8 @@
 
 Sending, reading, dispatching and reconciling common messages with the `message` commands, and the delivery guards they apply.
 
-The installed CLI accepts `--root COORDINATOR_ROOT` once, in any argument position. Use it
-from another working directory; body-file paths remain relative to the caller's working
-directory. Without `--root`, resolution uses `DELIVERY_KIT_ROOT`, then the working directory.
+The coordinator root resolves as in [configuration](configuration.md#coordinator-root). With
+`--root`, body-file paths remain relative to the caller's working directory.
 
 `message send --from ROLE --recipient ROLE_OR_UUID --id UUID --body-file PATH` stores the
 entire valid UTF-8 file locally, including whitespace and trailing newlines. Invalid UTF-8
@@ -64,7 +63,7 @@ do not count accepted native sends. A local or question-guard refusal is distinc
 native-send rejection or an unknown send outcome. Raw native messages, context and unknown
 codes are not exposed. Older receipts without diagnostics remain readable; absence supplies
 no historical cause or clearance. `DeliveryDiagnostic` and `NativeRpcCode` are type-only
-exports from `@andornaut/coordination-kit/build/transport` and its compatibility alias.
+exports from `@andornaut/coordination-kit/build/transport`.
 A `pending-question` diagnostic means clearance was not proved, not that a user question is
 necessarily unanswered. An adapter receipt of `deduplicated` means the recipient already holds
 that exact request: the transport reports it as `accepted` with a `deduplicated` diagnostic and
@@ -127,5 +126,4 @@ The existing scheduled review includes message health and outbox references; it 
 Every unresolved message observed in two distinct scheduled slots is reported with its ID,
 blocker, owner and next action, including retained, held and guarded work. Valid questions,
 holds and retention boundaries remain protected; a warning grants no retry, wake or ACK authority.
-Before rollout to all registered roles, gate the combined feature, then verify actual installed
-help and package behaviour for that exact artifact. These commands do not activate roles.
+These commands do not activate roles.

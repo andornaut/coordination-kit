@@ -6,28 +6,27 @@ every form and flag.
 
 ## Command forms
 
-| Command                                                                                                                                                  | Purpose                                                                                     |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `inbox snapshot --game ID [--recipient ROLE] [--parent ROLE]... [--history-cursor CURSOR]`                                                               | Capture the recipient's inbox snapshot.                                                     |
-| `inbox ack --game ID --snapshot UUID --queue-id ID... --disposition handled\|superseded\|retained [--reason TEXT] [--recipient ROLE] [--parent ROLE]...` | Acknowledge queue items from that snapshot. `retained` requires a reason.                   |
-| `message send`, `dispatch`, `status`, `reconcile`, `retire-spool`                                                                                        | Durable role messages; see [messages](messages.md).                                         |
-| `ledger intake`, `apply`, `show`, `report`, `history`, `coverage`, `reconcile`, `boundary`                                                               | The request ledger; see [request accounting](request-accounting.md).                        |
-| `claude ready`, `codex ready`                                                                                                                            | The handoff readiness probe (see [Readiness probe](registry.md#readiness-probe)).           |
-| `claude ready [--game ID]... [--role ROLE]...`, `codex ready [--game ID]... [--role ROLE]...`                                                            | Probe the requested target adapter and conversations for an explicit subset.                |
-| `harness ready [--game ID]... [--role ROLE]...`                                                                                                          | Read-only readiness using each selected role's effective harness.                           |
-| `harness select --harness claude\|codex\|default --expected-revision N [--game ID]... [--role ROLE]...`                                                  | Atomic selection for at least one explicit game or role, without activation.                |
-| `harness doctor --game ID ... [--role ROLE ...]`, `harness doctor --role ROLE ...`                                                                       | Diagnose explicitly selected roles without sending or activating.                           |
-| `claude channel [--game ID]... [--conversation UUID] [--state-dir DIR]... [--poll-seconds N]`                                                            | The stdio MCP server the Claude recipient session starts.                                   |
-| `protocol ...`                                                                                                                                           | The explicit filesystem work protocol; see [work protocol](work-protocol.md).               |
-| `work check [--root DIR]`, `work report [--root DIR]`                                                                                                    | Validate a repository's work files and report their state; see [work files](work-files.md). |
-| `help`, `--help`, `--version`                                                                                                                            | Usage and version.                                                                          |
+| Command                                                                                                                                                  | Purpose                                                                                       |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `inbox snapshot --game ID [--recipient ROLE] [--parent ROLE]... [--history-cursor CURSOR]`                                                               | Capture the recipient's inbox snapshot.                                                       |
+| `inbox ack --game ID --snapshot UUID --queue-id ID... --disposition handled\|superseded\|retained [--reason TEXT] [--recipient ROLE] [--parent ROLE]...` | Acknowledge queue items from that snapshot. `retained` requires a reason.                     |
+| `message send`, `dispatch`, `status`, `reconcile`, `retire-spool`                                                                                        | Durable role messages; see [messages](messages.md).                                           |
+| `ledger intake`, `apply`, `show`, `report`, `history`, `coverage`, `reconcile`, `boundary`                                                               | The request ledger; see [request accounting](request-accounting.md).                          |
+| `claude ready [--game ID]... [--role ROLE]...`, `codex ready [--game ID]... [--role ROLE]...`                                                            | The handoff readiness probe, optionally scoped; see [readiness](registry.md#readiness-probe). |
+| `harness ready [--game ID]... [--role ROLE]...`                                                                                                          | Read-only readiness using each selected role's effective harness.                             |
+| `harness select --harness claude\|codex\|default --expected-revision N [--game ID]... [--role ROLE]...`                                                  | Atomic selection for at least one explicit game or role, without activation.                  |
+| `harness doctor --game ID ... [--role ROLE ...]`, `harness doctor --role ROLE ...`                                                                       | Diagnose explicitly selected roles without sending or activating.                             |
+| `claude channel [--game ID]... [--conversation UUID] [--state-dir DIR]... [--poll-seconds N]`                                                            | The stdio MCP server the Claude recipient session starts.                                     |
+| `protocol ...`                                                                                                                                           | The explicit filesystem work protocol; see [work protocol](work-protocol.md).                 |
+| `work check [--root DIR]`, `work report [--root DIR]`                                                                                                    | Validate a repository's work files and report their state; see [work files](work-files.md).   |
+| `help`, `--help`, `--version`                                                                                                                            | Usage and version.                                                                            |
 
 ## Command semantics
 
-- `claude channel`: by default it drains every game's spool (or each `--game`) for the
-  conversation of the `reports.recipient` those games name, and requires that role's effective
-  harness to be `claude`. Games that name different recipients stop it with exit 1; select games
-  with one recipient or pass `--conversation`. `--conversation UUID` and repeated absolute
+- `claude channel`: by default it serves the conversation of the `reports.recipient` that every
+  game (or each `--game`) names, draining those games' spools and that conversation's message
+  spool, and requires that role's effective harness to be `claude`. Games that name different
+  recipients stop it with exit 1; select games with one recipient or pass `--conversation`. `--conversation UUID` and repeated absolute
   `--state-dir STATE/unblock` paths select the conversation and spools explicitly; `--state-dir`
   excludes `--game`. `--poll-seconds` defaults to 5. It creates no state directory and drains only
   spools that already exist, so it can start before any game state. Without `--conversation`, an
