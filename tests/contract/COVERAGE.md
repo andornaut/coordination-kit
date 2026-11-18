@@ -14,12 +14,17 @@ stderr, then calls `flushEvents`, as delivery-kit's runner observer does. Restar
 pass that keeps only durable state. Cadence, missed-slot handling, departures and the runner's
 own lines are delivery-kit's contract cases, which reach this kit through the same seam.
 
+The event cases drive the outbox the same way: a producer pass is a fresh process that records
+its events in order through the built `recordEvent`, and a flush pass is a fresh process that
+calls `flushEvents` alone, as an observer pass without a review slot ends. Which events the
+runner produces, and its per-commit CI and deployment tracking, are delivery-kit's cases.
+
 Decisions the cases assert:
 
 - Adapter selection: the recipient's selected harness chooses the adapter, not the route. claude-route "the registry's harness, not the route, selects the adapter" expects a malformed or schema 1 route under a Claude registry to be rejected without the Codex path.
 - Route deferral wording: an unusable `var/route.json` defers with "review route is unavailable or invalid; its owner must verify identities and ownership" (`ROUTE_INVALID_MESSAGE`).
 - Routes carry no harness: a route names roles, and brief target lines name the registry role key (`briefTarget`).
-- Native health events: health events such as review-stuck are delivered natively to the recipient. Cases that count slot sends count only slot requests (`slotMutations`) or only connections that delivered no event (`ownConnections`).
+- Native health events: health events such as review-stuck are delivered natively to the recipient. Cases that count slot sends count only slot requests (`slotMutations`).
 - Usage errors exit 2; an unavailable read exits 1.
 - Receive timeouts: a native reply that never arrives is classified and latched as a timeout (child health, question state and the review history transport failure).
 - Coordinator root: `--root`, then `COORDINATION_KIT_ROOT`, then `DELIVERY_KIT_ROOT`.

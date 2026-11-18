@@ -51,7 +51,6 @@ export interface Tick {
 export class Reviewed {
   readonly world = new NativeWorld();
   readonly socket: CodexSocket;
-  private output = "";
 
   constructor(readonly ws: Workspace) {
     this.socket = new CodexSocket(ws);
@@ -73,10 +72,8 @@ export class Reviewed {
     this.ws.env.CODEX_CONTROL_SOCKET = this.socket.path;
   }
 
-  /** Begin a run of slots; the output so far is cleared. */
-  async start(): Promise<void> {
-    this.output = "";
-  }
+  /** Begin a run of slots. Each slot is a fresh process, so there is nothing to start. */
+  async start(): Promise<void> {}
 
   async stop(): Promise<void> {}
 
@@ -88,7 +85,6 @@ export class Reviewed {
   async jump(epoch: number, predicate: (output: string) => boolean): Promise<string> {
     const pass = await execute(impl.review(this.ws, epoch));
     const output = pass.stdout + pass.stderr;
-    this.output += output;
     if (!predicate(output)) throw new Error(`slot ${epoch} output did not match:\n${output}`);
     return output;
   }
@@ -108,11 +104,6 @@ export class Reviewed {
         >)
       : undefined;
     return { result, output };
-  }
-
-  /** Output written so far in this run. */
-  text(): string {
-    return this.output;
   }
 
   receipt(epoch: number, recipient = TECH): Record<string, unknown> {

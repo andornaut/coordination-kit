@@ -1,9 +1,6 @@
-// Scratch workspace shared by both implementation adapters: a game-coordinator root, one or more
-// game checkouts, scratch HOME and XDG state, and fake external tools on PATH.
-import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+// Scratch workspace for every contract case: a game-coordinator root, one or more game
+// checkouts, scratch HOME and XDG state, and fake external tools on PATH.
 import {
-  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -11,7 +8,6 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,33 +19,13 @@ export const KIT_ROOT = join(HERE, "..", "..", "..");
 const FAKE_TOOLS = ["claude", "docker", "gh", "git", "wrangler"] as const;
 export type FakeTool = (typeof FAKE_TOOLS)[number];
 
-function objectId(type: string, body: Buffer | string): string {
-  const bytes = Buffer.from(body);
-  return createHash("sha1").update(`${type} ${bytes.length}\0`).update(bytes).digest("hex");
-}
-
-const FIXTURE_IGNORE = "dist/\n";
-const FIXTURE_TREE = objectId(
-  "tree",
-  Buffer.concat([
-    Buffer.from("100644 .gitignore\0"),
-    Buffer.from(objectId("blob", FIXTURE_IGNORE), "hex"),
-  ]),
-);
-export const SHA = objectId(
-  "commit",
-  `tree ${FIXTURE_TREE}\nauthor Fixture <fixture@example.invalid> 1700000000 +0000\ncommitter Fixture <fixture@example.invalid> 1700000000 +0000\n\nfixture\n`,
-);
-const BASE = "b".repeat(40);
-
 /** The committed game `delivery-kit.json` (plan schema 1). Values are passed through as given. */
 export interface GameConfig {
   schema?: unknown;
   git?: { main?: unknown; remote?: unknown; github?: unknown };
   schedule?: { departures?: unknown; timezone?: unknown };
   gate?: { image?: unknown; install?: unknown; steps?: unknown };
-  /** `maxWorkers` is a removed key that check-config rejects as unknown. */
-  resources?: { cpus?: unknown; maxWorkers?: unknown; loadLimit?: unknown; memoryMiB?: unknown };
+  resources?: { cpus?: unknown; loadLimit?: unknown; memoryMiB?: unknown };
   ci?: { requiredNames?: unknown; pollSeconds?: unknown; timeoutSeconds?: unknown };
   deploy?: { mode?: unknown; skipPattern?: unknown };
   reports?: {
@@ -59,8 +35,6 @@ export interface GameConfig {
     workerParents?: unknown;
   };
 }
-
-export type HostLoad = "ignore" | "real";
 
 export interface RoleRecord {
   ownership?: string;
@@ -80,12 +54,6 @@ export interface GameOptions {
   /** Key in game-coordinator `config.json`; the checkout is created beside game-coordinator. */
   game?: string;
   config?: GameConfig;
-  /** Use native Git for remote/history operations too, instead of scripting those operations. */
-  realGit?: boolean;
-  /** Harness-only; see Workspace.hostLoad. */
-  hostLoad?: HostLoad;
-  /** Explicit fixture adoption; null leaves the production control record absent. */
-  deliveryState?: "enabled" | "paused" | null;
 }
 
 function defaultConfig(): GameConfig {
@@ -110,26 +78,8 @@ function defaultConfig(): GameConfig {
   };
 }
 
+/** The fake tools' behaviour; only `claude agents --json` is modelled. */
 export interface Control {
-  sha?: string;
-  base?: string;
-  maxRealSleep?: number;
-  git?: {
-    real?: boolean;
-    /** Local main HEAD for `rev-parse main` (1.0 trunk-based departures). */
-    localMain?: string;
-    files?: string;
-    status?: string;
-  };
-  docker?: {
-    cpus?: number;
-    gateFail?: boolean;
-    installFail?: boolean;
-    /** The install provides no node_modules/wrangler/bin/wrangler.js. */
-    noWrangler?: boolean;
-  };
-  gh?: { exitCode?: number; default?: unknown[]; checks?: Record<string, unknown[]> };
-  wrangler?: { fail?: boolean };
   claude?: { exitCode?: number; agents?: unknown };
 }
 
@@ -150,13 +100,6 @@ export class Workspace {
   readonly repo: string;
   readonly state: string;
   config: GameConfig;
-  readonly realGit: boolean;
-  /**
-   * Harness-only fixture flag, never written to delivery-kit.json. "ignore" (the default)
-   * keeps the host's real load from blocking departures; "real" applies resources.loadLimit
-   * against the actual load, which cases use with loadLimit 0 to force a load block.
-   */
-  hostLoad: HostLoad;
   /** Extra environment for every CLI invocation (adapter overrides such as CODEX_CONTROL_SOCKET). */
   env: Record<string, string> = {};
 
@@ -172,28 +115,17 @@ export class Workspace {
     this.repo = join(this.root, this.game);
     this.state = join(this.coordinator, "var", "games", this.game, "bus");
     this.config = options.config ?? defaultConfig();
-    this.realGit = options.realGit ?? false;
-    this.hostLoad = options.hostLoad ?? "ignore";
     for (const path of [this.xdgState, this.fakeBin, this.repo, this.state])
       mkdirSync(path, { recursive: true });
-    // Docker would create a missing bind source as root; consumers keep this cache in state.
-    mkdirSync(join(this.state, "npm-cache"));
     this.installFakes();
-    // CI reports the default required check green unless a case scripts gh: every departure
-    // watches CI before deploying.
-    const gh = { default: [{ conclusion: "success", id: 1, name: "Test", status: "completed" }] };
-    this.setControl(this.realGit ? { gh, git: { real: true } } : { gh });
+    this.setControl({});
     this.writeCoordinator();
-    if (options.deliveryState !== null)
-      this.adoptDeliveryControl(options.deliveryState ?? "enabled");
-    this.initRealGit();
-    writeJson(join(this.fakeDir, "identity.json"), { sha: SHA, tree: FIXTURE_TREE });
+    this.writeDeliveryControl();
   }
 
   private installFakes(): void {
     const script = join(HERE, "fake-tool.mjs");
     for (const tool of FAKE_TOOLS) {
-      if (tool === "git" && this.realGit) continue;
       const path = join(this.fakeBin, tool);
       writeFileSync(path, `#!/bin/sh\nexec '${process.execPath}' '${script}' ${tool} "$@"\n`);
       chmodSync(path, 0o755);
@@ -271,8 +203,8 @@ export class Workspace {
     return join(this.repo, "delivery-kit.json");
   }
 
-  /** Seed this fixture's approved control state without changing production defaults. */
-  adoptDeliveryControl(state: "enabled" | "paused"): void {
+  /** delivery-kit's control record, which coordination commands must leave unchanged. */
+  private writeDeliveryControl(): void {
     const updatedAt = "2026-11-09T20:00:00.000Z";
     this.write(
       "delivery-control.json",
@@ -280,7 +212,7 @@ export class Workspace {
         schema: 1,
         revision: 1,
         desired: {
-          state,
+          state: "enabled",
           reason: "fixture adoption",
           requester: "game-coordinator",
           updatedAt,
@@ -292,7 +224,7 @@ export class Workspace {
     );
   }
 
-  setControl(control: Control): void {
+  private setControl(control: Control): void {
     writeJson(join(this.fakeDir, "control.json"), control);
   }
 
@@ -300,26 +232,10 @@ export class Workspace {
     const control = this.control();
     change(control);
     this.setControl(control);
-    // Keep an existing clock's sleep cap in step with the control value.
-    if (existsSync(this.clockFile)) {
-      const clock = JSON.parse(readFileSync(this.clockFile, "utf8")) as Record<string, unknown>;
-      delete clock.maxRealSleep;
-      writeJson(this.clockFile, { ...clock, ...this.realSleepCap() });
-    }
   }
 
-  control(): Control {
+  private control(): Control {
     return JSON.parse(readFileSync(join(this.fakeDir, "control.json"), "utf8"));
-  }
-
-  /** The fake remote's main head; pushes write it. */
-  get remoteHead(): string {
-    const path = join(this.fakeDir, "remote-head");
-    return existsSync(path) ? readFileSync(path, "utf8").trim() : (this.control().base ?? BASE);
-  }
-
-  set remoteHead(value: string) {
-    writeFileSync(join(this.fakeDir, "remote-head"), value);
   }
 
   calls(tool?: FakeTool): Call[] {
@@ -332,71 +248,6 @@ export class Workspace {
     return tool ? rows.filter((row) => row.tool === tool) : rows;
   }
 
-  /**
-   * Virtual clock for `run`: virtual = epoch + offsets + wall elapsed * speed.
-   * The runner reads the file through DELIVERY_KIT_TEST_CLOCK.
-   */
-  setClock(epoch: number, speed = 60): void {
-    rmSync(join(this.fakeDir, "clock-offsets"), { force: true });
-    writeJson(join(this.fakeDir, "clock.json"), {
-      epoch,
-      realStartMs: Date.now(),
-      speed,
-      ...this.realSleepCap(),
-    });
-  }
-
-  /**
-   * Hold the virtual clock at `epoch` until the next setClock: speed 0.001 keeps the whole second
-   * unchanged for over 16 real minutes, and real sleeps of at most 50 ms let the runner see the
-   * release promptly.
-   */
-  holdClock(epoch: number): void {
-    rmSync(join(this.fakeDir, "clock-offsets"), { force: true });
-    writeJson(join(this.fakeDir, "clock.json"), {
-      epoch,
-      realStartMs: Date.now(),
-      speed: 0.001,
-      maxRealSleep: 0.05,
-    });
-  }
-
-  /**
-   * The real-time cap on one runner sleep: control.maxRealSleep (seconds), written into
-   * clock.json's optional maxRealSleep.
-   */
-  private realSleepCap(): { maxRealSleep?: number } {
-    const cap = this.control().maxRealSleep;
-    return cap !== undefined && cap > 0 ? { maxRealSleep: cap } : {};
-  }
-
-  get clockFile(): string {
-    return join(this.fakeDir, "clock.json");
-  }
-
-  /** Current virtual time, as fake `date +%s` reports it. */
-  virtualNow(): number {
-    const clock = JSON.parse(readFileSync(this.clockFile, "utf8")) as {
-      epoch: number;
-      realStartMs: number;
-      speed: number;
-    };
-    const offsetsPath = join(this.fakeDir, "clock-offsets");
-    const offsets = existsSync(offsetsPath)
-      ? readFileSync(offsetsPath, "utf8")
-          .split("\n")
-          .filter(Boolean)
-          .reduce((sum, line) => sum + Number(line), 0)
-      : 0;
-    return Math.floor(
-      clock.epoch + offsets + ((Date.now() - clock.realStartMs) * clock.speed) / 1000,
-    );
-  }
-
-  advanceClock(seconds: number): void {
-    appendFileSync(join(this.fakeDir, "clock-offsets"), `${seconds}\n`);
-  }
-
   /** Base environment: scratch HOME and XDG state, fakes first on PATH. */
   baseEnv(): Record<string, string> {
     const env: Record<string, string> = {
@@ -405,55 +256,8 @@ export class Workspace {
       XDG_STATE_HOME: this.xdgState,
       DK_FAKE_DIR: this.fakeDir,
       LANG: "C.UTF-8",
-      GIT_AUTHOR_NAME: "Fixture",
-      GIT_AUTHOR_EMAIL: "fixture@example.invalid",
-      GIT_COMMITTER_NAME: "Fixture",
-      GIT_COMMITTER_EMAIL: "fixture@example.invalid",
-      GIT_CONFIG_NOSYSTEM: "1",
     };
-    if (existsSync(this.clockFile)) env.DELIVERY_KIT_TEST_CLOCK = this.clockFile;
     return { ...env, ...this.env };
-  }
-
-  // Real Git helpers for cases that integrate actual history.
-  private initRealGit(): void {
-    this.git("init", "-q", "-b", "main");
-    // Games ignore build output, so the gate's dist/ does not change the Git fingerprint.
-    writeFileSync(join(this.repo, ".gitignore"), FIXTURE_IGNORE);
-    this.git("add", "--", ".gitignore");
-    execFileSync("/usr/bin/git", ["-C", this.repo, "commit", "--no-verify", "-qm", "fixture"], {
-      env: {
-        ...this.baseEnv(),
-        GIT_AUTHOR_DATE: "1700000000 +0000",
-        GIT_COMMITTER_DATE: "1700000000 +0000",
-      },
-    });
-    if (this.git("rev-parse", "HEAD") !== SHA) throw new Error("fixture commit identity differs");
-  }
-
-  git(...args: string[]): string {
-    return execFileSync("/usr/bin/git", ["-C", this.repo, ...args], {
-      env: this.baseEnv(),
-      encoding: "utf8",
-    }).trim();
-  }
-
-  commit(message: string, files: Record<string, string> = {}): string {
-    for (const [name, content] of Object.entries(files)) {
-      mkdirSync(dirname(join(this.repo, name)), { recursive: true });
-      writeFileSync(join(this.repo, name), content);
-      this.git("add", "--", name);
-    }
-    this.git(
-      "-c",
-      "core.hooksPath=/dev/null",
-      "commit",
-      "--no-verify",
-      "--allow-empty",
-      "-qm",
-      message,
-    );
-    return this.git("rev-parse", "HEAD");
   }
 
   // State helpers. Paths are relative to the game's bus state directory.
@@ -481,10 +285,6 @@ export class Workspace {
   list(...parts: string[]): string[] {
     const path = this.path(...parts);
     return existsSync(path) ? readdirSync(path).sort() : [];
-  }
-
-  inode(...parts: string[]): number {
-    return statSync(this.path(...parts)).ino;
   }
 
   /** Outbox events, oldest first. */

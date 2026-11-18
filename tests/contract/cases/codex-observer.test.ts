@@ -3,8 +3,7 @@
 import { readFileSync } from "node:fs";
 import { afterAll, expect } from "vitest";
 
-import { clearRecipient } from "../lib/claude-codex.ts";
-import { codexWorld, tick } from "../lib/claude-fixture.ts";
+import { clear, codexWorld, tick } from "../lib/claude-fixture.ts";
 import { contract, suite, workspaces } from "../lib/cases.ts";
 import { CodexSocket } from "../lib/codex-socket.ts";
 import { at } from "../lib/time.ts";
@@ -38,7 +37,7 @@ async function nativeGame(ws: Workspace, sockets: CodexSocket[]): Promise<CodexS
   ws.config.schedule = { departures: ["00"], timezone: "America/Toronto" };
   ws.config.deploy = { mode: "none", skipPattern: "" };
   ws.config.reports = { project: "Fixture", recipient: "tech" };
-  clearRecipient(ws, TECH);
+  clear(ws, TECH);
   const socket = await codexWorld(new CodexSocket(ws), { [TECH]: QUEUE }).listen();
   sockets.push(socket);
   ws.env.CODEX_CONTROL_SOCKET = socket.path;
@@ -67,7 +66,7 @@ suite("codex observer", () => {
       expect(new Set(Object.keys(queues))).toEqual(new Set([RECIPIENT, TECH, GAMEPLAY]));
       expect(queues[TECH][0].input[0].text).toBe(PRIVATE);
       expect(socket.methods().some((method) => method.startsWith("turn/"))).toBe(false);
-      clearRecipient(ws, RECIPIENT);
+      clear(ws, RECIPIENT);
       const next = await tick(ws, fifty);
       expect(next.review[0]!.result.status).toBe("accepted");
       const duplicate = await tick(ws, fifty);

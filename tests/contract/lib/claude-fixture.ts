@@ -1,8 +1,8 @@
-// Helpers for Claude route, channel and review-tick cases: identities, request IDs, a
-// scheduled review tick driven through the resident runner, and an MCP channel client.
+// Helpers for Claude route, channel, review-tick and event cases: identities, request IDs, a
+// scheduled review tick through the built seam, and an MCP channel client.
 import { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 
 import { type Command, execute, impl, type Resident, type Result, start } from "./adapter.ts";
 import type { CodexSocket } from "./codex-socket.ts";
@@ -111,15 +111,6 @@ export function claudeGame(ws: Workspace, options: { recipient?: boolean } = {})
   ws.writeRoute(claudeRoute(ws));
   clear(ws);
   agents(ws, "idle");
-}
-
-export function virtualNow(ws: Workspace): number {
-  const clock = JSON.parse(readFileSync(ws.clockFile, "utf8")) as {
-    epoch: number;
-    realStartMs: number;
-    speed: number;
-  };
-  return clock.epoch + ((Date.now() - clock.realStartMs) * clock.speed) / 1000;
 }
 
 export interface Tick extends Result {

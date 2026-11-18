@@ -10,6 +10,13 @@ export interface Result {
   stderr: string;
 }
 
+/** One bus event a producer records. */
+export interface RecordedEvent {
+  kind: string;
+  key: string;
+  message: string;
+}
+
 export interface Command {
   argv: string[];
   cwd: string;
@@ -31,6 +38,13 @@ export interface Implementation {
    * built public seam: `deliverScheduledReview`, its runner log line, then `flushEvents`.
    */
   review(ws: Workspace, slot: number): Command;
+  /**
+   * One producer pass through the built `recordEvent`: each event in order, in one process, with
+   * the game's `reports.project`, as delivery-kit's runner records them.
+   */
+  record(ws: Workspace, events: readonly RecordedEvent[]): Command;
+  /** One event flush pass through the built `flushEvents`, as the runner observer ends a pass. */
+  flush(ws: Workspace): Command;
   /** The Claude channel consumer (stdio MCP server). */
   channel(ws: Workspace, args: string[]): Command;
 }
@@ -82,10 +96,6 @@ export interface Resident {
   until(predicate: () => boolean, timeoutMs?: number): Promise<void>;
   /** SIGTERM the process group, then SIGKILL stragglers. */
   stop(): Promise<Result>;
-  /** Signal only the group leader, leaving detached children running. */
-  terminateLeader(): Promise<Result>;
-  /** Output captured so far. */
-  output(): { stdout: string; stderr: string };
 }
 
 /** Start a long-running command (the channel consumer) in its own group. */
@@ -125,21 +135,12 @@ export function start(command: Command): Resident {
         await new Promise((r) => setTimeout(r, 50));
       }
     },
-    output: () => ({ stdout, stderr }),
-    async terminateLeader() {
-      // `exit`, not `close`: surviving children may still hold the output pipes.
-      const exited = new Promise<Result>((resolve) =>
-        child.once("exit", (code, signal) => resolve({ code, signal, stdout, stderr })),
-      );
-      child.kill("SIGTERM");
-      return exited;
-    },
     async stop() {
       signalGroup("SIGTERM");
       const timer = setTimeout(() => signalGroup("SIGKILL"), 5_000);
       const result = await done;
       clearTimeout(timer);
-      // Detached reporters share the group; never leave them running after a case.
+      // Never leave a child of the group running after a case.
       signalGroup("SIGKILL");
       return result;
     },

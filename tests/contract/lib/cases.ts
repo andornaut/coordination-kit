@@ -28,9 +28,6 @@ export const ROUTE_INVALID_MESSAGE =
 export const WORKER_PARENTS_ROUTE_MESSAGE =
   "workerParents requires parents in the active review route";
 
-/** The exit status for invalid configuration, a failed precondition or an unavailable read. */
-export const EXIT_INVALID = 1;
-
 /** A fresh workspace per case, removed afterwards. */
 export function workspaces(): (options?: GameOptions) => Workspace {
   const created: Workspace[] = [];

@@ -95,18 +95,6 @@ export class CodexSocket {
     );
   }
 
-  /** Connections that delivered a bus event, which 1.0 sends natively to the recipient. */
-  eventConnections(): number[] {
-    return [
-      ...new Set(this.calls.filter(CodexSocket.isEvent).map((call) => call.connection ?? -1)),
-    ];
-  }
-
-  /** Connections other than those that delivered a bus event. */
-  ownConnections(): number {
-    return this.connections.length - this.eventConnections().length;
-  }
-
   methods(): string[] {
     return this.calls.map((call) => call.method);
   }

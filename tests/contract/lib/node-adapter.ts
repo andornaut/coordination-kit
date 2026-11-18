@@ -8,11 +8,12 @@
 //
 // A scheduled review pass runs the built public seam the way delivery-kit's runner observer does:
 // `deliverScheduledReview` for the slot, the same runner log line, then `flushEvents`. The slot
-// is the explicit argument; no clock is read.
+// is the explicit argument; no clock is read. Event passes call `recordEvent` or `flushEvents`
+// alone, each in a fresh process.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { Command, Implementation } from "./adapter.ts";
+import type { Command, Implementation, RecordedEvent } from "./adapter.ts";
 import { KIT_ROOT, type Workspace, writeJson } from "./workspace.ts";
 
 const CLI = join(KIT_ROOT, "dist", "cli.js");
@@ -189,6 +190,41 @@ await flushEvents(game);
 `;
 }
 
+const SEAM_PRELUDE = (game: string) => `
+import { gameLayout, loadLayout } from ${DIST("shared")};
+const layout = loadLayout(process.env.COORDINATION_KIT_ROOT);
+const game = gameLayout(layout, ${JSON.stringify(game)});
+`;
+
+/** A producer pass: each event through recordEvent, in order, in one process. */
+function recordPass(game: string, project: string, events: readonly RecordedEvent[]): string {
+  return `
+import { recordEvent } from ${DIST("events")};
+${SEAM_PRELUDE(game)}
+for (const event of ${JSON.stringify(events)}) {
+  recordEvent(game, { project: ${JSON.stringify(project)} }, event.kind, event.key, event.message);
+}
+`;
+}
+
+/** An observer pass without a review slot: only the event flush. */
+function flushPass(game: string): string {
+  return `
+import { flushEvents } from ${DIST("events")};
+${SEAM_PRELUDE(game)}
+await flushEvents(game);
+`;
+}
+
+function seam(ws: Workspace, script: string): Command {
+  prepare(ws, []);
+  return {
+    argv: [process.execPath, "--input-type=module", "-e", script],
+    cwd: ws.coordinator,
+    env: env(ws),
+  };
+}
+
 export const nodeImplementation: Implementation = {
   name: "node",
   available: existsSync(CLI) ? true : "dist/cli.js is not built; Node cases are pending",
@@ -203,14 +239,12 @@ export const nodeImplementation: Implementation = {
     cwd: ws.coordinator,
     env: ws.baseEnv(),
   }),
-  review: (ws, slot) => {
-    prepare(ws, []);
-    return {
-      argv: [process.execPath, "--input-type=module", "-e", observerPass(ws.game, slot)],
-      cwd: ws.coordinator,
-      env: env(ws),
-    };
+  review: (ws, slot) => seam(ws, observerPass(ws.game, slot)),
+  record: (ws, events) => {
+    const project = (nodeConfig(ws).reports as { project: string }).project;
+    return seam(ws, recordPass(ws.game, project, events));
   },
+  flush: (ws) => seam(ws, flushPass(ws.game)),
   channel: (ws, args) => ({
     argv: [process.execPath, CLI, "claude", "channel", ...args],
     cwd: ws.coordinator,
