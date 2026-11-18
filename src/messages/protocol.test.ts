@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { holdLock, LockBusy } from "../lock.ts";
+import { ProtocolStore } from "../protocol/core.ts";
 import { type MessageWriter, ProtocolMessages } from "../protocol/messages.ts";
 import { runtimeProtocolStore } from "../protocol/runtime.ts";
 import { activateProtocolFixture } from "../protocol/testFixtures.ts";
@@ -62,8 +63,12 @@ async function fixture() {
     id: envelope.id,
     recipient: envelope.toRole,
   };
-  return { ...game, envelope, input, messages, original, protocol, service };
+  return { ...game, envelope, input, messages, original, protocol, service, writer };
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("protocol originals and legacy transport projections (isolated fixtures)", () => {
   it("requires the canonical original and recipient-owned receipt without clearing a pending question", async () => {
@@ -129,6 +134,31 @@ describe("protocol originals and legacy transport projections (isolated fixtures
       handlingAttestation: "attested",
     });
     expect(readFileSync(marker, "utf8")).toBe(before);
+  });
+
+  it("reads each protocol role state at most once for one recipient listing", async () => {
+    const f = await fixture();
+    const id = "00000000-0000-4000-8000-000000000079";
+    await f.messages.publish(
+      { ...f.writer, expectedRevision: 2, id: "publish-second-original" },
+      {
+        envelope: { ...f.envelope, id },
+        guards: GUARDS,
+        links: { clauseIds: [], messageIds: [], requestIds: [], workIds: [] },
+      },
+    );
+    await f.service.send(f.input);
+    await f.service.send({ ...f.input, id });
+    const read = vi.spyOn(ProtocolStore.prototype, "read");
+    const listing = f.service.status({ recipient: f.envelope.toRole });
+    expect(listing.map((row) => row.id)).toEqual([f.envelope.id, id]);
+    expect(listing.map((row) => row.protocol)).toEqual([
+      { disposition: null, handlingAttestation: "unattested" },
+      { disposition: null, handlingAttestation: "unattested" },
+    ]);
+    const roles = read.mock.calls.map(([role]) => role);
+    expect(roles.length).toBeGreaterThan(0);
+    expect(new Set(roles).size).toBe(roles.length);
   });
 
   it("pins the generation through an active attempt while preserving per-message exclusion and ambiguity", async () => {

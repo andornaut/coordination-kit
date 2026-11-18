@@ -400,6 +400,18 @@ export class MessageStore {
     return this.records().filter((record) => record.envelope.toRole === toRole);
   }
 
+  /**
+   * Point-in-time recipient listing: one scan and its protocol lookups share one read view, and
+   * each status comes from the scanned record without a second read.
+   */
+  inboxStatus(
+    toRole: string,
+  ): readonly { readonly record: MessageRecord; readonly status: MessageStatus }[] {
+    return this.readView(() =>
+      this.inbox(toRole).map((record) => ({ record, status: this.publicRecord(record) })),
+    );
+  }
+
   private records(): readonly MessageRecord[] {
     return this.readView(() => this.readRecords());
   }

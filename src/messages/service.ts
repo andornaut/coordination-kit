@@ -272,6 +272,19 @@ export interface MessageView extends MessageStatus {
   readonly retention?: MessageRetention | null;
 }
 
+function projection(
+  status: MessageStatus,
+  record: MessageRecord,
+  includeBody = false,
+  includeRetention = false,
+): MessageView {
+  return {
+    ...status,
+    ...(includeBody ? { body: record.envelope.body } : {}),
+    ...(includeRetention ? { retention: structuredClone(record.retention) } : {}),
+  };
+}
+
 /** Stable local inbox and explicit guarded dispatch. Construction never probes a provider. */
 export class MessageService {
   readonly store: MessageStore;
@@ -299,11 +312,7 @@ export class MessageService {
     if (status === undefined || status.revision !== record.revision) {
       throw new MessageError("binding-conflict");
     }
-    return {
-      ...status,
-      ...(includeBody ? { body: record.envelope.body } : {}),
-      ...(includeRetention ? { retention: structuredClone(record.retention) } : {}),
-    };
+    return projection(status, record, includeBody, includeRetention);
   }
 
   async send(input: MessageSendInput): Promise<MessageRecord> {
@@ -374,8 +383,10 @@ export class MessageService {
     }
     const role = resolveRole(readRegistry(this.context.layout), selection.recipient!);
     return this.store
-      .inbox(role)
-      .map((record) => this.view(record, selection.includeBody, selection.includeRetention));
+      .inboxStatus(role)
+      .map(({ record, status }) =>
+        projection(status, record, selection.includeBody, selection.includeRetention),
+      );
   }
 
   private receiptPath(source: MessageAttemptSource): string {

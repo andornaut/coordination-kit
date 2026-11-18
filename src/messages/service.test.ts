@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -8,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -113,6 +115,59 @@ describe("message service", () => {
     await expect(restarted.send({ ...input(), body: `${BODY}changed` })).rejects.toThrow(
       "id-conflict",
     );
+  });
+
+  it("lists a recipient as one snapshot while another process reconciles a listed message", async () => {
+    const test = fixture();
+    const service = new MessageService({ env: {}, layout: test.layout, now: () => NOW });
+    const first = await service.send(input());
+    const second = await service.send(input(ROLE, SECOND));
+    const scan = service.store.inbox.bind(service.store);
+    let reconciled = false;
+    vi.spyOn(service.store, "inbox").mockImplementation((role) => {
+      const snapshot = scan(role);
+      // A separate CLI process reconciles one listed record after the scan and before the views.
+      const cli = spawnSync(
+        process.execPath,
+        [
+          fileURLToPath(new URL("../bin.ts", import.meta.url)),
+          "message",
+          "reconcile",
+          "--id",
+          SECOND,
+          "--disposition",
+          "superseded",
+          "--expected-revision",
+          String(second.revision),
+          "--evidence",
+          "fixture-concurrent-reconcile",
+          "--root",
+          test.root,
+        ],
+        { encoding: "utf8", env: { HOME: test.base, PATH: process.env.PATH } },
+      );
+      expect(cli.status, cli.stderr).toBe(0);
+      reconciled = true;
+      return snapshot;
+    });
+    const listing = service.status({ recipient: ROLE });
+    expect(reconciled).toBe(true);
+    expect(listing.map(({ id, revision, state }) => ({ id, revision, state }))).toEqual([
+      { id: ID, revision: first.revision, state: "queued" },
+      { id: SECOND, revision: second.revision, state: "queued" },
+    ]);
+    expect(service.status({ id: SECOND })[0]).toMatchObject({
+      revision: second.revision + 1,
+      state: "superseded",
+    });
+    await expect(
+      service.reconcile({
+        disposition: "handled",
+        evidence: "fixture-stale",
+        expectedRevision: second.revision,
+        id: SECOND,
+      }),
+    ).rejects.toThrow("binding-conflict");
   });
 
   it("requires existing clearance before dispatch and keeps acceptance distinct from handling", async () => {
