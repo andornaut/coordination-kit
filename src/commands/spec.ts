@@ -18,6 +18,7 @@ import {
 import {
   PROTOCOL_ARTIFACT_OPTIONS,
   PROTOCOL_BOUNDARY_OPTIONS,
+  PROTOCOL_ENROLL_SELF_OPTIONS,
   PROTOCOL_INBOX_OPTIONS,
   PROTOCOL_INPUT_OPTIONS,
   PROTOCOL_INTAKE_OPTIONS,
@@ -294,6 +295,14 @@ export const SPECS = {
     group: "protocol",
     options: PROTOCOL_INPUT_OPTIONS,
     summary: "enroll supported canonical protocol evidence; no provider activation",
+  },
+  "protocol enroll-self": {
+    forms: [["role", "at", "native-id?", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_ENROLL_SELF_OPTIONS,
+    summary:
+      "enroll the caller's own registered role from its journal, binding and canonical references",
+    values: { "native-id": "ID" },
   },
   "protocol enrollment-report": {
     forms: [["state-root?"]],

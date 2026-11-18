@@ -61,6 +61,7 @@ import {
   resolveProtocolBinding,
   runtimeProtocolStore,
 } from "../protocol/runtime.ts";
+import { enrollSelf } from "../protocol/self-enrollment.ts";
 import type { ProtocolClaim } from "../protocol/types.ts";
 import { type WorkContext, WorkStore } from "../protocol/work.ts";
 import { readRegistry } from "../registry/store.ts";
@@ -89,6 +90,12 @@ export const PROTOCOL_INBOX_OPTIONS = {
 export const PROTOCOL_INTAKE_OPTIONS = {
   id: { type: "string" },
   owner: { type: "string" },
+} as const;
+export const PROTOCOL_ENROLL_SELF_OPTIONS = {
+  ...PROTOCOL_ROOT_OPTIONS,
+  at: { type: "string" },
+  "native-id": { type: "string" },
+  role: { type: "string" },
 } as const;
 export const PROTOCOL_BOUNDARY_OPTIONS = {
   "work-id": { type: "string" },
@@ -137,6 +144,8 @@ const ENROLLMENT_CODES = new Set([
   "enrollment-inspection-time",
   "enrollment-source-changed",
   "enrollment-unavailable",
+  "enrollment-caller-unverified",
+  "enrollment-claim-required",
 ]);
 function options(spec: NonNullable<ParseArgsConfig["options"]>, args: string[]): Values {
   const parsed = parseArgs({ args, options: spec, strict: true, tokens: true });
@@ -853,6 +862,25 @@ export const protocolEnroll = handler(PROTOCOL_INPUT_OPTIONS, async (io, layout,
       );
       return { event, ...enrollmentStatus(layout, protocol, own) };
     },
+    repairLease(chosen.management),
+  );
+});
+export const protocolEnrollSelf = handler(PROTOCOL_ENROLL_SELF_OPTIONS, (io, layout, values) => {
+  const chosen = selected(layout, values);
+  const role = required(values, "role");
+  const at = required(values, "at");
+  if (!Number.isFinite(Date.parse(at))) {
+    throw new UsageError();
+  }
+  return withProtocolLayout(
+    layout,
+    chosen.expected,
+    () =>
+      enrollSelf(io, layout, store(io, layout, chosen.root), scopeInput(layout, chosen), {
+        at,
+        role,
+        ...(values["native-id"] === undefined ? {} : { nativeId: required(values, "native-id") }),
+      }),
     repairLease(chosen.management),
   );
 });

@@ -168,6 +168,36 @@ commands use the configured root; an alternate active root is refused. Repeat in
 publish an active receipt under the current claim after cutover. Prepared receipts alone do not
 establish adoption.
 
+A registered role enrolls itself without an input file:
+
+```sh
+coordination-kit --root /path/to/game-coordinator protocol enroll-self \
+  --role ROLE --at ISO_TIMESTAMP [--native-id ID] [--state-root /path/to/prepared-state]
+```
+
+`--role` takes the registry role name. The caller's native ID is `--native-id`, else
+`CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID` for the role's effective harness; when both are
+present they must agree. The command then:
+
+1. verifies the binding: the role is registered with an active, unheld owner, the native ID equals
+   its effective registry binding and supported binding resolution accepts it;
+2. claims epoch 1 if the journal is unclaimed; a journal held under any other binding is refused
+   with `enrollment-claim-required`, so rotation stays an explicit `protocol claim`;
+3. resolves the scope as `protocol enroll` does, focused on the role, and stores an inspection
+   artifact naming the binding, journal revision and hash, ledger anchor, registry revision,
+   references and unknown scopes, and what was and was not verified;
+4. publishes through the enrollment producer with context ID `enroll-self-<epoch>-<revision>`,
+   listing every known reference and one UNKNOWN per required scope, each with that artifact as
+   evidence.
+
+The receipt format is the one `protocol enroll` writes. Output adds `claimed`, `context` and
+`input` to the `event`, `scope` and `report` fields. Any other registered role, a missing,
+conflicting or unregistered native ID, or an inactive or held owner is refused with
+`enrollment-caller-unverified`. The native ID is compared, not authenticated: it is the caller's
+assertion, and an environment variable is inherited by every child process, including a harness's
+own subagents. It does not verify the calling process, native history, external WIP or a worker
+census; those stay UNKNOWN. Workers keep using `protocol enroll` with their verified lineage.
+
 Scope resolution reads each role journal, the registry and the request ledger once, so the
 scope is internally consistent and other roles' concurrent writes, including their enrollments
 and publications, never refuse an enrollment, report or boundary. `protocol enroll` and

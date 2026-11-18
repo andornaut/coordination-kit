@@ -22,7 +22,7 @@ async function fixture() {
     planProtocolMigration(layout, { expectedGeneration: 0, stateRoot, workspaceId: "fixture" }),
   );
   let sequence = 0;
-  const env = { CODEX_CONTROL_SOCKET: "/never/connect" };
+  const env: NodeJS.ProcessEnv = { CODEX_CONTROL_SOCKET: "/never/connect" };
   const file = (value: unknown) => {
     const path = join(t.base, `input-${sequence++}.json`);
     writeFileSync(path, JSON.stringify(value));
@@ -200,6 +200,23 @@ describe("supported protocol CLI", () => {
     } finally {
       await server.close();
     }
+  });
+  it("enrolls only the caller's own registered role without an input file", async () => {
+    const t = await fixture();
+    t.env.CLAUDE_CODE_SESSION_ID = CLAUDE_COORDINATOR;
+    const enroll = (...args: string[]) =>
+      t.run("protocol", "enroll-self", "--state-root", t.stateRoot, ...args);
+    const refused = await enroll("--role", "archies-dog-walks/tech", "--at", AT);
+    expect(refused.code).toBe(1);
+    expect(JSON.parse(refused.err).error.code).toBe("enrollment-caller-unverified");
+    expect((await enroll("--role", "game-coordinator")).code).toBe(2);
+    const accepted = await enroll("--role", "game-coordinator", "--at", AT);
+    expect(accepted, accepted.err).toMatchObject({ code: 0 });
+    const value = JSON.parse(accepted.out);
+    expect(value.input).toMatchObject({ phase: "prepared", workspaceId: "fixture" });
+    expect(
+      value.report.participants.find((p: { role: string }) => p.role === "coordinator"),
+    ).toMatchObject({ adopted: false, represented: true });
   });
   it("publishes and reads an exact original with scoped unknown coverage", async () => {
     const t = await fixture();

@@ -49,6 +49,10 @@ every form and flag.
   spool is reported under the snapshot's `errors`, with `complete` false and exit 1; only a
   missing spool counts as empty. Both keep their JSON result on stdout and also name an error on
   stderr.
+- `protocol enroll-self --role ROLE --at ISO_TIMESTAMP [--native-id ID]`: enrolls the caller's
+  own registered role from its journal, registry binding and canonical references, refusing any
+  other role. The native ID defaults to `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`; see
+  [declaration, enrollment and rollout](work-protocol.md#declaration-enrollment-and-rollout).
 - `work check` and `work report`: `--root` names the repository, not the coordinator. See
   [work files](work-files.md).
 
