@@ -268,6 +268,16 @@ export interface LedgerReport extends LedgerProjection {
   readonly protectedQuestions: readonly string[];
 }
 
+/** How `apply` checks `expectedRevision`. */
+export interface LedgerApplyOptions {
+  /**
+   * `ledger` (the default) requires the current global revision. `records` commits at the head
+   * when no later event touches a record the command names, raising an earlier `at` to the head
+   * event time.
+   */
+  readonly revisionScope?: "ledger" | "records";
+}
+
 export interface LedgerStoreOptions {
   /** Canonical caller resolves the active generation's sole request-journal directory. */
   readonly directory: string;

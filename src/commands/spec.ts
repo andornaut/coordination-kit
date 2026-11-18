@@ -54,6 +54,7 @@ const VALUES: Readonly<Record<string, string>> = {
   "queue-id": "ID",
   reason: "TEXT",
   recipient: "ROLE|UUID",
+  "revision-scope": "ledger|records",
   role: "ROLE",
   snapshot: "UUID",
   "state-dir": "STATE/unblock",
@@ -146,7 +147,7 @@ export const SPECS = {
     summary: "capture the recipient's inbox snapshot",
   },
   "ledger apply": {
-    forms: [["input-file"]],
+    forms: [["input-file", "revision-scope?"]],
     group: "ledger",
     options: LEDGER_INPUT_OPTIONS,
     summary: "apply one explicit revision-checked request accounting transaction",
@@ -170,13 +171,13 @@ export const SPECS = {
     summary: "show immutable request accounting transitions",
   },
   "ledger intake": {
-    forms: [["input-file"]],
+    forms: [["input-file", "revision-scope?"]],
     group: "ledger",
     options: LEDGER_INPUT_OPTIONS,
     summary: "register a request with explicit provenance and revision",
   },
   "ledger reconcile": {
-    forms: [["input-file"]],
+    forms: [["input-file", "revision-scope?"]],
     group: "ledger",
     options: LEDGER_INPUT_OPTIONS,
     summary: "record an explicit accounting reconciliation transaction",

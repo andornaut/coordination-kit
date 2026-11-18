@@ -920,3 +920,106 @@ describe("journal checkpoint", () => {
     expect(j.store.history().slice(0, 6)).toEqual(expected.history);
   });
 });
+
+describe("concurrent writers", () => {
+  const WRITERS = 20;
+
+  it("commits twenty concurrent record-scoped writers on distinct records once each", async () => {
+    const f = fixture();
+    await f.register(request("shared"));
+    const observed = f.store.read().revision;
+    const inputs = Array.from({ length: WRITERS }, (_, index) => ({
+      ...f.transaction({ request: request(`writer-${index}`), type: "register" }),
+      expectedRevision: observed,
+    }));
+    const events = await Promise.all(
+      inputs.map((input) => new LedgerStore(f.options).apply(input, { revisionScope: "records" })),
+    );
+    expect(events.map((event) => event.revision).sort((a, b) => a - b)).toEqual(
+      Array.from({ length: WRITERS }, (_, index) => observed + index + 1),
+    );
+    for (const event of events) {
+      expect(event.expectedRevision).toBe(event.revision - 1);
+    }
+    rmSync(join(f.directory, "checkpoint.json"));
+    expect(new LedgerStore(f.options).read().revision).toBe(observed + WRITERS);
+    // A retry reconciles to the same commit; the global check refuses the rebased original.
+    const rebased = events.findIndex((event) => event.expectedRevision > observed);
+    expect(await f.store.apply(inputs[rebased]!, { revisionScope: "records" })).toEqual(
+      events[rebased],
+    );
+    await expect(f.store.apply(inputs[rebased]!)).rejects.toMatchObject({
+      code: "command-conflict",
+    });
+  });
+
+  it("keeps the global revision check for twenty concurrent default writers", async () => {
+    const f = fixture();
+    const results = await Promise.allSettled(
+      Array.from({ length: WRITERS }, (_, index) =>
+        new LedgerStore(f.options).apply(
+          f.transaction({ request: request(`writer-${index}`), type: "register" }),
+        ),
+      ),
+    );
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    for (const result of results.filter((r) => r.status === "rejected")) {
+      expect(result).toMatchObject({ reason: { code: "stale-revision" } });
+    }
+  });
+
+  it("refuses a record-scoped writer when a later event touches a record it names", async () => {
+    const f = fixture();
+    await f.register(request("parent"));
+    const observed = f.store.read().revision;
+    const progress = (commandId: string) => ({
+      ...f.transaction({
+        id: "parent",
+        nextBoundary: "next review",
+        reason: "Working",
+        requiredOwner: "delivery-kit",
+        state: "started",
+        type: "progress",
+      }),
+      commandId,
+      expectedRevision: observed,
+    });
+    await f.store.apply(progress("first"), { revisionScope: "records" });
+    await expect(
+      f.store.apply(progress("second"), { revisionScope: "records" }),
+    ).rejects.toMatchObject({ code: "stale-revision" });
+    const child = {
+      ...f.transaction({ request: { ...request("child"), parentId: "parent" }, type: "register" }),
+      expectedRevision: observed,
+    };
+    await expect(f.store.apply(child, { revisionScope: "records" })).rejects.toMatchObject({
+      code: "stale-revision",
+    });
+    const ahead = { ...progress("ahead"), expectedRevision: observed + 5 };
+    await expect(f.store.apply(ahead, { revisionScope: "records" })).rejects.toMatchObject({
+      code: "stale-revision",
+    });
+    await expect(
+      f.store.apply(progress("invalid"), { revisionScope: "global" as "ledger" }),
+    ).rejects.toMatchObject({ code: "invalid-revision-scope" });
+  });
+
+  it("raises an earlier record-scoped time to the head event time", async () => {
+    const f = fixture();
+    await f.register(request("first"));
+    const earlier = {
+      ...f.transaction({ request: request("second"), type: "register" }),
+      at: "2026-11-16T00:59:00.000Z",
+      expectedRevision: 0,
+    };
+    await expect(f.store.apply({ ...earlier, expectedRevision: 1 })).rejects.toMatchObject({
+      code: "stale-time",
+    });
+    const event = await f.store.apply(earlier, { revisionScope: "records" });
+    expect(event).toMatchObject({ at: AT, expectedRevision: 1, revision: 2 });
+    expect(await f.store.apply(earlier, { revisionScope: "records" })).toEqual(event);
+    await expect(
+      f.store.apply({ ...earlier, at: "2026-11-16T01:30:00.000Z" }, { revisionScope: "records" }),
+    ).rejects.toMatchObject({ code: "command-conflict" });
+  });
+});

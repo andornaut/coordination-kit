@@ -30,6 +30,7 @@ export {
 export { LedgerError, LedgerStore } from "./accounting/store.ts";
 export type {
   EvidenceKind,
+  LedgerApplyOptions,
   LedgerAssignment,
   LedgerCommand,
   LedgerCoverage,

@@ -45,6 +45,18 @@ at revision zero. Reuse the exact transaction to reconcile an uncertain result: 
 command replay returns its event, while conflicting reuse or a stale new command is refused.
 The revision belongs to the whole ledger, including updates to other requests.
 
+`intake`, `apply` and `reconcile` accept `--revision-scope records` (in the library,
+`apply(transaction, { revisionScope: "records" })`) for a writer that needs only the records it
+names to be unchanged; the default `ledger` scope keeps the global check. A records-scoped
+transaction commits at the current head unless an event after its `expectedRevision` touches a
+record it names: its request or coverage IDs, and the parent, dependencies, descendants,
+replacement or link candidate it names, matched by the same relation as `history`. Otherwise it
+is refused with `stale-revision`. The committed event carries the head as `expectedRevision`,
+and an `at` earlier than the head event time is raised to that time, so the journal keeps its
+revision chain and time order. Concurrent records-scoped writers on distinct records wait for the
+ledger lock and each commit once. Reconcile with the same scope: the default scope compares the
+exact committed transaction and refuses a rebased original with `command-conflict`.
+
 The `events` journal is authoritative. Each committed mutation also writes `checkpoint.json`
 beside it: the projection, the command index and the SHA-256 digest of every event file through
 that revision. A read checks the covered files against those digests and parses, validates,

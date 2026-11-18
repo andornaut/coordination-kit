@@ -68,10 +68,10 @@ function fixture(ws: Workspace) {
     source: SOURCE,
     command: operation,
   });
-  const send = (input: Json, verb = "apply") => {
+  const send = (input: Json, verb = "apply", args: string[] = []) => {
     const file = join(ws.root, `accounting-${randomUUID()}.json`);
     writeJson(file, input);
-    return command(verb, ["--input-file", file]);
+    return command(verb, ["--input-file", file, ...args]);
   };
   const value = (result: Result): Json => {
     expect(result.code, result.stderr).toBe(0);
@@ -153,6 +153,33 @@ suite("request accounting", () => {
     expect(history.code, history.stderr).toBe(0);
     expect(JSON.parse(history.stdout)).toEqual([first]);
   });
+
+  contract(
+    "twenty concurrent record-scoped writers on distinct records each commit once",
+    async () => {
+      const ledger = fixture(workspace());
+      await ledger.apply({ type: "register", request: request() });
+      const inputs = Array.from({ length: 20 }, () =>
+        ledger.transaction({ type: "register", request: request() }, 1),
+      );
+      const results = await Promise.all(
+        inputs.map((input) => ledger.send(input, "apply", ["--revision-scope", "records"])),
+      );
+      const events = results.map((result) => ledger.value(result));
+      expect(events.map((event) => event.revision).sort((a, b) => Number(a) - Number(b))).toEqual(
+        Array.from({ length: 20 }, (_, index) => index + 2),
+      );
+      expect(ledger.value(await ledger.command("report", ["--at", AT]))).toMatchObject({
+        revision: 21,
+      });
+      const usage = await ledger.send(inputs[0]!, "apply", ["--revision-scope", "global"]);
+      expect(usage.code).toBe(2);
+      expect(JSON.parse(usage.stderr)).toEqual({
+        error: { code: "invalid-ledger-options" },
+        ok: false,
+      });
+    },
+  );
 
   contract(
     "mixed targets and consumers close only after scoped cancellation and sibling evidence",

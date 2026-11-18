@@ -27,7 +27,10 @@ import { resolveConversation, resolveHarness, resolveRole } from "../registry/re
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 
-export const LEDGER_INPUT_OPTIONS = { "input-file": { type: "string" } } as const;
+export const LEDGER_INPUT_OPTIONS = {
+  "input-file": { type: "string" },
+  "revision-scope": { type: "string" },
+} as const;
 export const LEDGER_ID_OPTIONS = { id: { type: "string" } } as const;
 export const LEDGER_REPORT_OPTIONS = {
   at: { type: "string" },
@@ -245,8 +248,15 @@ function transaction(io: Io, file: string): LedgerTransaction {
 function mutate(registerOnly: boolean): Handler {
   return (io, root, args) => {
     let file: string;
+    let revisionScope: "ledger" | "records";
     try {
-      file = required(options(LEDGER_INPUT_OPTIONS, args), "input-file");
+      const values = options(LEDGER_INPUT_OPTIONS, args);
+      file = required(values, "input-file");
+      const scope = values["revision-scope"] ?? "ledger";
+      if (scope !== "ledger" && scope !== "records") {
+        throw new CommandError("invalid-ledger-options");
+      }
+      revisionScope = scope;
     } catch {
       return failure(io, "invalid-ledger-options", EXIT_USAGE);
     }
@@ -260,7 +270,7 @@ function mutate(registerOnly: boolean): Handler {
       } catch {
         throw new CommandError("ledger-actor-unavailable");
       }
-      return ledger.apply(input);
+      return ledger.apply(input, { revisionScope });
     });
   };
 }

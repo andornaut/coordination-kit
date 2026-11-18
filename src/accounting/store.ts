@@ -7,6 +7,7 @@ import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { fsyncDirectory, writeDurable, writeJsonDurable } from "../durable.ts";
 import { holdLockAsync, LockBusy, type LockHandle } from "../lock.ts";
 import type {
+  LedgerApplyOptions,
   LedgerAssignment,
   LedgerCommand,
   LedgerCoverage,
@@ -1056,22 +1057,58 @@ function projection(state: Replay): LedgerProjection {
   };
 }
 
-/** True when `event` belongs to the history of request or coverage `id`. */
-function concerns(event: LedgerEvent, id: string): boolean {
+/** The request and coverage IDs whose history includes `event`. */
+function touched(event: LedgerEvent): string[] {
   const c = event.command;
   if (c.type === "capture") {
-    return (
-      c.requests.some((request) => request.id === id) ||
-      c.coverage.some((coverage) => coverage.id === id)
-    );
+    return [...c.requests.map((request) => request.id), ...c.coverage.map((entry) => entry.id)];
   }
   if (c.type === "register") {
-    return c.request.id === id || c.request.parentId === id;
+    return c.request.parentId === null ? [c.request.id] : [c.request.id, c.request.parentId];
   }
   if (c.type === "coverage") {
-    return c.coverage.id === id;
+    return [c.coverage.id];
   }
-  return c.id === id || (c.type === "cancel" && c.descendants.includes(id));
+  return c.type === "cancel" ? [c.id, ...c.descendants] : [c.id];
+}
+
+/** The request and coverage IDs a command names, which a record-scoped check protects. */
+function named(command: LedgerCommand): string[] {
+  switch (command.type) {
+    case "capture":
+      return [...command.requests.map((r) => r.id), ...command.coverage.map((c) => c.id)];
+    case "register": {
+      const r = command.request;
+      return [r.id, ...(r.parentId === null ? [] : [r.parentId]), ...r.dependencies];
+    }
+    case "coverage":
+      return [command.coverage.id];
+    case "cancel":
+      return [command.id, ...command.descendants];
+    case "supersede":
+      return [command.id, command.replacementId];
+    case "amend":
+      return [command.id, ...command.dependencies];
+    case "link":
+      return command.link.candidateId === null
+        ? [command.id]
+        : [command.id, command.link.candidateId];
+    default:
+      return [command.id];
+  }
+}
+
+function transactionOf(event: LedgerEvent): LedgerTransaction {
+  return {
+    actor: event.actor,
+    at: event.at,
+    command: event.command,
+    commandId: event.commandId,
+    expectedRevision: event.expectedRevision,
+    schema: event.schema,
+    source: event.source,
+    ...(event.writer === undefined ? {} : { writer: event.writer }),
+  };
 }
 
 /**
@@ -1225,7 +1262,7 @@ export class LedgerStore {
 
   history(id?: string): readonly LedgerEvent[] {
     const events = this.#replay(true).events!;
-    return id === undefined ? events : events.filter((event) => concerns(event, id));
+    return id === undefined ? events : events.filter((event) => touched(event).includes(id));
   }
 
   coverage(owner?: string): readonly LedgerCoverage[] {
@@ -1305,16 +1342,50 @@ export class LedgerStore {
     }
   }
 
-  async apply(input: LedgerTransaction): Promise<LedgerEvent> {
+  async apply(input: LedgerTransaction, options: LedgerApplyOptions = {}): Promise<LedgerEvent> {
     validate(input);
+    const scope = options.revisionScope ?? "ledger";
+    demand(scope === "ledger" || scope === "records", "invalid-revision-scope");
     const transaction = structuredClone(input);
     if (this.#options.withWriter !== undefined) {
-      return this.#options.withWriter(transaction, () => this.#apply(transaction));
+      return this.#options.withWriter(transaction, () => this.#apply(transaction, scope));
     }
-    return this.#apply(transaction);
+    return this.#apply(transaction, scope);
   }
 
-  async #apply(transaction: LedgerTransaction): Promise<LedgerEvent> {
+  /** A record-scoped retry matches its commit, which may carry a later revision and time. */
+  #recommitted(state: Replay, previous: LedgerEvent, input: LedgerTransaction): boolean {
+    const raised =
+      previous.at === input.at ||
+      (previous.revision > 1 &&
+        Date.parse(input.at) < Date.parse(previous.at) &&
+        this.#event(state, previous.revision - 1).at === previous.at);
+    return (
+      raised &&
+      previous.expectedRevision >= input.expectedRevision &&
+      isDeepStrictEqual(
+        { ...transactionOf(previous), at: input.at, expectedRevision: input.expectedRevision },
+        input,
+      )
+    );
+  }
+
+  /**
+   * Commit a record-scoped transaction at the head. Refuse it when an event after its observed
+   * revision touches a record it names; raise an earlier time to the head time.
+   */
+  #rebase(state: Replay, input: LedgerTransaction): LedgerTransaction {
+    demand(input.expectedRevision <= state.revision, "stale-revision");
+    const names = new Set(named(input.command));
+    for (let revision = input.expectedRevision + 1; revision <= state.revision; revision += 1) {
+      const event = this.#event(state, revision);
+      demand(!touched(event).some((id) => names.has(id)), "stale-revision");
+    }
+    const late = state.at !== null && Date.parse(input.at) < Date.parse(state.at);
+    return { ...input, expectedRevision: state.revision, ...(late ? { at: state.at! } : {}) };
+  }
+
+  async #apply(input: LedgerTransaction, scope: "ledger" | "records"): Promise<LedgerEvent> {
     const root = this.#options.directory;
     mkdirSync(root, { mode: 0o700, recursive: true });
     demand(lstatSync(root).isDirectory() && !lstatSync(root).isSymbolicLink(), "invalid-directory");
@@ -1336,22 +1407,18 @@ export class LedgerStore {
     }
     try {
       const { state } = this.#replay();
-      const committed = state.commands.get(transaction.commandId);
+      const committed = state.commands.get(input.commandId);
       if (committed !== undefined) {
         const previous = this.#event(state, committed);
-        const original: LedgerTransaction = {
-          actor: previous.actor,
-          at: previous.at,
-          command: previous.command,
-          commandId: previous.commandId,
-          expectedRevision: previous.expectedRevision,
-          schema: previous.schema,
-          source: previous.source,
-          ...(previous.writer === undefined ? {} : { writer: previous.writer }),
-        };
-        demand(isDeepStrictEqual(original, transaction), "command-conflict");
+        demand(
+          scope === "records"
+            ? this.#recommitted(state, previous, input)
+            : isDeepStrictEqual(transactionOf(previous), input),
+          "command-conflict",
+        );
         return previous;
       }
+      const transaction = scope === "records" ? this.#rebase(state, input) : input;
       demand(transaction.expectedRevision === state.revision, "stale-revision");
       demand(state.at === null || Date.parse(transaction.at) >= Date.parse(state.at), "stale-time");
       const command = transaction.command;
