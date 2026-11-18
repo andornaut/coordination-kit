@@ -251,6 +251,12 @@ applicable parent acceptance are still required. Completed requests remain refus
 `before-work` and `worker-start`; completion does not renew execution authority. Cancellation,
 supersession or a HOLD is not finish or cleanup permission.
 
+`WorkStore.evaluate` exposes this test as `historicallyClosed`, while `authorization` stays
+`unknown` for completed requests. The boundaries and the work report share that evaluation: the
+report leaves historically closed work out of `unknownRetained`, so it does not make the role
+`partial`. A cancelled or superseded request, an unsatisfied criterion, a guard or an explicit
+`retention` still reports the work as `unknownRetained`.
+
 Missing local adoption, approved work or essential evidence produces a finite nonzero diagnostic:
 `enrollment-required`, `approved-work-required` or `essential-evidence-required`. Inactive or held
 owners remain guarded by `role-guarded` outside intake/review. Repair through

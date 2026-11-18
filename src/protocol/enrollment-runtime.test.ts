@@ -388,6 +388,11 @@ describe("canonical enrollment scope", () => {
     ).toBe("completed");
     expect(boundary("before-work").reason).toBe("approved-work-required");
     expect(boundary("worker-start").reason).toBe("approved-work-required");
+    const report = () =>
+      new WorkStore({ protocol: t.protocol, readRequest: (id) => ledger.read(id) }).report({
+        roles: [ROLE],
+      });
+    expect(report()).toMatchObject({ status: "available", unknownRetained: [] });
     expect(boundary("finish").allowed).toBe(true);
     expect(boundary("before-cleanup").allowed).toBe(true);
     expect(boundary("cleanup").allowed).toBe(true);
@@ -412,6 +417,7 @@ describe("canonical enrollment scope", () => {
       type: "cancel",
     });
     expect(boundary("cleanup").allowed).toBe(false);
+    expect(report().unknownRetained).toEqual([`${ROLE}:work-one`]);
   });
   it("admits interleaved enrollments by two roles and refuses only the role whose own journal changed", async () => {
     const t = await fixture();

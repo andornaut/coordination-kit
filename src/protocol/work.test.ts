@@ -412,6 +412,53 @@ describe("protocol work publications", () => {
     expect(f.work.evaluate(ROLE, f.definition.id).criteriaSatisfied).toBe(false);
   });
 
+  it("reports closed historical work as done without renewing its execution authority", async () => {
+    const f = await fixture(["check"]);
+    await f.publish();
+    await f.record("check");
+    await f.publish(true);
+    const reader = (request: LedgerRequest) =>
+      new WorkStore({ protocol: f.protocol, readRequest: () => request });
+    const completed: LedgerRequest = { ...f.request, state: "completed" };
+    expect(reader(completed).evaluate(ROLE, f.definition.id)).toMatchObject({
+      authorization: "unknown",
+      closureReady: false,
+      historicallyClosed: true,
+    });
+    expect(reader(completed).report()).toMatchObject({
+      approvedUnstarted: [],
+      status: "available",
+      unknownRetained: [],
+    });
+    expect(f.work.evaluate(ROLE, f.definition.id).historicallyClosed).toBe(false);
+    const retained = [`${ROLE}:work-one`];
+    for (const state of ["cancelled", "superseded"] as const) {
+      const closed = reader({ ...f.request, state });
+      expect(closed.evaluate(ROLE, f.definition.id).historicallyClosed).toBe(false);
+      expect(closed.report().unknownRetained).toEqual(retained);
+    }
+    const unattested = reader({
+      ...completed,
+      source: { ...completed.source, origin: "relay" },
+    });
+    expect(unattested.report().unknownRetained).toEqual(retained);
+    const question = {
+      native: null,
+      options: null,
+      resolutionRef: null,
+      status: "pending" as const,
+      text: null,
+    };
+    expect(reader({ ...completed, question }).report().unknownRetained).toEqual(retained);
+    await f.work.receipt(f.context(), {
+      workId: f.definition.id,
+      expectedWorkRevision: f.objectRevision(),
+      receipt: { ...f.receipt("check"), outcome: "failed" },
+    });
+    expect(reader(completed).evaluate(ROLE, f.definition.id).historicallyClosed).toBe(false);
+    expect(reader(completed).report().unknownRetained).toEqual(retained);
+  });
+
   it("bounds report reads and refreshes role, request and artifact views between operations", async () => {
     const f = await fixture(["check"]);
     await f.publish();

@@ -151,6 +151,11 @@ export interface WorkEvaluation {
   readonly criteriaSatisfied: boolean;
   /** Scoped work evidence only; the ledger independently governs request completion. */
   readonly closureReady: boolean;
+  /**
+   * Every linked request is completed, reviewed, owner-attested and in scope, every criterion
+   * passed and nothing is guarded. It admits evidence boundaries, never renewed execution.
+   */
+  readonly historicallyClosed: boolean;
   readonly criteria: readonly {
     readonly criterionId: string;
     readonly targetId: string;
@@ -840,18 +845,22 @@ export class WorkStore {
     } catch {
       // Missing authority remains unknown; it never turns a publication into approval.
     }
-    const provenance =
+    const attested = (states: (state: LedgerRequest["state"]) => boolean) =>
       requests.length === work.definition.requestIds.length &&
       requests.every(
         (request) =>
           request != null &&
           request.reviewed &&
           ["request", "approval"].includes(request.kind) &&
-          !["completed", "cancelled", "superseded"].includes(request.state) &&
+          states(request.state) &&
           [request.source, ...request.sources.map((link) => link.source)].some(
             (s) => s.origin === "owner-attested" && s.reference !== null,
           ),
       );
+    const provenance = attested(
+      (state) => !["completed", "cancelled", "superseded"].includes(state),
+    );
+    const completed = attested((state) => state === "completed");
     const scope = work.definition.criteria.every((criterion) => {
       const matches = requests.flatMap(
         (request) =>
@@ -908,6 +917,7 @@ export class WorkStore {
       criteria,
       criteriaSatisfied,
       guarded,
+      historicallyClosed: completed && scope && !guarded && criteriaSatisfied,
     };
   }
 
@@ -1016,7 +1026,12 @@ export class WorkStore {
           const phase = (value: WorkPhase) => covered(work.definition, work.receipts, [value]);
           const required = (value: WorkPhase) =>
             work.definition.criteria.some((criterion) => criterion.phases.includes(value));
-          if (!authorized || evaluation.guarded || work.definition.retention !== null) {
+          // Closed historical work agrees with the evidence boundaries; explicit retention stays.
+          if (
+            (!authorized && !evaluation.historicallyClosed) ||
+            evaluation.guarded ||
+            work.definition.retention !== null
+          ) {
             result.unknownRetained.push(id);
           }
           if (
