@@ -22,7 +22,7 @@ NODE_RUN = $(DOCKER_RUN) --workdir /work $(NODE_IMAGE) sh -ec '\
 SHELLCHECK_RUN := $(DOCKER_RUN) --network none --workdir /source $(SHELLCHECK_IMAGE) \
 	-x -P SCRIPTDIR scripts/check.sh scripts/pack.sh tests/contract/run.sh
 
-LINT := npm run check && npm run lint:node && npm run lint:markdown && npm run lint:work
+LINT := npm run check && npm run lint:node && npm run lint:markdown && npm run lint:docs && npm run lint:work
 TEST := npm run build && npm test && npm run contract
 BUILD := npm run build && npm run package:check
 

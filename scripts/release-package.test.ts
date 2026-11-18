@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { packagedDocs } from "./package-check.ts";
+import { packagedDocs } from "./docs-check.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const helper = join(root, "scripts/release-package.mjs");

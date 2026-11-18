@@ -7,12 +7,12 @@ import { fileURLToPath } from "node:url";
 
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { packagedDocs } from "./package-check.ts";
+import { packagedDocs } from "./docs-check.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LIBRARIES = ["accounting", "events", "protocol", "registry", "review", "shared", "transport"];
 const BUNDLES = ["dist/cli.js", ...LIBRARIES.map((name) => `dist/${name}.js`)];
-const METADATA = ["LICENSE", "README.md", "SOURCE_COMMIT", "package.json", ...packagedDocs(root)];
+const METADATA = ["LICENSE", "SOURCE_COMMIT", "package.json", ...packagedDocs(root)];
 
 beforeAll(() => {
   for (const bundle of BUNDLES) {

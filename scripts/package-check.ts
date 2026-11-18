@@ -5,7 +5,6 @@ import {
   existsSync,
   mkdtempSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
   symlinkSync,
   writeFileSync,
@@ -15,6 +14,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { isMain, node, run } from "./check.ts";
+import { packagedDocs } from "./docs-check.ts";
 
 export interface CheckContext {
   readonly CHECK_REVISION: string;
@@ -45,15 +45,6 @@ export function inspectionContext(env: Readonly<Record<string, string | undefine
     immutableCommitClaim: false as const,
     ...(supplied ? checkContext(env) : {}),
   };
-}
-
-// The package ships the topic docs and the design summaries; the work files stay in the repository.
-export function packagedDocs(root: string): string[] {
-  const topics = readdirSync(join(root, "docs"), { withFileTypes: true })
-    .filter((entry) => entry.isFile())
-    .map((entry) => `docs/${entry.name}`);
-  const design = readdirSync(join(root, "docs", "design")).map((name) => `docs/design/${name}`);
-  return [...topics, ...design].sort();
 }
 
 export function inspectPackage(

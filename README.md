@@ -72,7 +72,9 @@ prefixed `coordination-kit:`. Commands with a JSON result keep it on stdout.
 | [docs/libraries.md](docs/libraries.md)                   | The public build API subpaths and their main symbols                                                             |
 | [docs/upgrading.md](docs/upgrading.md)                   | Moving from delivery-kit 4.7 to coordination-kit 1.0                                                             |
 | [docs/design/](docs/design/README.md)                    | Design area summaries, each linking its topic docs and indexing its work items                                   |
-| [docs/work/](docs/work/README.md)                        | The work-file convention and one file per approved task (repository only, not packaged)                          |
+| [docs/work/][work-files]                                 | The work-file convention and one file per approved task (repository only, not packaged)                          |
+
+[work-files]: https://github.com/andornaut/coordination-kit/blob/main/docs/work/README.md
 
 ## Developing
 
@@ -104,7 +106,7 @@ patched `katex` without the override.
 | ----------------------- | -------------------------------------------------------------------------------------------------------- |
 | `npm run verify`        | Root and contract types, lint, wrapper syntax, build, unit tests, full contracts and package inspection. |
 | `npm run check`         | Root and contract types.                                                                                 |
-| `npm run lint`          | Prettier, ESLint, Markdown, this repository's work files and ShellCheck with `-x -P SCRIPTDIR`.          |
+| `npm run lint`          | Prettier, ESLint, Markdown, packaged docs, work files and ShellCheck with `-x -P SCRIPTDIR`.             |
 | `npm run build`         | Build the CLI and public build API bundles and declarations.                                             |
 | `npm test`              | Unit tests, using at most four workers by default; build first.                                          |
 | `npm run contract`      | Build, contract types and the complete native contract suite.                                            |
@@ -116,10 +118,15 @@ lockfile with native npm. Ordinary Git commits run serial local lint-staged, wit
 and ESLint fixes that preserve Git's staged/unstaged workflow.
 
 CI runs the same native npm commands directly on the runner with the pinned Node version and the
-pinned ShellCheck step. Its `lint` job (types, Prettier, ESLint, Markdown lint, the work-file check
-and ShellCheck) runs for every push and pull request. The `build`, `test`, `contract` and
-`package` jobs run only when a path outside `docs/` changed, and otherwise report as skipped. A
-forced push, a new branch or a base the clone does not have runs every job.
+pinned ShellCheck step. Its `lint` job (types, Prettier, ESLint, Markdown lint, the packaged-docs
+check, the work-file check and ShellCheck) runs for every push and pull request. The `build`,
+`test`, `contract` and `package` jobs run only when a path outside `docs/` changed, and otherwise
+report as skipped. A forced push, a new branch or a base the clone does not have runs every job.
+
+The packaged-docs check (`npm run lint:docs`) holds `package.json` `files` to the tree: every
+listed doc exists, every `docs/*.md` and `docs/design/*.md` is listed or excluded with a `!`
+entry, and no packaged doc links by relative path to a file the package leaves out. Packaged docs
+link to `docs/work/` by its repository URL.
 
 Package inspection always reports `immutableCommitClaim: false`. Snapshot metadata retains
 `CHECK_REVISION`, `CHECK_SOURCE_SHA256` and `CHECK_SOURCE_DIRTY` when supplied; native inspection

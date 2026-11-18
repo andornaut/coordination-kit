@@ -80,8 +80,10 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           npm --prefix tests/contract ci --ignore-scripts --no-audit --no-fund
+      # lint:docs checks the packaged docs against package.json files, so a docs-only change that
+      # adds, drops or links a doc is checked here rather than only in the skipped package job.
       - name: Types and lint
-        run: npm run check && npm run lint:node && npm run lint:markdown && npm run lint:work
+        run: npm run check && npm run lint:node && npm run lint:markdown && npm run lint:docs && npm run lint:work
   build:
     needs: changes
     if: needs.changes.outputs.code == 'true'

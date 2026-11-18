@@ -2,7 +2,7 @@
 
 Each area has a short design summary and an index of its work items. The topic docs in
 [docs/](..) remain the detailed reference. Work items and their convention are in
-[docs/work/](../work/README.md).
+[docs/work/](https://github.com/andornaut/coordination-kit/blob/main/docs/work/README.md).
 
 | Area                              | Covers                                                                                    | Topic docs                                                                                       |
 | --------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
