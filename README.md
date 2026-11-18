@@ -95,10 +95,10 @@ Native npm commands run directly wherever they are invoked. Local prerequisites 
 Node version, root and contract dependencies, and ShellCheck 0.11.0. Install dependencies with
 `npm ci` and `npm --prefix tests/contract ci`.
 
-WORKAROUND: root overrides keep `markdownlint-cli2` 0.24.0 on patched Markdown and math
-dependencies for [GHSA-gg6h-894w-4m9c](https://github.com/advisories/GHSA-gg6h-894w-4m9c)
-and [GHSA-238p-pmpm-9mq7](https://github.com/advisories/GHSA-238p-pmpm-9mq7).
-Remove them when upstream resolves the patched versions without overrides.
+WORKAROUND: a root override keeps `markdownlint-cli2` 0.24.1 on a patched `katex` for
+[GHSA-238p-pmpm-9mq7](https://github.com/advisories/GHSA-238p-pmpm-9mq7), because
+`micromark-extension-math` 3.1.0 requires `katex` ^0.16.0. Remove it when upstream resolves a
+patched `katex` without the override.
 
 | Command                 | Checks                                                                                                   |
 | ----------------------- | -------------------------------------------------------------------------------------------------------- |
