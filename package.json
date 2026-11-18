@@ -1,6 +1,6 @@
 {
   "name": "@andornaut/coordination-kit",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "Role registry, durable role messages and their transports, harness adapters, the request ledger, the filesystem work protocol and work-file checks for the game and kit roles.",
   "license": "MIT",
   "type": "module",
