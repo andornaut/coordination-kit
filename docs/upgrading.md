@@ -14,7 +14,7 @@ keeps the game operations (`run`, `runner unit`, `status`, `control`, `check-con
 - Commands: `delivery-kit GROUP VERB ...` becomes `coordination-kit GROUP VERB ...` for the
   `inbox`, `message`, `ledger`, `harness`, `claude`, `codex` and `protocol` groups, with the same
   options, JSON output and exit codes. Errors on stderr are prefixed `coordination-kit:`.
-- Root: `--root` and `DELIVERY_KIT_ROOT` keep working. `COORDINATION_KIT_ROOT`, when set, takes
+- Root: `--root` and `DELIVERY_KIT_ROOT` keep working. `COORDINATION_KIT_ROOT`, when nonempty, takes
   precedence over `DELIVERY_KIT_ROOT`.
 - Channel MCP configuration: run `coordination-kit ... claude channel` instead of
   `delivery-kit ... claude channel`. The server still identifies itself as

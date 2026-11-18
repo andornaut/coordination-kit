@@ -128,6 +128,7 @@ describe("coordinator root", () => {
     expect(await status({ COORDINATION_KIT_ROOT: missing, DELIVERY_KIT_ROOT: root })).not.toBe(
       EXIT_OK,
     );
+    expect(await status({ COORDINATION_KIT_ROOT: "", DELIVERY_KIT_ROOT: root })).toBe(EXIT_OK);
     expect(await status({ COORDINATION_KIT_ROOT: missing }, "--root", root)).toBe(EXIT_OK);
     expect(await status({})).not.toBe(EXIT_OK);
   });

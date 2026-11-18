@@ -12,7 +12,7 @@ Every command except `work check` and `work report` resolves the game-coordinato
 order:
 
 1. `--root DIR`, anywhere on the command line, at most once;
-2. `COORDINATION_KIT_ROOT`;
+2. `COORDINATION_KIT_ROOT`, unless empty;
 3. `DELIVERY_KIT_ROOT`, the variable delivery-kit's runners and existing sessions already set;
 4. the working directory.
 

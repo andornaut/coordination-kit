@@ -14,7 +14,10 @@ export interface Io {
 
 export type Handler = (io: Io, root: string, args: string[]) => number | Promise<number>;
 
-/** The coordinator root the environment names: COORDINATION_KIT_ROOT, else DELIVERY_KIT_ROOT. */
+/**
+ * The coordinator root the environment names: a nonempty COORDINATION_KIT_ROOT, else
+ * DELIVERY_KIT_ROOT (read as in delivery-kit 4.7.0).
+ */
 export function coordinatorRoot(env: NodeJS.ProcessEnv): string | undefined {
-  return env.COORDINATION_KIT_ROOT ?? env.DELIVERY_KIT_ROOT;
+  return env.COORDINATION_KIT_ROOT || env.DELIVERY_KIT_ROOT;
 }
