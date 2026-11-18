@@ -412,6 +412,55 @@ describe("protocol work publications", () => {
     expect(f.work.evaluate(ROLE, f.definition.id).criteriaSatisfied).toBe(false);
   });
 
+  it("locates the definition field that keeps work unreviewed", async () => {
+    const f = await fixture(["execution", "check"], ["consumer-a"]);
+    await f.publish();
+    const reader = (request: LedgerRequest | null) =>
+      new WorkStore({ protocol: f.protocol, readRequest: () => request });
+    const evidence = (
+      requiredEvidence: LedgerRequest["targets"][number]["criteria"][number]["requiredEvidence"],
+    ) => ({
+      ...f.request,
+      targets: [
+        {
+          ...f.request.targets[0]!,
+          criteria: [{ ...f.request.targets[0]!.criteria[0]!, requiredEvidence }],
+        },
+      ],
+    });
+    expect(f.work.authorizationGap(ROLE, f.definition.id)).toBeNull();
+    expect(
+      reader(evidence(["implementation", "check"])).authorizationGap(ROLE, f.definition.id),
+    ).toBeNull();
+    expect(reader(evidence(["check"])).authorizationGap(ROLE, f.definition.id)).toEqual({
+      path: "/definition/criteria/0/phases/0",
+      rule: "required-evidence",
+    });
+    expect(reader(null).authorizationGap(ROLE, f.definition.id)).toEqual({
+      path: "/definition/requestIds/0",
+      rule: "unapproved",
+    });
+    expect(
+      reader({
+        ...f.request,
+        targets: [{ ...f.request.targets[0]!, consumers: ["consumer-b"] }],
+      }).authorizationGap(ROLE, f.definition.id),
+    ).toEqual({ path: "/definition/criteria/0/consumers/0", rule: "unknown" });
+    expect(
+      reader({
+        ...f.request,
+        question: {
+          native: null,
+          options: null,
+          resolutionRef: null,
+          status: "pending",
+          text: null,
+        },
+      }).authorizationGap(ROLE, f.definition.id),
+    ).toEqual({ path: "/definition/requestIds/0", rule: "guarded" });
+    expect(f.work.authorizationGap(ROLE, "work-absent")).toBeNull();
+  });
+
   it("reports closed historical work as done without renewing its execution authority", async () => {
     const f = await fixture(["check"]);
     await f.publish();

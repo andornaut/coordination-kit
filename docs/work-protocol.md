@@ -312,6 +312,67 @@ departure admission gate. Scheduled monitoring, delivery controls, cadence, bus 
 independent holds remain separate. No new timer, daemon, provider activation or native question
 mutation follows from a lifecycle check.
 
+## Command inputs and errors
+
+Each `--input-file` holds one JSON object. Work commands and `enroll` take `{ context, input }`;
+message commands take `{ writer, input }`. `context` and `writer` are the same fenced transaction
+without mutations: `id`, `role` (the canonical namespace), `epoch`,
+`binding: { harness, nativeId }`, `expectedRevision` and `at` (an ISO timestamp ending in `Z`).
+Other top-level keys are ignored.
+
+| Command            | Input file                      | Fields                                                                                                                                      |
+| ------------------ | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `claim`            | `ProtocolClaim`                 | `role`, `expectedEpoch`, `binding`, `evidence`, `at`; `parent: { role, epoch, workerId }` for a worker role only                            |
+| `enroll`           | `{ context, input }`            | `workspaceId`, `generation`, `phase`, `registryRevision`, `inspectedAt`, `ledger: { revision, hash }`, `references`, `unknowns`, `evidence` |
+| `work-publish`     | `{ context, input }`            | `definition`, `ready`, `expectedWorkRevision`, `replaces`: the prior publication hash when the definition changes, otherwise `null`         |
+| `work-receipt`     | `{ context, input }`            | `workId`, `expectedWorkRevision`, `receipt`                                                                                                 |
+| `work-submit`      | `{ context, input }` (worker)   | `id`, `parentRole`, `parentEpoch`, `workerId`, `workId`, `definitionHash`, `criterionIds`, `source`, `artifacts`, `receipts`                |
+| `work-accept`      | `{ context, input }`            | `workId`, `expectedWorkRevision`, `submission: { role, id, revision, artifact }`, `evidence`                                                |
+| `message-publish`  | `{ writer, input }`             | `envelope`, `links`, `guards`; optional `imported: { legacyRecord, evidenceRef }`                                                           |
+| `message-receipt`  | `{ writer, input }` (recipient) | `id`, `original`, `disposition`, `evidence` (nonempty), `retention`, `guards`                                                               |
+| `message-withdraw` | `{ writer, input }` (sender)    | `id`, `original`, `reason`, `evidenceRef`, `guards`                                                                                         |
+| `message-observe`  | `{ writer, input }` (sender)    | `id`, `original`, `record`, `guards`                                                                                                        |
+| `message-original` | `OriginalRef`                   | `senderRole`, `messageId`, `revision` (`1`), `hash`                                                                                         |
+| `artifact-put`     | none; `--file FILE`             | The file bytes                                                                                                                              |
+
+Every listed field is required. Records take exactly their listed keys, except the `input` of
+`work-publish`, `work-receipt` and `work-accept` and the message `envelope`, which ignore extra
+keys.
+
+- `definition` is `{ id, requestIds, clauseIds, messageIds, plan, artifacts, criteria, source,
+retention }`: `requestIds` and `criteria` are nonempty, `source` is a pin or `null` and
+  `retention` is `{ owner, reason, nextBoundary }` or `null`. A criterion is
+  `{ id, targetId, phases, consumers }`.
+- A work receipt is `{ id, workId, definitionHash, criterionId, phase, consumer, outcome,
+artifact, source }`; `outcome` is `passed`, `failed` or `unknown`.
+- Work phases are `execution`, `check`, `integration`, `publication`, `consumer-adoption`,
+  `delivery`, `deployment` and `acceptance`. Each criterion phase must appear in the matching
+  ledger criterion's `requiredEvidence`: `execution` maps to `implementation`, and every other
+  phase maps to itself. `review` is a lifecycle boundary, not a work phase. Worker submissions
+  carry only `execution` and `check` receipts.
+
+A failure writes `{"error":{...},"ok":false}` to stderr and exits 1, or 2 for
+`invalid-protocol-options`. Its fields are:
+
+- `code`: the refusal. Store codes and exit codes are unchanged. `invalid-input` reports an
+  envelope failure, such as a missing `context` or `writer`, an unregistered `role`, or a field
+  the store would otherwise fail on without a code.
+- `path`: a JSON pointer to the field, such as `/input/definition/criteria/0/phases/0`. For
+  `approved-work-required` from `protocol boundary --work-id`, it points into the referenced
+  work publication instead.
+- `rule`: `required`, `unexpected-key`, `type`, `enum`, `empty`, `format`, `range`,
+  `duplicate`, `mismatch` (disagrees with current state or another field) or `unknown` (names
+  nothing registered or published). Boundary refusals also use `unapproved`,
+  `required-evidence` and `guarded`.
+- `stage`: only with `protocol-operation-failed`, the step that failed: `input`, `claim-check`,
+  `store-write` or `boundary`.
+
+A store refusal keeps its code and gains `path` and `rule` when the input explains it, for
+example `{"error":{"code":"invalid-work","path":"/input/ready","rule":"type"},"ok":false}`.
+Enrollment evidence failures keep `enrollment-unavailable` and gain the field. Error output never
+contains input values, bodies or exception messages; an unexpected key that is not a short field
+name is reported at its parent object.
+
 ## Message ownership
 
 | Owner     | Record                | Meaning                                                                    |

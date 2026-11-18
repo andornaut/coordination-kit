@@ -864,6 +864,74 @@ export class WorkStore {
     return this.#evaluate(view, work);
   }
 
+  /**
+   * The first definition field that keeps `evaluate` from reporting reviewed, unguarded work, as a
+   * JSON pointer into the publication and a rule: `unapproved` (the linked request is missing,
+   * unreviewed, not owner-attested or closed), `unknown` (no single ledger criterion or target
+   * consumer matches), `required-evidence` (the ledger criterion does not require the phase;
+   * `execution` maps to `implementation`) or `guarded` (a linked question is pending or unknown).
+   */
+  authorizationGap(
+    role: string,
+    id: string,
+  ): { readonly path: string; readonly rule: string } | null {
+    const work = this.read(role, id);
+    if (work === undefined) {
+      return null;
+    }
+    const requests = work.definition.requestIds.map((requestId) => {
+      try {
+        return this.#options.readRequest?.(requestId);
+      } catch {
+        return undefined;
+      }
+    });
+    const open = (request: LedgerRequest | null | undefined) =>
+      request != null &&
+      request.reviewed &&
+      ["request", "approval"].includes(request.kind) &&
+      !["completed", "cancelled", "superseded"].includes(request.state) &&
+      [request.source, ...request.sources.map((link) => link.source)].some(
+        (s) => s.origin === "owner-attested" && s.reference !== null,
+      );
+    const unapproved = requests.findIndex((request) => !open(request));
+    if (unapproved >= 0) {
+      return { path: `/definition/requestIds/${unapproved}`, rule: "unapproved" };
+    }
+    for (const [index, criterion] of work.definition.criteria.entries()) {
+      const path = `/definition/criteria/${index}`;
+      const matches = requests.flatMap((request) =>
+        request!.targets
+          .filter((target) => target.id === criterion.targetId)
+          .flatMap((target) =>
+            target.criteria
+              .filter((entry) => entry.id === criterion.id)
+              .map((entry) => ({ entry, target })),
+          ),
+      );
+      if (matches.length !== 1) {
+        return { path, rule: matches.length === 0 ? "unknown" : "duplicate" };
+      }
+      const { entry, target } = matches[0]!;
+      const phase = criterion.phases.findIndex(
+        (value) =>
+          !entry.requiredEvidence.includes(value === "execution" ? "implementation" : value),
+      );
+      if (phase >= 0) {
+        return { path: `${path}/phases/${phase}`, rule: "required-evidence" };
+      }
+      const consumer = criterion.consumers.findIndex((value) => !target.consumers.includes(value));
+      if (consumer >= 0) {
+        return { path: `${path}/consumers/${consumer}`, rule: "unknown" };
+      }
+    }
+    const guarded = requests.findIndex(
+      (request) =>
+        request?.question != null && ["pending", "unknown"].includes(request.question.status),
+    );
+    return guarded >= 0 ? { path: `/definition/requestIds/${guarded}`, rule: "guarded" } : null;
+  }
+
   #evaluate(view: WorkReadView, work: WorkPublication): WorkEvaluation {
     let requests: readonly (LedgerRequest | null | undefined)[] = [];
     try {

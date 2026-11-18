@@ -64,7 +64,25 @@ import {
 import { enrollSelf } from "../protocol/self-enrollment.ts";
 import type { ProtocolClaim } from "../protocol/types.ts";
 import { type WorkContext, WorkStore } from "../protocol/work.ts";
+import { UnknownRole } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
+import {
+  checkClaim,
+  checkEnroll,
+  checkMessageObserve,
+  checkMessagePublish,
+  checkMessageReceipt,
+  checkMessageWithdraw,
+  checkOriginalRef,
+  checkWorkAccept,
+  checkWorkPublish,
+  checkWorkReceipt,
+  checkWorkSubmit,
+  type InputCheck,
+  type InputIssue,
+  type InputRule,
+  locateIssue,
+} from "./protocol-input.ts";
 export const PROTOCOL_ROOT_OPTIONS = { "state-root": { type: "string" } } as const;
 export const PROTOCOL_INPUT_OPTIONS = {
   ...PROTOCOL_ROOT_OPTIONS,
@@ -109,22 +127,45 @@ export const PROTOCOL_BOUNDARY_OPTIONS = {
 export const PROTOCOL_PHASES = PROTOCOL_LIFECYCLE_PHASES;
 type Phase = (typeof PROTOCOL_PHASES)[number];
 type Values = Record<string, string | string[] | boolean | undefined>;
-class UsageError extends Error {}
+/** The operation step an unexpected failure is reported against. */
+type Stage = "input" | "claim-check" | "store-write" | "boundary";
+interface Step {
+  stage: Stage;
+  check: InputCheck | null;
+}
+class UsageError extends Error {
+  readonly location: { readonly path: string; readonly rule: InputRule } | undefined;
+  constructor(location?: { readonly path: string; readonly rule: InputRule }) {
+    super("invalid-protocol-options");
+    this.location = location;
+  }
+}
+/** An input-file envelope failure detected before any store call. */
+class InputError extends Error {
+  readonly issue: InputIssue;
+  constructor(issue: InputIssue) {
+    super("invalid-input");
+    this.issue = issue;
+  }
+}
 class ProtocolAdmissionError extends Error {
   readonly code:
     | "enrollment-required"
     | "approved-work-required"
     | "essential-evidence-required"
     | "role-guarded";
+  readonly location: { readonly path: string; readonly rule: string } | null;
   constructor(
     code:
       | "enrollment-required"
       | "approved-work-required"
       | "essential-evidence-required"
       | "role-guarded",
+    location: { readonly path: string; readonly rule: string } | null = null,
   ) {
     super(code);
     this.code = code;
+    this.location = location;
   }
 }
 const ENROLLMENT_CODES = new Set([
@@ -249,7 +290,16 @@ const FAILURES = new Set([
   "message-retention-required",
   "message-sender-mismatch",
   "original-reference-mismatch",
+  "invalid-envelope",
+  "invalid-worker-target",
+  "protocol-not-configured",
+  "stale-root",
 ]);
+/** The code a store or runtime error carries, before allowlist mapping. */
+function rawCode(error: unknown): string | null {
+  const value = typeof error === "object" && error !== null && "code" in error ? error.code : null;
+  return typeof value === "string" ? value : null;
+}
 function code(error: unknown): string {
   if (error instanceof MigrationError) {
     return error.code;
@@ -270,9 +320,33 @@ function code(error: unknown): string {
   const value = typeof error === "object" && error !== null && "code" in error ? error.code : null;
   return typeof value === "string" && FAILURES.has(value) ? value : "protocol-operation-failed";
 }
+/**
+ * Field and stage details for a failure. A store refusal keeps its code and gains the path of the
+ * field that violates it; an otherwise unexplained failure on invalid input reports `invalid-input`
+ * at the first invalid field; any other unexpected failure keeps the generic code and its stage.
+ * Only codes, pointers, rule names and stages are reported, never values or exception messages.
+ */
+function located(error: unknown, step: Step, mapped: string) {
+  if (error instanceof InputError) {
+    return { code: "invalid-input", path: error.issue.path, rule: error.issue.rule };
+  }
+  if (error instanceof ProtocolAdmissionError) {
+    return { code: mapped, ...(error.location ?? {}) };
+  }
+  const check = step.check;
+  if (mapped === "protocol-operation-failed") {
+    const issue = check?.issues[0];
+    return issue === undefined
+      ? { code: mapped, stage: step.stage }
+      : { code: "invalid-input", path: issue.path, rule: issue.rule };
+  }
+  const raw = rawCode(error);
+  const issue = check === null || raw === null ? undefined : locateIssue(check, raw);
+  return { code: mapped, ...(issue === undefined ? {} : { path: issue.path, rule: issue.rule }) };
+}
 function handler(
   spec: NonNullable<ParseArgsConfig["options"]>,
-  action: (io: Io, layout: Layout, values: Values) => unknown | Promise<unknown>,
+  action: (io: Io, layout: Layout, values: Values, step: Step) => unknown | Promise<unknown>,
 ): Handler {
   return async (io, root, args) => {
     let values: Values;
@@ -282,16 +356,19 @@ function handler(
       io.err('{"error":{"code":"invalid-protocol-options"},"ok":false}\n');
       return EXIT_USAGE;
     }
+    const step: Step = { check: null, stage: "input" };
     try {
-      const result = await action(io, loadLayout(root), values);
+      const result = await action(io, loadLayout(root), values, step);
       io.out(`${JSON.stringify(result)}\n`);
       return EXIT_OK;
     } catch (error) {
       if (error instanceof UsageError) {
-        io.err('{"error":{"code":"invalid-protocol-options"},"ok":false}\n');
+        const usage = { error: { code: "invalid-protocol-options", ...error.location }, ok: false };
+        io.err(`${JSON.stringify(usage)}\n`);
         return EXIT_USAGE;
       }
       const details = error instanceof MigrationError ? error.details : undefined;
+      const { code: reported, ...location } = located(error, step, code(error));
       const failure = {
         error: {
           ...(error instanceof ProtocolError && error.actionMayHaveCommitted
@@ -300,8 +377,9 @@ function handler(
           ...(error instanceof ObserverAdoptionError
             ? { actionMayHaveCommitted: true, reconcileKey: error.reconcileKey }
             : {}),
-          code: code(error),
+          code: reported,
           ...(details === undefined ? {} : { details }),
+          ...location,
         },
         ok: false,
       };
@@ -309,6 +387,12 @@ function handler(
       return EXIT_INVALID;
     }
   };
+}
+/** Parse an input file and record its shape check for error reporting. */
+function checked<T>(io: Io, values: Values, step: Step, check: (value: unknown) => InputCheck): T {
+  const value = input<unknown>(io, values);
+  step.check = check(value);
+  return value as T;
 }
 function selected(layout: Layout, values: Values) {
   const management = resolveProtocolManagement(layout);
@@ -319,12 +403,12 @@ function selected(layout: Layout, values: Values) {
       : undefined;
   if (expected !== null) {
     if (requested !== undefined && requested !== expected.stateRoot) {
-      throw new Error("stale-root");
+      throw new ProtocolError("stale-root");
     }
     return { expected, management, root: expected.stateRoot };
   }
   if (requested === undefined) {
-    throw new Error("protocol-not-configured");
+    throw new ProtocolError("protocol-not-configured");
   }
   inspectProtocolMigration(layout, requested);
   return { expected, management, root: requested };
@@ -364,9 +448,21 @@ function scopeInput(layout: Layout, chosen: ReturnType<typeof selected>) {
   };
 }
 /** Read only known filesystem publications; unavailable human history remains an explicit gap. */
-function boundary(layout: Layout, protocol: ProtocolStore, role: string, phase: Phase, at: string) {
-  if (!PROTOCOL_PHASES.includes(phase) || !Number.isFinite(Date.parse(at))) {
+function boundary(
+  layout: Layout,
+  protocol: ProtocolStore,
+  role: string,
+  phase: Phase,
+  at: string,
+  atPath?: string,
+) {
+  if (!PROTOCOL_PHASES.includes(phase)) {
     throw new UsageError();
+  }
+  if (!Number.isFinite(Date.parse(at))) {
+    const value: unknown = at;
+    const rule = value === undefined ? "required" : typeof value === "string" ? "format" : "type";
+    throw new UsageError(atPath === undefined ? undefined : { path: atPath, rule });
   }
   const namespace = protocolRole(layout, role);
   let accounting: unknown;
@@ -418,13 +514,20 @@ async function mutating<T>(
   io: Io,
   layout: Layout,
   values: Values,
+  step: Step,
+  key: "context" | "writer",
   writer: WorkContext | MessageWriter,
   phase: Phase,
   action: (protocol: ProtocolStore) => Promise<T>,
 ) {
   const selection = selected(layout, values);
+  if (step.check?.fatal) {
+    throw new InputError(step.check.fatal);
+  }
+  step.stage = "claim-check";
   const role = registryRole(writer.role.split("/workers/")[0]!);
   if (selection.expected !== null) {
+    step.stage = "boundary";
     await captureAccounting(
       layout,
       {},
@@ -437,9 +540,21 @@ async function mutating<T>(
     layout,
     selection.expected,
     async () => {
+      step.stage = "claim-check";
       const protocol = store(io, layout, selection.root);
-      const before = boundary(layout, protocol, role, phase, writer.at);
+      try {
+        protocolRole(layout, role);
+      } catch (error) {
+        if (error instanceof UnknownRole) {
+          throw new InputError({ code: "invalid-input", path: `/${key}/role`, rule: "unknown" });
+        }
+        throw error;
+      }
+      step.stage = "boundary";
+      const before = boundary(layout, protocol, role, phase, writer.at, `/${key}/at`);
+      step.stage = "store-write";
       const result = await action(protocol);
+      step.stage = "boundary";
       return {
         boundary: { after: boundary(layout, protocol, role, phase, writer.at), before },
         result,
@@ -487,13 +602,16 @@ export const protocolRestore = handler(PROTOCOL_INPUT_OPTIONS, (io, layout, valu
 export const protocolActivate = handler(PROTOCOL_INPUT_OPTIONS, (io, layout, values) =>
   activateProtocol(layout, input(io, values)),
 );
-export const protocolClaim = handler(PROTOCOL_INPUT_OPTIONS, (io, layout, values) => {
-  const value = input<ProtocolClaim>(io, values);
+export const protocolClaim = handler(PROTOCOL_INPUT_OPTIONS, (io, layout, values, step) => {
+  const value = checked<ProtocolClaim>(io, values, step, checkClaim);
   const chosen = selected(layout, values);
   return withProtocolLayout(
     layout,
     chosen.expected,
-    () => store(io, layout, chosen.root).claim(value),
+    () => {
+      step.stage = "store-write";
+      return store(io, layout, chosen.root).claim(value);
+    },
     repairLease(chosen.management),
   );
 });
@@ -526,42 +644,49 @@ export const protocolRoleRead = handler(PROTOCOL_ROLE_OPTIONS, (io, layout, valu
     })),
   };
 });
-export const protocolWorkPublish = handler(PROTOCOL_INPUT_OPTIONS, (io, layout, values) => {
-  const value = input<{
+export const protocolWorkPublish = handler(PROTOCOL_INPUT_OPTIONS, (io, layout, values, step) => {
+  const value = checked<{
     context: WorkContext;
     input: Parameters<WorkStore["publish"]>[1];
-  }>(io, values);
-  return mutating(io, layout, values, value.context, "before-work", (protocol) =>
+  }>(io, values, step, checkWorkPublish);
+  return mutating(io, layout, values, step, "context", value.context, "before-work", (protocol) =>
     work(protocol, layout, join(selected(layout, values).root, "accounting")).publish(
       value.context,
       value.input,
     ),
   );
 });
-export const protocolWorkSubmit = handler(PROTOCOL_INPUT_OPTIONS, (io, layout, values) => {
-  const value = input<{
+export const protocolWorkSubmit = handler(PROTOCOL_INPUT_OPTIONS, (io, layout, values, step) => {
+  const value = checked<{
     context: WorkContext;
     input: Parameters<WorkStore["submit"]>[1];
-  }>(io, values);
-  return mutating(io, layout, values, value.context, "worker-publication", (protocol) =>
-    work(protocol, layout).submit(value.context, value.input),
+  }>(io, values, step, checkWorkSubmit);
+  return mutating(
+    io,
+    layout,
+    values,
+    step,
+    "context",
+    value.context,
+    "worker-publication",
+    (protocol) => work(protocol, layout).submit(value.context, value.input),
   );
 });
-export const protocolWorkAccept = handler(PROTOCOL_INPUT_OPTIONS, (io, layout, values) => {
-  const value = input<{
+export const protocolWorkAccept = handler(PROTOCOL_INPUT_OPTIONS, (io, layout, values, step) => {
+  const value = checked<{
     context: WorkContext;
     input: Parameters<WorkStore["accept"]>[1];
-  }>(io, values);
-  return mutating(io, layout, values, value.context, "parent-review", (protocol) =>
+  }>(io, values, step, checkWorkAccept);
+  return mutating(io, layout, values, step, "context", value.context, "parent-review", (protocol) =>
     work(protocol, layout).accept(value.context, value.input),
   );
 });
-export const protocolWorkReceipt = handler(PROTOCOL_INPUT_OPTIONS, (io, layout, values) => {
-  const value = input<{
+export const protocolWorkReceipt = handler(PROTOCOL_INPUT_OPTIONS, (io, layout, values, step) => {
+  const value = checked<{
     context: WorkContext;
     input: Parameters<WorkStore["receipt"]>[1];
-  }>(io, values);
-  return mutating(io, layout, values, value.context, "integration", (protocol) =>
+  }>(io, values, step, checkWorkReceipt);
+  return mutating(io, layout, values, step, "context", value.context, "integration", (protocol) =>
     work(protocol, layout).receipt(value.context, value.input),
   );
 });
@@ -576,16 +701,24 @@ export const protocolWorkRead = handler(PROTOCOL_ROLE_OPTIONS, (io, layout, valu
   return result;
 });
 type MessageOperation = "publish" | "receipt" | "withdraw" | "observeTransport";
+const MESSAGE_CHECKS: Record<MessageOperation, (value: unknown) => InputCheck> = {
+  observeTransport: checkMessageObserve,
+  publish: checkMessagePublish,
+  receipt: checkMessageReceipt,
+  withdraw: checkMessageWithdraw,
+};
 function message(operation: MessageOperation): Handler {
-  return handler(PROTOCOL_INPUT_OPTIONS, (io, layout, values) => {
-    const value = input<{
+  return handler(PROTOCOL_INPUT_OPTIONS, (io, layout, values, step) => {
+    const value = checked<{
       writer: MessageWriter;
       input: unknown;
-    }>(io, values);
+    }>(io, values, step, MESSAGE_CHECKS[operation]);
     return mutating(
       io,
       layout,
       values,
+      step,
+      "writer",
       value.writer,
       operation === "publish" ? "intake" : "review",
       async (protocol) => {
@@ -638,11 +771,12 @@ export const protocolInbox = handler(PROTOCOL_INBOX_OPTIONS, (io, layout, values
 });
 export const protocolOriginal = handler(
   { ...PROTOCOL_INPUT_OPTIONS, "include-body": { type: "boolean" } },
-  (io, layout, values) => {
+  (io, layout, values, step) => {
     const chosen = selected(layout, values);
-    const value = new ProtocolMessages({ store: store(io, layout, chosen.root) }).read(
-      input<OriginalRef>(io, values),
-    );
+    const reader = new ProtocolMessages({ store: store(io, layout, chosen.root) });
+    const reference = checked<OriginalRef>(io, values, step, checkOriginalRef);
+    step.stage = "store-write";
+    const value = reader.read(reference);
     checkProtocolManagementRead(layout, chosen);
     if (values["include-body"] === true) {
       return value;
@@ -723,84 +857,118 @@ async function selectedWorkerCensus(
     },
   ];
 }
-export const protocolBoundary = handler(PROTOCOL_BOUNDARY_OPTIONS, async (io, layout, values) => {
-  const chosen = selected(layout, values);
-  const role = required(values, "role");
-  const phase = required(values, "phase") as Phase;
-  if (!PROTOCOL_PHASES.includes(phase)) {
-    throw new UsageError();
-  }
-  if (chosen.expected !== null) {
-    await captureAccounting(
-      layout,
-      {},
-      phase === "startup" || phase === "resume" ? phase : "review",
-      "message",
-      [role],
+/** Locate why referenced work is not reviewed; diagnostics never replace the admission code. */
+function workGap(protocol: ProtocolStore, root: string, values: Values, subject: string) {
+  try {
+    const requests = enrollmentRequests(join(root, "accounting"));
+    const role = typeof values["work-role"] === "string" ? values["work-role"] : subject;
+    return new WorkStore({ protocol, readRequest: (id) => requests.get(id) }).authorizationGap(
+      role,
+      required(values, "work-id"),
     );
+  } catch {
+    return null;
   }
-  return withProtocolLayout(
-    layout,
-    chosen.expected,
-    async () => {
-      const protocol = store(io, layout, chosen.root);
-      if (chosen.management.required !== null) {
-        const namespace = protocolRole(layout, role);
-        let subject = namespace;
-        if (values.worker !== undefined) {
-          const parent = protocol.read(namespace);
-          subject = `${namespace}/workers/${required(values, "worker")}/${parent.epoch}`;
-        }
-        let census: EnrollmentWorkerCensus[] = [];
-        if (values.worker !== undefined) {
-          if (!protocol.listRoles({ includeWorkers: true }).includes(subject)) {
-            throw new ProtocolError("binding-unavailable");
+}
+export const protocolBoundary = handler(
+  PROTOCOL_BOUNDARY_OPTIONS,
+  async (io, layout, values, step) => {
+    const chosen = selected(layout, values);
+    const role = required(values, "role");
+    const phase = required(values, "phase") as Phase;
+    if (!PROTOCOL_PHASES.includes(phase)) {
+      throw new UsageError();
+    }
+    step.stage = "boundary";
+    if (chosen.expected !== null) {
+      await captureAccounting(
+        layout,
+        {},
+        phase === "startup" || phase === "resume" ? phase : "review",
+        "message",
+        [role],
+      );
+    }
+    return withProtocolLayout(
+      layout,
+      chosen.expected,
+      async () => {
+        const protocol = store(io, layout, chosen.root);
+        if (chosen.management.required !== null) {
+          const namespace = protocolRole(layout, role);
+          let subject = namespace;
+          if (values.worker !== undefined) {
+            const parent = protocol.read(namespace);
+            subject = `${namespace}/workers/${required(values, "worker")}/${parent.epoch}`;
           }
-          const child = protocol.read(subject);
-          if (child.binding === null) {
-            throw new ProtocolError("binding-unavailable");
+          let census: EnrollmentWorkerCensus[] = [];
+          if (values.worker !== undefined) {
+            step.stage = "claim-check";
+            if (!protocol.listRoles({ includeWorkers: true }).includes(subject)) {
+              throw new ProtocolError("binding-unavailable");
+            }
+            const child = protocol.read(subject);
+            if (child.binding === null) {
+              throw new ProtocolError("binding-unavailable");
+            }
+            census = await selectedWorkerCensus(
+              io,
+              layout,
+              protocol,
+              subject,
+              child.binding,
+              `boundary:${phase}:${required(values, "at")}`,
+            );
           }
-          census = await selectedWorkerCensus(
-            io,
-            layout,
-            protocol,
-            subject,
-            child.binding,
-            `boundary:${phase}:${required(values, "at")}`,
-          );
+          step.stage = "boundary";
+          const checked = evaluateEnrollmentBoundary(layout, protocol, {
+            ...scopeInput(layout, chosen),
+            boundary: phase,
+            census,
+            role: subject,
+            ...(values["work-id"] === undefined ? {} : { workId: required(values, "work-id") }),
+            ...(values["work-role"] === undefined
+              ? {}
+              : { workRole: required(values, "work-role") }),
+          });
+          if (!checked.admission.allowed) {
+            const reason = checked.admission.reason!;
+            throw new ProtocolAdmissionError(
+              reason,
+              reason === "approved-work-required" && values["work-id"] !== undefined
+                ? workGap(protocol, chosen.root, values, subject)
+                : null,
+            );
+          }
+          return {
+            enrollment: checked,
+            ...boundary(layout, protocol, role, phase, required(values, "at")),
+          };
         }
-        const checked = evaluateEnrollmentBoundary(layout, protocol, {
-          ...scopeInput(layout, chosen),
-          boundary: phase,
-          census,
-          role: subject,
-          ...(values["work-id"] === undefined ? {} : { workId: required(values, "work-id") }),
-          ...(values["work-role"] === undefined ? {} : { workRole: required(values, "work-role") }),
-        });
-        if (!checked.admission.allowed) {
-          throw new ProtocolAdmissionError(checked.admission.reason!);
-        }
-        return {
-          enrollment: checked,
-          ...boundary(layout, protocol, role, phase, required(values, "at")),
-        };
-      }
-      return boundary(layout, protocol, role, phase, required(values, "at"));
-    },
-    repairLease(chosen.management),
-  );
-});
-export const protocolArtifactPut = handler(PROTOCOL_ARTIFACT_OPTIONS, (io, layout, values) => {
-  const chosen = selected(layout, values);
-  const raw = required(values, "file");
-  const path = raw.startsWith("/") ? raw : `${io.cwd}/${raw}`;
-  return withProtocolLayout(
-    layout,
-    chosen.expected,
-    () => store(io, layout, chosen.root).putArtifact(readPromotableArtifact(path)),
-    repairLease(chosen.management),
-  );
-});
+        return boundary(layout, protocol, role, phase, required(values, "at"));
+      },
+      repairLease(chosen.management),
+    );
+  },
+);
+export const protocolArtifactPut = handler(
+  PROTOCOL_ARTIFACT_OPTIONS,
+  (io, layout, values, step) => {
+    const chosen = selected(layout, values);
+    const raw = required(values, "file");
+    const path = raw.startsWith("/") ? raw : `${io.cwd}/${raw}`;
+    return withProtocolLayout(
+      layout,
+      chosen.expected,
+      () => {
+        const bytes = readPromotableArtifact(path);
+        step.stage = "store-write";
+        return store(io, layout, chosen.root).putArtifact(bytes);
+      },
+      repairLease(chosen.management),
+    );
+  },
+);
 export const protocolArtifactRead = handler(PROTOCOL_ARTIFACT_OPTIONS, (io, layout, values) => {
   const chosen = selected(layout, values);
   const hash = required(values, "hash");
@@ -832,16 +1000,20 @@ export const protocolEnrollmentReport = handler(PROTOCOL_ROOT_OPTIONS, (io, layo
   checkProtocolManagementRead(layout, chosen);
   return checked;
 });
-export const protocolEnroll = handler(PROTOCOL_INPUT_OPTIONS, async (io, layout, values) => {
+export const protocolEnroll = handler(PROTOCOL_INPUT_OPTIONS, async (io, layout, values, step) => {
   const chosen = selected(layout, values);
-  const value = input<{
+  const value = checked<{
     context: EnrollmentContext;
     input: EnrollmentInput;
-  }>(io, values);
+  }>(io, values, step, checkEnroll);
+  if (step.check?.fatal) {
+    throw new InputError(step.check.fatal);
+  }
   return withProtocolLayout(
     layout,
     chosen.expected,
     async () => {
+      step.stage = "claim-check";
       const protocol = store(io, layout, chosen.root);
       const base = scopeInput(layout, chosen);
       const census = await selectedWorkerCensus(
@@ -854,12 +1026,15 @@ export const protocolEnroll = handler(PROTOCOL_INPUT_OPTIONS, async (io, layout,
       );
       // Only the enrolling role's own inputs are rechecked; other roles may enroll concurrently.
       const own = { ...base, census, role: value.context.role };
+      step.stage = "boundary";
       const { scope } = enrollmentStatus(layout, protocol, own);
+      step.stage = "store-write";
       const event = await new EnrollmentStore({ protocol }).publish(
         value.context,
         value.input,
         scope,
       );
+      step.stage = "boundary";
       return { event, ...enrollmentStatus(layout, protocol, own) };
     },
     repairLease(chosen.management),
