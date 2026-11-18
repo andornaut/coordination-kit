@@ -1,12 +1,13 @@
 // Scheduled review for a due slot. The adapter follows the recipient's selected harness; the
 // recipient (the host game's reports.recipient) and worker parents are role names resolved through
-// the registry. The result is the one-line JSON
-// status the runner logs, or an empty string when this project does not dispatch the slot.
+// the registry. `reviewOutcome` returns the typed outcome; `deliverScheduledReview` formats it as
+// the one-line JSON status the runner logs, or an empty string when this project does not
+// dispatch the slot.
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { performance } from "node:perf_hooks";
 
-import { accountingReview, captureAccounting } from "../accounting/boundary.ts";
+import { accountingReview, boundaryAccounting } from "../accounting/boundary.ts";
 import { claudeAdapter } from "../adapters/claude/index.ts";
 import { spoolReviewBrief, unblockDir } from "../adapters/claude/spool.ts";
 import { collectAll, unavailableCollected } from "../adapters/codex/collect.ts";
@@ -164,6 +165,7 @@ function snapshotAdapter(client: RpcClient | null, deadline: number): HarnessAda
 
 interface Wake {
   readonly layout: Layout;
+  readonly capture: boolean;
   readonly claude: HarnessAdapter;
   readonly harnesses: Readonly<Record<string, Harness>>;
   readonly unblock: string;
@@ -186,6 +188,7 @@ function capture(wake: Wake, client: RpcClient | null, deadline: number): Promis
       {
         accountingLayout: wake.layout,
         busDir: wake.busDir,
+        capture: wake.capture,
         messageSummary: summary,
         unblock: wake.unblock,
       },
@@ -245,6 +248,10 @@ async function runSlot(wake: Wake): Promise<Json> {
       wake.signal?.addEventListener("abort", () => open.close(), { once: true });
       // Inventory precedes decision guards and reminder deduplication.
       snapshot = await capture(wake, client, deadline);
+      if (wake.signal?.aborted === true) {
+        // A stop before any slot receipt write leaves the slot as it was.
+        throw new SlotInterrupted();
+      }
       const previous = previousSlot(path);
       let state: Json;
       let outcome: Json;
@@ -300,13 +307,15 @@ async function codexSlot(
   project: string,
   slot: number,
   signal: AbortSignal | undefined,
-): Promise<string> {
+  capture: boolean,
+): Promise<ReviewOutcome> {
   const socket = process.env.CODEX_CONTROL_SOCKET;
   if (socket === undefined || !isAbsolute(socket)) {
-    return `${DEFERRED_PREFIX}provide CODEX_CONTROL_SOCKET and the installed unblock helper`;
+    return deferred("provide CODEX_CONTROL_SOCKET and the installed unblock helper");
   }
   const state = await runSlot({
     busDir: game.busDir,
+    capture,
     claude: claudeAdapter(process.env, game),
     emit: (kind, key, message) => recordEvent(game, { project }, kind, key, message),
     harnesses:
@@ -323,50 +332,102 @@ async function codexSlot(
     socket,
     unblock: unblockDir(game.busDir),
   });
-  return line(state);
+  return { kind: "state", state };
+}
+
+/** Options for one scheduled review. */
+export interface ReviewOptions {
+  /** Automatic accounting capture at the review boundary; off unless set. */
+  readonly capture?: boolean;
+}
+
+/**
+ * What one scheduled review did: no review for this game (`skip`), a deferral before any native
+ * call (`deferred`, the runner's own deferral line), the slot status (`state`), or a stop while a
+ * native send was unresolved (`interrupted`).
+ */
+export type ReviewOutcome =
+  | { readonly kind: "skip"; readonly reason: "nothing-due" | "held"; readonly detail: string }
+  | { readonly kind: "deferred"; readonly text: string }
+  | { readonly kind: "state"; readonly state: Json }
+  | { readonly kind: "interrupted" };
+
+function deferred(text: string): ReviewOutcome {
+  return { kind: "deferred", text };
+}
+
+function status(state: Json): ReviewOutcome {
+  return { kind: "state", state };
+}
+
+/** The one-line runner form of an outcome: "" for no review, else a deferral or a JSON status. */
+export function outcomeLine(outcome: ReviewOutcome): string {
+  switch (outcome.kind) {
+    case "deferred":
+      return `${DEFERRED_PREFIX}${outcome.text}`;
+    case "state":
+      return line(outcome.state);
+    default:
+      return "";
+  }
 }
 
 /**
  * Resolve the role-name route, its recipient and the worker parents through the registry as it is
- * now. A route this runner does not host, a held route or no route returns "" before any native
+ * now. A route this runner does not host, a held route or no route is skipped before any native
  * call.
  */
-export async function deliverScheduledReview(
+export async function reviewOutcome(
   layout: Layout,
   game: GameLayout,
   slot: number,
   signal?: AbortSignal,
-): Promise<string> {
+  options: ReviewOptions = {},
+): Promise<ReviewOutcome> {
+  const capture = options.capture === true;
   try {
     let route: RoleRoute | null;
     try {
       route = readRoleRoute(layout);
     } catch (error) {
       if (error instanceof RouteError) {
-        return `${DEFERRED_PREFIX}${routeUnavailable(error)}`;
+        return deferred(routeUnavailable(error));
       }
       throw error;
     }
-    if (route === null || route.host !== game.id) {
-      return "";
+    if (route === null) {
+      return { detail: "no review route", kind: "skip", reason: "nothing-due" };
+    }
+    if (route.host !== game.id) {
+      return {
+        detail: "this game does not host the review route",
+        kind: "skip",
+        reason: "nothing-due",
+      };
     }
     let recipient: string;
     try {
       recipient = routeRecipient(layout, route);
     } catch (error) {
       if (error instanceof RouteError) {
-        return `${DEFERRED_PREFIX}${routeUnavailable(error)}`;
+        return deferred(routeUnavailable(error));
       }
       throw error;
     }
     const registry = readRegistry(layout);
     const send = sendRoute(registry, recipient, route, game.id);
     if (send.status !== "active") {
-      return "";
+      return send.status === "held"
+        ? { detail: "review route held", kind: "skip", reason: "held" }
+        : {
+            detail: "this game does not host the review route",
+            kind: "skip",
+            reason: "nothing-due",
+          };
     }
     const scope = activeScope(send);
     if (scope === null) {
-      return line({
+      return status({
         reason: "recipient has no conversation for the active harness",
         status: "deferred",
       });
@@ -377,22 +438,31 @@ export async function deliverScheduledReview(
     if (parentRoles.some((role) => !members.has(role))) {
       // The Codex observer reports a scope deferral on its own line; the Claude helper as status.
       return send.harness === "codex"
-        ? `${DEFERRED_PREFIX}workerParents requires parents in the active review route`
-        : line({
+        ? deferred("workerParents requires parents in the active review route")
+        : status({
             reason: "worker parents must be in the active review route",
             status: "deferred",
           });
     }
     const parents = parentRoles.map((role) => roleConversation(registry, role));
     if (parents.some((parent) => parent === null)) {
-      return line({
+      return status({
         reason: "worker parents require conversations for the active harness",
         status: "deferred",
       });
     }
     const unique = [...new Set(parents as string[])];
     if (send.harness === "codex") {
-      return await codexSlot(layout, game, scope, unique, config.reports.project, slot, signal);
+      return await codexSlot(
+        layout,
+        game,
+        scope,
+        unique,
+        config.reports.project,
+        slot,
+        signal,
+        capture,
+      );
     }
     const unblock = unblockDir(game.busDir);
     const summary = captureMessageSummary(layout);
@@ -404,7 +474,7 @@ export async function deliverScheduledReview(
         scope.recipient,
         unique,
       );
-      captured.accounting = await captureAccounting(layout, captured);
+      captured.accounting = await boundaryAccounting(capture, layout, captured);
       captured.message_health = recordMessageHealth({ unblock }, scope.recipient, slot, summary);
       persist(snapshotPath(unblock, String(captured.snapshot_id)), captured);
       return captured;
@@ -420,11 +490,15 @@ export async function deliverScheduledReview(
         status: summary.status,
       },
     ];
+    if (signal?.aborted === true) {
+      // A stop before the slot receipt is written leaves the slot as it was.
+      return { kind: "interrupted" };
+    }
     const state = spoolReviewBrief(process.env, game.busDir, scope, slot, unique, diagnostics);
     if (state.status === "busy" || state.status === "deduplicated") {
-      return line({ ...state });
+      return status({ ...state });
     }
-    return line({
+    return status({
       ...state,
       ...(snapshot.message_health as Json),
       snapshot_id: snapshot.snapshot_id,
@@ -432,8 +506,22 @@ export async function deliverScheduledReview(
     });
   } catch (error) {
     if (error instanceof SlotInterrupted) {
-      return "";
+      return { kind: "interrupted" };
     }
-    return line({ reason: "review route or state unavailable", status: "blocked" });
+    return status({ reason: "review route or state unavailable", status: "blocked" });
   }
+}
+
+/**
+ * The runner's form of `reviewOutcome`: "" when this runner does not dispatch the slot (or stopped
+ * during a native send), a `DEFERRED_PREFIX` line, or the slot's one-line JSON status.
+ */
+export async function deliverScheduledReview(
+  layout: Layout,
+  game: GameLayout,
+  slot: number,
+  signal?: AbortSignal,
+  options: ReviewOptions = {},
+): Promise<string> {
+  return outcomeLine(await reviewOutcome(layout, game, slot, signal, options));
 }

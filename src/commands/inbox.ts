@@ -2,7 +2,7 @@
 // Codex worker with one registered parent. Registered recipients default to reports.recipient.
 import { parseArgs } from "node:util";
 
-import { captureAccounting } from "../accounting/boundary.ts";
+import { boundaryAccounting } from "../accounting/boundary.ts";
 import { listingOrNull } from "../adapters/claude/agents.ts";
 import { unblockDir } from "../adapters/claude/spool.ts";
 import { codexAdapter } from "../adapters/codex/index.ts";
@@ -241,7 +241,12 @@ function channelSummary(record: Json): Json {
   );
 }
 
-async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise<number> {
+async function snapshot(
+  io: Io,
+  context: Scope,
+  capture: boolean,
+  historyCursor?: string,
+): Promise<number> {
   const unblock = unblockDir(context.game.busDir);
   const { parents, recipient } = context;
   if (context.worker !== null) {
@@ -257,7 +262,7 @@ async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise
         );
         captured.worker_binding = workerSnapshotBinding(binding);
         persist(snapshotPath(unblock, captured.snapshot_id as string), captured);
-        captured.accounting = await captureAccounting(context.layout, captured);
+        captured.accounting = await boundaryAccounting(capture, context.layout, captured);
         persist(snapshotPath(unblock, captured.snapshot_id as string), captured);
         return captured;
       }),
@@ -296,7 +301,7 @@ async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise
     );
     const record = await locked(unblock, () =>
       captureMixed(
-        { accountingLayout: context.layout, busDir: context.game.busDir, unblock },
+        { accountingLayout: context.layout, busDir: context.game.busDir, capture, unblock },
         adapters,
         context.harnesses,
         [recipient],
@@ -341,7 +346,7 @@ async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise
         recipient,
         parents,
       );
-      captured.accounting = await captureAccounting(context.layout, captured);
+      captured.accounting = await boundaryAccounting(capture, context.layout, captured);
       persist(snapshotPath(unblock, String(captured.snapshot_id)), captured);
       return captured;
     });
@@ -370,7 +375,7 @@ async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise
   const adapter = adapterFor(io.env, context.layout, context.game, context.harness);
   const record = await locked(unblock, () =>
     captureCodex(
-      { accountingLayout: context.layout, busDir: context.game.busDir, unblock },
+      { accountingLayout: context.layout, busDir: context.game.busDir, capture, unblock },
       adapter,
       [recipient],
       parents,
@@ -435,6 +440,7 @@ export const inboxSnapshot: Handler = (io, root, args) => {
     snapshot(
       io,
       scope(root, values.game, values.recipient, values.parent ?? []),
+      values.capture === true,
       values["history-cursor"],
     ),
   );

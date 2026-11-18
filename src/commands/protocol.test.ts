@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -6,11 +6,18 @@ import { describe, expect, it } from "vitest";
 import { startFakeControl } from "../adapters/codex/testControlSocket.ts";
 import { main } from "../cli.ts";
 import { loadLayout } from "../layout.ts";
+import { MessageStore } from "../messages/store.ts";
 import { ProtocolStore, protocolWorkerRole } from "../protocol/core.ts";
 import type { EnrollmentInput } from "../protocol/enrollment.ts";
 import { importProtocolMigration, planProtocolMigration } from "../protocol/migration.ts";
 import { createRegistry, type Registry, updateRegistry } from "../registry/index.ts";
-import { CLAUDE_COORDINATOR, CODEX_TECH, makeFixture, registryInput } from "../testFixtures.ts";
+import {
+  CLAUDE_COORDINATOR,
+  CLAUDE_TECH,
+  CODEX_TECH,
+  makeFixture,
+  registryInput,
+} from "../testFixtures.ts";
 const AT = "2026-11-16T04:00:00.000Z";
 async function fixture() {
   const t = makeFixture();
@@ -218,6 +225,97 @@ describe("supported protocol CLI", () => {
       value.report.participants.find((p: { role: string }) => p.role === "coordinator"),
     ).toMatchObject({ adopted: false, represented: true });
   });
+  it("passes boundaries and mutating commands without capture, and captures only with --capture", async () => {
+    const t = await fixture();
+    // Active pointer setup is synthetic, as in the enrollment case above.
+    const config = { generation: 1, schema: 1, stateRoot: t.stateRoot, workspaceId: "fixture" };
+    writeFileSync(
+      join(t.stateRoot, "workspace.json"),
+      JSON.stringify({ generation: 1, schema: 1, workspaceId: "fixture" }),
+    );
+    for (const name of ["work-protocol-fence.json", "work-protocol.json"]) {
+      writeFileSync(join(t.layout.varDir, name), JSON.stringify(config));
+    }
+    const accounting = () => {
+      const directory = join(t.stateRoot, "accounting");
+      return existsSync(directory) ? readdirSync(directory, { recursive: true }).sort() : [];
+    };
+    const binding = { harness: "claude", nativeId: CLAUDE_COORDINATOR };
+    for (const [role, owner] of [
+      ["coordinator", binding],
+      ["games/archies-dog-walks/tech", { harness: "claude", nativeId: CLAUDE_TECH }],
+    ] as const) {
+      // eslint-disable-next-line no-await-in-loop
+      const claim = await t.run(
+        "protocol",
+        "claim",
+        "--state-root",
+        t.stateRoot,
+        "--input-file",
+        t.file({ at: AT, binding: owner, evidence: "fixture:owner", expectedEpoch: 0, role }),
+      );
+      expect(claim, claim.err).toMatchObject({ code: 0 });
+    }
+    const envelope = {
+      body: "Capture fixture message\n",
+      created: AT,
+      fromRole: "game-coordinator",
+      id: "capture-fixture",
+      intent: "queue" as const,
+      schema: 1 as const,
+      toRole: "archies-dog-walks/tech",
+    };
+    const before = accounting();
+    const published = await t.run(
+      "protocol",
+      "message-publish",
+      "--state-root",
+      t.stateRoot,
+      "--input-file",
+      t.file({
+        input: {
+          envelope,
+          guards: { artifacts: [], hold: "unknown", question: "unknown", references: [] },
+          links: { clauseIds: [], messageIds: [], requestIds: [], workIds: [] },
+        },
+        writer: {
+          at: AT,
+          binding,
+          epoch: 1,
+          expectedRevision: 1,
+          id: "capture-fixture-publish",
+          role: "coordinator",
+        },
+      }),
+    );
+    expect(published, published.err).toMatchObject({ code: 0 });
+    // The stored projection gives a captured boundary a message to retain.
+    await new MessageStore({
+      layout: t.layout,
+      resolveOwner: () => ({ harness: "claude", nativeId: CLAUDE_TECH, parentBinding: null }),
+    }).enqueue(envelope);
+    const boundary = (...extra: string[]) =>
+      t.run(
+        "protocol",
+        "boundary",
+        "--state-root",
+        t.stateRoot,
+        "--role",
+        "archies-dog-walks/tech",
+        "--phase",
+        "startup",
+        "--at",
+        AT,
+        ...extra,
+      );
+    const plain = await boundary();
+    expect(plain, plain.err).toMatchObject({ code: 0 });
+    expect(accounting()).toEqual(before);
+    const captured = await boundary("--capture");
+    expect(captured, captured.err).toMatchObject({ code: 0 });
+    expect(accounting()).not.toEqual(before);
+  });
+
   it("publishes and reads an exact original with scoped unknown coverage", async () => {
     const t = await fixture();
     const binding = { harness: "claude", nativeId: CLAUDE_COORDINATOR };

@@ -34,6 +34,15 @@ export function channelNotification(entry: SpoolEntry): ChannelNotification {
   };
 }
 
+/** The one notification a wake emits: fixed text, no payload. */
+export function wakeNotification(text: string, seq: number): ChannelNotification {
+  return {
+    jsonrpc: "2.0",
+    method: "notifications/claude/channel",
+    params: { content: text, meta: { kind: "wake", seq: String(seq) } },
+  };
+}
+
 export function initializeResult(params: unknown): Record<string, unknown> {
   const requested =
     typeof params === "object" && params !== null

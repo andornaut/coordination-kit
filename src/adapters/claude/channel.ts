@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 import { fsyncDirectory, readJsonIfExists, writeJsonDurable } from "../../durable.ts";
 import { holdLockAsync } from "../../lock.ts";
-import { channelNotification, initializeResult } from "./protocol.ts";
+import { channelNotification, initializeResult, wakeNotification } from "./protocol.ts";
 import {
   deliveredDir,
   entryKind,
@@ -18,6 +18,7 @@ import {
   type SpoolEntry,
   unblockDir,
 } from "./spool.ts";
+import { wakeText, type WakeWatcher } from "./wakeFile.ts";
 
 /** Writes one complete line synchronously; throws when the channel output is unusable. */
 export type LineWriter = (line: string) => void;
@@ -266,6 +267,8 @@ export interface ServeOptions extends MessageChannelOptions {
   readonly pollMs: number;
   /** Refreshed on the existing poll, after independent static game feeds. */
   readonly refreshFeeds?: () => readonly ChannelFeed[];
+  /** Polled after every spool drain; each seq increase emits one wake notification. */
+  readonly wake?: WakeWatcher;
 }
 
 export interface ChannelFeed {
@@ -320,7 +323,7 @@ export function serve(
           feeds = options.refreshFeeds?.() ?? [];
         } catch {
           // An unavailable generic root cannot suppress independent scheduled game feeds.
-          return;
+          feeds = [];
         }
         for (const feed of feeds) {
           if (!isDirectory(spoolDir(feed.busDir))) {
@@ -332,6 +335,15 @@ export function serve(
           if (!(await (feed.withLease === undefined ? consume() : feed.withLease(consume)))) {
             finish(1);
             return;
+          }
+        }
+        // The wake follows the legacy spools, so spool delivery never waits on it.
+        const wake = options.wake?.poll();
+        if (wake !== undefined) {
+          try {
+            write(`${JSON.stringify(wakeNotification(wakeText(wake), wake.seq))}\n`);
+          } catch {
+            finish(1);
           }
         }
       } finally {

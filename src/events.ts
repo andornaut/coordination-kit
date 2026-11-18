@@ -4,7 +4,8 @@
 // under the same lock (delivery-kit tracks per-SHA CI and deployment state there). flushEvents
 // delivers unsent events in creation order under the non-blocking dispatch.lock, through the
 // recipient's selected adapter, and marks an event sent only after its delivery is accepted. The
-// first event not accepted stops the flush; a later flush resumes there.
+// first event not accepted stops the flush; a later flush resumes there. Each flush returns a
+// typed result: its status, a reason token, and how many events it delivered and left unsent.
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -22,6 +23,7 @@ import { holdLock, LockBusy, type LockHandle } from "./lock.ts";
 import { resolveConversation, resolveHarness, resolveRole } from "./registry/resolve.ts";
 import type { Harness } from "./registry/schema.ts";
 import { readRegistry } from "./registry/store.ts";
+import { type ReasonToken, reasonToken, type SeamStatus } from "./review/outcome.ts";
 
 export interface EmitOptions {
   readonly project: string;
@@ -218,17 +220,17 @@ function coordinatorRoot(game: GameLayout): string {
  * with no queue fallback. An invalid route, or a held one whose recipient is this recipient,
  * defers every event; any other recipient, or no route at all, is delivered.
  */
-function eventRouting(layout: Layout, recipientRole: string): "defer" | "deliver" {
+function eventRouting(layout: Layout, recipientRole: string): "deliver" | "held" | "invalid" {
   try {
     const route = readRoleRoute(layout);
     if (route === null) {
       return "deliver";
     }
     return routeRecipient(layout, route) === recipientRole && route.state === "held"
-      ? "defer"
+      ? "held"
       : "deliver";
   } catch {
-    return "defer";
+    return "invalid";
   }
 }
 
@@ -238,7 +240,13 @@ interface Destination {
   readonly recipient: string;
 }
 
-function destination(adapters: AdapterFactories, game: GameLayout): Destination | null {
+/** Why no destination resolved. */
+interface Undeliverable {
+  readonly reason: ReasonToken;
+  readonly detail: string;
+}
+
+function destination(adapters: AdapterFactories, game: GameLayout): Destination | Undeliverable {
   try {
     const layout = loadLayout(coordinatorRoot(game));
     const registry = readRegistry(layout);
@@ -247,16 +255,27 @@ function destination(adapters: AdapterFactories, game: GameLayout): Destination 
     const harness = resolveHarness(registry, role);
     const factory = adapters[harness];
     if (recipient === null || factory === undefined) {
-      return null;
+      return {
+        detail: "the recipient has no conversation or adapter for its harness",
+        reason: "recipient-unavailable",
+      };
     }
-    if (eventRouting(layout, resolveRole(registry, role)) === "defer") {
-      return null;
+    const routing = eventRouting(layout, resolveRole(registry, role));
+    if (routing === "held") {
+      return { detail: "the review route is held for this recipient", reason: "held" };
+    }
+    if (routing === "invalid") {
+      return { detail: "review route is unavailable or invalid", reason: "route-unavailable" };
     }
     return { adapter: factory(layout, game), harness, recipient };
   } catch {
     // An unresolvable recipient leaves every event unsent for a later flush.
-    return null;
+    return { detail: "the recipient does not resolve", reason: "recipient-unavailable" };
   }
+}
+
+function undeliverable(value: Destination | Undeliverable): value is Undeliverable {
+  return Object.hasOwn(value, "reason");
 }
 
 const STORED_EVENT_STATUSES: ReadonlySet<string> = new Set([
@@ -328,23 +347,77 @@ function previousDelivery(
   return accepted ? "accepted" : blocked ? "blocked" : "none";
 }
 
+/** What one flush did. `delivered` counts events marked sent; `held`, events left unsent. */
+export interface FlushResult {
+  readonly status: SeamStatus;
+  readonly reason: ReasonToken | null;
+  readonly detail: string;
+  readonly delivered: number;
+  readonly held: number;
+}
+
+/** Unsent events left in the outbox; an unreadable event file counts as unsent. */
+function heldCount(directory: string): number {
+  let held = 0;
+  let names: string[];
+  try {
+    names = readdirSync(directory);
+  } catch {
+    return 0;
+  }
+  for (const name of names) {
+    if (name.startsWith(".") || !name.endsWith(".json")) {
+      continue;
+    }
+    try {
+      const event = readEvent(join(directory, name));
+      if (!event.sent && event.suppressed !== true && !QUIET_KINDS.has(event.kind)) {
+        held += 1;
+      }
+    } catch {
+      held += 1;
+    }
+  }
+  return held;
+}
+
 /** Deliver unsent events through `adapters`; the testable form of flushEvents. */
-export async function flushEventsWith(adapters: AdapterFactories, game: GameLayout): Promise<void> {
+export async function flushEventsWith(
+  adapters: AdapterFactories,
+  game: GameLayout,
+): Promise<FlushResult> {
   const directory = eventsDir(game);
+  let delivered = 0;
+  const finish = (reason: ReasonToken | null, detail: string): FlushResult => {
+    const held = heldCount(directory);
+    if (held === 0) {
+      return delivered > 0
+        ? { delivered, detail: `delivered ${delivered}`, held, reason: null, status: "delivered" }
+        : { delivered, detail: "no unsent events", held, reason: "no-events", status: "skipped" };
+    }
+    return { delivered, detail, held, reason: reason ?? "recipient-busy", status: "deferred" };
+  };
   if (!existsSync(directory)) {
-    return;
+    return {
+      delivered,
+      detail: "no event outbox",
+      held: 0,
+      reason: "no-events",
+      status: "skipped",
+    };
   }
   const lock = tryLock(join(directory, "dispatch.lock"));
   if (lock === null) {
-    return;
+    return finish("recipient-busy", "another flush holds dispatch.lock");
   }
   try {
-    if (destination(adapters, game) === null) {
-      return;
+    const first = destination(adapters, game);
+    if (undeliverable(first)) {
+      return finish(first.reason, first.detail);
     }
     const events = pendingEvents(directory);
     if (events === null) {
-      return;
+      return finish("outbox-unreadable", "an event file is unreadable");
     }
     const receipts = join(directory, "native");
     mkdirSync(receipts, { recursive: true });
@@ -359,8 +432,8 @@ export async function flushEventsWith(adapters: AdapterFactories, game: GameLayo
         continue;
       }
       const target = destination(adapters, game);
-      if (target === null) {
-        return;
+      if (undeliverable(target)) {
+        return finish(target.reason, target.detail);
       }
       const previous = previousDelivery(receipts, target, event);
       if (previous === "blocked") {
@@ -368,11 +441,15 @@ export async function flushEventsWith(adapters: AdapterFactories, game: GameLayo
         process.stderr.write(
           `delivery-kit: event ${event.id} held: reconcile prior native receipt before retargeting\n`,
         );
-        return;
+        return finish(
+          "receipt-ambiguous",
+          `event ${event.id} held: reconcile prior native receipt before retargeting`,
+        );
       }
       if (previous === "accepted") {
         event.sent = true;
         writeEventState(path, event);
+        delivered += 1;
         continue;
       }
       const requestId = eventRequestId(event.id, target.recipient);
@@ -386,16 +463,22 @@ export async function flushEventsWith(adapters: AdapterFactories, game: GameLayo
         { event_id: event.id },
       );
       if (receipt.status !== "accepted") {
-        return;
+        const why = receipt.reason === undefined ? "" : `: ${receipt.reason}`;
+        return finish(
+          reasonToken(receipt.status, receipt.reason),
+          `event ${event.id.slice(0, 12)} ${receipt.status}${why}`,
+        );
       }
       event.sent = true;
       writeEventState(path, event);
+      delivered += 1;
     }
+    return finish(null, "events recorded during this flush remain unsent");
   } finally {
     lock.release();
   }
 }
 
-export function flushEvents(game: GameLayout): Promise<void> {
+export function flushEvents(game: GameLayout): Promise<FlushResult> {
   return flushEventsWith(DEFAULT_ADAPTERS, game);
 }

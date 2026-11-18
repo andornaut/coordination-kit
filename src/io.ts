@@ -10,6 +10,13 @@ export interface Io {
   readonly cwd: string;
   readonly out: (text: string) => void;
   readonly err: (text: string) => void;
+  /** The running entry file (dist/cli.js in a build); absent for in-process callers. */
+  readonly entry?: string;
+  /**
+   * Aborts a long-running seam command. Absent, `review deliver` aborts on SIGTERM to the
+   * process.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export type Handler = (io: Io, root: string, args: string[]) => number | Promise<number>;

@@ -11,6 +11,7 @@ import { MessageError } from "../messages/store.ts";
 
 export const MESSAGE_SEND_OPTIONS = {
   "body-file": { type: "string" },
+  capture: { type: "boolean" },
   from: { type: "string" },
   id: { type: "string" },
   intent: { type: "string" },
@@ -108,6 +109,7 @@ export const messageSend: Handler = (io, root, args) => {
     }
     file = required(values, "body-file");
     input = {
+      ...(values.capture === true ? { capture: true } : {}),
       fromRole: required(values, "from"),
       id: required(values, "id"),
       ...(intent === undefined ? {} : { intent }),

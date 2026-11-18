@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -90,6 +90,35 @@ describe("cross-directory common messages", () => {
     ).toBe(EXIT_OK);
     expect(JSON.parse(out)).toMatchObject([{ id, body, state: "queued", attempts: 0 }]);
     expect(err).toBe("");
+  });
+});
+
+describe("automatic capture", () => {
+  it("is off for message send unless --capture is given", async () => {
+    const { base, root } = makeFixture();
+    withRegistry(root);
+    writeFileSync(join(base, "message.txt"), "Capture fixture body.\n");
+    const ledger = join(root, "var", "accounting");
+    const send = (id: string, ...extra: string[]) =>
+      run(
+        root,
+        "message",
+        "send",
+        "--from",
+        "game-coordinator",
+        "--recipient",
+        "archies-dog-walks/tech",
+        "--id",
+        id,
+        "--body-file",
+        join(base, "message.txt"),
+        ...extra,
+      );
+    expect((await send("00000000-0000-4000-8000-000000000011")).code).toBe(EXIT_OK);
+    expect(existsSync(ledger)).toBe(false);
+    const captured = await send("00000000-0000-4000-8000-000000000012", "--capture");
+    expect(captured.code, captured.err).toBe(EXIT_OK);
+    expect(existsSync(ledger)).toBe(true);
   });
 });
 

@@ -3,7 +3,8 @@
 // `--game`) plus the resolved conversation's generic message spool. `--conversation UUID` and
 // repeatable `--state-dir STATE/unblock` select them explicitly. It creates no state directory:
 // only spools that already exist are drained, so a channel started before any game state exists
-// leaves var/ untouched.
+// leaves var/ untouched. It also watches the conversation's wake file and emits one notification
+// per seq increase.
 import { realpathSync, statSync, writeSync } from "node:fs";
 import { dirname, isAbsolute } from "node:path";
 import { parseArgs } from "node:util";
@@ -14,6 +15,7 @@ import {
   type MessageChannelGuard,
   serve,
 } from "../adapters/claude/channel.ts";
+import { wakeFilePath, WakeWatcher } from "../adapters/claude/wakeFile.ts";
 import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { gameRecipients } from "../config.ts";
 import { EXIT_INVALID, EXIT_USAGE, type Handler, type Io } from "../io.ts";
@@ -198,6 +200,7 @@ export async function runChannel(
       beforeMessage: streams.beforeMessage ?? messageConsumeGuard(loadLayout(root), io.env),
       pollMs: pollSeconds * 1000,
       refreshFeeds,
+      wake: new WakeWatcher(() => wakeFilePath(loadLayout(root), conversation)),
     },
     streams.input,
     streams.write,

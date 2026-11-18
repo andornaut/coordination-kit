@@ -4,7 +4,7 @@
 import { randomUUID } from "node:crypto";
 import { readdirSync } from "node:fs";
 
-import { captureAccounting } from "../accounting/boundary.ts";
+import { boundaryAccounting } from "../accounting/boundary.ts";
 import { type AgentEntry, roleDiagnostics } from "../adapters/claude/agents.ts";
 import { deliveredEntries } from "../adapters/claude/index.ts";
 import { spoolDir } from "../adapters/claude/spool.ts";
@@ -33,6 +33,8 @@ const UNAVAILABLE: Readonly<Json> = Object.freeze({
 
 export interface SnapshotContext {
   readonly accountingLayout?: Layout;
+  /** Automatic accounting capture; otherwise the snapshot records the read-only status. */
+  readonly capture?: boolean;
   readonly busDir: string;
   readonly unblock: string;
   readonly messageSummary?: MessageSummary;
@@ -209,7 +211,11 @@ export async function captureCodex(
   const record = await collectCodex(context, adapter, recipients, parents, options);
   persist(snapshotPath(context.unblock, record.snapshot_id as string), record);
   if (context.accountingLayout !== undefined) {
-    record.accounting = await captureAccounting(context.accountingLayout, record);
+    record.accounting = await boundaryAccounting(
+      context.capture === true,
+      context.accountingLayout,
+      record,
+    );
     persist(snapshotPath(context.unblock, record.snapshot_id as string), record);
   }
   return record;
@@ -364,7 +370,11 @@ export async function captureMixed(
   }
   persist(snapshotPath(context.unblock, record.snapshot_id as string), record);
   if (context.accountingLayout !== undefined) {
-    record.accounting = await captureAccounting(context.accountingLayout, record);
+    record.accounting = await boundaryAccounting(
+      context.capture === true,
+      context.accountingLayout,
+      record,
+    );
     persist(snapshotPath(context.unblock, record.snapshot_id as string), record);
   }
   return record;

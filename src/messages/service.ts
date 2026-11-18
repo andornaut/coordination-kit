@@ -242,6 +242,8 @@ export function messageConsumeGuard(layout: Layout, env: NodeJS.ProcessEnv): Mes
 }
 
 export interface MessageSendInput {
+  /** Automatic accounting capture after the store write; off unless set. */
+  readonly capture?: boolean;
   readonly fromRole: string;
   readonly recipient: string;
   readonly id: string;
@@ -363,15 +365,17 @@ export class MessageService {
       schema: 1,
       toRole,
     });
-    const accounting = await captureAccounting(
-      this.context.layout,
-      { message_id: record.envelope.id },
-      "review",
-      "message",
-    );
-    if (accounting.status !== "available") {
-      // The original is retained and the same message ID can safely retry local accounting.
-      throw new MessageError("accounting-unavailable");
+    if (input.capture === true) {
+      const accounting = await captureAccounting(
+        this.context.layout,
+        { message_id: record.envelope.id },
+        "review",
+        "message",
+      );
+      if (accounting.status !== "available") {
+        // The original is retained and the same message ID can safely retry local accounting.
+        throw new MessageError("accounting-unavailable");
+      }
     }
     return record;
   }

@@ -55,12 +55,13 @@ import {
   protocolWorkSubmit,
 } from "./commands/protocol.ts";
 import { claudeReady, codexReady, harnessReady } from "./commands/ready.ts";
+import { eventsFlush, reviewDeliver } from "./commands/runner.ts";
 import { type Command, GROUPS, SPECS, synopsis } from "./commands/spec.ts";
 import { workCheck, workReport } from "./commands/work.ts";
-import { coordinatorRoot, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "./io.ts";
-declare const __CK_VERSION__: string;
+import { coordinatorRoot, EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "./io.ts";
+import { cliIdentity, VERSION } from "./version.ts";
 export { EXIT_INVALID, EXIT_OK, EXIT_REFUSED, EXIT_USAGE, type Handler, type Io } from "./io.ts";
-export const VERSION = typeof __CK_VERSION__ === "string" ? __CK_VERSION__ : "0.0.0-source";
+export { SOURCE_DIGEST, VERSION } from "./version.ts";
 export const COMMANDS = [
   "inbox snapshot",
   "inbox ack",
@@ -70,6 +71,8 @@ export const COMMANDS = [
   "harness ready",
   "harness select",
   "claude channel",
+  "review deliver",
+  "events flush",
   "message send",
   "message dispatch",
   "message status",
@@ -117,7 +120,15 @@ export const COMMANDS = [
   "work report",
 ] as const satisfies readonly Command[];
 export type { Command };
-const GROUP_ORDER = ["inbox", "message", "ledger", "harness", "protocol", "work"] as const;
+const GROUP_ORDER = [
+  "inbox",
+  "message",
+  "ledger",
+  "harness",
+  "review",
+  "protocol",
+  "work",
+] as const;
 /** Help text, generated from each command's parser options and grouped by audience. */
 export const USAGE = [
   "usage: coordination-kit COMMAND [options] [--root DIR]",
@@ -133,8 +144,9 @@ export const USAGE = [
   "Inbox --recipient and --parent take a role name resolved through var/registry.json, or a",
   "conversation UUID registered for the active harness. Repeat --parent UUID for each parent.",
   "",
-  "  help, --help    print this text",
-  "  --version       print the version",
+  "  help, --help      print this text",
+  "  --version         print the version",
+  "  --version --json  print {schema, version, distSha256} as one JSON line",
   "",
   "game-coordinator is --root (in any position, once), else COORDINATION_KIT_ROOT, else",
   "DELIVERY_KIT_ROOT, else the working directory. For work check and work report, --root names",
@@ -149,6 +161,7 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "claude channel": channel,
   "claude ready": claudeReady,
   "codex ready": codexReady,
+  "events flush": eventsFlush,
   "harness doctor": harnessDoctor,
   "harness ready": harnessReady,
   "harness select": harnessSelect,
@@ -197,6 +210,7 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "protocol work-read": protocolWorkRead,
   "protocol work-receipt": protocolWorkReceipt,
   "protocol work-submit": protocolWorkSubmit,
+  "review deliver": reviewDeliver,
   "work check": workCheck,
   "work report": workReport,
 };
@@ -246,8 +260,26 @@ export async function main(io: Io, argv: readonly string[]): Promise<number> {
     return EXIT_OK;
   }
   if (word === "--version") {
-    io.out(`${VERSION}\n`);
-    return EXIT_OK;
+    if (args[1] !== "--json") {
+      io.out(`${VERSION}\n`);
+      return EXIT_OK;
+    }
+    try {
+      const { distSha256, version } = cliIdentity(io.entry);
+      io.out(
+        `${JSON.stringify(
+          Object.fromEntries([
+            ["schema", 1],
+            ["version", version],
+            ["distSha256", distSha256],
+          ]),
+        )}\n`,
+      );
+      return EXIT_OK;
+    } catch (error) {
+      io.err(`coordination-kit: ${errorMessage(error)}\n`);
+      return EXIT_INVALID;
+    }
   }
   const found = commandOf(args);
   if (found === undefined) {

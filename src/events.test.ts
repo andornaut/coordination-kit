@@ -411,3 +411,106 @@ describe("flushEventsWith", () => {
     ]);
   });
 });
+
+describe("flush results", () => {
+  it("reports no events, delivered counts, the stop reason and the events left unsent", async () => {
+    const game = setup();
+    expect(await flushEventsWith({ claude: () => mockAdapter([]) }, game)).toEqual({
+      delivered: 0,
+      detail: "no event outbox",
+      held: 0,
+      reason: "no-events",
+      status: "skipped",
+    });
+    recordEvent(game, OPTIONS, "push", "one", "first");
+    recordEvent(game, OPTIONS, "push", "two", "second");
+    recordEvent(game, OPTIONS, "push", "three", "third");
+    // One adapter per flush: destination() asks the factory again before each event.
+    const mixed = mockAdapter(["accepted", "rejected"]);
+    const partial = await flushEventsWith({ claude: () => mixed }, game);
+    expect(partial).toMatchObject({
+      delivered: 1,
+      held: 2,
+      reason: "recipient-unavailable",
+      status: "deferred",
+    });
+    expect(partial.detail).toContain("rejected");
+    const ambiguous = mockAdapter(["ambiguous"]);
+    expect(await flushEventsWith({ claude: () => ambiguous }, game)).toMatchObject({
+      delivered: 0,
+      held: 2,
+      reason: "receipt-ambiguous",
+      status: "deferred",
+    });
+    expect(await flushEventsWith({ claude: () => mockAdapter([]) }, game)).toEqual({
+      delivered: 2,
+      detail: "delivered 2",
+      held: 0,
+      reason: null,
+      status: "delivered",
+    });
+    expect(await flushEventsWith({ claude: () => mockAdapter([]) }, game)).toMatchObject({
+      delivered: 0,
+      held: 0,
+      reason: "no-events",
+      status: "skipped",
+    });
+  });
+
+  it("names a held route, a missing adapter, lock contention and an unreadable outbox", async () => {
+    const game = setup();
+    const layout = loadLayout(resolve(game.stateDir, "..", "..", ".."));
+    recordEvent(game, OPTIONS, "push", "one", "first");
+    expect(await flushEventsWith({}, game)).toMatchObject({
+      delivered: 0,
+      held: 1,
+      reason: "recipient-unavailable",
+      status: "deferred",
+    });
+    const lock = holdLock(join(eventsDir(game), "dispatch.lock"));
+    try {
+      expect(await flushEventsWith({ claude: () => mockAdapter([]) }, game)).toMatchObject({
+        held: 1,
+        reason: "recipient-busy",
+        status: "deferred",
+      });
+    } finally {
+      lock.release();
+    }
+    writeFileSync(
+      layout.routeFile,
+      JSON.stringify({
+        host: "archies-dog-walks",
+        schema: 2,
+        state: "held",
+        targets: ["archies-dog-walks/tech"],
+      }),
+    );
+    expect(await flushEventsWith({ claude: () => mockAdapter([]) }, game)).toMatchObject({
+      held: 1,
+      reason: "held",
+      status: "deferred",
+    });
+    writeFileSync(layout.routeFile, "{");
+    expect(await flushEventsWith({ claude: () => mockAdapter([]) }, game)).toMatchObject({
+      reason: "route-unavailable",
+      status: "deferred",
+    });
+    writeFileSync(
+      layout.routeFile,
+      JSON.stringify({
+        host: "archies-dog-walks",
+        schema: 2,
+        state: "active",
+        targets: ["archies-dog-walks/tech"],
+      }),
+    );
+    writeFileSync(join(eventsDir(game), `${"f".repeat(64)}.json`), "{");
+    expect(await flushEventsWith({ claude: () => mockAdapter([]) }, game)).toMatchObject({
+      delivered: 0,
+      held: 2,
+      reason: "outbox-unreadable",
+      status: "deferred",
+    });
+  });
+});

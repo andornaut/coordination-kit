@@ -1,10 +1,11 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 
 import { describe, expect, it, vi } from "vitest";
 
 import { LOCK_FILE, spoolReviewBrief } from "../adapters/claude/spool.ts";
+import { wakeFilePath, writeWakeFile } from "../adapters/claude/wakeFile.ts";
 import { slotRequestId } from "../adapters/shared/ids.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Io } from "../io.ts";
 import { holdLock, holdLockAsync, LockBusy } from "../lock.ts";
@@ -385,6 +386,68 @@ describe("Claude channel generic feeds", () => {
       expect(await done).toBe(EXIT_OK);
     }
     expect(JSON.parse(lines[0]!).params.meta.kind).toBe("review");
+  });
+
+  it("emits one wake notification per seq increase beside unchanged spool delivery", async () => {
+    const fixture = claudeFixture();
+    const route = activeRoute(fixture);
+    expect(spoolReviewBrief(fixture.env, fixture.game.busDir, route, SLOT).status).toBe("sending");
+    const input = new PassThrough();
+    const lines: string[] = [];
+    const done = runChannel(
+      { input, write: (line) => void lines.push(line) },
+      io(),
+      fixture.layout.root,
+      ["--conversation", RECIPIENT, "--poll-seconds", "3600"],
+    );
+    const poll = async (count: number) => {
+      input.write('{"method":"notifications/initialized"}\n');
+      await vi.waitFor(() => expect(lines).toHaveLength(count));
+      // A second drain proves nothing more is emitted for the same seq.
+      input.write('{"method":"notifications/initialized"}\n');
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      expect(lines).toHaveLength(count);
+    };
+    const wake = { count: 2, role: "game-coordinator" };
+    try {
+      await poll(1);
+      writeWakeFile(fixture.layout, RECIPIENT, wake);
+      await poll(2);
+      writeWakeFile(fixture.layout, RECIPIENT, wake);
+      writeWakeFile(fixture.layout, RECIPIENT, { ...wake, count: 4 });
+      await poll(3);
+      writeFileSync(wakeFilePath(fixture.layout, RECIPIENT), '{"schema":1,"seq":');
+      await poll(3);
+      fixture.agents([{ kind: "interactive", sessionId: RECIPIENT, status: "idle" }]);
+      expect(spoolReviewBrief(fixture.env, fixture.game.busDir, route, SLOT + 60).status).toBe(
+        "sending",
+      );
+      await poll(4);
+    } finally {
+      input.end();
+      expect(await done).toBe(EXIT_OK);
+    }
+    const sent = lines.map((line) => JSON.parse(line).params);
+    expect(sent.map((params) => params.meta.kind)).toEqual(["review", "wake", "wake", "review"]);
+    expect(sent[1]).toEqual({
+      content: "2 new messages for game-coordinator: run coordination-kit inbox",
+      meta: { kind: "wake", seq: "1" },
+    });
+    expect(sent[2]).toEqual({
+      content: "4 new messages for game-coordinator: run coordination-kit inbox",
+      meta: { kind: "wake", seq: "3" },
+    });
+    for (const slot of [SLOT, SLOT + 60]) {
+      const receipt = JSON.parse(
+        readFileSync(join(fixture.unblock, `${RECIPIENT}-${slot}.json`), "utf8"),
+      );
+      expect(receipt).toMatchObject({
+        requestId: slotRequestId(RECIPIENT, slot),
+        status: "accepted",
+      });
+    }
   });
 
   it("preserves game feeds and discovers a generic inbox created after startup", async () => {

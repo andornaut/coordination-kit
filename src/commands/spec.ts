@@ -22,10 +22,12 @@ import {
   PROTOCOL_INBOX_OPTIONS,
   PROTOCOL_INPUT_OPTIONS,
   PROTOCOL_INTAKE_OPTIONS,
+  PROTOCOL_MUTATING_OPTIONS,
   PROTOCOL_PHASES,
   PROTOCOL_ROLE_OPTIONS,
   PROTOCOL_ROOT_OPTIONS,
 } from "./protocol.ts";
+import { EVENTS_FLUSH_OPTIONS, REVIEW_DELIVER_OPTIONS } from "./runner.ts";
 import { type CommandSpec, formSynopsis, usageText } from "./usage.ts";
 import { WORK_OPTIONS } from "./work.ts";
 export type { CommandSpec, Options } from "./usage.ts";
@@ -56,6 +58,7 @@ const VALUES: Readonly<Record<string, string>> = {
   recipient: "ROLE|UUID",
   "revision-scope": "ledger|records",
   role: "ROLE",
+  slot: "ISO_TIMESTAMP",
   snapshot: "UUID",
   "state-dir": "STATE/unblock",
 };
@@ -66,6 +69,7 @@ export const GROUPS = {
   ledger: "request accounting",
   message: "durable role messages",
   protocol: "explicit filesystem work protocol",
+  review: "runner seam (delivery-kit)",
   work: "repository work files",
 } as const;
 export interface GroupedSpec extends CommandSpec {
@@ -103,6 +107,12 @@ export const SPECS = {
   },
   "claude ready": READY,
   "codex ready": READY,
+  "events flush": {
+    forms: [["game"]],
+    group: "review",
+    options: EVENTS_FLUSH_OPTIONS,
+    summary: "flush the game's event outbox; prints one typed JSON result line",
+  },
   "harness doctor": {
     forms: [["game", "role?"], ["role"]],
     group: "harness",
@@ -141,9 +151,9 @@ export const SPECS = {
     summary: "acknowledge inbox queue items from a snapshot",
   },
   "inbox snapshot": {
-    forms: [["game", "recipient?", "parent?", "history-cursor?"]],
+    forms: [["game", "recipient?", "parent?", "history-cursor?", "capture?"]],
     group: "inbox",
-    options: { ...INBOX, "history-cursor": { type: "string" } },
+    options: { ...INBOX, capture: { type: "boolean" }, "history-cursor": { type: "string" } },
     summary: "capture the recipient's inbox snapshot",
   },
   "ledger apply": {
@@ -226,7 +236,7 @@ export const SPECS = {
     summary: "move Claude spool entries of handled or superseded messages to claude-retired",
   },
   "message send": {
-    forms: [["from", "recipient", "id", "body-file", "intent?", "parent?"]],
+    forms: [["from", "recipient", "id", "body-file", "intent?", "parent?", "capture?"]],
     group: "message",
     options: MESSAGE_SEND_OPTIONS,
     summary: "store an exact message locally without waking a recipient",
@@ -267,7 +277,9 @@ export const SPECS = {
     summary: "Explicit protocol backup operation; no native delivery or owner activation",
   },
   "protocol boundary": {
-    forms: [["role", "phase", "at", "work-id?", "work-role?", "worker?", "state-root?"]],
+    forms: [
+      ["role", "phase", "at", "work-id?", "work-role?", "worker?", "state-root?", "capture?"],
+    ],
     group: "protocol",
     options: PROTOCOL_BOUNDARY_OPTIONS,
     summary: "Explicit protocol boundary operation; no native delivery or owner activation",
@@ -342,9 +354,9 @@ export const SPECS = {
     summary: "Explicit protocol inventory operation; no native delivery or owner activation",
   },
   "protocol message-observe": {
-    forms: [["input-file", "state-root?"]],
+    forms: [["input-file", "state-root?", "capture?"]],
     group: "protocol",
-    options: PROTOCOL_INPUT_OPTIONS,
+    options: PROTOCOL_MUTATING_OPTIONS,
     summary: "Explicit protocol message-observe operation; no native delivery or owner activation",
   },
   "protocol message-original": {
@@ -354,21 +366,21 @@ export const SPECS = {
     summary: "Explicit protocol message-original operation; no native delivery or owner activation",
   },
   "protocol message-publish": {
-    forms: [["input-file", "state-root?"]],
+    forms: [["input-file", "state-root?", "capture?"]],
     group: "protocol",
-    options: PROTOCOL_INPUT_OPTIONS,
+    options: PROTOCOL_MUTATING_OPTIONS,
     summary: "Explicit protocol message-publish operation; no native delivery or owner activation",
   },
   "protocol message-receipt": {
-    forms: [["input-file", "state-root?"]],
+    forms: [["input-file", "state-root?", "capture?"]],
     group: "protocol",
-    options: PROTOCOL_INPUT_OPTIONS,
+    options: PROTOCOL_MUTATING_OPTIONS,
     summary: "Explicit protocol message-receipt operation; no native delivery or owner activation",
   },
   "protocol message-withdraw": {
-    forms: [["input-file", "state-root?"]],
+    forms: [["input-file", "state-root?", "capture?"]],
     group: "protocol",
-    options: PROTOCOL_INPUT_OPTIONS,
+    options: PROTOCOL_MUTATING_OPTIONS,
     summary: "Explicit protocol message-withdraw operation; no native delivery or owner activation",
   },
   "protocol observer-adoption": {
@@ -396,15 +408,15 @@ export const SPECS = {
     summary: "Explicit protocol status operation; no native delivery or owner activation",
   },
   "protocol work-accept": {
-    forms: [["input-file", "state-root?"]],
+    forms: [["input-file", "state-root?", "capture?"]],
     group: "protocol",
-    options: PROTOCOL_INPUT_OPTIONS,
+    options: PROTOCOL_MUTATING_OPTIONS,
     summary: "Explicit protocol work-accept operation; no native delivery or owner activation",
   },
   "protocol work-publish": {
-    forms: [["input-file", "state-root?"]],
+    forms: [["input-file", "state-root?", "capture?"]],
     group: "protocol",
-    options: PROTOCOL_INPUT_OPTIONS,
+    options: PROTOCOL_MUTATING_OPTIONS,
     summary: "Explicit protocol work-publish operation; no native delivery or owner activation",
   },
   "protocol work-read": {
@@ -414,16 +426,22 @@ export const SPECS = {
     summary: "Explicit protocol work-read operation; no native delivery or owner activation",
   },
   "protocol work-receipt": {
-    forms: [["input-file", "state-root?"]],
+    forms: [["input-file", "state-root?", "capture?"]],
     group: "protocol",
-    options: PROTOCOL_INPUT_OPTIONS,
+    options: PROTOCOL_MUTATING_OPTIONS,
     summary: "Explicit protocol work-receipt operation; no native delivery or owner activation",
   },
   "protocol work-submit": {
-    forms: [["input-file", "state-root?"]],
+    forms: [["input-file", "state-root?", "capture?"]],
     group: "protocol",
-    options: PROTOCOL_INPUT_OPTIONS,
+    options: PROTOCOL_MUTATING_OPTIONS,
     summary: "Explicit protocol work-submit operation; no native delivery or owner activation",
+  },
+  "review deliver": {
+    forms: [["game", "slot", "capture?"]],
+    group: "review",
+    options: REVIEW_DELIVER_OPTIONS,
+    summary: "deliver the scheduled review for one slot once; prints one typed JSON result line",
   },
   "work check": {
     forms: [[]],

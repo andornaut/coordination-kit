@@ -88,6 +88,11 @@ export const PROTOCOL_INPUT_OPTIONS = {
   ...PROTOCOL_ROOT_OPTIONS,
   "input-file": { type: "string" },
 } as const;
+/** Mutating commands take `--capture` to restore automatic accounting capture at the boundary. */
+export const PROTOCOL_MUTATING_OPTIONS = {
+  ...PROTOCOL_INPUT_OPTIONS,
+  capture: { type: "boolean" },
+} as const;
 export const PROTOCOL_ROLE_OPTIONS = {
   ...PROTOCOL_ROOT_OPTIONS,
   id: { type: "string" },
@@ -116,6 +121,7 @@ export const PROTOCOL_ENROLL_SELF_OPTIONS = {
   role: { type: "string" },
 } as const;
 export const PROTOCOL_BOUNDARY_OPTIONS = {
+  capture: { type: "boolean" },
   "work-id": { type: "string" },
   "work-role": { type: "string" },
   worker: { type: "string" },
@@ -526,7 +532,7 @@ async function mutating<T>(
   }
   step.stage = "claim-check";
   const role = registryRole(writer.role.split("/workers/")[0]!);
-  if (selection.expected !== null) {
+  if (selection.expected !== null && values.capture === true) {
     step.stage = "boundary";
     await captureAccounting(
       layout,
@@ -644,19 +650,22 @@ export const protocolRoleRead = handler(PROTOCOL_ROLE_OPTIONS, (io, layout, valu
     })),
   };
 });
-export const protocolWorkPublish = handler(PROTOCOL_INPUT_OPTIONS, (io, layout, values, step) => {
-  const value = checked<{
-    context: WorkContext;
-    input: Parameters<WorkStore["publish"]>[1];
-  }>(io, values, step, checkWorkPublish);
-  return mutating(io, layout, values, step, "context", value.context, "before-work", (protocol) =>
-    work(protocol, layout, join(selected(layout, values).root, "accounting")).publish(
-      value.context,
-      value.input,
-    ),
-  );
-});
-export const protocolWorkSubmit = handler(PROTOCOL_INPUT_OPTIONS, (io, layout, values, step) => {
+export const protocolWorkPublish = handler(
+  PROTOCOL_MUTATING_OPTIONS,
+  (io, layout, values, step) => {
+    const value = checked<{
+      context: WorkContext;
+      input: Parameters<WorkStore["publish"]>[1];
+    }>(io, values, step, checkWorkPublish);
+    return mutating(io, layout, values, step, "context", value.context, "before-work", (protocol) =>
+      work(protocol, layout, join(selected(layout, values).root, "accounting")).publish(
+        value.context,
+        value.input,
+      ),
+    );
+  },
+);
+export const protocolWorkSubmit = handler(PROTOCOL_MUTATING_OPTIONS, (io, layout, values, step) => {
   const value = checked<{
     context: WorkContext;
     input: Parameters<WorkStore["submit"]>[1];
@@ -672,7 +681,7 @@ export const protocolWorkSubmit = handler(PROTOCOL_INPUT_OPTIONS, (io, layout, v
     (protocol) => work(protocol, layout).submit(value.context, value.input),
   );
 });
-export const protocolWorkAccept = handler(PROTOCOL_INPUT_OPTIONS, (io, layout, values, step) => {
+export const protocolWorkAccept = handler(PROTOCOL_MUTATING_OPTIONS, (io, layout, values, step) => {
   const value = checked<{
     context: WorkContext;
     input: Parameters<WorkStore["accept"]>[1];
@@ -681,15 +690,18 @@ export const protocolWorkAccept = handler(PROTOCOL_INPUT_OPTIONS, (io, layout, v
     work(protocol, layout).accept(value.context, value.input),
   );
 });
-export const protocolWorkReceipt = handler(PROTOCOL_INPUT_OPTIONS, (io, layout, values, step) => {
-  const value = checked<{
-    context: WorkContext;
-    input: Parameters<WorkStore["receipt"]>[1];
-  }>(io, values, step, checkWorkReceipt);
-  return mutating(io, layout, values, step, "context", value.context, "integration", (protocol) =>
-    work(protocol, layout).receipt(value.context, value.input),
-  );
-});
+export const protocolWorkReceipt = handler(
+  PROTOCOL_MUTATING_OPTIONS,
+  (io, layout, values, step) => {
+    const value = checked<{
+      context: WorkContext;
+      input: Parameters<WorkStore["receipt"]>[1];
+    }>(io, values, step, checkWorkReceipt);
+    return mutating(io, layout, values, step, "context", value.context, "integration", (protocol) =>
+      work(protocol, layout).receipt(value.context, value.input),
+    );
+  },
+);
 export const protocolWorkRead = handler(PROTOCOL_ROLE_OPTIONS, (io, layout, values) => {
   const chosen = selected(layout, values);
   const reader = work(store(io, layout, chosen.root), layout, join(chosen.root, "accounting"));
@@ -708,7 +720,7 @@ const MESSAGE_CHECKS: Record<MessageOperation, (value: unknown) => InputCheck> =
   withdraw: checkMessageWithdraw,
 };
 function message(operation: MessageOperation): Handler {
-  return handler(PROTOCOL_INPUT_OPTIONS, (io, layout, values, step) => {
+  return handler(PROTOCOL_MUTATING_OPTIONS, (io, layout, values, step) => {
     const value = checked<{
       writer: MessageWriter;
       input: unknown;
@@ -880,7 +892,7 @@ export const protocolBoundary = handler(
       throw new UsageError();
     }
     step.stage = "boundary";
-    if (chosen.expected !== null) {
+    if (chosen.expected !== null && values.capture === true) {
       await captureAccounting(
         layout,
         {},

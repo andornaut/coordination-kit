@@ -19,6 +19,7 @@ describe("accounting at existing ingress boundaries (isolated fixtures)", () => 
     const service = new MessageService({ env: fixture.env, layout: fixture.layout });
     const input = {
       body: "Fixture transport body: question, suggestion and request need owner review",
+      capture: true,
       fromRole: "archies-dog-walks/tech",
       id: "00000000-0000-4000-8000-000000000017",
       recipient: "game-coordinator",

@@ -445,6 +445,18 @@ export async function captureAccounting(
   }
 }
 
+/**
+ * The accounting a snapshot or review records. Automatic capture is opt-in: without `capture` it
+ * is the read-only status and writes no intake offer or ledger event.
+ */
+export function boundaryAccounting(
+  capture: boolean,
+  layout: Layout,
+  snapshot: Readonly<Record<string, unknown>>,
+): Promise<AccountingBoundary> {
+  return capture ? captureAccounting(layout, snapshot) : Promise.resolve(accountingStatus(layout));
+}
+
 /** Metadata-only reminder. Complete local detail remains in the durable snapshot. */
 export function accountingReview(value: unknown): string {
   if (typeof value !== "object" || value === null || !("status" in value)) {

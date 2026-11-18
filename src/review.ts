@@ -9,4 +9,16 @@ export {
   routeRecipient,
   validateRoleRoute,
 } from "./adapters/shared/route.ts";
-export { DEFERRED_PREFIX, deliverScheduledReview } from "./review/wake.ts";
+export {
+  type CliIdentity,
+  REASON_TOKENS,
+  type ReasonToken,
+  type SeamStatus,
+} from "./review/outcome.ts";
+export {
+  DEFERRED_PREFIX,
+  deliverScheduledReview,
+  type ReviewOptions,
+  type ReviewOutcome,
+  reviewOutcome,
+} from "./review/wake.ts";
