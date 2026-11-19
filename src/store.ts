@@ -1,5 +1,6 @@
 // @andornaut/coordination-kit/build/store: the SQLite coordination store, its message lifecycle,
-// wakes, the registry writer fence, the legacy import, runner event ingest and the cutover.
+// wakes, the registry writer fence, the legacy import, runner event ingest, the cutover, and
+// questions, holds and decisions.
 export { COORDINATOR_ROLE, type CutoverOutput, storeCutover } from "./store/cutover.ts";
 export type { AppendResult, VerifyResult } from "./store/db.ts";
 export {
@@ -11,6 +12,14 @@ export {
   storePath,
   storeRoot,
 } from "./store/db.ts";
+export {
+  appendDecisionLine,
+  decisionLine,
+  type DecisionLineInput,
+  fileDecisionNumbers,
+  mainWorkFile,
+  type WorkFileTarget,
+} from "./store/decisionLine.ts";
 export { type CallerOptions, NATIVE_ID_VARIABLES, resolveCaller } from "./store/identity.ts";
 export {
   busEventId,
@@ -72,6 +81,49 @@ export {
   type Projection,
   PROJECTIONS,
 } from "./store/projections.ts";
+export {
+  type AnswerInput,
+  answerQuestion,
+  type AnswerResult,
+  cancelQuestion,
+  type DecisionRow,
+  HOLD_STATES,
+  type HoldResult,
+  holdScope,
+  type HoldState,
+  type HoldView,
+  listDecisions,
+  listHolds,
+  listQuestions,
+  normalizeOptions,
+  type OpenInput,
+  openQuestion,
+  publicText,
+  QUESTION_STATES,
+  questionHoldGuard,
+  type QuestionOption,
+  type QuestionResult,
+  QUESTIONS_PROJECTION,
+  type QuestionState,
+  type QuestionView,
+  RECORD_ID,
+  releaseHold,
+  requireOwnQuestion,
+  setHold,
+} from "./store/questions.ts";
+export {
+  type AnswerOutput,
+  type HoldOutput,
+  type QuestionOutput,
+  storeDecisionList,
+  storeHoldList,
+  storeHoldRelease,
+  storeHoldSet,
+  storeQuestionAnswer,
+  storeQuestionCancel,
+  storeQuestionList,
+  storeQuestionOpen,
+} from "./store/questionService.ts";
 export { SECRET_SHAPES, secretShape } from "./store/secrets.ts";
 export {
   storeDone,

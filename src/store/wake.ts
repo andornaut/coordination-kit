@@ -21,6 +21,7 @@ import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Harness } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 import { type Store, storeRoot } from "./db.ts";
+import { questionHoldGuard } from "./questions.ts";
 import { type Actor, StoreError, type WakeOutcome } from "./types.ts";
 
 export interface WakeGuard {
@@ -29,16 +30,19 @@ export interface WakeGuard {
 }
 
 /**
- * The store question and hold check. Phase 3 supplies one backed by its records; until then every
- * recipient passes it and only the registry held flag and the Codex native check guard a wake.
+ * The store question and hold check, run after the registry checks. The default,
+ * `questionHoldGuard`, blocks a recipient with a pending question or an active `role` hold; the
+ * Codex native question check still runs after it.
  */
 export type StoreWakeGuard = (store: Store, role: string) => WakeGuard;
 
+/** A guard that passes every recipient, for callers that check questions and holds themselves. */
 export const NO_STORE_GUARD: StoreWakeGuard = () => ({ status: "clear" });
 
 export interface WakePorts {
   /** The Codex control connection; defaults to the resolved control socket. */
   readonly connect?: () => Promise<RpcClient>;
+  /** Defaults to `questionHoldGuard`. */
   readonly storeGuard?: StoreWakeGuard;
 }
 
@@ -229,7 +233,7 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
   const guard =
     "reason" in target
       ? ({ reason: target.reason, status: "blocked" } as const)
-      : (context.ports?.storeGuard ?? NO_STORE_GUARD)(store, role);
+      : (context.ports?.storeGuard ?? questionHoldGuard)(store, role);
   const wake = randomUUID();
   const claim = store.transaction((): WakeResult | { readonly count: number } => {
     const state = wakeState(store, role);

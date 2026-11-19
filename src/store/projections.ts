@@ -4,6 +4,7 @@
 // add appliers for existing kinds and pick them up on the next rebuild.
 import type { DatabaseSync } from "node:sqlite";
 
+import { QUESTIONS_PROJECTION } from "./questions.ts";
 import type { JsonObject, StoredEvent } from "./types.ts";
 
 export interface Projection {
@@ -366,4 +367,8 @@ export const DELIVERY_PROJECTION: Projection = {
 };
 
 /** Every projection, in apply order. A later phase appends its own here. */
-export const PROJECTIONS: readonly Projection[] = [MESSAGES_PROJECTION, DELIVERY_PROJECTION];
+export const PROJECTIONS: readonly Projection[] = [
+  MESSAGES_PROJECTION,
+  DELIVERY_PROJECTION,
+  QUESTIONS_PROJECTION,
+];

@@ -1,0 +1,664 @@
+// Questions, holds and decisions over the store. A question is a pending prompt owned by one role;
+// answering it records a typed decision linked to a work item. A hold is owned by the role that
+// set it and only that role releases it. Every writer trusts its `actor`: the CLI resolves it
+// through the registry fence first, and these functions refuse any other owner's record.
+import { hostname } from "node:os";
+import type { DatabaseSync, SQLInputValue } from "node:sqlite";
+
+import { ID_PATTERN as WORK_ID } from "../work/check.ts";
+import type { Store } from "./db.ts";
+import type { Projection } from "./projections.ts";
+import { secretShape } from "./secrets.ts";
+import { type Actor, type Json, type JsonObject, type StoredEvent, StoreError } from "./types.ts";
+import type { WakeGuard } from "./wake.ts";
+
+/** Question and hold IDs: role-scoped `q-<role>-<n>` when generated, any safe token when given. */
+export const RECORD_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
+const DECISION_REF = /^D([1-9][0-9]{0,5})$/;
+/** A registry role key, as `messages.ts` checks it; repeated so this projection imports no writer. */
+const ROLE = /^[a-z0-9][a-z0-9-]{0,63}(?:\/[a-z0-9][a-z0-9-]{0,63})?$/;
+const BY = ROLE;
+const GAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const HOME_PATH = /\/(?:home|Users)\/[A-Za-z0-9._-]+|(?<![\w.-])\/root(?=\/)/;
+const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
+const MAX_OPTIONS = 8;
+
+export type QuestionState = "pending" | "answered" | "cancelled";
+export const QUESTION_STATES: readonly QuestionState[] = ["pending", "answered", "cancelled"];
+export type HoldState = "active" | "released";
+export const HOLD_STATES: readonly HoldState[] = ["active", "released"];
+
+export interface QuestionOption {
+  readonly label: string;
+  readonly description?: string;
+}
+
+export interface QuestionView {
+  readonly id: string;
+  readonly role: string;
+  readonly title: string;
+  readonly work: string | null;
+  readonly options: readonly QuestionOption[] | null;
+  readonly state: QuestionState;
+  readonly openedAt: string;
+  readonly closedAt: string | null;
+  /** The decision that answered it. */
+  readonly decision: string | null;
+  /** The cancellation reason. */
+  readonly reason: string | null;
+}
+
+/** A typed decision record, the store mirror of a work file's `- D<n> (...)` line. */
+export interface DecisionRow {
+  /** `<work>/D<n>`. */
+  readonly id: string;
+  readonly work: string;
+  readonly question: string;
+  readonly by: string;
+  readonly at: string;
+  /** The role whose binding recorded it: the question's owner. */
+  readonly role: string;
+  /** `<work>/D<k>`, or null. */
+  readonly supersedes: string | null;
+  readonly text: string;
+}
+
+export interface HoldView {
+  readonly id: string;
+  readonly role: string;
+  /** `work:<id>`, `role` (the owner itself) or `game:<id>`. */
+  readonly scope: string;
+  readonly reason: string;
+  readonly state: HoldState;
+  readonly setAt: string;
+  readonly releasedAt: string | null;
+}
+
+type Row = Record<string, SQLInputValue>;
+
+function ensure(condition: unknown, code: string): asserts condition {
+  if (!condition) {
+    throw new StoreError(code);
+  }
+}
+
+function text(payload: JsonObject, key: string): string | null {
+  const value = payload[key];
+  return typeof value === "string" ? value : null;
+}
+
+const QUESTIONS_DDL = `
+CREATE TABLE IF NOT EXISTS questions (
+  id TEXT PRIMARY KEY,
+  role TEXT NOT NULL,
+  title TEXT NOT NULL,
+  work TEXT,
+  options TEXT,
+  state TEXT NOT NULL CHECK (state IN ('pending', 'answered', 'cancelled')),
+  opened_at TEXT NOT NULL,
+  opened_seq INTEGER NOT NULL,
+  closed_at TEXT,
+  decision TEXT,
+  reason TEXT
+);
+CREATE INDEX IF NOT EXISTS questions_role ON questions (role, state, opened_seq);
+CREATE TABLE IF NOT EXISTS decisions (
+  id TEXT PRIMARY KEY,
+  work TEXT NOT NULL,
+  n INTEGER NOT NULL,
+  question TEXT NOT NULL,
+  by TEXT NOT NULL,
+  at TEXT NOT NULL,
+  role TEXT NOT NULL,
+  supersedes TEXT,
+  text TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  UNIQUE (work, n)
+);
+CREATE INDEX IF NOT EXISTS decisions_role ON decisions (role, seq);
+CREATE TABLE IF NOT EXISTS holds (
+  id TEXT PRIMARY KEY,
+  role TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('active', 'released')),
+  set_at TEXT NOT NULL,
+  set_seq INTEGER NOT NULL,
+  released_at TEXT
+);
+CREATE INDEX IF NOT EXISTS holds_role ON holds (role, state, set_seq);
+`;
+
+const opened = (db: DatabaseSync, event: StoredEvent): void => {
+  const p = event.payload;
+  db.prepare(
+    `INSERT INTO questions (id, role, title, work, options, state, opened_at, opened_seq)
+     VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`,
+  ).run(
+    text(p, "id"),
+    text(p, "role"),
+    text(p, "title"),
+    text(p, "work"),
+    p.options === null || p.options === undefined ? null : JSON.stringify(p.options),
+    event.at,
+    event.seq,
+  );
+};
+
+const answered = (db: DatabaseSync, event: StoredEvent): void => {
+  const p = event.payload;
+  const decision = `${text(p, "work")}/D${Number(p.n)}`;
+  db.prepare(
+    `UPDATE questions SET state = 'answered', closed_at = ?, decision = ? WHERE id = ?`,
+  ).run(event.at, decision, text(p, "id"));
+  db.prepare(
+    `INSERT INTO decisions (id, work, n, question, by, at, role, supersedes, text, seq)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    decision,
+    text(p, "work"),
+    Number(p.n),
+    text(p, "id"),
+    text(p, "by"),
+    event.at,
+    text(p, "role"),
+    text(p, "supersedes"),
+    text(p, "text"),
+    event.seq,
+  );
+};
+
+const cancelled = (db: DatabaseSync, event: StoredEvent): void => {
+  const p = event.payload;
+  db.prepare(
+    `UPDATE questions SET state = 'cancelled', closed_at = ?, reason = ? WHERE id = ?`,
+  ).run(event.at, text(p, "reason"), text(p, "id"));
+};
+
+const holdSet = (db: DatabaseSync, event: StoredEvent): void => {
+  const p = event.payload;
+  db.prepare(
+    `INSERT INTO holds (id, role, scope, reason, state, set_at, set_seq)
+     VALUES (?, ?, ?, ?, 'active', ?, ?)`,
+  ).run(text(p, "id"), text(p, "role"), text(p, "scope"), text(p, "reason"), event.at, event.seq);
+};
+
+const holdReleased = (db: DatabaseSync, event: StoredEvent): void => {
+  db.prepare(`UPDATE holds SET state = 'released', released_at = ? WHERE id = ?`).run(
+    event.at,
+    text(event.payload, "id"),
+  );
+};
+
+/** Questions, their decisions and holds. */
+export const QUESTIONS_PROJECTION: Projection = {
+  apply: {
+    "hold.released": holdReleased,
+    "hold.set": holdSet,
+    "question.answered": answered,
+    "question.cancelled": cancelled,
+    "question.opened": opened,
+  },
+  ddl: QUESTIONS_DDL,
+  tables: ["questions", "decisions", "holds"],
+};
+
+function ownerOf(actor: Actor): string {
+  ensure(actor.role !== null && ROLE.test(actor.role), "invalid-actor");
+  return actor.role;
+}
+
+/** One line of private store text: a title, reason or option. */
+function storeText(value: string, max: number, code: string): string {
+  ensure(
+    typeof value === "string" &&
+      value.trim() !== "" &&
+      value.length <= max &&
+      !/[\r\n]/.test(value),
+    code,
+  );
+  ensure(secretShape(value) === null, "secret-shaped-body");
+  return value;
+}
+
+/**
+ * Decision text goes into a public work file: one line with no secret shape, home-directory path,
+ * UUID or this machine's host name, read at run time and never stored.
+ */
+export function publicText(value: string): string {
+  storeText(value, 1000, "invalid-text");
+  const host = hostname().toLowerCase();
+  ensure(
+    !HOME_PATH.test(value) &&
+      !UUID.test(value) &&
+      (host.length < 3 || !value.toLowerCase().includes(host)),
+    "text-not-public",
+  );
+  return value;
+}
+
+function questionRow(store: Store, id: string): Row | undefined {
+  return store.db.prepare("SELECT * FROM questions WHERE id = ?").get(id) as Row | undefined;
+}
+
+function parseOptions(value: SQLInputValue | undefined): QuestionOption[] | null {
+  return value == null ? null : (JSON.parse(value as string) as QuestionOption[]);
+}
+
+function questionView(row: Row): QuestionView {
+  const nullable = (key: string) => (row[key] as string | null) ?? null;
+  return {
+    closedAt: nullable("closed_at"),
+    decision: nullable("decision"),
+    id: row.id as string,
+    openedAt: row.opened_at as string,
+    options: parseOptions(row.options),
+    reason: nullable("reason"),
+    role: row.role as string,
+    state: row.state as QuestionState,
+    title: row.title as string,
+    work: nullable("work"),
+  };
+}
+
+/** Options as a structured prompt shows them: 1 to 8, each a label and an optional description. */
+export function normalizeOptions(raw: unknown): QuestionOption[] {
+  ensure(Array.isArray(raw) && raw.length >= 1 && raw.length <= MAX_OPTIONS, "invalid-options");
+  return raw.map((item: unknown) => {
+    if (typeof item === "string") {
+      return { label: storeText(item, 200, "invalid-options") };
+    }
+    ensure(typeof item === "object" && item !== null && !Array.isArray(item), "invalid-options");
+    const { description, label, ...rest } = item as Record<string, unknown>;
+    ensure(Object.keys(rest).length === 0 && typeof label === "string", "invalid-options");
+    ensure(description === undefined || typeof description === "string", "invalid-options");
+    return {
+      label: storeText(label, 200, "invalid-options"),
+      ...(description === undefined
+        ? {}
+        : { description: storeText(description, 1000, "invalid-options") }),
+    };
+  });
+}
+
+/** A comparable form of an option list; the stored copy has its keys sorted. */
+function optionsKey(options: readonly QuestionOption[] | null): string {
+  return JSON.stringify(
+    options?.map((option) => [option.label, option.description ?? null]) ?? null,
+  );
+}
+
+/** The next role-scoped ID, `q-<role>-<n>`, with `/` in a game role written as `-`. */
+function nextQuestionId(store: Store, role: string): string {
+  const prefix = `q-${role.replaceAll("/", "-")}-`;
+  const rows = store.db
+    .prepare("SELECT id FROM questions WHERE substr(id, 1, ?) = ?")
+    .all(prefix.length, prefix) as Row[];
+  let max = 0;
+  for (const row of rows) {
+    const rest = (row.id as string).slice(prefix.length);
+    if (/^[1-9][0-9]*$/.test(rest)) {
+      max = Math.max(max, Number(rest));
+    }
+  }
+  return `${prefix}${max + 1}`;
+}
+
+export interface OpenInput {
+  readonly id?: string;
+  readonly title: string;
+  readonly work?: string;
+  readonly options?: readonly QuestionOption[];
+}
+
+export interface QuestionResult {
+  readonly question: QuestionView;
+  /** The same open, answer or cancel was already recorded; nothing was written. */
+  readonly duplicate: boolean;
+}
+
+/**
+ * Record a pending prompt owned by the caller's role. Without `id` it gets the next role-scoped
+ * ID. Reopening an ID with identical owner, title, work and options is a no-op; any other reuse is
+ * `id-conflict`. The native prompt itself is never touched.
+ */
+export function openQuestion(store: Store, actor: Actor, input: OpenInput): QuestionResult {
+  const role = ownerOf(actor);
+  ensure(input.id === undefined || RECORD_ID.test(input.id), "invalid-id");
+  ensure(input.work === undefined || WORK_ID.test(input.work), "invalid-work");
+  const title = storeText(input.title, 500, "invalid-title");
+  const options = input.options === undefined ? null : normalizeOptions(input.options);
+  return store.transaction(() => {
+    const id = input.id ?? nextQuestionId(store, role);
+    const existing = questionRow(store, id);
+    if (existing !== undefined) {
+      ensure(
+        existing.role === role &&
+          existing.title === title &&
+          ((existing.work as string | null) ?? null) === (input.work ?? null) &&
+          optionsKey(parseOptions(existing.options)) === optionsKey(options),
+        "id-conflict",
+      );
+      return { duplicate: true, question: questionView(existing) };
+    }
+    store.append({
+      actor,
+      key: `question.opened:${id}`,
+      kind: "question.opened",
+      payload: {
+        id,
+        options: options as unknown as Json,
+        role,
+        title,
+        work: input.work ?? null,
+      },
+    });
+    return { duplicate: false, question: questionView(questionRow(store, id)!) };
+  });
+}
+
+/** The caller's own question, or `missing` and `not-owner`. */
+function ownQuestion(store: Store, actor: Actor, id: string): Row {
+  const role = ownerOf(actor);
+  ensure(RECORD_ID.test(id), "invalid-id");
+  const row = questionRow(store, id);
+  ensure(row !== undefined, "missing");
+  ensure(row.role === role, "not-owner");
+  return row;
+}
+
+/**
+ * The caller's own question. Refuses `missing` and `not-owner`, so a caller can check ownership
+ * before it reads anything else the write needs.
+ */
+export function requireOwnQuestion(store: Store, actor: Actor, id: string): QuestionView {
+  return questionView(ownQuestion(store, actor, id));
+}
+
+function decisionRow(row: Row): DecisionRow {
+  return {
+    at: row.at as string,
+    by: row.by as string,
+    id: row.id as string,
+    question: row.question as string,
+    role: row.role as string,
+    supersedes: (row.supersedes as string | null) ?? null,
+    text: row.text as string,
+    work: row.work as string,
+  };
+}
+
+export interface AnswerInput {
+  readonly work: string;
+  readonly text: string;
+  /** `user` unless another decider is named. */
+  readonly by?: string;
+  /** `D<k>` of the same work item. */
+  readonly supersedes?: string;
+  /** Decision numbers the work file already uses; the new one takes the next free number. */
+  readonly fileNumbers?: readonly number[];
+}
+
+export interface AnswerResult extends QuestionResult {
+  readonly decision: DecisionRow;
+  /** The decision's number in its work item. */
+  readonly n: number;
+}
+
+/**
+ * Close the caller's own pending question and record its decision in one write. The decision's
+ * number is one above the highest in the store and the work file. Repeating the same answer is a
+ * no-op that returns the recorded decision; any other change is `already-closed`.
+ */
+export function answerQuestion(
+  store: Store,
+  actor: Actor,
+  id: string,
+  input: AnswerInput,
+): AnswerResult {
+  ensure(WORK_ID.test(input.work), "invalid-work");
+  const decisionText = publicText(input.text);
+  const by = input.by ?? "user";
+  ensure(BY.test(by), "invalid-by");
+  const superseded = input.supersedes === undefined ? null : DECISION_REF.exec(input.supersedes);
+  ensure(input.supersedes === undefined || superseded !== null, "invalid-supersedes");
+  const supersedes = superseded === null ? null : `${input.work}/D${superseded[1]}`;
+  return store.transaction(() => {
+    const row = ownQuestion(store, actor, id);
+    ensure(row.work == null || row.work === input.work, "work-mismatch");
+    if (row.state !== "pending") {
+      const recorded =
+        row.decision == null
+          ? undefined
+          : (store.db.prepare("SELECT * FROM decisions WHERE id = ?").get(row.decision) as
+              Row | undefined);
+      ensure(
+        recorded !== undefined &&
+          recorded.work === input.work &&
+          recorded.text === decisionText &&
+          recorded.by === by &&
+          ((recorded.supersedes as string | null) ?? null) === supersedes,
+        "already-closed",
+      );
+      return {
+        decision: decisionRow(recorded),
+        duplicate: true,
+        n: Number(recorded.n),
+        question: questionView(row),
+      };
+    }
+    const stored = store.db
+      .prepare("SELECT n FROM decisions WHERE work = ?")
+      .all(input.work)
+      .map((item) => Number((item as Row).n));
+    const known = new Set([...stored, ...(input.fileNumbers ?? [])]);
+    ensure(supersedes === null || known.has(Number(superseded![1])), "invalid-supersedes");
+    const n = Math.max(0, ...known) + 1;
+    store.append({
+      actor,
+      key: `question.answered:${id}`,
+      kind: "question.answered",
+      payload: {
+        by,
+        id,
+        n,
+        role: row.role as string,
+        supersedes,
+        text: decisionText,
+        work: input.work,
+      },
+    });
+    const decision = store.db
+      .prepare("SELECT * FROM decisions WHERE work = ? AND n = ?")
+      .get(input.work, n) as Row;
+    return {
+      decision: decisionRow(decision),
+      duplicate: false,
+      n,
+      question: questionView(questionRow(store, id)!),
+    };
+  });
+}
+
+/** Cancel the caller's own pending question. Repeating the same cancel is a no-op. */
+export function cancelQuestion(
+  store: Store,
+  actor: Actor,
+  id: string,
+  reason: string,
+): QuestionResult {
+  const why = storeText(reason, 1000, "invalid-reason");
+  return store.transaction(() => {
+    const row = ownQuestion(store, actor, id);
+    if (row.state !== "pending") {
+      ensure(row.state === "cancelled" && row.reason === why, "already-closed");
+      return { duplicate: true, question: questionView(row) };
+    }
+    store.append({
+      actor,
+      key: `question.cancelled:${id}`,
+      kind: "question.cancelled",
+      payload: { id, reason: why },
+    });
+    return { duplicate: false, question: questionView(questionRow(store, id)!) };
+  });
+}
+
+/** Questions in opening order, optionally of one owner and in the given states. */
+export function listQuestions(
+  store: Store,
+  filter: { readonly role?: string; readonly states?: readonly QuestionState[] } = {},
+): QuestionView[] {
+  const states = filter.states ?? QUESTION_STATES;
+  return (
+    store.db
+      .prepare(
+        `SELECT * FROM questions WHERE (? IS NULL OR role = ?)
+           AND state IN (${states.map(() => "?").join(",")}) ORDER BY opened_seq`,
+      )
+      .all(filter.role ?? null, filter.role ?? null, ...states) as Row[]
+  ).map(questionView);
+}
+
+/** Decision records in recording order, optionally of one work item and one owning role. */
+export function listDecisions(
+  store: Store,
+  filter: { readonly work?: string; readonly role?: string } = {},
+): DecisionRow[] {
+  return (
+    store.db
+      .prepare(
+        `SELECT * FROM decisions WHERE (? IS NULL OR work = ?) AND (? IS NULL OR role = ?)
+         ORDER BY seq`,
+      )
+      .all(
+        filter.work ?? null,
+        filter.work ?? null,
+        filter.role ?? null,
+        filter.role ?? null,
+      ) as Row[]
+  ).map(decisionRow);
+}
+
+/** `work:<id>`, `role` or `game:<id>`, validated. */
+export function holdScope(scope: string): string {
+  const [kind, ref, ...rest] = scope.split(":");
+  ensure(
+    rest.length === 0 &&
+      ((kind === "role" && ref === undefined) ||
+        (kind === "work" && ref !== undefined && WORK_ID.test(ref)) ||
+        (kind === "game" && ref !== undefined && GAME.test(ref))),
+    "invalid-scope",
+  );
+  return scope;
+}
+
+function holdRow(store: Store, id: string): Row | undefined {
+  return store.db.prepare("SELECT * FROM holds WHERE id = ?").get(id) as Row | undefined;
+}
+
+function holdView(row: Row): HoldView {
+  return {
+    id: row.id as string,
+    reason: row.reason as string,
+    releasedAt: (row.released_at as string | null) ?? null,
+    role: row.role as string,
+    scope: row.scope as string,
+    setAt: row.set_at as string,
+    state: row.state as HoldState,
+  };
+}
+
+export interface HoldResult {
+  readonly hold: HoldView;
+  readonly duplicate: boolean;
+}
+
+/**
+ * Set a hold owned by the caller's role. Setting the same ID again with identical owner, scope and
+ * reason while it is active is a no-op; any other reuse, including after release, is `id-conflict`.
+ */
+export function setHold(
+  store: Store,
+  actor: Actor,
+  input: { readonly id: string; readonly scope: string; readonly reason: string },
+): HoldResult {
+  const role = ownerOf(actor);
+  ensure(RECORD_ID.test(input.id), "invalid-id");
+  const scope = holdScope(input.scope);
+  const reason = storeText(input.reason, 1000, "invalid-reason");
+  return store.transaction(() => {
+    const existing = holdRow(store, input.id);
+    if (existing !== undefined) {
+      ensure(
+        existing.state === "active" &&
+          existing.role === role &&
+          existing.scope === scope &&
+          existing.reason === reason,
+        "id-conflict",
+      );
+      return { duplicate: true, hold: holdView(existing) };
+    }
+    store.append({
+      actor,
+      key: `hold.set:${input.id}`,
+      kind: "hold.set",
+      payload: { id: input.id, reason, role, scope },
+    });
+    return { duplicate: false, hold: holdView(holdRow(store, input.id)!) };
+  });
+}
+
+/** Release the caller's own hold. Only its owner can; repeating a release is a no-op. */
+export function releaseHold(store: Store, actor: Actor, id: string): HoldResult {
+  const role = ownerOf(actor);
+  ensure(RECORD_ID.test(id), "invalid-id");
+  return store.transaction(() => {
+    const row = holdRow(store, id);
+    ensure(row !== undefined, "missing");
+    ensure(row.role === role, "not-owner");
+    if (row.state === "released") {
+      return { duplicate: true, hold: holdView(row) };
+    }
+    store.append({ actor, key: `hold.released:${id}`, kind: "hold.released", payload: { id } });
+    return { duplicate: false, hold: holdView(holdRow(store, id)!) };
+  });
+}
+
+/** Holds in setting order, optionally of one owner and in the given states. */
+export function listHolds(
+  store: Store,
+  filter: { readonly role?: string; readonly states?: readonly HoldState[] } = {},
+): HoldView[] {
+  const states = filter.states ?? HOLD_STATES;
+  return (
+    store.db
+      .prepare(
+        `SELECT * FROM holds WHERE (? IS NULL OR role = ?)
+           AND state IN (${states.map(() => "?").join(",")}) ORDER BY set_seq`,
+      )
+      .all(filter.role ?? null, filter.role ?? null, ...states) as Row[]
+  ).map(holdView);
+}
+
+/**
+ * The store wake guard: a recipient with a pending question or an active `role` hold gets no
+ * wake. It reads the projections only; a wake never answers or clears either.
+ */
+export function questionHoldGuard(store: Store, role: string): WakeGuard {
+  if (
+    store.db
+      .prepare("SELECT 1 FROM questions WHERE role = ? AND state = 'pending' LIMIT 1")
+      .get(role) !== undefined
+  ) {
+    return { reason: "recipient-question-pending", status: "blocked" };
+  }
+  if (
+    store.db
+      .prepare("SELECT 1 FROM holds WHERE role = ? AND scope = 'role' AND state = 'active' LIMIT 1")
+      .get(role) !== undefined
+  ) {
+    return { reason: "recipient-hold-active", status: "blocked" };
+  }
+  return { status: "clear" };
+}

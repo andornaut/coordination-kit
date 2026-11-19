@@ -351,10 +351,26 @@ export interface HistoryEntry {
   readonly detail: JsonObject;
 }
 
-/** The body is never part of history; senders and recipients appear by role. */
-function historyDetail(event: Pick<StoredEvent, "kind" | "payload">): JsonObject {
+/** The role that may read every message body in history, beside each sender and recipient. */
+const BODY_READER = "game-coordinator";
+
+/**
+ * Senders and recipients appear by role. A body appears only to a `viewer` that is the message's
+ * sender, its recipient or `game-coordinator`; everyone else, and every read without a viewer,
+ * gets metadata.
+ */
+function historyDetail(
+  event: Pick<StoredEvent, "kind" | "payload">,
+  viewer: string | null,
+): JsonObject {
   const { payload } = event;
   if (event.kind === "msg.sent" || event.kind === "msg.imported") {
+    if (
+      viewer !== null &&
+      (viewer === BODY_READER || viewer === payload.from || viewer === payload.to)
+    ) {
+      return payload;
+    }
     const rest: Record<string, Json> = { ...payload };
     delete rest.body;
     return rest;
@@ -364,11 +380,17 @@ function historyDetail(event: Pick<StoredEvent, "kind" | "payload">): JsonObject
 
 /**
  * Message events in seq order, optionally touching one role (as sender, recipient, reader or
- * actor) and at or after `since`, at most `limit` of them.
+ * actor) and at or after `since`, at most `limit` of them. `viewer` is the fenced caller's role
+ * when bodies were asked for; it sees only the bodies `historyDetail` allows.
  */
 export function messageHistory(
   store: Store,
-  options: { readonly role?: string; readonly since?: string; readonly limit?: number } = {},
+  options: {
+    readonly role?: string;
+    readonly since?: string;
+    readonly limit?: number;
+    readonly viewer?: string;
+  } = {},
 ): HistoryEntry[] {
   return historyQuery(
     store,
@@ -376,6 +398,7 @@ export function messageHistory(
     options.role ?? null,
     options.since ?? null,
     options.limit ?? 1000,
+    options.viewer ?? null,
   );
 }
 
@@ -385,6 +408,7 @@ function historyQuery(
   role: string | null,
   since: string | null,
   limit: number,
+  viewer: string | null,
 ): HistoryEntry[] {
   const rows = store.db
     .prepare(
@@ -403,7 +427,10 @@ function historyQuery(
       worker: (row.actor_worker as string | null) ?? null,
     },
     at: row.at as string,
-    detail: historyDetail({ kind: row.kind as string, payload: parse<JsonObject>(row.payload) }),
+    detail: historyDetail(
+      { kind: row.kind as string, payload: parse<JsonObject>(row.payload) },
+      viewer,
+    ),
     kind: row.kind as string,
     seq: Number(row.seq),
   }));

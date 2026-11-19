@@ -47,7 +47,7 @@ export interface StoreServiceContext {
   readonly now?: () => string;
 }
 
-async function withStore<T>(
+export async function withStore<T>(
   context: StoreServiceContext,
   body: (store: Store) => T | Promise<T>,
   options: { readonly createMissing?: boolean } = {},
@@ -64,7 +64,7 @@ async function withStore<T>(
   }
 }
 
-function registry(context: StoreServiceContext): Registry {
+export function registry(context: StoreServiceContext): Registry {
   try {
     return readRegistry(context.layout);
   } catch {
@@ -212,12 +212,29 @@ export async function storeStatus(
   return withStore(context, (store) => ({ message: messageStatus(store, id), schema: 1 as const }));
 }
 
+/**
+ * Message events without bodies. With `includeBody` the caller is resolved through the registry
+ * fence and sees the bodies of messages it sent or received, or every body as `game-coordinator`.
+ */
 export async function storeHistory(
   context: StoreServiceContext,
-  selection: { readonly role?: string; readonly since?: string; readonly limit?: number },
+  selection: {
+    readonly role?: string;
+    readonly since?: string;
+    readonly limit?: number;
+    readonly includeBody?: boolean;
+    readonly caller?: CallerOptions;
+  },
 ): Promise<{ readonly schema: 1; readonly events: readonly HistoryEntry[] }> {
+  const viewer =
+    selection.includeBody === true ? caller(context, selection.caller ?? {}).role : undefined;
   return withStore(context, (store) => ({
-    events: messageHistory(store, selection),
+    events: messageHistory(store, {
+      ...(selection.limit === undefined ? {} : { limit: selection.limit }),
+      ...(selection.role === undefined ? {} : { role: selection.role }),
+      ...(selection.since === undefined ? {} : { since: selection.since }),
+      ...(viewer === undefined ? {} : { viewer }),
+    }),
     schema: 1 as const,
   }));
 }
