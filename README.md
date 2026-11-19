@@ -25,7 +25,7 @@ commit the lockfile integrity:
 
 ```json
 "devDependencies": {
-  "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v1.2.0/coordination-kit-1.2.0.tgz"
+  "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v1.3.0/coordination-kit-1.3.0.tgz"
 }
 ```
 
