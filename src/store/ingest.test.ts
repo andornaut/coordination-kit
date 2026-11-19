@@ -353,9 +353,12 @@ describe("events ingest", () => {
     );
     expect(await ingestEvents(test.context, test.game)).toMatchObject({
       completed: 3,
-      // gate_passed is quiet: three events per commit are delivered.
-      delivered: 9,
+      // gate_passed is quiet: three events per commit and the three COMPLETEs are delivered.
+      delivered: 12,
     });
+    expect(messages(test.layout).filter((message) => message.body.includes("gate_passed"))).toEqual(
+      [],
+    );
     const stored = completes(test.layout);
     expect(stored.map((message) => message.id)).toEqual([
       derivedId("complete", GAME, SHA),
