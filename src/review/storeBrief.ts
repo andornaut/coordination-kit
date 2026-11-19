@@ -20,6 +20,7 @@ import {
 } from "../store/wake.ts";
 import type { ReviewResult } from "./deliver.ts";
 import { coordinationNotice } from "./emit.ts";
+import { type NativeCollect, type NativeSurvey, surveyNative } from "./storeNative.ts";
 
 export const BRIEF_MAX_LINES = 60;
 export const BRIEF_MAX_BYTES = 4096;
@@ -31,11 +32,20 @@ export interface StoreReviewContext {
   readonly env: NodeJS.ProcessEnv;
   readonly ports?: WakePorts;
   readonly now?: () => string;
+  /** Test hook: replaces the Codex control connection and the legacy collectors. */
+  readonly collect?: NativeCollect;
 }
 
-/** The route recipient for this game's slot, or the typed result that ends the review. */
-function routeFor(layout: Layout, game: GameLayout): string | ReviewResult {
+interface RouteTarget {
+  readonly recipient: string;
+  /** The recipient and the route's targets, the scope of the native question check. */
+  readonly members: readonly string[];
+}
+
+/** The route recipient and members for this game's slot, or the typed result that ends it. */
+function routeFor(layout: Layout, game: GameLayout): RouteTarget | ReviewResult {
   let recipient: string;
+  let targets: readonly string[];
   try {
     const route = readRoleRoute(layout);
     if (route === null || route.host !== game.id) {
@@ -49,6 +59,7 @@ function routeFor(layout: Layout, game: GameLayout): string | ReviewResult {
       return { detail: "review route held", reason: "held", status: "skipped" };
     }
     recipient = routeRecipient(layout, route);
+    targets = route.targets;
   } catch (error) {
     if (error instanceof RouteError) {
       return {
@@ -61,7 +72,12 @@ function routeFor(layout: Layout, game: GameLayout): string | ReviewResult {
     throw error;
   }
   try {
-    return resolveRole(readRegistry(layout), recipient);
+    const registry = readRegistry(layout);
+    const role = resolveRole(registry, recipient);
+    return {
+      members: [role, ...targets.map((target) => resolveRole(registry, target))],
+      recipient: role,
+    };
   } catch {
     return {
       detail: "the review recipient is not a registered role",
@@ -72,11 +88,22 @@ function routeFor(layout: Layout, game: GameLayout): string | ReviewResult {
 }
 
 export interface BriefException {
-  readonly kind: "stalled" | "unconfirmed" | "wake-failed" | "wake-ambiguous" | "wake-guarded";
+  readonly kind:
+    | "question-pending"
+    | "question-unknown"
+    | "worker-failed"
+    | "worker-unknown"
+    | "stalled"
+    | "unconfirmed"
+    | "wake-failed"
+    | "wake-ambiguous"
+    | "wake-guarded";
   readonly role: string;
   readonly id?: string;
   readonly state?: string;
   readonly detail?: string;
+  /** A pending question's title, at most 80 characters; left out of a secret-shaped fallback. */
+  readonly title?: string;
 }
 
 export interface BriefRecord {
@@ -89,6 +116,10 @@ export interface BriefRecord {
   /** Open (sent, delivered or retained) message IDs at this slot, for the next slot's ages. */
   readonly open: readonly string[];
   readonly result: ReviewResult;
+  /** The native question and child health checks as this slot read them. */
+  readonly native: NativeSurvey;
+  /** Worker failures any brief of this game has reported, so each is reminded once. */
+  readonly reportedWorkerFailures: readonly string[];
 }
 
 function previousBrief(store: Store, game: string, slot: number): BriefRecord | undefined {
@@ -111,10 +142,71 @@ function recordedBrief(store: Store, game: string, slot: number): BriefRecord | 
   return row === undefined ? undefined : (JSON.parse(row.payload as string) as BriefRecord);
 }
 
+/**
+ * The native exceptions first, so they survive the page cap: each owner-attested pending Codex
+ * question, each Codex role whose question state is unreadable, each worker failure no earlier
+ * brief reported, and each worker parent whose child health is unreadable.
+ */
+function nativeExceptions(
+  native: NativeSurvey,
+  previous: BriefRecord | undefined,
+): { exceptions: BriefException[]; reported: string[]; counts: JsonObject } {
+  const exceptions: BriefException[] = [];
+  const reported = new Set(previous?.reportedWorkerFailures ?? []);
+  const questions = { clear: 0, pending: 0, unknown: 0 };
+  const workers = { failed: 0, ok: 0, unknown: 0 };
+  for (const question of native.questions) {
+    questions[question.status] += 1;
+    for (const pending of question.pending) {
+      exceptions.push({
+        detail: `turn ${pending.turn} item ${pending.item}; answer in its own conversation`,
+        kind: "question-pending",
+        role: question.role,
+        ...(pending.title === null ? {} : { title: pending.title }),
+      });
+    }
+    if (question.status === "unknown") {
+      exceptions.push({
+        detail: question.reason ?? "unavailable",
+        kind: "question-unknown",
+        role: question.role,
+      });
+    }
+  }
+  for (const worker of native.workers) {
+    workers[worker.status] += 1;
+    workers.failed += worker.failures.length;
+    for (const [child, turn, code] of worker.failures) {
+      const key = [worker.role, child, turn, code].join(" ");
+      if (!reported.has(key)) {
+        reported.add(key);
+        exceptions.push({
+          detail: `child ${child} turn ${turn} failed (${code}); the parent decides reassignment`,
+          kind: "worker-failed",
+          role: worker.role,
+        });
+      }
+    }
+    if (worker.status === "unknown") {
+      exceptions.push({
+        detail: worker.reason ?? "unavailable",
+        kind: "worker-unknown",
+        role: worker.role,
+      });
+    }
+  }
+  return {
+    counts: { claudeRoles: native.claudeRoles.length, questions, workers },
+    exceptions,
+    reported: [...reported].sort(),
+  };
+}
+
 /** Counts and exceptions from the store as it is now; the previous brief ages open messages. */
 function survey(
   store: Store,
   previous: BriefRecord | undefined,
+  native: NativeSurvey,
 ): Omit<BriefRecord, "game" | "slot" | "recipient" | "messageId" | "result"> {
   const rows = store.db
     .prepare(
@@ -125,7 +217,8 @@ function survey(
   const before = new Set(previous?.open ?? []);
   const byRole: Record<string, Record<string, number>> = {};
   const states: Record<string, number> = { delivered: 0, retained: 0, sent: 0 };
-  const exceptions: BriefException[] = [];
+  const checked = nativeExceptions(native, previous);
+  const exceptions: BriefException[] = [...checked.exceptions];
   let unconfirmed = 0;
   for (const row of rows) {
     const role = row.to_role as string;
@@ -187,6 +280,7 @@ function survey(
     counts: {
       byRole: byRole as unknown as Json,
       completes: Number(runner.completes ?? 0),
+      native: checked.counts,
       open: rows.length,
       runnerEvents: Number(runner.events ?? 0),
       states,
@@ -194,7 +288,9 @@ function survey(
       wakes,
     },
     exceptions,
+    native,
     open: rows.map((row) => row.id as string),
+    reportedWorkerFailures: checked.reported,
   };
 }
 
@@ -205,8 +301,13 @@ function previousSeq(store: Store, previous: BriefRecord): number {
   return Number(row?.seq ?? 0);
 }
 
-function exceptionLine(exception: BriefException): string {
+function exceptionLine(exception: BriefException, titles: boolean): string {
   switch (exception.kind) {
+    case "question-pending":
+      return (
+        `- question-pending ${exception.role}: ` +
+        `${titles && exception.title !== undefined ? `"${exception.title}", ` : ""}${exception.detail}`
+      );
     case "stalled":
       return `- stalled ${exception.id} to ${exception.role} (${exception.state}, open across two slots)`;
     case "unconfirmed":
@@ -221,8 +322,15 @@ export function composeBrief(
   game: GameLayout,
   slot: number,
   record: Pick<BriefRecord, "counts" | "exceptions">,
+  options: { readonly titles?: boolean } = {},
 ): string {
+  const titles = options.titles !== false;
   const counts = record.counts as Record<string, Json>;
+  const native = counts.native as {
+    claudeRoles: number;
+    questions: Record<string, number>;
+    workers: Record<string, number>;
+  };
   const states = counts.states as Record<string, number>;
   const wakes = counts.wakes as Record<string, number>;
   const byRole = counts.byRole as Record<string, Record<string, number>>;
@@ -238,7 +346,13 @@ export function composeBrief(
       `${wakes.guarded} guarded`,
     `Runner since the previous brief: ${String(counts.runnerEvents)} events, ` +
       `${String(counts.completes)} COMPLETE`,
-    "Native questions and worker turns are not part of the stored brief: unknown, not clear.",
+    `Codex questions: ${native.questions.pending} pending, ${native.questions.clear} clear, ` +
+      `${native.questions.unknown} unknown; worker parents: ${native.workers.ok} read, ` +
+      `${native.workers.unknown} unknown, ${native.workers.failed} failed children${
+        native.claudeRoles > 0
+          ? `; ${native.claudeRoles} Claude roles have no native check (unknown)`
+          : ""
+      }`,
     `Exceptions: ${record.exceptions.length}`,
   ];
   const tail = [
@@ -255,11 +369,11 @@ export function composeBrief(
   for (const [index, exception] of record.exceptions.entries()) {
     const remaining = record.exceptions.length - index - 1;
     const more = remaining > 0 ? [`- ${remaining} more: ${show}`] : [];
-    if (!fits([exceptionLine(exception), ...more])) {
+    if (!fits([exceptionLine(exception, titles), ...more])) {
       lines.push(`- ${record.exceptions.length - index} more: ${show}`);
       break;
     }
-    lines.push(exceptionLine(exception));
+    lines.push(exceptionLine(exception, titles));
   }
   return [...lines, ...tail].join("\n");
 }
@@ -273,25 +387,46 @@ export async function storeReview(
   game: GameLayout,
   slot: number,
 ): Promise<ReviewResult> {
-  const recipient = routeFor(context.layout, game);
-  if (typeof recipient !== "string") {
-    return recipient;
+  const route = routeFor(context.layout, game);
+  if (!("recipient" in route)) {
+    return route;
   }
+  const { recipient } = route;
   const store = Store.forLayout(
     context.layout,
     context.now === undefined ? {} : { now: context.now },
   );
   try {
+    const earlier = recordedBrief(store, game.id, slot);
+    if (earlier !== undefined) {
+      return earlier.result;
+    }
+    // The native checks run before the transaction: no native call runs inside one.
+    const native = await surveyNative(
+      {
+        env: context.env,
+        layout: context.layout,
+        ...(context.collect === undefined ? {} : { collect: context.collect }),
+        ...(context.ports?.connect === undefined ? {} : { connect: context.ports.connect }),
+      },
+      game,
+      route.members,
+      slot,
+    );
     const outcome = store.transaction((): { result: ReviewResult; fresh: boolean } => {
       const recorded = recordedBrief(store, game.id, slot);
       if (recorded !== undefined) {
         return { fresh: false, result: recorded.result };
       }
       const previous = previousBrief(store, game.id, slot);
-      const surveyed = survey(store, previous);
+      const surveyed = survey(store, previous, native);
       const messageId = derivedId("review-brief", game.id, slot);
-      const body = composeBrief(game, slot, surveyed);
-      storeNotice(store, { body, fallback: body, id: messageId, to: recipient });
+      storeNotice(store, {
+        body: composeBrief(game, slot, surveyed),
+        fallback: composeBrief(game, slot, surveyed, { titles: false }),
+        id: messageId,
+        to: recipient,
+      });
       const stalled = surveyed.exceptions.filter((item) => item.kind === "stalled").length;
       const wasStalled = (previous?.exceptions ?? []).some((item) => item.kind === "stalled");
       if (stalled > 0 && !wasStalled) {

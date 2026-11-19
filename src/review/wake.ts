@@ -48,6 +48,7 @@ import {
 import { reconcileSlot } from "./reconcile.ts";
 import { captureClaude, captureMessageSummary, captureMixed } from "./snapshot.ts";
 import { type Json, locked, persist, snapshotPath } from "./store.ts";
+import type { NativeCollect } from "./storeNative.ts";
 
 const PRINTED = [
   "status",
@@ -344,6 +345,8 @@ export interface ReviewOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly wakePorts?: WakePorts;
   readonly now?: () => string;
+  /** Store mode test hook: replaces the native connection and the legacy collectors. */
+  readonly collect?: NativeCollect;
 }
 
 /**

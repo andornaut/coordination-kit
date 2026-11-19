@@ -213,7 +213,7 @@ export function questionObservations(snapshot: Json): Map<string, Observation> {
 }
 
 /** An owner-attested pending question on its owner's latest turn. */
-function pendingProven(owner: string, question: Json): boolean {
+export function pendingProven(owner: string, question: Json): boolean {
   const proofs = question.proof_refs;
   return (
     question.state === "pending" &&

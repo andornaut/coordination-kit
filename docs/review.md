@@ -162,7 +162,13 @@ Slot receipts, snapshots and health records keep the paths and formats delivery-
 
 In store mode `review deliver` resolves the route as above: no route, a route this game does not
 host, a held route, an invalid route and an unregistered recipient give the same typed results.
-It then composes the brief from the store and stores it as one message from `delivery-kit` to the
+A slot already recorded returns its result at once. Otherwise, before any store write, it runs the
+legacy brief's native checks through the same collectors (`collectAll`): the question state of
+each active Codex route member and the child health of each active Codex `reports.workerParents`
+role, over one control connection (`CODEX_CONTROL_SOCKET`, else the managed socket) under the
+collectors' 256-call budget and deadline. They are read-only, and nothing is contacted when no
+Codex member or parent exists. It then composes the brief from the store and those checks and
+stores it as one message from `delivery-kit` to the
 route recipient, in one transaction with a `review.brief` record of the slot. The message ID
 derives from (game, slot), so a repeated call, even without the per-slot result file, stores
 nothing and returns the recorded result: `delivered`, with a detail naming the message, the open
@@ -170,9 +176,19 @@ count and the exception count.
 
 The brief is at most one page, 60 lines and 4096 bytes: open message counts by state and by
 recipient, unconfirmed messages, outstanding, failed, ambiguous and guarded wakes, runner events
-and COMPLETE records since the game's previous brief, then the exceptions while the page has room,
-then `review show` for the rest. Exceptions are:
+and COMPLETE records since the game's previous brief, Codex question states (pending, clear or
+unknown) and worker parents (read, unknown, failed children), then the exceptions while the page
+has room, then `review show` for the rest. Claude roles have no native question or child health
+check and are counted as unknown. Exceptions, native ones first:
 
+- `question-pending`: an owner-attested pending question on a Codex role's latest turn, with its
+  title (at most 80 characters) and turn and item IDs, every slot while it stays pending;
+- `question-unknown`: a Codex role whose question state could not be read completely, with the
+  collector's reason code (`control_unavailable` when the connection failed); a role is clear only
+  when the collector read it completely with no pending or unknown question;
+- `worker-failed`: a verified failed latest child turn of a Codex worker parent, reported once per
+  game, as the legacy reminder is;
+- `worker-unknown`: a Codex worker parent whose child health could not be read, with its reason;
 - `stalled`: a message still `sent` or `delivered` that was open at the game's previous brief,
   that is, open across two distinct slots;
 - `unconfirmed`: an imported uncertain delivery the recipient has not closed;
@@ -181,8 +197,8 @@ then `review show` for the rest. Exceptions are:
 
 The first brief of an episode with stalled messages also stores one `review-stuck` message. After
 the commit the review rearms each failed or ambiguous outstanding wake, then wakes the recipient
-and every wake-pending role, with no payload. Native questions and worker turns are not part of
-the stored brief: the brief says they are unknown, never clear.
+and every wake-pending role, with no payload. A secret-shaped brief is stored without question
+titles.
 
 `coordination-kit --root R review show [--game G] [--slot S]` prints the recorded brief for the
 slot, or the latest one, as one JSON line: `kind` `review-show`, the game, slot, recipient,

@@ -176,6 +176,7 @@ export async function deliverReview(
           layout,
           ...(options.wakePorts === undefined ? {} : { ports: options.wakePorts }),
           ...(options.now === undefined ? {} : { now: options.now }),
+          ...(options.collect === undefined ? {} : { collect: options.collect }),
         },
         game,
         slot,

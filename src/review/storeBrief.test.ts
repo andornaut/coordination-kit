@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import type { Collected, CollectRequest } from "../adapters/types.ts";
 import { EXIT_OK, main } from "../cli.ts";
 import { type EventAdapter, eventsDir, flushEventsWith, recordEvent } from "../events.ts";
 import { gameLayout, type Layout } from "../layout.ts";
@@ -10,7 +11,8 @@ import { storeCutover } from "../store/cutover.ts";
 import { Store } from "../store/db.ts";
 import { derivedId } from "../store/notices.ts";
 import { storeSend } from "../store/service.ts";
-import { COORDINATOR, GAME, storeFixture } from "../store/testStore.ts";
+import { ART, COORDINATOR, fakeCodex, GAME, storeFixture } from "../store/testStore.ts";
+import { projectConfig, writeFixtureJson } from "../testFixtures.ts";
 import { deliverReview, reviewResultsDir } from "./deliver.ts";
 import { coordinationEmit } from "./emit.ts";
 import { BRIEF_MAX_BYTES, BRIEF_MAX_LINES } from "./storeBrief.ts";
@@ -25,12 +27,22 @@ function uuid(n: number): string {
   return `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
 }
 
-async function storeModeFixture(): Promise<{ layout: Layout; root: string; base: string }> {
+const ART_ROLE = `${GAME}/art`;
+
+async function storeModeFixture(
+  targets: readonly string[] = [TECH_ROLE],
+  workerParents?: readonly string[],
+): Promise<{ layout: Layout; root: string; base: string }> {
   const fixture = storeFixture();
   writeFileSync(
     fixture.layout.routeFile,
-    JSON.stringify({ host: GAME, schema: 2, state: "active", targets: [TECH_ROLE] }),
+    JSON.stringify({ host: GAME, schema: 2, state: "active", targets }),
   );
+  if (workerParents !== undefined) {
+    const config = projectConfig("Archie") as { reports: Record<string, unknown> };
+    config.reports.workerParents = workerParents;
+    writeFixtureJson(gameLayout(fixture.layout, GAME).configFile, config);
+  }
   await storeCutover({ env: SENDER, layout: fixture.layout }, {}, { apply: true });
   return fixture;
 }
@@ -188,5 +200,103 @@ describe("coordination events in store mode", () => {
     );
     expect(result).toMatchObject({ delivered: 1, held: 0, status: "delivered" });
     expect(deliver).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** What the legacy collectors return for one Codex role with a pending question and a failed child. */
+function collectedFor(request: CollectRequest): Collected {
+  const question = {
+    item_id: "item-9",
+    kind: "question_tool",
+    options: ["Yes", "No"],
+    proof_complete: true,
+    proof_refs: [
+      {
+        kind: "owner_pending_attestation",
+        question_index: 0,
+        question_item_id: "item-9",
+        question_turn_id: "turn-9",
+        recipient: ART,
+      },
+    ],
+    proof_scope: "latest_turn",
+    question_index: 0,
+    state: "pending",
+    title: "Ship the new map?",
+    turn_id: "turn-9",
+  };
+  const child = {
+    child_id: "child-1",
+    error_code: "tool_failed",
+    lineage_verified: true,
+    parent_id: ART,
+    requires_parent_action: true,
+    turn_id: "turn-c1",
+    turn_status: "failed",
+  };
+  expect(request).toMatchObject({ parents: [ART], recipients: [ART], routeMembers: [ART] });
+  return {
+    collection_budget: { calls_used: 4, max_calls: 256, reason_code: null },
+    history: {},
+    question_state: { [ART]: { complete: true, questions: [question], status: "complete" } },
+    worker_health: { [ART]: { children: [child], complete: true, status: "complete" } },
+  };
+}
+
+function brief(layout: Layout, slot: number): string {
+  return briefs(layout).find((message) => message.id === derivedId("review-brief", GAME, slot))!
+    .body;
+}
+
+describe("native checks in the stored brief", () => {
+  it("reports a pending Codex question every slot and a failed worker once", async () => {
+    const { layout } = await storeModeFixture([TECH_ROLE, ART_ROLE], [ART_ROLE]);
+    const game = gameLayout(layout, GAME);
+    const collect = vi.fn((request: CollectRequest) => Promise.resolve(collectedFor(request)));
+    const options = { collect, env: {} };
+    await deliverReview(layout, game, SLOT, undefined, options);
+    const first = brief(layout, SLOT);
+    expect(first).toContain(
+      "Codex questions: 1 pending, 0 clear, 0 unknown; worker parents: 1 read, 0 unknown, 1 failed children",
+    );
+    expect(first).toContain(
+      '- question-pending archies-dog-walks/art: "Ship the new map?", turn turn-9 item item-9',
+    );
+    expect(first).toContain(
+      "- worker-failed archies-dog-walks/art: child child-1 turn turn-c1 failed (tool_failed)",
+    );
+    await deliverReview(layout, game, NEXT, undefined, options);
+    const second = brief(layout, NEXT);
+    expect(second).toContain("- question-pending archies-dog-walks/art");
+    expect(second).not.toContain("- worker-failed");
+    // A repeated slot is answered from the store without another native read.
+    await deliverReview(layout, game, NEXT, undefined, options);
+    expect(collect).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports unknown only when the native check is unavailable", async () => {
+    const { layout } = await storeModeFixture([TECH_ROLE, ART_ROLE], [ART_ROLE]);
+    const game = gameLayout(layout, GAME);
+    const connect = () => Promise.reject(new Error("no control socket"));
+    await deliverReview(layout, game, SLOT, undefined, { env: {}, wakePorts: { connect } });
+    const body = brief(layout, SLOT);
+    expect(body).toContain("Codex questions: 0 pending, 0 clear, 1 unknown");
+    expect(body).toContain("- question-unknown archies-dog-walks/art: control_unavailable");
+    expect(body).toContain("- worker-unknown archies-dog-walks/art: control_unavailable");
+  });
+
+  it("reads question state through the legacy collectors and reports a clear role", async () => {
+    const { layout } = await storeModeFixture([TECH_ROLE, ART_ROLE]);
+    const game = gameLayout(layout, GAME);
+    const codex = fakeCodex(ART);
+    await deliverReview(layout, game, SLOT, undefined, {
+      env: {},
+      wakePorts: { connect: () => Promise.resolve(codex.client) },
+    });
+    expect(codex.calls.map((call) => call.method)).toContain("thread/items/list");
+    expect(codex.adds()).toEqual([]);
+    const body = brief(layout, SLOT);
+    expect(body).toContain("Codex questions: 0 pending, 1 clear, 0 unknown");
+    expect(body).not.toContain("question-unknown");
   });
 });
