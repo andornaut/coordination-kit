@@ -182,6 +182,13 @@ describe("checkWork", () => {
     ]);
   });
 
+  it("accepts proposed and declined items as well as the other statuses", () => {
+    const root = copy();
+    edit(root, "docs/work/dk-0002.md", (text) => text.replace("status: done", "status: proposed"));
+    edit(root, "docs/work/dk-0003.md", (text) => text.replace(/^status: .*$/m, "status: declined"));
+    expect(checkWork(root)).toMatchObject({ findings: [], ok: true });
+  });
+
   it("requires unique IDs and existing supersedes targets", () => {
     const root = copy();
     edit(root, "docs/work/dk-0008.md", (text) => text.replace("id: dk-0008", "id: dk-0007"));
@@ -241,7 +248,7 @@ describe("work check command", () => {
     expect(JSON.parse(failed.out).findings).toHaveLength(1);
     expect(failed.err).toBe(
       "coordination-kit: docs/work/dk-0002.md: status-invalid: " +
-        "status must be one of approved, done, cancelled, superseded\n",
+        "status must be one of proposed, approved, done, declined, cancelled, superseded\n",
     );
     expect((await cli("work", "check", "--root", root, "--game", "x")).code).toBe(EXIT_USAGE);
   });

@@ -1,3 +1,5 @@
+import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -125,6 +127,21 @@ describe("reportWork", () => {
     });
     expect(report.items.find((item) => item.id === "dk-0018")?.status).toBe("approved");
     expect(report.items.some((item) => "publications" in item)).toBe(false);
+  });
+
+  it("reports proposed and declined milestones as written", () => {
+    const repository = mkdtempSync(join(tmpdir(), "work-report-"));
+    cpSync(FIXTURE, repository, { recursive: true });
+    for (const [id, status] of [
+      ["dk-0002", "proposed"],
+      ["dk-0003", "declined"],
+    ] as const) {
+      const path = join(repository, "docs", "work", `${id}.md`);
+      writeFileSync(path, readFileSync(path, "utf8").replace(/^status: .*$/m, `status: ${status}`));
+    }
+    const items = reportWork({ env: {} }, undefined, repository).items;
+    expect(items.find((item) => item.id === "dk-0002")?.status).toBe("proposed");
+    expect(items.find((item) => item.id === "dk-0003")?.status).toBe("declined");
   });
 
   it("names an unconfigured protocol and keeps front matter only", () => {

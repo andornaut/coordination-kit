@@ -29,7 +29,7 @@ resolve. The check reports:
 | `index-link-unresolved`, `index-id-mismatch`          | Every indexed link resolves within the repository, and the row's ID is the linked item's `id`.                                       |
 | `front-matter-missing`, `front-matter-invalid`        | The file opens with a `---` block of `key: value` lines; a list is `[a, b]`.                                                         |
 | `field-missing`, `field-invalid`, `field-unknown`     | `id`, `title`, `status`, `approved` and `design` are present and non-empty; `related` and `supersedes` are the only optional fields. |
-| `status-invalid`                                      | `status` is `approved`, `done`, `cancelled` or `superseded`.                                                                         |
+| `status-invalid`                                      | `status` is `proposed`, `approved`, `done`, `declined`, `cancelled` or `superseded`.                                                 |
 | `id-invalid`, `id-mismatch`, `id-duplicate`           | `id` is a prefix and a zero-padded sequence (`ck-0001`), equals the file name and is unique.                                         |
 | `design-unknown`                                      | `design` names an existing `docs/design/<area>.md`.                                                                                  |
 | `supersedes-missing`                                  | A `supersedes` target is an existing work item.                                                                                      |
@@ -48,7 +48,8 @@ COORDINATION_KIT_ROOT=/path/to/game-coordinator coordination-kit work report --r
 ```
 
 Stdout is one JSON object. `items` lists each work file's `path`, `id`, `title`, `status` (the
-front-matter milestone) and `design`. `coordinator.status` is:
+front-matter milestone as written, any of the six) and `design`. The derived, cross-repository
+view with delivery evidence is [`status`](commands.md#status). `coordinator.status` is:
 
 - `absent`: no coordinator root was named; the report is front matter only.
 - `unconfigured`: the coordinator has no work protocol configuration; front matter only.

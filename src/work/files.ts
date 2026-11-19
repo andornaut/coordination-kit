@@ -8,7 +8,14 @@ export const DESIGN_DIR = join("docs", "design");
 /** The convention document in docs/work/, which is not a work item. */
 export const CONVENTION_FILE = "README.md";
 
-export const STATUSES = ["approved", "done", "cancelled", "superseded"] as const;
+export const STATUSES = [
+  "proposed",
+  "approved",
+  "done",
+  "declined",
+  "cancelled",
+  "superseded",
+] as const;
 export type WorkStatus = (typeof STATUSES)[number];
 export const REQUIRED_FIELDS = ["id", "title", "status", "approved", "design"] as const;
 export const OPTIONAL_FIELDS = ["related", "supersedes"] as const;
