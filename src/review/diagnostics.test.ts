@@ -3,11 +3,12 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { writeChannelStatus } from "../adapters/claude/channelStatus.ts";
 import { type FakeControl, startFakeControl } from "../adapters/codex/testControlSocket.ts";
 import { loadLayout } from "../layout.ts";
 import { createRegistry, readRegistry, type Registry } from "../registry/index.ts";
 import { CLAUDE_TECH, CODEX_TECH, makeFixture, registryInput } from "../testFixtures.ts";
-import { diagnoseHarness } from "./diagnostics.ts";
+import { diagnoseHarness, stableChannelCommand } from "./diagnostics.ts";
 
 const ROLE = "archies-dog-walks/tech";
 const controls: FakeControl[] = [];
@@ -196,5 +197,59 @@ describe("scoped harness diagnostics", () => {
       diagnoseHarness(env, test.layout, test.registry, { roles: [ROLE, "unknown"] }),
     ).rejects.toThrow();
     expect(control.calls).toEqual([]);
+  });
+
+  it("compares the Claude channel command with the stable path and reports the server's own status", async () => {
+    const test = setup("claude");
+    const env = { CLAUDE_BIN: "/never/run" };
+    const row = async () =>
+      (await diagnoseHarness(env, test.layout, test.registry, { roles: [ROLE] })).roles[0]!;
+    expect((await row()).channel_command).toMatchObject({
+      code: "channel_config_missing",
+      status: "unknown",
+    });
+    expect((await row()).channel_server).toMatchObject({
+      code: "status_file_missing",
+      status: "unknown",
+      version: null,
+    });
+    const config = join(test.root, "var", "claude-channel.mcp.json");
+    const server = (command: string, args: string[]) =>
+      writeFileSync(
+        config,
+        JSON.stringify({ mcpServers: { "delivery-kit-monitor": { args, command } } }),
+      );
+    server("npx", ["--no-install", "coordination-kit", "--root", test.root, "claude", "channel"]);
+    expect((await row()).channel_command).toMatchObject({
+      code: "command_not_stable_path",
+      server: "delivery-kit-monitor",
+      status: "unstable",
+    });
+    const [node, ...args] = stableChannelCommand(test.root);
+    server(node!, args);
+    expect((await row()).channel_command).toMatchObject({
+      code: "stable_path",
+      command: stableChannelCommand(test.root),
+      status: "stable",
+    });
+    writeChannelStatus(test.layout, {
+      argv: stableChannelCommand(test.root),
+      conversation: CLAUDE_TECH,
+      distSha256: "a".repeat(64),
+      pid: 4242,
+      schema: 1,
+      startedAt: "2026-11-18T15:00:00.000Z",
+      version: "2.0.0",
+    });
+    expect((await row()).channel_server).toEqual({
+      argv: stableChannelCommand(test.root),
+      code: "status_file_read",
+      distSha256: "a".repeat(64),
+      pid: 4242,
+      startedAt: "2026-11-18T15:00:00.000Z",
+      status: "reported",
+      version: "2.0.0",
+    });
+    expect(readFileSync(config, "utf8")).toContain("delivery-kit-monitor");
   });
 });

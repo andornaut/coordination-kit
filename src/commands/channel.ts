@@ -15,6 +15,7 @@ import {
   type MessageChannelGuard,
   serve,
 } from "../adapters/claude/channel.ts";
+import { writeChannelStatus } from "../adapters/claude/channelStatus.ts";
 import { wakeFilePath, WakeWatcher } from "../adapters/claude/wakeFile.ts";
 import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { gameRecipients } from "../config.ts";
@@ -22,10 +23,11 @@ import { EXIT_INVALID, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { gameLayout, type Layout, loadLayout } from "../layout.ts";
 import { messageChannelStateDir } from "../messages/paths.ts";
 import { messageConsumeGuard } from "../messages/service.ts";
-import { acquireProtocolLayout } from "../protocol/layout.ts";
+import { acquireProtocolLayout, readStoreCutover } from "../protocol/layout.ts";
 import { captureProtocolSelection, checkProtocolSelection } from "../protocol/selection.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import { readRegistry, RegistryMissing } from "../registry/store.ts";
+import { cliIdentity } from "../version.ts";
 import { SPECS } from "./spec.ts";
 
 export interface ChannelStreams {
@@ -83,6 +85,11 @@ function refreshFeed(
   explicit?: { directory: string; generic: boolean },
 ): ChannelFeed[] {
   const layout = loadLayout(root);
+  // After the store cutover the generic spool is frozen: its unclaimed entries were imported as
+  // stored messages, so draining them would deliver them twice.
+  if (readStoreCutover(layout) !== null) {
+    return [];
+  }
   const selection = captureProtocolSelection(layout);
   const generic = dirname(messageChannelStateDir(layout, conversation));
   if (explicit?.generic === true && !sameDirectory(explicit.directory, generic)) {
@@ -194,6 +201,21 @@ export async function runChannel(
       (error as { code?: string }).code?.startsWith("ERR_PARSE_ARGS")
       ? EXIT_USAGE
       : EXIT_INVALID;
+  }
+  try {
+    const layout = loadLayout(root);
+    const identity = cliIdentity(io.entry);
+    writeChannelStatus(layout, {
+      argv: process.argv,
+      conversation,
+      distSha256: identity.distSha256,
+      pid: process.pid,
+      schema: 1,
+      startedAt: new Date().toISOString(),
+      version: identity.version,
+    });
+  } catch {
+    // The status file is diagnostic only; the channel serves without it.
   }
   return serve(
     {

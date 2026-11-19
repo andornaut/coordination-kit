@@ -1,10 +1,14 @@
 // Scoped read-only diagnostics. Native transport health never proves activation or handling.
+import { existsSync } from "node:fs";
+import { basename, join } from "node:path";
 import { performance } from "node:perf_hooks";
 
 import { listingOrNull, recipientAvailability } from "../adapters/claude/agents.ts";
+import { readChannelStatus } from "../adapters/claude/channelStatus.ts";
 import { connectControl, type RpcClient } from "../adapters/codex/rpc.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
 import { isRecord } from "../adapters/shared/pyjson.ts";
+import { readJsonIfExists } from "../durable.ts";
 import type { Layout } from "../layout.ts";
 import { messageChannelStateDir } from "../messages/paths.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
@@ -31,6 +35,10 @@ export interface RoleDiagnosis {
     readonly source: "message_channel_state_dir";
   } | null;
   readonly config_reference: { readonly path: string; readonly source: "registry" };
+  /** Claude only: the channel MCP server's configured launch command against the stable path. */
+  readonly channel_command: ChannelCommand | null;
+  /** Claude only: what the running channel server reported in its status file. */
+  readonly channel_server: ChannelServer | null;
   readonly layers: Record<DiagnosticLayer, LayerDiagnostic>;
   readonly native_session: LayerDiagnostic;
   readonly activation: "unknown";
@@ -39,6 +47,117 @@ export interface RoleDiagnosis {
   readonly recovery_owner: "delivery-kit" | "native-codex" | "native-claude" | null;
   readonly supported_next_action:
     "verify_endpoint_configuration" | "inspect_native_session" | "native_owner_required" | "none";
+}
+
+export interface ChannelCommand {
+  readonly status: "stable" | "unstable" | "unknown";
+  readonly code:
+    | "stable_path"
+    | "command_not_stable_path"
+    | "channel_config_missing"
+    | "channel_config_unreadable"
+    | "channel_server_not_configured";
+  readonly config: string;
+  readonly server: string | null;
+  /** The configured executable and arguments. */
+  readonly command: readonly string[] | null;
+  readonly expected: readonly string[];
+}
+
+export interface ChannelServer {
+  readonly status: "reported" | "unknown";
+  readonly code: "status_file_read" | "status_file_missing";
+  readonly version: string | null;
+  readonly distSha256: string | null;
+  readonly startedAt: string | null;
+  readonly pid: number | null;
+  readonly argv: readonly string[] | null;
+}
+
+/** The channel MCP config game-coordinator's Claude sessions launch with. */
+export const CHANNEL_CONFIG = join("var", "claude-channel.mcp.json");
+
+/** `node <root>/node_modules/@andornaut/coordination-kit/dist/cli.js --root <root> claude channel`. */
+export function stableChannelCommand(root: string): string[] {
+  return [
+    "node",
+    join(root, "node_modules", "@andornaut", "coordination-kit", "dist", "cli.js"),
+    "--root",
+    root,
+    "claude",
+    "channel",
+  ];
+}
+
+function channelArgs(args: readonly unknown[]): boolean {
+  return args.some((arg, index) => arg === "claude" && args[index + 1] === "channel");
+}
+
+/**
+ * Compare the configured channel server's launch command with the stable path. Read-only: the
+ * config is read, never written, and no server is contacted. Anything unreadable is unknown.
+ */
+export function channelCommand(layout: Layout): ChannelCommand {
+  const config = join(layout.root, CHANNEL_CONFIG);
+  const expected = stableChannelCommand(layout.root);
+  const base = { command: null, config, expected, server: null };
+  if (!existsSync(config)) {
+    return { ...base, code: "channel_config_missing", status: "unknown" };
+  }
+  let servers: [string, unknown][];
+  try {
+    const value = readJsonIfExists(config);
+    servers = isRecord(value) && isRecord(value.mcpServers) ? Object.entries(value.mcpServers) : [];
+  } catch {
+    return { ...base, code: "channel_config_unreadable", status: "unknown" };
+  }
+  const found = servers.find(
+    ([, server]) =>
+      isRecord(server) &&
+      typeof server.command === "string" &&
+      Array.isArray(server.args) &&
+      channelArgs(server.args),
+  );
+  if (found === undefined) {
+    return { ...base, code: "channel_server_not_configured", status: "unknown" };
+  }
+  const [name, server] = found as [string, { command: string; args: unknown[] }];
+  const command = [server.command, ...server.args.map(String)];
+  const stable =
+    basename(server.command) === "node" &&
+    expected.slice(1).every((part, index) => command[index + 1] === part);
+  return {
+    code: stable ? "stable_path" : "command_not_stable_path",
+    command,
+    config,
+    expected,
+    server: name,
+    status: stable ? "stable" : "unstable",
+  };
+}
+
+/** The channel server's own report, or unknown when it wrote none. Never clearance. */
+export function channelServer(layout: Layout, conversation: string | null): ChannelServer {
+  const status = conversation === null ? null : readChannelStatus(layout, conversation);
+  return status === null
+    ? {
+        argv: null,
+        code: "status_file_missing",
+        distSha256: null,
+        pid: null,
+        startedAt: null,
+        status: "unknown",
+        version: null,
+      }
+    : {
+        argv: status.argv,
+        code: "status_file_read",
+        distSha256: status.distSha256,
+        pid: status.pid,
+        startedAt: status.startedAt,
+        status: "reported",
+        version: status.version,
+      };
 }
 
 export interface HarnessDiagnosis {
@@ -55,10 +174,12 @@ function initial(layout: Layout, registry: Registry, role: string): RoleDiagnosi
   const id = resolveConversation(registry, role);
   return {
     activation: "unknown",
+    channel_command: harness === "claude" ? channelCommand(layout) : null,
     channel_reference:
       harness === "claude" && id !== null
         ? { path: messageChannelStateDir(layout, id), source: "message_channel_state_dir" }
         : null,
+    channel_server: harness === "claude" ? channelServer(layout, id) : null,
     config_reference: { path: layout.registryFile, source: "registry" },
     effective_harness: harness,
     endpoint: { path: null, source: "skipped" },
