@@ -191,9 +191,10 @@ Each deletion needs its phase's exit criteria plus explicit user approval; archi
 
 ## Work items
 
-| ID      | Title                                         | Link                                                                                       |
-| ------- | --------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| ck-0016 | Phase 1: stable entry points and growth stop  | [ck-0016.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0016.md) |
-| ck-0017 | Phase 2: one store and one message path       | [ck-0017.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0017.md) |
-| ck-0018 | Phase 3: work, decisions, questions and holds | [ck-0018.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0018.md) |
-| ck-0019 | Phase 4: thin protocol and retirement         | [ck-0019.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0019.md) |
+| ID      | Title                                                                      | Link                                                                                       |
+| ------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| ck-0016 | Phase 1: stable entry points and growth stop                               | [ck-0016.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0016.md) |
+| ck-0017 | Phase 2: one store and one message path                                    | [ck-0017.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0017.md) |
+| ck-0018 | Phase 3: work, decisions, questions and holds                              | [ck-0018.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0018.md) |
+| ck-0019 | Phase 4: thin protocol and retirement                                      | [ck-0019.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0019.md) |
+| ck-0020 | Add a cross-repository status command and proposed and declined work items | [ck-0020.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0020.md) |
