@@ -18,7 +18,8 @@ same across subpaths. Every on-disk format stays byte-compatible with delivery-k
 `work check` and `work report` apply the work-file convention to any repository's docs and join
 its milestones with live protocol state. `status` reads every registered repository through local
 Git refs only and derives one status per item from front matter, protocol and ledger state, the
-landing commit on `main`, and the runner COMPLETE event or release tag that contains it.
+landing commit on `main`, and the runner COMPLETE event, last deployed SHA or release tag that
+contains it.
 
 Reference: [review](../review.md#scheduled-review-seam), [libraries](../libraries.md),
 [work files](../work-files.md), [status](../commands.md#status), [upgrading](../upgrading.md).

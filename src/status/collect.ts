@@ -17,8 +17,9 @@ import {
   findLandings,
   type Landing,
   reachable,
-  readCompleteEvents,
+  readBusDeployments,
   releasePoints,
+  workListings,
 } from "./delivery.ts";
 import {
   ACTIVE_LEDGER_STATES,
@@ -27,6 +28,7 @@ import {
   type DerivedStatus,
   deriveLedgerOnly,
   deriveWorkFile,
+  type StateFilter,
 } from "./derive.ts";
 import { type GitRunner, readHistory, readMainFiles, repositoryRoot } from "./git.ts";
 import {
@@ -52,8 +54,11 @@ export interface StatusOptions {
   /** `all`, a game ID, a kit ID or a registry role key. */
   readonly scope: string;
   readonly since: string | null;
-  readonly states: readonly DerivedStatus[];
+  /** Derived statuses, or `unverified` for done items without deployment evidence. */
+  readonly states: readonly StateFilter[];
   readonly audit: boolean;
+  /** Done items without evidence whose done commit is at or after this instant are unverified. */
+  readonly verifySince: string;
 }
 
 export type RepositoryKind = "game" | "kit" | "coordinator" | "other";
@@ -119,6 +124,8 @@ export interface StatusItem {
   readonly owner: string | null;
   readonly waitingOnUser: boolean;
   readonly userOriginated: boolean;
+  readonly deliveryVerified: boolean | null;
+  readonly deliveryEvidence: "deployed" | "assumed" | null;
   readonly latestEvidenceAt: string | null;
   readonly workFile: {
     readonly path: string;
@@ -138,9 +145,11 @@ export interface StatusItem {
     readonly onOrigin: boolean | null;
     readonly deployed: {
       readonly sha: string;
-      readonly at: string;
+      readonly at: string | null;
       readonly via: DeployPoint["via"];
       readonly tag: string | null;
+      /** The deployment covers the landing commit, or a COMPLETE event lists the ID. */
+      readonly matched: "landing" | "work-list";
     } | null;
   };
 }
@@ -336,6 +345,7 @@ function readRepository(
   repository: Repository,
   protocol: ProtocolSnapshot,
   ledger: LedgerSnapshot,
+  verifySince: string,
 ): RepositoryItems {
   const channel: DeploymentChannel =
     repository.kind === "game" ? "bus" : repository.kind === "kit" ? "release-tag" : "none";
@@ -360,9 +370,10 @@ function readRepository(
   }
   let history;
   let files;
+  let doneAt;
   try {
     history = readHistory(context.git, repository.path);
-    files = readMainFiles(context.git, repository.path, WORK_DIRECTORY);
+    ({ doneAt, files } = readMainFiles(context.git, repository.path, WORK_DIRECTORY));
   } catch (error) {
     return {
       items: [],
@@ -376,7 +387,7 @@ function readRepository(
   let deployment: RepositoryStatus["deployment"] = base.deployment;
   if (channel === "bus") {
     try {
-      const bus = readCompleteEvents(gameLayout(layout, repository.name).busDir);
+      const bus = readBusDeployments(gameLayout(layout, repository.name).busDir);
       points = bus.points;
       deployment = { channel, status: bus.status, unreadable: bus.unreadable };
     } catch {
@@ -387,6 +398,7 @@ function readRepository(
     deployment = { channel, status: "available", unreadable: 0 };
   }
   const marks = deploymentMarks(history, points);
+  const listed = workListings(points);
   const workFiles = [...files.values()]
     .filter((file) => {
       const name = file.path.slice(WORK_DIRECTORY.length + 1);
@@ -409,6 +421,7 @@ function readRepository(
     history,
     onMain,
     workFiles.map((work) => ({ id: work.id, path: work.file.path, title: work.title })),
+    doneAt,
   );
   const supersededBy = new Map<string, string>();
   for (const work of workFiles) {
@@ -454,18 +467,35 @@ function readRepository(
       return request === undefined ? [] : [requestEntry(request)];
     });
     const land = landing.get(work.id) ?? null;
-    const mark = land === null ? undefined : marks.get(land.sha);
+    const covering = land === null ? undefined : marks.get(land.sha);
+    const listing = listed.get(work.id);
+    const mark =
+      listing !== undefined && (covering === undefined || listing.order < covering.order)
+        ? { matched: "work-list" as const, point: listing }
+        : covering === undefined
+          ? undefined
+          : { matched: "landing" as const, point: covering };
     const deployed =
-      mark === undefined ? null : { at: mark.at, sha: mark.sha, tag: mark.tag, via: mark.via };
+      mark === undefined
+        ? null
+        : {
+            at: mark.point.at,
+            matched: mark.matched,
+            sha: mark.point.sha,
+            tag: mark.point.tag,
+            via: mark.point.via,
+          };
     const derived = deriveWorkFile({
       channel,
       deployed: deployed !== null,
+      doneAt: doneAt.get(work.file.path)?.at ?? work.file.at,
       frontMatter: work.status,
       landed: land !== null,
       started:
         joined.length > 0 ||
         requests.some((request) => ACTIVE_LEDGER_STATES.has(request.state as never)),
       supersededBy: supersededBy.get(work.id) ?? null,
+      verifySince,
     });
     const block = CLOSED.has(derived.status)
       ? { blocked: false, blocker: null, owner: null }
@@ -477,6 +507,8 @@ function readRepository(
         landing: land,
         onOrigin: land === null || onOrigin === null ? null : onOrigin.has(land.sha),
       },
+      deliveryEvidence: derived.deliveryEvidence,
+      deliveryVerified: derived.deliveryVerified,
       id: work.id,
       latestEvidenceAt: latest([
         work.file.at,
@@ -562,6 +594,8 @@ function requestedItems(
     items.push({
       ...block,
       delivery: { deployed: null, landing: null, onOrigin: null },
+      deliveryEvidence: null,
+      deliveryVerified: null,
       id: request.id,
       latestEvidenceAt: latest([request.updatedAt]),
       protocol: null,
@@ -626,7 +660,7 @@ export function collectStatus(
   const protocol = readProtocol(layout, ledger, context.counters);
   const reports = repos
     .filter((repo) => selected.names.has(repo.name))
-    .map((repo) => readRepository(context, layout, repo, protocol, ledger));
+    .map((repo) => readRepository(context, layout, repo, protocol, ledger, options.verifySince));
   const linked = new Set(reports.flatMap((report) => [...report.linked]));
   const coordinator = repos.find((repo) => repo.kind === "coordinator")?.name ?? null;
   const repositoryOf = (role: string): string | null => {
@@ -641,7 +675,11 @@ export function collectStatus(
     items = items.filter((item) => ownedBy(selected.role!, item));
   }
   if (options.states.length > 0) {
-    items = items.filter((item) => options.states.includes(item.status));
+    items = items.filter(
+      (item) =>
+        options.states.includes(item.status) ||
+        (options.states.includes("unverified") && item.deliveryVerified === false),
+    );
   }
   if (options.since !== null) {
     const since = Date.parse(options.since);

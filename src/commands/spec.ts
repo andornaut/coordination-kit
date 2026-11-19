@@ -446,7 +446,7 @@ export const SPECS = {
     summary: "deliver the scheduled review for one slot once; prints one typed JSON result line",
   },
   status: {
-    forms: [["scope?", "since?", "state?", "audit?", "format?"]],
+    forms: [["scope?", "since?", "state?", "audit?", "verify-since?", "format?"]],
     group: "status",
     options: STATUS_OPTIONS,
     summary:
@@ -456,6 +456,7 @@ export const SPECS = {
       scope: "all|GAME|KIT|ROLE",
       since: "ISO_TIMESTAMP",
       state: "STATE",
+      "verify-since": "ISO_TIMESTAMP",
     },
   },
   "work check": {

@@ -4,19 +4,19 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { Commit, History } from "./git.ts";
+import type { Commit, CommitRef, History } from "./git.ts";
 
 const WORK_PREFIX = "docs/work/";
 const DESIGN_PREFIX = "docs/design/";
 const ID_TOKEN = /(?<![\w-])([a-z][a-z0-9]*-\d{4,})(?!\w)/g;
 const SHA = /^[0-9a-f]{40}$/;
 
-export type LandingRule = "id" | "work-file" | "title";
+export type LandingRule = "done-flip" | "id" | "title";
 
 export interface Landing {
   readonly sha: string;
   readonly at: string;
-  /** Which citation matched: the ID in the message, a change to the work file, or the title. */
+  /** Which rule matched: the commit setting `status: done`, the ID in the message, or the title. */
   readonly rule: LandingRule;
 }
 
@@ -58,20 +58,20 @@ function bookkeeping(commit: Commit): boolean {
 }
 
 /**
- * The landing commit of each item: the oldest commit reachable from local `main` that cites the
- * item and is not bookkeeping. A commit cites an item when its message names the ID as a whole
- * token, when it changes the item's work file (or a path later renamed to it), or when its subject
- * equals the item's title. Bookkeeping commits never land an item: those that change only
- * docs/work/ and docs/design/, and the commit that adds the item's work file.
+ * The landing commit of each item. Primary: the first commit on `main` whose change sets the work
+ * file's front matter to `status: done` (integration sets `done` in the merge), from `doneAt`.
+ * Otherwise the oldest commit reachable from local `main` that is not bookkeeping and whose
+ * message names the ID as a whole token, or whose subject equals the item's title. Bookkeeping
+ * commits change only docs/work/ and docs/design/, or add the item's work file.
  */
 export function findLandings(
   history: History,
   onMain: ReadonlySet<string>,
   items: readonly LandingItem[],
+  doneAt: ReadonlyMap<string, CommitRef>,
 ): Landings {
   const ids = new Set(items.map((item) => item.id));
   const owner = new Map(items.map((item) => [item.path, item.id]));
-  const pathOf = new Map(items.map((item) => [item.id, item.path]));
   const byTitle = new Map<string, string[]>();
   for (const item of items) {
     if (item.title !== null && item.title !== "") {
@@ -80,7 +80,7 @@ export function findLandings(
   }
   const landing = new Map<string, Landing>();
   const addedIn = new Map<string, string>();
-  // Newest first, so a rename seen here names the item that older commits on the old path serve.
+  // Newest first: the last assignment for an item is its oldest qualifying commit.
   for (const commit of history.commits) {
     if (!onMain.has(commit.sha)) {
       continue;
@@ -93,24 +93,16 @@ export function findLandings(
         cited.set(id, "id");
       }
     }
-    for (const change of commit.changes) {
-      const id = owner.get(change.path);
-      if (id === undefined) {
-        continue;
-      }
-      if (!cited.has(id)) {
-        cited.set(id, "work-file");
-      }
-      if (change.status === "A" || change.status === "R" || change.status === "C") {
-        added.add(id);
-        if (pathOf.get(id) === change.path) {
-          addedIn.set(id, commit.sha);
-        }
-      }
-    }
     for (const id of byTitle.get(commit.subject) ?? []) {
       if (!cited.has(id)) {
         cited.set(id, "title");
+      }
+    }
+    for (const change of commit.changes) {
+      const id = owner.get(change.path);
+      if (id !== undefined && ["A", "R", "C"].includes(change.status)) {
+        added.add(id);
+        addedIn.set(id, commit.sha);
       }
     }
     if (!bookkeeping(commit)) {
@@ -120,11 +112,11 @@ export function findLandings(
         }
       }
     }
-    for (const change of commit.changes) {
-      const id = owner.get(change.path);
-      if (change.from !== undefined && change.status === "R" && id !== undefined) {
-        owner.set(change.from, id);
-      }
+  }
+  for (const item of items) {
+    const flip = doneAt.get(item.path);
+    if (flip !== undefined) {
+      landing.set(item.id, { at: flip.at, rule: "done-flip", sha: flip.sha });
     }
   }
   return { addedIn, landing };
@@ -132,13 +124,19 @@ export function findLandings(
 
 export interface DeployPoint {
   readonly sha: string;
-  readonly at: string;
-  /** `complete` for a runner COMPLETE event, `release` for a release tag. */
-  readonly via: "complete" | "release";
+  /** Null for a `last-deploy.sha` whose `last-deploy` time is missing or unreadable. */
+  readonly at: string | null;
+  /** A runner COMPLETE event, the runner's `last-deploy.sha`, or a release tag. */
+  readonly via: "complete" | "last-deploy" | "release";
   readonly tag: string | null;
-  /** Chronological order key: event nanoseconds or tag commit milliseconds. */
+  /** Work IDs a COMPLETE event lists in its optional `work` array; empty otherwise. */
+  readonly work: readonly string[];
+  /** Chronological order key: nanoseconds for bus points, milliseconds for release tags. */
   readonly order: bigint;
 }
+
+/** Orders a point with no time after every timed one. */
+const UNTIMED = 2n ** 80n;
 
 /**
  * The first deployment containing each commit. Points are taken in chronological order; each marks
@@ -177,39 +175,53 @@ export function releasePoints(history: History): DeployPoint[] {
       sha: commit.sha,
       tag,
       via: "release" as const,
+      work: [],
     })),
   );
 }
 
 export interface BusRead {
-  /** `absent` when the game has no events directory yet. */
+  /** `absent` when the game has neither an events directory nor a `last-deploy.sha` yet. */
   readonly status: "available" | "absent";
   readonly points: readonly DeployPoint[];
-  /** Event files that could not be parsed; they are not counted as deployments. */
+  /** Event or last-deploy files that could not be parsed; they count as no deployment. */
   readonly unreadable: number;
 }
 
-/**
- * Every runner COMPLETE event in a game's bus outbox (`<bus>/events/<id>.json`, kind `complete`,
- * key the pushed SHA), timed by its nanosecond `created` stamp.
- */
-export function readCompleteEvents(busDir: string): BusRead {
-  const directory = join(busDir, "events");
-  let names: string[];
+function optionalText(path: string): string | null {
   try {
-    names = readdirSync(directory);
+    return readFileSync(path, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { points: [], status: "absent", unreadable: 0 };
+      return null;
     }
     throw error;
   }
+}
+
+/**
+ * A game's deployment points from its bus: every runner COMPLETE event in the outbox
+ * (`<bus>/events/<id>.json`, kind `complete`, key the pushed SHA, timed by its nanosecond `created`
+ * stamp, with an optional `work` array of IDs), and the runner's last deployed SHA
+ * (`<bus>/last-deploy.sha`, timed by the epoch seconds in `<bus>/last-deploy`).
+ */
+export function readBusDeployments(busDir: string): BusRead {
+  const directory = join(busDir, "events");
+  let names: string[] | null;
+  try {
+    names = readdirSync(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+    names = null;
+  }
   const points: DeployPoint[] = [];
   let unreadable = 0;
-  for (const name of names.filter((entry) => entry.endsWith(".json")).sort()) {
+  for (const name of (names ?? []).filter((entry) => entry.endsWith(".json")).sort()) {
     try {
       const text = readFileSync(join(directory, name), "utf8");
-      const event = JSON.parse(text) as { kind?: unknown; key?: unknown };
+      const event = JSON.parse(text) as { kind?: unknown; key?: unknown; work?: unknown };
       if (event.kind !== "complete" || typeof event.key !== "string" || !SHA.test(event.key)) {
         continue;
       }
@@ -225,10 +237,47 @@ export function readCompleteEvents(busDir: string): BusRead {
         sha: event.key,
         tag: null,
         via: "complete",
+        work: Array.isArray(event.work)
+          ? event.work.filter((id): id is string => typeof id === "string")
+          : [],
       });
     } catch {
       unreadable += 1;
     }
   }
-  return { points, status: "available", unreadable };
+  const last = optionalText(join(busDir, "last-deploy.sha"));
+  if (last !== null) {
+    const sha = last.trim();
+    if (SHA.test(sha)) {
+      const seconds = (optionalText(join(busDir, "last-deploy")) ?? "").trim();
+      const timed = /^\d+$/.test(seconds);
+      points.push({
+        at: timed ? new Date(Number(seconds) * 1000).toISOString() : null,
+        order: timed ? BigInt(seconds) * 1_000_000_000n : UNTIMED,
+        sha,
+        tag: null,
+        via: "last-deploy",
+        work: [],
+      });
+    } else if (sha !== "") {
+      unreadable += 1;
+    }
+  }
+  return { points, status: names === null && last === null ? "absent" : "available", unreadable };
+}
+
+/** The first COMPLETE event listing each work ID in its optional `work` array. */
+export function workListings(points: readonly DeployPoint[]): Map<string, DeployPoint> {
+  const listed = new Map<string, DeployPoint>();
+  const ordered = [...points].sort((left, right) =>
+    left.order === right.order ? 0 : left.order < right.order ? -1 : 1,
+  );
+  for (const point of ordered) {
+    for (const id of point.work) {
+      if (!listed.has(id)) {
+        listed.set(id, point);
+      }
+    }
+  }
+  return listed;
 }

@@ -20,7 +20,7 @@ every form and flag.
 | `review deliver --game ID --slot ISO_TIMESTAMP [--capture]`                                                                                              | Deliver one slot's scheduled review once; see [review](review.md#cli-seam).                   |
 | `events flush --game ID`                                                                                                                                 | Flush the game's event outbox; see [review](review.md#cli-seam).                              |
 | `protocol ...`                                                                                                                                           | The explicit filesystem work protocol; see [work protocol](work-protocol.md).                 |
-| `status [--scope all\|GAME\|KIT\|ROLE] [--since ISO_TIMESTAMP] [--state STATE]... [--audit] [--format json\|markdown]`                                   | Read-only status of every registered repository's work items; see [status](#status).          |
+| `status [--scope all\|GAME\|KIT\|ROLE] [--since ISO_TIMESTAMP] [--state STATE]... [--audit] [--verify-since ISO_TIMESTAMP] [--format json\|markdown]`    | Read-only status of every registered repository's work items; see [status](#status).          |
 | `work check [--root DIR]`, `work report [--root DIR]`                                                                                                    | Validate a repository's work files and report their state; see [work files](work-files.md).   |
 | `help`, `--help`, `--version`, `--version --json`                                                                                                        | Usage, the version, and the version with the `dist/cli.js` sha256 as one JSON line.           |
 
@@ -87,7 +87,8 @@ commands.
   `game` or `kit` by its `config.json` path, `coordinator` for the coordinator root, else `other`.
 - **Reads:** per repository, one `git log` over `main` and `origin/main` (parents, committer dates,
   messages, changes against the first parent with rename detection, and release tags) and one
-  first-parent `git log -p` over `docs/work/` on `main`, whose newest diff of each file holds its
+  first-parent `git log -p` over `docs/work/` on `main` with unbounded context, whose diffs show
+  each change of front-matter status and whose newest diff of each file holds its
   current text. Each protocol role journal is replayed once, the request ledger once, and each
   game's bus outbox directory once. The number of Git calls does not depend on the number of items.
 - **Items:** each `docs/work/<id>.md` on `main` (front matter `id`, `title`, `status`, `approved`,
@@ -99,7 +100,8 @@ commands.
 - **Scope:** `all` (the default); a game or kit ID selects its repository; a registry role key
   selects its repository and keeps the items that role publishes, owns in the ledger, or whose
   `design` area is the role's name (a game's `art`, `gameplay` or `tech`).
-- **Filters:** `--state` is repeatable and keeps items with any named status. `--since` keeps items
+- **Filters:** `--state` is repeatable and keeps items with any named status; `--state unverified`
+  keeps done items whose delivery is unverified. `--since` keeps items
   whose latest evidence time (work-file commit, landing, deployment or linked request update) is at
   or after it. `--audit` keeps user-originated items: a work file whose `approved` reference starts
   with `user`, or a linked request whose source reference starts with `user` or whose origin is
@@ -107,19 +109,35 @@ commands.
 
 ### Delivery evidence
 
-- **Landing:** the oldest commit reachable from local `main` that cites the item and is not
-  bookkeeping. A commit cites an item when its message names the ID as a whole token, when it
-  changes the item's work file or a path later renamed to it, or when its subject equals the
-  item's title. Bookkeeping never lands an item: a commit that changes only `docs/work/` and
-  `docs/design/`, and the commit that adds the item's work file (its proposal or approval, reported
-  as `workFile.addedIn`).
+- **Landing:** integration sets `status: done` in the merge, so the primary rule (`done-flip`) is
+  the first commit on `main` (first parent) whose change sets the item's work file front matter to
+  `status: done`, by adding it as `done` or changing it from another status. Without one, the
+  secondary rules take the oldest commit reachable from local `main` that is not bookkeeping and
+  whose message names the ID as a whole token (`id`) or whose subject equals the item's title
+  (`title`). Bookkeeping is a commit that changes only `docs/work/` and `docs/design/`, or that
+  adds the item's work file (its proposal or approval, reported as `workFile.addedIn`).
+  `delivery.landing.rule` names the rule that matched.
 - **On origin:** whether `origin/main` contains the landing commit; null without a landing or
   without a local `origin/main`.
-- **Deployment:** for a game, the first runner COMPLETE event (`var/games/<g>/bus/events/*.json`
-  with kind `complete`) whose SHA has the landing commit as an ancestor, timed by the event's
-  `created` stamp. For a kit, the first release tag (`vMAJOR.MINOR.PATCH`) whose commit contains
-  the landing, timed by that commit's committer date. A SHA outside the history of `main` and
-  `origin/main` counts for nothing.
+- **Deployment:** the earliest deployment point that contains the landing commit.
+  - A game has two kinds of point. A runner COMPLETE event (`var/games/<g>/bus/events/*.json` with
+    kind `complete`, key the pushed SHA) is timed by its `created` stamp. The runner's last deployed
+    SHA (`var/games/<g>/bus/last-deploy.sha`) is timed by the epoch seconds in `last-deploy`, or has
+    a null time when that file is missing.
+  - A COMPLETE event may carry an optional `work` array of work IDs. A listed ID counts as deployed
+    by the first such event even without a landing match (`deployed.matched` is `work-list`,
+    otherwise `landing`). Events without the field are read as before.
+  - A kit's points are its release tags (`vMAJOR.MINOR.PATCH`), each timed by its commit's
+    committer date.
+  - A SHA outside the history of `main` and `origin/main` counts for nothing.
+- **Verification:** an item with deployment evidence has `deliveryVerified: true` and
+  `deliveryEvidence: "deployed"`. A `done` item without evidence is checked against its done
+  commit (the `done-flip` commit, else the work file's latest commit) and the cutoff, which
+  `--verify-since ISO_TIMESTAMP` sets and which defaults to 2026-11-19T02:00:00Z, the instant the
+  user decided that items marked done before it are done. Before the cutoff it reads
+  `deliveryVerified: null` and `deliveryEvidence: "assumed"`; at or after it, it reads
+  `deliveryVerified: false` and `deliveryEvidence: null`. Other items, and `done` items in a
+  repository with no deployment channel, read null for both.
 
 ### Status precedence
 
@@ -128,9 +146,9 @@ A work-file item takes the first that applies:
 1. `superseded`: front matter `superseded`, or another work file that is not `proposed`,
    `declined` or `cancelled` names it in `supersedes`; `replacement` is that file's ID, else null.
 2. `cancelled`, `declined`: the front-matter status.
-3. `done`: front matter `done` and deployed, or `done` in a repository with no deployment channel.
-4. `deployed`: deployment evidence, whatever the front matter.
-5. `landed`: a landing commit, or front matter `done` without deployment evidence.
+3. `done`: front matter `done`, verified, assumed or unverified as above.
+4. `deployed`: deployment evidence for an item whose front matter is not `done`.
+5. `landed`: a landing commit for an item whose front matter is not `done`.
 6. `in-progress`: front matter `approved` and started: a joined publication or a linked request
    in `started`, `blocked`, `waiting`, `ready`, `checked`, `integrated` or `delivered`.
 7. `approved`: front matter `approved`.
@@ -150,13 +168,14 @@ Stdout is one JSON object, schema 1; field order is not significant:
 schema        1
 coordinator   {root, protocol: {status, reason?, unavailable?}, ledger: {status, reason?}}
               status: available | unconfigured | unavailable (protocol also partial)
-filters       {scope, since, states, audit}
+filters       {scope, since, states, audit, verifySince}
 repositories  [{name, kind, path, roles, status, reason, main, originMain,
                 deployment: {channel: bus | release-tag | none,
                              status: available | absent | unavailable | not-applicable,
                              unreadable}}]
 items         [{repository, id, title, status, replacement, blocked, blocker, owner,
-                waitingOnUser, userOriginated, latestEvidenceAt,
+                waitingOnUser, userOriginated, deliveryVerified: true | false | null,
+                deliveryEvidence: deployed | assumed | null, latestEvidenceAt,
                 workFile: {path, status, approved, design, supersedes, addedIn, commit,
                            committedAt} | null,
                 protocol: [{role, joinedBy, revision, ready, accepted, receipts,
@@ -165,9 +184,9 @@ items         [{repository, id, title, status, replacement, blocked, blocker, ow
                             workers: [{role, submissions, accepted}]}] | null,
                 requests: [{id, kind, state, owner, question, requiredOwner, reason,
                             updatedAt, userSource}],
-                delivery: {landing: {sha, at, rule: id | work-file | title} | null,
-                           onOrigin, deployed: {sha, at, via: complete | release,
-                                                tag} | null}}]
+                delivery: {landing: {sha, at, rule: done-flip | id | title} | null,
+                           onOrigin, deployed: {sha, at, via: complete | last-deploy | release,
+                                                tag, matched: landing | work-list} | null}}]
 ```
 
 `protocol` is null when the protocol is unconfigured or unavailable, and an empty list when no
@@ -177,7 +196,8 @@ and unguarded); enrollment is not evaluated. Items are ordered by repository nam
 `--format markdown` prints a digest: per repository, the headings Done (`done`, `deployed`,
 `declined`, `cancelled`, `superseded`), In progress (`in-progress`, `landed`), New (`requested`),
 Outstanding (`approved`) and Waiting on the user (proposed items and pending questions, which take
-precedence), each item once.
+precedence), each item once. An unverified done item carries the marker `(unverified)` after its
+title.
 
 The command exits 0, or 1 when the protocol or ledger is unavailable or partial, a selected
 repository or a game's bus cannot be read, or a bus event file is unreadable; the output is still

@@ -46,7 +46,13 @@ const SOURCE: LedgerSource = {
   wordingHash: null,
 };
 const USER_SOURCE: LedgerSource = { ...SOURCE, reference: "user, fixture request" };
-const ALL: StatusOptions = { audit: false, scope: "all", since: null, states: [] };
+const ALL: StatusOptions = {
+  audit: false,
+  scope: "all",
+  since: null,
+  states: [],
+  verifySince: "2026-11-19T02:00:00Z",
+};
 
 let clock = Date.parse("2026-11-01T00:00:00Z");
 
@@ -250,6 +256,10 @@ async function buildFixture(): Promise<Fixture> {
     "docs/work/sg-0009.md": work("sg-0009", "Deployed before acceptance", "approved"),
     "docs/work/sg-0010.md": work("sg-0010", "Polish the menu", "approved"),
     "docs/work/sg-0012.md": work("sg-0012", "Blocked on art", "approved", { design: "art" }),
+    "docs/work/sg-0013.md": work("sg-0013", "Done before the cutoff", "approved"),
+    "docs/work/sg-0014.md": work("sg-0014", "Done after the cutoff", "approved"),
+    "docs/work/sg-0015.md": work("sg-0015", "Deployed by the last deploy", "approved"),
+    "docs/work/sg-0016.md": work("sg-0016", "Listed by a COMPLETE event", "approved"),
     "package.json": "{}\n",
   });
   sha.sg8 = commit(game, "Build the delivered thing", {
@@ -259,6 +269,7 @@ async function buildFixture(): Promise<Fixture> {
     "src/b.ts": "b\n",
   });
   sha.sg9 = commit(game, "Wire sg-0009", { "src/c.ts": "c\n" });
+  sha.sg15 = commit(game, "Wire sg-0015", { "src/f.ts": "f\n" });
   sha.sg7 = commit(game, "Add the sg-0007 feature", { "src/a.ts": "a\n" });
   sha.sg10 = commit(game, "Polish the menu", { "src/d.ts": "d\n" });
   sha.sg11 = commit(game, "Load enemy data from the sidecars map", {
@@ -271,6 +282,12 @@ async function buildFixture(): Promise<Fixture> {
     `${work("sg-0011", "Load the sidecars", "approved")}Notes.\n`,
   );
   sha.number = commit(game, "Number the sidecars work item as sg-0011", {});
+  sha.sg13 = commit(game, "Mark sg-0013 done", {
+    "docs/work/sg-0013.md": work("sg-0013", "Done before the cutoff", "done"),
+  });
+  sha.sg14 = commit(game, "Mark the late item done", {
+    "docs/work/sg-0014.md": work("sg-0014", "Done after the cutoff", "done"),
+  });
   git(game, "update-ref", "refs/remotes/origin/main", sha.sg7);
   git(game, "worktree", "add", "-q", "-b", "tech", ".worktrees/tech", "main");
 
@@ -320,15 +337,20 @@ async function buildFixture(): Promise<Fixture> {
 
   const events = join(root, "var", "games", GAME, "bus", "events");
   mkdirSync(events, { recursive: true });
-  const event = (kind: string, key: string, created: string) =>
+  const event = (kind: string, key: string, created: string, extra = "") =>
     writeFileSync(
       join(events, `${createHash("sha256").update(`${kind}:${key}`).digest("hex")}.json`),
-      `{"created": ${created}, "id": "x", "key": "${key}", "kind": "${kind}", "message": "m", "sent": true}\n`,
+      `{"created": ${created}, "id": "x", "key": "${key}", "kind": "${kind}", "message": "m", "sent": true${extra}}\n`,
     );
   const completed = Date.parse(git(game, "show", "-s", "--format=%cI", sha.sg9)) + 1_800_000;
   event("push", sha.sg10, `${completed + 1}000000`);
   event("complete", sha.sg9, `${completed}000000`);
+  event("complete", sha.approve, `${completed + 600_000}000000`, ', "work": ["sg-0016", 7]');
   writeFileSync(join(base, "completed"), new Date(completed).toISOString());
+  const deployedAt =
+    Math.floor(Date.parse(git(game, "show", "-s", "--format=%cI", sha.sg15)) / 1000) + 60;
+  writeFileSync(join(root, "var", "games", GAME, "bus", "last-deploy.sha"), `${sha.sg15}\n`);
+  writeFileSync(join(root, "var", "games", GAME, "bus", "last-deploy"), `${deployedAt}\n`);
   writeFileSync(join(events, `${sha.sg9}.state`), "{}\n");
 
   const stateRoot = activateProtocolFixture(layout);
@@ -460,7 +482,7 @@ describe("status", () => {
     const gameRepo = report.repositories.find((repo) => repo.name === GAME)!;
     expect(gameRepo).toMatchObject({
       deployment: { channel: "bus", status: "available", unreadable: 0 },
-      main: fixture.sha.number,
+      main: fixture.sha.sg14,
       originMain: fixture.sha.sg7,
     });
     expect(report.coordinator.protocol).toEqual({ status: "available" });
@@ -481,8 +503,12 @@ describe("status", () => {
       "sg-0008": "done",
       "sg-0009": "deployed",
       "sg-0010": "landed",
-      "sg-0011": "landed",
+      "sg-0011": "approved",
       "sg-0012": "in-progress",
+      "sg-0013": "done",
+      "sg-0014": "done",
+      "sg-0015": "deployed",
+      "sg-0016": "deployed",
       "sk-0001": "done",
       "sk-0002": "landed",
       "sk-0003": "deployed",
@@ -495,7 +521,7 @@ describe("status", () => {
     });
   });
 
-  it("finds landings by ID, work file and title, never in bookkeeping commits", () => {
+  it("lands an item where its work file is set to done, else by ID or title citations", () => {
     expect(item(report, "sg-0001").delivery.landing).toBeNull();
     expect(item(report, "sg-0007").delivery).toEqual({
       deployed: null,
@@ -503,28 +529,50 @@ describe("status", () => {
       onOrigin: true,
     });
     expect(item(report, "sg-0008").delivery.landing).toMatchObject({
-      rule: "work-file",
+      rule: "done-flip",
       sha: fixture.sha.sg8,
+    });
+    // A docs-only commit setting done still lands the item; the ID citation there does not.
+    expect(item(report, "sg-0013").delivery.landing).toMatchObject({
+      rule: "done-flip",
+      sha: fixture.sha.sg13,
+    });
+    expect(item(report, "sk-0001").delivery.landing).toMatchObject({
+      rule: "done-flip",
+      sha: fixture.sha.sk1,
     });
     expect(item(report, "sg-0010").delivery).toMatchObject({
       landing: { rule: "title", sha: fixture.sha.sg10 },
       onOrigin: false,
     });
-    expect(item(report, "sg-0011").delivery.landing).toMatchObject({
-      rule: "work-file",
-      sha: fixture.sha.sg11,
-    });
+    expect(item(report, "sg-0011").delivery.landing).toBeNull();
     expect(item(report, "sg-0001").workFile?.addedIn).toBe(fixture.sha.approve);
     expect(item(report, "sg-0011").workFile?.addedIn).toBe(fixture.sha.number);
   });
 
-  it("dates deployment by the first COMPLETE event or release tag containing the landing", () => {
+  it("dates deployment by the first COMPLETE event, last deploy or release tag", () => {
     expect(item(report, "sg-0009").delivery.deployed).toEqual({
       at: completedAt(fixture),
+      matched: "landing",
       sha: fixture.sha.sg9,
       tag: null,
       via: "complete",
     });
+    expect(item(report, "sg-0015").delivery.deployed).toMatchObject({
+      at: expect.any(String),
+      matched: "landing",
+      sha: fixture.sha.sg15,
+      via: "last-deploy",
+    });
+    expect(item(report, "sg-0016")).toMatchObject({
+      delivery: {
+        deployed: { matched: "work-list", sha: fixture.sha.approve, via: "complete" },
+        landing: null,
+      },
+      deliveryEvidence: "deployed",
+      deliveryVerified: true,
+    });
+    expect(item(report, "sg-0007").delivery.deployed).toBeNull();
     expect(item(report, "sg-0010").delivery.deployed).toBeNull();
     expect(item(report, "sk-0001").delivery.deployed).toMatchObject({
       sha: fixture.sha.sk3,
@@ -532,6 +580,35 @@ describe("status", () => {
       via: "release",
     });
     expect(item(report, "sk-0002").delivery.deployed).toBeNull();
+  });
+
+  it("verifies done items by evidence and assumes those marked done before the cutoff", () => {
+    expect(item(report, "sg-0008")).toMatchObject({
+      deliveryEvidence: "deployed",
+      deliveryVerified: true,
+    });
+    for (const id of ["sg-0013", "sg-0014"]) {
+      expect(item(report, id)).toMatchObject({
+        deliveryEvidence: "assumed",
+        deliveryVerified: null,
+        status: "done",
+      });
+    }
+    const verifySince = item(report, "sg-0014").delivery.landing!.at;
+    const strict = run(fixture, { verifySince });
+    expect(item(strict, "sg-0013")).toMatchObject({ deliveryEvidence: "assumed" });
+    expect(item(strict, "sg-0014")).toMatchObject({
+      deliveryEvidence: null,
+      deliveryVerified: false,
+      status: "done",
+    });
+    expect(run(fixture, { states: ["unverified"], verifySince }).items.map((e) => e.id)).toEqual([
+      "sg-0014",
+    ]);
+    expect(item(report, "sg-0001")).toMatchObject({
+      deliveryEvidence: null,
+      deliveryVerified: null,
+    });
   });
 
   it("joins protocol publications, ledger requests, blockers and pending questions", () => {
@@ -577,7 +654,7 @@ describe("status", () => {
     expect(audit.items.map((entry) => entry.id)).toEqual(["request-new", "sg-0002", "sg-0008"]);
     expect(item(audit, "sg-0008")).toMatchObject({
       delivery: {
-        deployed: { at: completedAt(fixture), sha: fixture.sha.sg9 },
+        deployed: { at: completedAt(fixture), matched: "landing", sha: fixture.sha.sg9 },
         landing: { sha: fixture.sha.sg8 },
         onOrigin: true,
       },
@@ -600,11 +677,11 @@ describe("status", () => {
       "sg-0012",
     ]);
     expect(run(fixture, { states: ["landed", "deployed"] }).items.map((entry) => entry.id)).toEqual(
-      ["sg-0007", "sg-0009", "sg-0010", "sg-0011", "sk-0002", "sk-0003"],
+      ["sg-0007", "sg-0009", "sg-0010", "sg-0015", "sg-0016", "sk-0002", "sk-0003"],
     );
-    const since = item(report, "sg-0011").delivery.landing!.at;
+    const since = item(report, "sg-0014").delivery.landing!.at;
     expect(run(fixture, { since, scope: GAME }).items.map((entry) => entry.id)).toEqual([
-      "sg-0011",
+      "sg-0014",
     ]);
     expect(() => run(fixture, { scope: "nowhere" })).toThrow(/--scope/);
   });
@@ -628,10 +705,21 @@ describe("status", () => {
       "- sg-0005:",
       "- sg-0008:",
       "- sg-0009:",
+      "- sg-0013:",
+      "- sg-0014:",
+      "- sg-0015:",
+      "- sg-0016:",
     ]);
-    expect(under("In progress")).toEqual(["- sg-0007:", "- sg-0010:", "- sg-0011:", "- sg-0012:"]);
+    expect(under("In progress")).toEqual(["- sg-0007:", "- sg-0010:", "- sg-0012:"]);
     expect(under("New")).toEqual(["- request-new:"]);
-    expect(under("Outstanding")).toEqual(["- sg-0001:"]);
+    expect(under("Outstanding")).toEqual(["- sg-0001:", "- sg-0011:"]);
+    expect(digest.out).not.toContain("(unverified)");
+    const verifySince = item(report, "sg-0014").delivery.landing!.at;
+    const strict = await cli(fixture, "--format", "markdown", "--verify-since", verifySince);
+    expect(strict.out.match(/^- .*\(unverified\).*$/gm)).toEqual([
+      expect.stringMatching(/^- sg-0014: Done after the cutoff \(unverified\) \(done; landed /),
+    ]);
+    expect((await cli(fixture, "--verify-since", "soon")).code).toBe(EXIT_USAGE);
     expect(under("Waiting on the user")).toEqual(["- sg-0002:", "- sg-0006:"]);
     expect((await cli(fixture, "--state", "shipped")).code).toBe(EXIT_USAGE);
     expect((await cli(fixture, "--since", "yesterday")).code).toBe(EXIT_USAGE);

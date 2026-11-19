@@ -44,15 +44,17 @@ function line(item: StatusItem): string {
   }
   if (item.delivery.deployed !== null) {
     const { deployed } = item.delivery;
-    details.push(
-      `${deployed.via === "release" ? `released ${deployed.tag ?? ""}` : "deployed"} ${deployed.at}`,
-    );
+    const how = deployed.via === "release" ? `released ${deployed.tag ?? ""}` : "deployed";
+    details.push(deployed.at === null ? how : `${how} ${deployed.at}`);
+  } else if (item.deliveryEvidence === "assumed") {
+    details.push("delivery assumed");
   }
   if (item.blocked) {
     details.push(`blocked${item.owner === null ? "" : ` on ${item.owner}`}`);
   }
   const title = (item.title ?? "").replace(/\s+/g, " ").trim();
-  return `- ${item.id}${title === "" ? "" : `: ${title}`} (${details.join("; ")})`;
+  const marker = item.deliveryVerified === false ? " (unverified)" : "";
+  return `- ${item.id}${title === "" ? "" : `: ${title}`}${marker} (${details.join("; ")})`;
 }
 
 function sourceLine(name: string, state: { status: string; reason?: string }): string | null {

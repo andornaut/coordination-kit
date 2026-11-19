@@ -177,16 +177,44 @@ export interface MainFile {
   readonly at: string;
 }
 
+export interface CommitRef {
+  readonly sha: string;
+  readonly at: string;
+}
+
+export interface MainFiles {
+  readonly files: ReadonlyMap<string, MainFile>;
+  /**
+   * The oldest first-parent commit on `main` whose change sets each file's front-matter `status`
+   * to `done`: added as `done`, or changed from another status.
+   */
+  readonly doneAt: ReadonlyMap<string, CommitRef>;
+}
+
+/** The front-matter `status` value of a work file's text, or null. */
+function frontMatterStatus(lines: readonly string[]): string | null {
+  if (lines[0] !== "---") {
+    return null;
+  }
+  for (const line of lines.slice(1)) {
+    if (line === "---") {
+      return null;
+    }
+    const match = /^status:\s*(.*?)\s*$/.exec(line);
+    if (match !== null) {
+      return match[1] ?? null;
+    }
+  }
+  return null;
+}
+
 /**
- * The text of every file under `directory` on `main`, from one first-parent `git log -p` with
- * unbounded context: the newest diff of each path holds its whole current text. A path whose
- * newest diff deletes it is absent.
+ * Every file under `directory` on `main`, from one first-parent `git log -p` with unbounded
+ * context: each diff holds the whole old and new text, so the newest diff of a path gives its
+ * current text (a path whose newest diff deletes it is absent) and each diff shows whether it set
+ * the front-matter status to `done`.
  */
-export function readMainFiles(
-  git: GitRunner,
-  repository: string,
-  directory: string,
-): Map<string, MainFile> {
+export function readMainFiles(git: GitRunner, repository: string, directory: string): MainFiles {
   const output = git(repository, [
     "log",
     "--first-parent",
@@ -205,7 +233,8 @@ export function readMainFiles(
     `${directory}/`,
   ]);
   const files = new Map<string, MainFile>();
-  /** Paths whose newest diff deletes them, or whose newest content diff is still to come. */
+  const doneAt = new Map<string, CommitRef>();
+  /** Paths whose current state is known: deleted, or text taken from their newest content diff. */
   const settled = new Set<string>();
   const latest = new Map<string, { commit: string; at: string }>();
   for (const record of output.split(RECORD)) {
@@ -224,35 +253,44 @@ export function readMainFiles(
           : source !== undefined && source !== "--- /dev/null"
             ? source.slice("--- a/".length)
             : (header?.[2] ?? "");
-      if (path === "" || settled.has(path)) {
+      if (path === "") {
         continue;
       }
       if (!latest.has(path)) {
         latest.set(path, { at, commit });
       }
-      if (
-        target === "+++ /dev/null" ||
-        lines.some((line) => line.startsWith("deleted file mode"))
-      ) {
-        settled.add(path);
-        continue;
-      }
+      const deleted =
+        target === "+++ /dev/null" || lines.some((line) => line.startsWith("deleted file mode"));
       const hunk = lines.findIndex((line) => line.startsWith("@@"));
-      if (hunk < 0) {
-        // A mode change or an empty file: the content comes from an older diff, if any.
-        if (lines.some((line) => line.startsWith("new file mode"))) {
+      if (deleted || hunk < 0) {
+        // A deletion, a mode change or an empty file sets no status.
+        if (!settled.has(path) && (deleted || lines.some((l) => l.startsWith("new file mode")))) {
           settled.add(path);
-          files.set(path, { ...latest.get(path)!, path, text: "" });
+          if (!deleted) {
+            files.set(path, { ...latest.get(path)!, path, text: "" });
+          }
         }
         continue;
       }
-      const text = lines
-        .slice(hunk + 1)
-        .filter((line) => line.startsWith(" ") || line.startsWith("+"))
-        .map((line) => line.slice(1));
-      settled.add(path);
-      files.set(path, { ...latest.get(path)!, path, text: `${text.join("\n")}\n` });
+      const content = lines.slice(hunk + 1);
+      const after = content.filter((line) => line.startsWith(" ") || line.startsWith("+"));
+      const before = content.filter((line) => line.startsWith(" ") || line.startsWith("-"));
+      const created = source === "--- /dev/null";
+      const was = created ? null : frontMatterStatus(before.map((line) => line.slice(1)));
+      const now = frontMatterStatus(after.map((line) => line.slice(1)));
+      if (now === "done" && was !== "done") {
+        // Newest first: the last assignment is the oldest such commit.
+        doneAt.set(path, { at, sha: commit });
+      }
+      if (!settled.has(path)) {
+        settled.add(path);
+        files.set(path, {
+          ...latest.get(path)!,
+          path,
+          text: `${after.map((line) => line.slice(1)).join("\n")}\n`,
+        });
+      }
     }
   }
-  return files;
+  return { doneAt, files };
 }
