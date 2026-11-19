@@ -68,7 +68,7 @@ export interface BusLine {
   readonly key: string;
   readonly at: string;
   readonly sha: string | null;
-  readonly status: string;
+  readonly status: string | null;
   readonly detail: string | null;
   readonly work: readonly string[] | null;
 }
@@ -107,8 +107,7 @@ export function parseBusLine(game: string, text: string): BusLine | null {
     typeof v.at !== "string" ||
     !Number.isFinite(Date.parse(v.at)) ||
     !(v.sha === null || (typeof v.sha === "string" && SHA.test(v.sha))) ||
-    typeof v.status !== "string" ||
-    !EVENT_STATUSES.has(v.status) ||
+    !(v.status === null || (typeof v.status === "string" && EVENT_STATUSES.has(v.status))) ||
     !(v.detail === null || typeof v.detail === "string") ||
     !(
       work === null ||
@@ -127,7 +126,7 @@ export function parseBusLine(game: string, text: string): BusLine | null {
     kind: v.kind,
     schema: 1,
     sha: v.sha as string | null,
-    status: v.status,
+    status: v.status as string | null,
     type: v.type,
     work: work as readonly string[] | null,
   };
@@ -356,7 +355,7 @@ function result(
 }
 
 function eventNotice(project: string, to: string, line: BusLine): Notice {
-  const head = `${project} bus: ${line.type} ${line.status}${line.sha === null ? "" : ` ${line.sha.slice(0, 12)}`}`;
+  const head = `${project} bus: ${line.type}${line.status === null ? "" : ` ${line.status}`}${line.sha === null ? "" : ` ${line.sha.slice(0, 12)}`}`;
   const links: MessageLink[] = [{ kind: "event", ref: line.id }];
   if (line.sha !== null) {
     links.push({ kind: "commit", ref: line.sha });
@@ -373,7 +372,7 @@ function eventNotice(project: string, to: string, line: BusLine): Notice {
 interface EventRow {
   readonly kind: string;
   readonly type: string;
-  readonly status: string;
+  readonly status: string | null;
   readonly work: string | null;
   readonly detail?: string;
 }

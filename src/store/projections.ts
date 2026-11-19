@@ -269,7 +269,7 @@ CREATE TABLE IF NOT EXISTS bus_events (
   type TEXT NOT NULL,
   key TEXT NOT NULL,
   kind TEXT NOT NULL,
-  status TEXT NOT NULL,
+  status TEXT,
   sha TEXT,
   at TEXT NOT NULL,
   work TEXT,

@@ -41,7 +41,7 @@ function line(
   type: string,
   key: string,
   kind: string,
-  status: string,
+  status: string | null,
   extra: Partial<Line> = {},
 ): Line {
   return {
@@ -219,6 +219,18 @@ describe("events ingest", () => {
     appendFileSync(test.log, `${torn.slice(20)}\n`);
     expect(await ingestEvents(test.context, test.game)).toMatchObject({ delivered: 1, held: 0 });
     expect(busEvents(test.layout)).toEqual(["attempt_started", "attempt_started"]);
+  });
+
+  it("stores lines whose status is null, as the line schema allows", async () => {
+    const test = setup();
+    const started = line("runner.started", "t1", "runner", null, { detail: "{}" });
+    const attempt = line("attempt", "a1", "attempt", null);
+    writeFileSync(test.log, text(started, attempt));
+    expect(await ingestEvents(test.context, test.game)).toMatchObject({
+      ingested: 2,
+      quarantined: 0,
+    });
+    expect(busEvents(test.layout).sort()).toEqual(["attempt", "runner.started"]);
   });
 
   it("copies each complete malformed line to the quarantine and skips it", async () => {

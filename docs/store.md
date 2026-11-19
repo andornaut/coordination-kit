@@ -224,7 +224,8 @@ offset equals its size and the size exceeds 1 MiB. Ingest is the only reader:
 ```
 
 - `kind` is `attempt`, `gate`, `push`, `ci`, `deploy` or `runner`; `status` is `ok`, `failed`,
-  `blocked`, `skipped` or `timeout`; `type` is the exact legacy kind string, such as
+  `blocked`, `skipped`, `timeout` or `null` for a type with no outcome (such as `attempt` or
+  `runner.started`); `type` is the exact legacy kind string, such as
   `ci_success` or `blocked-full-gate`. A line whose `id` is not the sha256 of
   `${game}\n${type}\n${key}`, whose `game` is another game, or that is not valid JSON in this
   shape is malformed.
