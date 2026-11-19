@@ -36,7 +36,7 @@ suite("entry", () => {
       const result = await execute(command);
       expect(result.code, result.stderr).toBe(0);
       expect(result.stdout).toContain("usage: coordination-kit COMMAND");
-      expect(result.stdout).toContain("--parent UUID");
+      expect(result.stdout).toContain("store retire --dry-run");
       expect(result.stdout).toContain("work check");
       expect(result.stdout).not.toContain("check-config");
       expect(result.stderr).toBe("");
@@ -58,7 +58,7 @@ suite("entry", () => {
     "the coordinator root is --root, then COORDINATION_KIT_ROOT, then DELIVERY_KIT_ROOT",
     async () => {
       const ws = workspace();
-      const status = ["message", "status", "--recipient", "game-coordinator"];
+      const status = ["question", "list"];
       const ok = impl.command(ws, ["harness", "ready"]);
       const run = (env: Record<string, string>, extra: string[] = []) =>
         execute({

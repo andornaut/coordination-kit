@@ -2,8 +2,6 @@
 // and `decision list`. Writes identify the caller through the registry fence and refuse any other
 // owner's record. Each prints one JSON object on stdout; a refusal prints `coordination-kit: CODE`
 // on stderr and exits 1, and a usage error exits 2.
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 import type { Handler } from "../io.ts";
 import {
@@ -23,7 +21,6 @@ import {
   storeQuestionList,
   storeQuestionOpen,
 } from "../store/questionService.ts";
-import { StoreError } from "../store/types.ts";
 import { callerOf, required, run, text, Usage, type Values } from "./store.ts";
 
 const CALLER = {
@@ -34,7 +31,7 @@ const CALLER = {
 export const QUESTION_OPEN_OPTIONS = {
   ...CALLER,
   id: { type: "string" },
-  "options-file": { type: "string" },
+  option: { multiple: true, type: "string" },
   title: { type: "string" },
   work: { type: "string" },
 } as const;
@@ -97,17 +94,8 @@ export const questionOpen: Handler = (io, root, args) =>
     "question open",
     args,
     (context, values) => {
-      const file = text(values, "options-file");
-      let options;
-      if (file !== undefined) {
-        let raw: unknown;
-        try {
-          raw = JSON.parse(readFileSync(resolve(io.cwd, file), "utf8"));
-        } catch {
-          throw new StoreError("invalid-options");
-        }
-        options = normalizeOptions(raw);
-      }
+      const labels = values.option;
+      const options = Array.isArray(labels) ? normalizeOptions(labels) : undefined;
       return storeQuestionOpen(context, callerOf(values), {
         title: required(values, "title"),
         ...optional("id", text(values, "id")),

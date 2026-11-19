@@ -1,14 +1,13 @@
-// The runner seam through the built CLI: `--version --json`, `review deliver` and `events flush`
-// print one typed JSON line carrying the CLI version and the sha256 of dist/cli.js.
+// The runner seam through the built CLI: `--version --json` and `review deliver` print one typed
+// JSON line carrying the CLI version and the sha256 of dist/cli.js.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "vitest";
 
 import { cli, execute, impl } from "../lib/adapter.ts";
-import { claudeGame, deliver } from "../lib/claude-fixture.ts";
+import { claudeGame } from "../lib/claude-fixture.ts";
 import { contract, suite, workspaces } from "../lib/cases.ts";
-import { record } from "../lib/event-passes.ts";
 import type { Json } from "../lib/json.ts";
 import { at } from "../lib/time.ts";
 import { KIT_ROOT } from "../lib/workspace.ts";
@@ -53,35 +52,15 @@ suite("runner seam", () => {
       reason: null,
       cli: identity(),
     });
-    await deliver(ws);
     const repeat = await cli(ws, ["review", "deliver", "--slot", SLOT]);
     expect(repeat.stdout).toBe(first.stdout);
-    expect(ws.list("unblock", "claude-spool").filter((name) => name.endsWith(".json"))).toEqual([]);
     const usage = await cli(ws, ["review", "deliver", "--slot", "not-a-time"]);
     expect(usage).toMatchObject({ code: 2, stdout: "" });
   });
 
-  contract("events flush reports delivered and held counts", async () => {
+  contract("events flush is retired: the runner ingests its event log instead", async () => {
     const ws = workspace();
     claudeGame(ws);
-    await record(ws, { kind: "attempt", key: "seam-attempt", message: "scheduled attempt" });
-    const spooled = await cli(ws, ["events", "flush"]);
-    expect(spooled.code, spooled.stderr).toBe(0);
-    expect(line(spooled.stdout)).toMatchObject({
-      schema: 1,
-      kind: "events-flush",
-      game: ws.game,
-      status: "deferred",
-      delivered: 0,
-      held: 1,
-      cli: identity(),
-    });
-    await deliver(ws);
-    expect(line((await cli(ws, ["events", "flush"])).stdout)).toMatchObject({
-      status: "delivered",
-      reason: null,
-      delivered: 1,
-      held: 0,
-    });
+    expect(await cli(ws, ["events", "flush"])).toMatchObject({ code: 2, stdout: "" });
   });
 });

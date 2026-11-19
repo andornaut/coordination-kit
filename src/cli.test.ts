@@ -1,4 +1,3 @@
-import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -33,14 +32,15 @@ describe("dispatcher", () => {
     const { root } = makeFixture();
     const help = await run(root, "--help");
     expect(help.code).toBe(EXIT_OK);
-    expect(help.out).toContain("message dispatch --id UUID");
-    expect(help.out).toContain("message reconcile --id UUID --receipt");
-    expect(help.out).toContain("message retire-spool --recipient ROLE|UUID [--dry-run]");
+    expect(help.out).toContain("store retire --dry-run");
+    expect(help.out).toContain("request close --id SAFE_ID --reason TEXT [--work WORK_ID]");
     expect(help.out).toContain("harness doctor --game ID ... [--role ROLE ...]");
     expect(help.out).toContain("harness doctor --role ROLE ...");
     expect(help.out).not.toContain("harness doctor [");
-    expect(help.out).toContain("[--parent ROLE]");
-    expect(help.out).toContain("message status --recipient ROLE [--include-body]");
+    expect(help.out).toContain(
+      "question open --title TEXT [--id SAFE_ID] [--work WORK_ID] [--option LABEL ...]",
+    );
+    expect(help.out).not.toContain("--options-file");
     expect(help.out).toContain("work check [--decisions]\n");
     expect(help.out).not.toContain("check-config");
     expect(await run(root, "scheduled-once")).toMatchObject({ code: EXIT_USAGE });
@@ -51,74 +51,24 @@ describe("dispatcher", () => {
   });
 });
 
-describe("cross-directory common messages", () => {
-  it("stores and pulls the exact body with root in different argument positions without native admission", async () => {
-    const { base, root } = makeFixture();
+describe("retired commands", () => {
+  it("rejects every removed protocol, ledger and legacy message command as unknown", async () => {
+    const { root } = makeFixture();
     withRegistry(root);
-    const body = "Exact original payload.\n\n";
-    writeFileSync(join(base, "message.txt"), body);
-    const id = "00000000-0000-4000-8000-000000000001";
-    let out = "";
-    let err = "";
-    const io = {
-      cwd: base,
-      env: {},
-      err: (text: string) => (err += text),
-      out: (text: string) => (out += text),
-    };
-    expect(
-      await main(io, [
-        "message",
-        "send",
-        "--from",
-        "game-coordinator",
-        "--recipient",
-        "archies-dog-walks/tech",
-        "--root",
-        root,
-        "--id",
-        id,
-        "--body-file",
-        "message.txt",
-      ]),
-    ).toBe(EXIT_OK);
-    expect(JSON.parse(out)).toMatchObject({ id, state: "queued" });
-    expect(JSON.parse(out)).not.toHaveProperty("body");
-    out = "";
-    expect(
-      await main(io, ["message", "status", "--id", id, "--include-body", "--root", root]),
-    ).toBe(EXIT_OK);
-    expect(JSON.parse(out)).toMatchObject([{ id, body, state: "queued", attempts: 0 }]);
-    expect(err).toBe("");
-  });
-});
-
-describe("automatic capture", () => {
-  it("is off for message send unless --capture is given", async () => {
-    const { base, root } = makeFixture();
-    withRegistry(root);
-    writeFileSync(join(base, "message.txt"), "Capture fixture body.\n");
-    const ledger = join(root, "var", "accounting");
-    const send = (id: string, ...extra: string[]) =>
-      run(
-        root,
-        "message",
-        "send",
-        "--from",
-        "game-coordinator",
-        "--recipient",
-        "archies-dog-walks/tech",
-        "--id",
-        id,
-        "--body-file",
-        join(base, "message.txt"),
-        ...extra,
-      );
-    expect((await send("00000000-0000-4000-8000-000000000011")).code).toBe(EXIT_OK);
-    expect(existsSync(ledger)).toBe(false);
-    const captured = await send("00000000-0000-4000-8000-000000000012", "--capture");
-    expect(captured.code, captured.err).toBe(EXIT_OK);
-    expect(existsSync(ledger)).toBe(true);
+    for (const argv of [
+      ["protocol", "status"],
+      ["protocol", "enroll-self"],
+      ["ledger", "show"],
+      ["message", "send"],
+      ["message", "retire-spool"],
+      ["inbox", "snapshot"],
+      ["inbox", "ack"],
+      ["events", "flush"],
+      ["store", "cutover"],
+    ]) {
+      // eslint-disable-next-line no-await-in-loop
+      expect((await run(root, ...argv)).code, argv.join(" ")).toBe(EXIT_USAGE);
+    }
   });
 });
 
@@ -139,10 +89,8 @@ describe("claude ready and codex ready", () => {
 describe("coordinator root", () => {
   async function status(env: NodeJS.ProcessEnv, ...argv: string[]): Promise<number> {
     return main({ cwd: "/nonexistent", env, err: () => undefined, out: () => undefined }, [
-      "message",
-      "status",
-      "--recipient",
-      "archies-dog-walks/tech",
+      "question",
+      "list",
       ...argv,
     ]);
   }

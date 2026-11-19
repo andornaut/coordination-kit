@@ -1,7 +1,6 @@
 // @andornaut/coordination-kit/build/store: the SQLite coordination store, its message lifecycle,
-// wakes, the registry writer fence, the legacy import, runner event ingest, the cutover, work
+// wakes, the registry writer fence, runner event ingest, the retirement, imported requests, work
 // records, and questions, holds and decisions.
-export { COORDINATOR_ROLE, type CutoverOutput, storeCutover } from "./store/cutover.ts";
 export type { AppendResult, VerifyResult } from "./store/db.ts";
 export {
   canonicalJson,
@@ -37,16 +36,6 @@ export {
   readCursor,
 } from "./store/ingest.ts";
 export {
-  type ImportAction,
-  type ImportDiff,
-  importLegacy,
-  type ImportRecord,
-  type ImportReport,
-  type LegacySource,
-  legacySources,
-  mapLegacyRecord,
-} from "./store/legacy.ts";
-export {
   type CloseInput,
   closeMessage,
   type ExportResult,
@@ -66,7 +55,6 @@ export {
   type SendResult,
   type WriteResult,
 } from "./store/messages.ts";
-export { isStoreMode, type StoreMode, storeMode, type StoreModeName } from "./store/mode.ts";
 export {
   DELIVERY_KIT_ACTOR,
   DELIVERY_KIT_ROLE,
@@ -125,12 +113,28 @@ export {
   storeQuestionList,
   storeQuestionOpen,
 } from "./store/questionService.ts";
+export {
+  closeRequest,
+  type CloseRequestResult,
+  importRequest,
+  readRequests,
+  type RequestImport,
+  type RequestRecord,
+  REQUESTS_PROJECTION,
+} from "./store/requests.ts";
+export {
+  COORDINATOR_ROLE,
+  READ_WITH,
+  readLedgerRequests,
+  RETIRED_PATHS,
+  type RetireOutput,
+  storeRetire,
+} from "./store/retire.ts";
 export { SECRET_SHAPES, secretShape } from "./store/secrets.ts";
 export {
   storeDone,
   storeExport,
   storeHistory,
-  storeImport,
   storeInbox,
   storeRebuild,
   storeRetain,

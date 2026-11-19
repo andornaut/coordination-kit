@@ -1,26 +1,23 @@
-// `review deliver`: one typed result per (game, slot) for delivery-kit's runner. The scheduled
-// review seam keeps its own slot receipts, deduplication, ambiguity and stale-turn rules; this
-// module maps its outcome to a status and reason token and records the result, so a repeated call
-// for the slot returns the recorded result without calling the seam again.
+// `review deliver`: one typed result per (game, slot) for delivery-kit's runner. The brief is one
+// stored message per (game, slot); natives only wake. The result is recorded, so a repeated call
+// for the slot returns the recorded result without composing the brief again.
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { unblockDir } from "../adapters/claude/spool.ts";
 import { isRecord } from "../adapters/shared/pyjson.ts";
 import { readJsonIfExists, writeJsonDurable } from "../durable.ts";
 import type { GameLayout, Layout } from "../layout.ts";
 import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
-import { isStoreMode } from "../store/mode.ts";
+import type { WakePorts } from "../store/wake.ts";
 import {
   type CliIdentity,
   cliMember,
   REASON_TOKENS,
   type ReasonToken,
-  reasonToken,
   type SeamStatus,
 } from "./outcome.ts";
 import { storeReview } from "./storeBrief.ts";
-import { outcomeLine, type ReviewOptions, type ReviewOutcome, reviewOutcome } from "./wake.ts";
+import type { NativeCollect } from "./storeNative.ts";
 
 export interface ReviewResult {
   readonly status: SeamStatus;
@@ -28,66 +25,20 @@ export interface ReviewResult {
   readonly detail: string;
 }
 
-interface Mapped {
-  readonly result: ReviewResult;
-  /** False for lock contention, which the seam itself never records either. */
-  readonly record: boolean;
+export interface ReviewOptions {
+  /** The environment and wake ports for the brief's wakes, and the store clock. */
+  readonly env?: NodeJS.ProcessEnv;
+  readonly wakePorts?: WakePorts;
+  readonly now?: () => string;
+  /** Test hook: replaces the native connection and collectors. */
+  readonly collect?: NativeCollect;
 }
 
-const DELIVERED_STATUSES: ReadonlySet<string> = new Set(["accepted", "sending"]);
 const STATUSES: ReadonlySet<string> = new Set(["delivered", "deferred", "skipped"]);
-
-/** The typed result of one seam outcome; undefined when a stop interrupted a native send. */
-export function mapReviewOutcome(outcome: ReviewOutcome): Mapped | undefined {
-  switch (outcome.kind) {
-    case "interrupted":
-      return undefined;
-    case "skip":
-      return {
-        record: true,
-        result: { detail: outcome.detail, reason: outcome.reason, status: "skipped" },
-      };
-    case "deferred":
-      return {
-        record: true,
-        result: {
-          detail: outcome.text,
-          reason: reasonToken("deferred", outcome.text),
-          status: "deferred",
-        },
-      };
-    default: {
-      const { state } = outcome;
-      const detail = outcomeLine(outcome);
-      const status = String(state.status);
-      const reason = typeof state.reason === "string" ? state.reason : null;
-      if (DELIVERED_STATUSES.has(status)) {
-        return { record: true, result: { detail, reason: null, status: "delivered" } };
-      }
-      if (status === "deduplicated") {
-        const previous = String(state.previousStatus);
-        return {
-          record: true,
-          result: {
-            detail,
-            reason: DELIVERED_STATUSES.has(previous)
-              ? "already-delivered"
-              : reasonToken(previous, reason),
-            status: "skipped",
-          },
-        };
-      }
-      return {
-        record: status !== "busy",
-        result: { detail, reason: reasonToken(status, reason), status: "deferred" },
-      };
-    }
-  }
-}
 
 /** `<bus>/unblock/review-deliver/`: one recorded result per slot and the per-game call lock. */
 export function reviewResultsDir(game: GameLayout): string {
-  return join(unblockDir(game.busDir), "review-deliver");
+  return join(game.busDir, "unblock", "review-deliver");
 }
 
 function recordPath(game: GameLayout, slot: number): string {
@@ -139,9 +90,8 @@ const CALL_BUSY: ReviewResult = {
 
 /**
  * Deliver the scheduled review for `slot` (epoch seconds) once. A recorded result for the slot is
- * returned as recorded; otherwise the seam runs and its result is recorded, except for lock
- * contention. Undefined when `signal` stopped the call before a result: nothing is recorded and
- * the seam's receipt stays as the stop left it.
+ * returned as recorded; otherwise the brief is stored and its result recorded, except for lock
+ * contention. Undefined when `signal` stopped the call before it began: nothing is recorded.
  */
 export async function deliverReview(
   layout: Layout,
@@ -168,30 +118,19 @@ export async function deliverReview(
     if (signal?.aborted === true) {
       return undefined;
     }
-    if (isStoreMode(layout)) {
-      // Store mode: the brief is one stored message per (game, slot); natives only wake.
-      const stored = await storeReview(
-        {
-          env: options.env ?? process.env,
-          layout,
-          ...(options.wakePorts === undefined ? {} : { ports: options.wakePorts }),
-          ...(options.now === undefined ? {} : { now: options.now }),
-          ...(options.collect === undefined ? {} : { collect: options.collect }),
-        },
-        game,
-        slot,
-      );
-      record(game, slot, stored);
-      return stored;
-    }
-    const mapped = mapReviewOutcome(await reviewOutcome(layout, game, slot, signal, options));
-    if (mapped === undefined) {
-      return undefined;
-    }
-    if (mapped.record) {
-      record(game, slot, mapped.result);
-    }
-    return mapped.result;
+    const stored = await storeReview(
+      {
+        env: options.env ?? process.env,
+        layout,
+        ...(options.wakePorts === undefined ? {} : { ports: options.wakePorts }),
+        ...(options.now === undefined ? {} : { now: options.now }),
+        ...(options.collect === undefined ? {} : { collect: options.collect }),
+      },
+      game,
+      slot,
+    );
+    record(game, slot, stored);
+    return stored;
   } finally {
     lock.release();
   }

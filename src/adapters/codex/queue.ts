@@ -3,12 +3,35 @@ import { dirname } from "node:path";
 
 import { readJsonIfExists, writeJsonDurable } from "../../durable.ts";
 import { holdLockAsync } from "../../lock.ts";
-import type { NativeMessage, TransportReceipt } from "../../messages/transports.ts";
 import { isCanonicalUuid } from "../shared/ids.ts";
 import { isRecord } from "../shared/pyjson.ts";
 import { type DeliveryDiagnostic, safeDeliveryDiagnostic } from "../types.ts";
 import { acknowledgeEntry, queueEntries, type QueueEntry } from "./inventory.ts";
 import { type RpcClient, RpcError } from "./rpc.ts";
+
+/** The service resolves ownership and parent hops before selecting a transport. */
+export interface NativeMessage {
+  readonly requestId: string;
+  readonly recipient: string;
+  readonly text: string;
+}
+
+export interface TransportReceipt {
+  readonly diagnostic?: DeliveryDiagnostic;
+  readonly requestId: string;
+  readonly status:
+    | "accepted"
+    | "queued"
+    | "ambiguous"
+    | "blocked"
+    | "busy"
+    | "deferred"
+    | "rejected"
+    | "unsupported"
+    | "unavailable";
+  readonly reason?: string;
+  readonly queueId?: string;
+}
 
 /** Queue add may wake a loaded idle thread. Unknown clearance never permits native mutation. */
 export type QueueClearance = {
@@ -340,3 +363,56 @@ export function reconcileQueueMessage(
 
 /** Preserve the existing inventory helper's exact payload representation for acknowledgement. */
 export { acknowledgeEntry, queueEntries };
+
+/** The caller supplies existing connectControl routing, never a new frontend. */
+export function codexQueueTransport(ports: {
+  readonly connect: () => Promise<RpcClient>;
+  readonly guards?: QueueGuards;
+  /** Local owner/HOLD and decision check before connecting. No native probes here. */
+  readonly canConnect?: (message: NativeMessage) => boolean;
+}): {
+  send(receiptPath: string, message: NativeMessage): Promise<TransportReceipt>;
+  readonly capability: "guard-required" | "guarded";
+} {
+  return {
+    capability:
+      ports.guards === undefined || ports.canConnect === undefined ? "guard-required" : "guarded",
+    async send(path, message) {
+      let locallyClear = false;
+      try {
+        locallyClear = ports.guards !== undefined && ports.canConnect?.(message) === true;
+      } catch {
+        // Unknown owner or HOLD state leaves the message local.
+      }
+      if (!locallyClear) {
+        return queueMessage(null, path, message);
+      }
+      let client: RpcClient;
+      try {
+        client = await ports.connect();
+      } catch (error) {
+        const previous = await queueMessage(null, path, message);
+        return previous.status === "blocked"
+          ? {
+              diagnostic:
+                error instanceof RpcError
+                  ? { ...error.diagnostic, stage: "connection" as const }
+                  : {
+                      category: "transport-unavailable" as const,
+                      classification: "unavailable" as const,
+                      stage: "connection" as const,
+                    },
+              reason: "transport unavailable",
+              requestId: message.requestId,
+              status: "unavailable",
+            }
+          : previous;
+      }
+      try {
+        return await queueMessage(client, path, message, ports.guards);
+      } finally {
+        client.close();
+      }
+    },
+  };
+}

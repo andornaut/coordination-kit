@@ -9,14 +9,17 @@ import { performance } from "node:perf_hooks";
 
 import { wakeText, writeWakeFile } from "../adapters/claude/wakeFile.ts";
 import { clearanceUnchanged } from "../adapters/codex/guard.ts";
-import type { QueueClearance } from "../adapters/codex/queue.ts";
+import {
+  codexQueueTransport,
+  type QueueClearance,
+  type TransportReceipt,
+} from "../adapters/codex/queue.ts";
 import { connectControl, type RpcClient } from "../adapters/codex/rpc.ts";
 import { selectTarget } from "../adapters/codex/steer.ts";
 import { decisionClear, decisionRecord } from "../adapters/shared/decisions.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
-import type { Layout } from "../layout.ts";
-import { messageGuardDirectory } from "../messages/service.ts";
-import { codexQueueTransport, type TransportReceipt } from "../messages/transports.ts";
+import { readRoleRoute } from "../adapters/shared/route.ts";
+import { gameLayout, type Layout } from "../layout.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Harness } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
@@ -166,6 +169,22 @@ function codexOutcome(receipt: TransportReceipt): WakeOutcome {
       return "ambiguous";
     default:
       return "failed";
+  }
+}
+
+/** The bus `unblock` directory holding a role's local decision markers, or null. */
+function messageGuardDirectory(layout: Layout, role: string): string | null {
+  try {
+    const game = role.split("/")[0]!;
+    if (role.includes("/") && Object.hasOwn(layout.config.games, game)) {
+      return join(gameLayout(layout, game).busDir, "unblock");
+    }
+    const route = readRoleRoute(layout);
+    return route?.state === "active"
+      ? join(gameLayout(layout, route.host).busDir, "unblock")
+      : null;
+  } catch {
+    return null;
   }
 }
 

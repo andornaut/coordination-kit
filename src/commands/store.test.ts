@@ -184,9 +184,6 @@ describe("store message commands", () => {
       // eslint-disable-next-line no-await-in-loop
       expect((await run(...argv)).code, argv.join(" ")).toBe(EXIT_USAGE);
     }
-    const legacy = await run("inbox", "snapshot");
-    expect(legacy.code).toBe(EXIT_USAGE);
-    expect(legacy.err).not.toContain("invalid_store_options");
   });
 
   it("lists the store verbs in help with their positional IDs", async () => {
@@ -200,6 +197,7 @@ describe("store message commands", () => {
       "msg send --to ROLE --body-file FILE [--intent queue|unblock] [--id UUID] [--link KIND=REF ...]",
     );
     expect(help.out).toContain("inbox [--include-body] [--all]");
-    expect(help.out).toContain("store import --from-legacy [--dry-run]");
+    expect(help.out).toContain("store import --approval-ledger FILE [--dry-run]");
+    expect(help.out).toContain("store retire --dry-run");
   });
 });

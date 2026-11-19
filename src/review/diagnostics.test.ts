@@ -178,11 +178,8 @@ describe("scoped harness diagnostics", () => {
       activation: "unknown",
       native_hold: "unknown",
     });
-    const channel = join(test.layout.reviewDir, "messages", "recipients", CLAUDE_TECH, "unblock");
-    expect(report.roles[0]?.channel_reference).toEqual({
-      path: channel,
-      source: "message_channel_state_dir",
-    });
+    const channel = join(test.layout.varDir, "wake", `${CLAUDE_TECH}.json`);
+    expect(report.roles[0]?.channel_reference).toEqual({ path: channel, source: "wake_file" });
     expect(existsSync(channel)).toBe(false);
     expect(JSON.stringify(report)).not.toContain("DO_NOT_PRINT");
   });

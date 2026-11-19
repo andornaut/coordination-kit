@@ -1,10 +1,9 @@
-// `review deliver`, `events flush` and `events ingest`: the seam delivery-kit's runner spawns from the
+// `review deliver` and `events ingest`: the seam delivery-kit's runner spawns from the
 // coordinator-installed CLI. Each prints exactly one JSON line on stdout and exits 0 for every
 // typed outcome, 2 for a usage error and 1 for an internal failure, which prints nothing on
 // stdout and one `coordination-kit:` line on stderr.
 import { parseArgs } from "node:util";
 
-import { flushEvents, type FlushResult } from "../events.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { type GameLayout, gameLayout, type Layout, loadLayout, UnknownGame } from "../layout.ts";
 import { deliverReview, reviewDeliverLine } from "../review/deliver.ts";
@@ -15,12 +14,9 @@ import { StoreError } from "../store/types.ts";
 import { cliIdentity } from "../version.ts";
 
 export const REVIEW_DELIVER_OPTIONS = {
-  capture: { type: "boolean" },
   game: { type: "string" },
   slot: { type: "string" },
 } as const;
-
-export const EVENTS_FLUSH_OPTIONS = { game: { type: "string" } } as const;
 
 export const EVENTS_INGEST_OPTIONS = { game: { type: "string" } } as const;
 
@@ -92,7 +88,7 @@ export const reviewDeliver: Handler = async (io, root, args) => {
   if (typeof resolved === "number") {
     return resolved;
   }
-  // SIGTERM aborts the seam: an unresolved native send keeps its `sending` receipt.
+  // SIGTERM aborts the seam before the brief is stored.
   const controller = io.signal === undefined ? new AbortController() : undefined;
   const abort = (): void => controller?.abort();
   if (controller !== undefined) {
@@ -104,7 +100,6 @@ export const reviewDeliver: Handler = async (io, root, args) => {
       resolved.game,
       slot,
       io.signal ?? controller?.signal,
-      { capture: values.capture === true },
     );
     if (result === undefined) {
       io.err("coordination-kit: review deliver stopped before a result; no delivery claimed\n");
@@ -120,46 +115,7 @@ export const reviewDeliver: Handler = async (io, root, args) => {
   }
 };
 
-/** The one stdout line of `events flush`, in its documented key order. */
-export function eventsFlushLine(cli: CliIdentity, game: string, result: FlushResult): string {
-  return `${JSON.stringify(
-    Object.fromEntries([
-      ["schema", 1],
-      ["kind", "events-flush"],
-      ["game", game],
-      ["status", result.status],
-      ["reason", result.reason],
-      ["detail", result.detail],
-      ["delivered", result.delivered],
-      ["held", result.held],
-      ["cli", cliMember(cli)],
-    ]),
-  )}\n`;
-}
-
-export const eventsFlush: Handler = async (io, root, args) => {
-  let values;
-  try {
-    ({ values } = parseArgs({ args, options: EVENTS_FLUSH_OPTIONS, strict: true }));
-  } catch (error) {
-    io.err(`coordination-kit: ${message(error)}\n`);
-    return EXIT_USAGE;
-  }
-  const resolved = context(io, root, values.game);
-  if (typeof resolved === "number") {
-    return resolved;
-  }
-  try {
-    const result = await flushEvents(resolved.game);
-    io.out(eventsFlushLine(resolved.cli, resolved.game.id, result));
-    return EXIT_OK;
-  } catch (error) {
-    io.err(`coordination-kit: events flush failed: ${message(error)}\n`);
-    return EXIT_INVALID;
-  }
-};
-
-/** The one stdout line of `events ingest`: the `events flush` keys plus the ingest counts. */
+/** The one stdout line of `events ingest`: the seam keys plus the ingest counts. */
 export function eventsIngestLine(cli: CliIdentity, game: string, result: IngestResult): string {
   return `${JSON.stringify(
     Object.fromEntries([

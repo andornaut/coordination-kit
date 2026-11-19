@@ -13,7 +13,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { Command, Implementation, RecordedEvent } from "./adapter.ts";
+import type { Command, Implementation } from "./adapter.ts";
 import { KIT_ROOT, type Workspace, writeJson } from "./workspace.ts";
 
 const CLI = join(KIT_ROOT, "dist", "cli.js");
@@ -156,75 +156,6 @@ function command(ws: Workspace, words: string[]): Command {
   };
 }
 
-const DIST = (name: string) => JSON.stringify(join(KIT_ROOT, "dist", `${name}.js`));
-
-/**
- * One observer pass: the runner's review dispatch and log lines, then an event flush. Each log
- * line appears on stdout and stderr, as a runner.log replay does; a deferral is also written to
- * stderr directly, as the runner does.
- */
-function observerPass(game: string, slot: number): string {
-  return `
-import { DEFERRED_PREFIX, deliverScheduledReview } from ${DIST("review")};
-import { flushEvents } from ${DIST("events")};
-import { gameLayout, loadLayout } from ${DIST("shared")};
-const layout = loadLayout(process.env.COORDINATION_KIT_ROOT);
-const game = gameLayout(layout, ${JSON.stringify(game)});
-const slot = ${slot};
-const log = (line) => {
-  process.stdout.write(line + "\\n");
-  process.stderr.write(line + "\\n");
-};
-try {
-  const outcome = await deliverScheduledReview(layout, game, slot);
-  if (outcome.startsWith(DEFERRED_PREFIX)) {
-    log(outcome);
-    process.stderr.write(outcome + "\\n");
-  } else if (outcome !== "") {
-    log("bus: scheduled review " + slot + ": " + outcome);
-  }
-} catch (error) {
-  log("bus: scheduled review " + slot + " unavailable (" + String(error) + "); no delivery claimed");
-}
-await flushEvents(game);
-`;
-}
-
-const SEAM_PRELUDE = (game: string) => `
-import { gameLayout, loadLayout } from ${DIST("shared")};
-const layout = loadLayout(process.env.COORDINATION_KIT_ROOT);
-const game = gameLayout(layout, ${JSON.stringify(game)});
-`;
-
-/** A producer pass: each event through recordEvent, in order, in one process. */
-function recordPass(game: string, project: string, events: readonly RecordedEvent[]): string {
-  return `
-import { recordEvent } from ${DIST("events")};
-${SEAM_PRELUDE(game)}
-for (const event of ${JSON.stringify(events)}) {
-  recordEvent(game, { project: ${JSON.stringify(project)} }, event.kind, event.key, event.message);
-}
-`;
-}
-
-/** An observer pass without a review slot: only the event flush. */
-function flushPass(game: string): string {
-  return `
-import { flushEvents } from ${DIST("events")};
-${SEAM_PRELUDE(game)}
-await flushEvents(game);
-`;
-}
-
-function seam(ws: Workspace, script: string): Command {
-  prepare(ws, []);
-  return {
-    argv: [process.execPath, "--input-type=module", "-e", script],
-    cwd: ws.coordinator,
-    env: env(ws),
-  };
-}
-
 export const nodeImplementation: Implementation = {
   name: "node",
   available: existsSync(CLI) ? true : "dist/cli.js is not built; Node cases are pending",
@@ -239,12 +170,6 @@ export const nodeImplementation: Implementation = {
     cwd: ws.coordinator,
     env: ws.baseEnv(),
   }),
-  review: (ws, slot) => seam(ws, observerPass(ws.game, slot)),
-  record: (ws, events) => {
-    const project = (nodeConfig(ws).reports as { project: string }).project;
-    return seam(ws, recordPass(ws.game, project, events));
-  },
-  flush: (ws) => seam(ws, flushPass(ws.game)),
   channel: (ws, args) => ({
     argv: [process.execPath, CLI, "claude", "channel", ...args],
     cwd: ws.coordinator,

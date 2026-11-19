@@ -1,6 +1,6 @@
 // @andornaut/coordination-kit/build/review: the scheduled review seam. A resident runner decides when
-// a slot is due; this module composes the brief, inventories inboxes and delivers to the route's
-// recipient. It never decides cadence and never starts a runner.
+// a slot is due; this module stores the brief as a message to the route's recipient and wakes it.
+// It never decides cadence and never starts a runner.
 export {
   readRoleRoute,
   type RoleRoute,
@@ -9,6 +9,7 @@ export {
   routeRecipient,
   validateRoleRoute,
 } from "./adapters/shared/route.ts";
+export { deliverReview, type ReviewOptions, type ReviewResult } from "./review/deliver.ts";
 export { coordinationEmit, coordinationNotice } from "./review/emit.ts";
 export {
   type CliIdentity,
@@ -32,10 +33,3 @@ export {
   type NativeWorker,
   surveyNative,
 } from "./review/storeNative.ts";
-export {
-  DEFERRED_PREFIX,
-  deliverScheduledReview,
-  type ReviewOptions,
-  type ReviewOutcome,
-  reviewOutcome,
-} from "./review/wake.ts";

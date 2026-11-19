@@ -4,13 +4,12 @@ import { workBlock, workEvidence, workStart, workUnblock } from "../work/live.ts
 import { commit, IDS, KIT, live, liveFixture, workFile } from "../work/testLive.ts";
 import { collectStatus, type StatusItem } from "./collect.ts";
 import { systemGit } from "./git.ts";
-import { sourceCounters } from "./sources.ts";
 
 const SHA = "abcdef0123456789abcdef0123456789abcdef01";
 
 function status(root: string) {
   const env = { PATH: process.env.PATH };
-  return collectStatus({ counters: sourceCounters(), git: systemGit(env), io: { env } }, root, {
+  return collectStatus({ git: systemGit(env), io: { env } }, root, {
     audit: false,
     scope: KIT,
     since: null,

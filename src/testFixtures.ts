@@ -110,3 +110,22 @@ export function makeFixture(): Fixture {
 export function writeFixtureJson(path: string, value: unknown): void {
   writeJson(path, value);
 }
+
+/**
+ * An external state root for `layout`: a fresh directory outside every repository, named by
+ * `var/work-protocol.json` in the 3.0 shape, or in the 2.1 shape with `legacy`.
+ */
+export function stateRootFixture(
+  layout: { readonly varDir: string },
+  options: { readonly legacy?: boolean } = {},
+): string {
+  const stateRoot = mkdtempSync(join(tmpdir(), "coordination-kit-state-"));
+  mkdirSync(layout.varDir, { recursive: true });
+  writeJson(
+    join(layout.varDir, "work-protocol.json"),
+    options.legacy === true
+      ? { generation: 1, schema: 1, stateRoot, workspaceId: "fixture" }
+      : { schema: 2, stateRoot },
+  );
+  return stateRoot;
+}

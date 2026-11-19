@@ -1,6 +1,5 @@
-// One derived status per item, by documented precedence over front matter, ledger state, protocol
-// state and delivery evidence. Pure; see docs/commands.md#status.
-import type { LedgerState } from "../accounting/types.ts";
+// One derived status per item, by documented precedence over front matter, store records,
+// imported request state and delivery evidence. Pure; see docs/commands.md#status.
 
 export const DERIVED_STATUSES = [
   "requested",
@@ -30,7 +29,7 @@ export interface WorkFileEvidence {
   readonly landed: boolean;
   readonly deployed: boolean;
   readonly channel: DeploymentChannel;
-  /** A work publication, worker submission or linked ledger request in an active state exists. */
+  /** A store start or a linked imported request in an active state exists. */
   readonly started: boolean;
   /** The commit that set `status: done`, else the work file's latest commit; ISO 8601. */
   readonly doneAt: string | null;
@@ -95,23 +94,6 @@ export function deriveWorkFile(evidence: WorkFileEvidence): Derived {
   return { ...verification(evidence, status), replacement: null, status };
 }
 
-/**
- * Ledger requests with no work file: superseded (with the ledger's replacement), cancelled, done
- * for `completed`, otherwise requested.
- */
-export function deriveLedgerOnly(
-  state: LedgerState,
-  replacementId: string | null,
-): Pick<Derived, "replacement" | "status"> {
-  if (state === "superseded") {
-    return { replacement: replacementId, status: "superseded" };
-  }
-  if (state === "cancelled") {
-    return { replacement: null, status: "cancelled" };
-  }
-  return { replacement: null, status: state === "completed" ? "done" : "requested" };
-}
-
 /** `--state` values: every derived status, and `unverified` for done items without evidence. */
 export const STATE_FILTERS = [...DERIVED_STATUSES, "unverified"] as const;
 export type StateFilter = (typeof STATE_FILTERS)[number];
@@ -124,7 +106,8 @@ export const CLOSED: ReadonlySet<DerivedStatus> = new Set([
   "superseded",
 ]);
 
-export const ACTIVE_LEDGER_STATES: ReadonlySet<LedgerState> = new Set([
+/** Imported request states that count an approved item as started. */
+export const ACTIVE_LEDGER_STATES: ReadonlySet<string> = new Set([
   "started",
   "blocked",
   "waiting",

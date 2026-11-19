@@ -129,26 +129,23 @@ describe("question commands", () => {
     expect((await reader("question", "list", "--state", "bogus")).code).toBe(2);
   });
 
-  it("reads options from a file", async () => {
-    const { base, tech } = setup();
-    writeFileSync(
-      join(base, "options.json"),
-      JSON.stringify([{ description: "Recommended", label: "Ship" }, "Wait"]),
-    );
+  it("takes options as repeated --option labels, not an input file", async () => {
+    const { tech } = setup();
     const opened = await tech(
       "question",
       "open",
       "--title",
       "Ship?",
-      "--options-file",
-      "options.json",
+      "--option",
+      "Ship",
+      "--option",
+      "Wait",
     );
     expect(opened.json).toMatchObject({
-      question: { options: [{ description: "Recommended", label: "Ship" }, { label: "Wait" }] },
+      question: { options: [{ label: "Ship" }, { label: "Wait" }] },
     });
-    writeFileSync(join(base, "bad.json"), "[]");
-    expect((await tech("question", "open", "--title", "x", "--options-file", "bad.json")).err).toBe(
-      "coordination-kit: invalid-options\n",
+    expect((await tech("question", "open", "--title", "x", "--options-file", "o.json")).code).toBe(
+      2,
     );
   });
 

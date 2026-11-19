@@ -1,15 +1,14 @@
-// `coordination-kit status`: every registered repository's work items joined with live protocol
-// state, linked ledger requests and delivery evidence, one derived status per item. Read-only:
+// `coordination-kit status`: every registered repository's work items joined with their store
+// records, imported requests and delivery evidence, one derived status per item. Read-only:
 // one history pass and one work-file pass per repository, and one read of the coordinator state.
 import { realpathSync } from "node:fs";
 import { basename, resolve } from "node:path";
 
-import type { LedgerRequest } from "../accounting/types.ts";
 import type { Io } from "../io.ts";
 import { gameLayout, type Layout, loadLayout } from "../layout.ts";
-import { protocolRole } from "../protocol/core.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
+import type { RequestRecord } from "../store/requests.ts";
 import type { WorkRecord } from "../store/work.ts";
 import { CONVENTION_FILE, fieldIds, parseFrontMatter } from "../work/files.ts";
 import {
@@ -27,23 +26,13 @@ import {
   CLOSED,
   type DeploymentChannel,
   type DerivedStatus,
-  deriveLedgerOnly,
   deriveWorkFile,
   type StateFilter,
 } from "./derive.ts";
 import { type GitRunner, readHistory, readMainFiles, repositoryRoot } from "./git.ts";
-import {
-  type LedgerSnapshot,
-  type ProtocolSnapshot,
-  type PublicationRecord,
-  readLedger,
-  readProtocol,
-  readStoreWork,
-  type SourceCounters,
-  type StoreWorkSnapshot,
-} from "./sources.ts";
+import { readStoreWork, type StoreWorkSnapshot } from "./sources.ts";
 
-export const STATUS_SCHEMA = 1;
+export const STATUS_SCHEMA = 2;
 const WORK_DIRECTORY = "docs/work";
 
 export class StatusUsageError extends Error {
@@ -83,27 +72,6 @@ export interface RepositoryStatus {
   };
 }
 
-export interface ProtocolEntry {
-  readonly role: string;
-  readonly joinedBy: readonly ("id" | "path")[];
-  readonly revision: number;
-  readonly ready: boolean;
-  readonly accepted: number;
-  readonly receipts: number;
-  readonly criteriaSatisfied: boolean | null;
-  readonly authorization: "reviewed" | "unknown" | null;
-  readonly historicallyClosed: boolean | null;
-  readonly guarded: boolean | null;
-  /** The work-reference half of the before-work admission: reviewed and unguarded. */
-  readonly beforeWork: "admissible" | "refused" | null;
-  readonly retention: {
-    readonly owner: string;
-    readonly reason: string;
-    readonly nextBoundary: string;
-  } | null;
-  readonly workers: PublicationRecord["workers"];
-}
-
 export interface RequestEntry {
   readonly id: string;
   readonly kind: string;
@@ -141,8 +109,7 @@ export interface StatusItem {
     readonly commit: string;
     readonly committedAt: string;
   } | null;
-  /** Null when the protocol state is unconfigured or unavailable. */
-  readonly protocol: readonly ProtocolEntry[] | null;
+  /** Imported requests that name this item, or the request itself for a request item. */
   readonly requests: readonly RequestEntry[];
   /** The item's store work record; null when the store is absent or holds none. */
   readonly store: WorkRecord | null;
@@ -169,8 +136,6 @@ export interface StatusReport {
   readonly schema: typeof STATUS_SCHEMA;
   readonly coordinator: {
     readonly root: string;
-    readonly protocol: ProtocolSnapshot["state"];
-    readonly ledger: LedgerSnapshot["state"];
     readonly store: StoreWorkSnapshot["state"];
   };
   readonly filters: StatusOptions;
@@ -181,7 +146,6 @@ export interface StatusReport {
 export interface StatusContext {
   readonly io: Pick<Io, "env">;
   readonly git: GitRunner;
-  readonly counters: SourceCounters;
 }
 
 export interface Repository {
@@ -270,52 +234,27 @@ export function repositories(
   return [...found.values()].sort((left, right) => (left.name < right.name ? -1 : 1));
 }
 
-function requestOwner(request: LedgerRequest): string {
-  return request.assignment?.ownerRole ?? request.createdBy;
+function userSource(request: RequestRecord): boolean {
+  return request.source.origin === "native-user" || /^user\b/i.test(request.source.reference ?? "");
 }
 
-function userSource(request: LedgerRequest): boolean {
-  return [request.source, ...request.sources.map((link) => link.source)].some(
-    (source) => source.origin === "native-user" || /^user\b/i.test(source.reference ?? ""),
-  );
-}
-
-function requestEntry(request: LedgerRequest): RequestEntry {
+function requestEntry(request: RequestRecord): RequestEntry {
   return {
     id: request.id,
     kind: request.kind,
-    owner: requestOwner(request),
-    question: request.question?.status ?? null,
+    owner: request.owner,
+    question: request.question,
     reason: request.reason,
     requiredOwner: request.requiredOwner,
-    state: request.state,
+    state: request.closed === null ? request.state : "closed",
     updatedAt: request.updatedAt,
     userSource: userSource(request),
   };
 }
 
-function protocolEntry(record: PublicationRecord, joinedBy: ("id" | "path")[]): ProtocolEntry {
-  const { evaluation, publication } = record;
-  return {
-    accepted: publication.accepted.length,
-    authorization: evaluation?.authorization ?? null,
-    beforeWork:
-      evaluation === null
-        ? null
-        : evaluation.authorization === "reviewed" && !evaluation.guarded
-          ? "admissible"
-          : "refused",
-    criteriaSatisfied: evaluation?.criteriaSatisfied ?? null,
-    guarded: evaluation?.guarded ?? null,
-    historicallyClosed: evaluation?.historicallyClosed ?? null,
-    joinedBy,
-    ready: publication.ready,
-    receipts: publication.receipts.length,
-    retention: publication.definition.retention,
-    revision: record.revision,
-    role: record.role,
-    workers: record.workers,
-  };
+/** The work IDs a request names: its own list and, once closed, the work its owner named. */
+function requestWork(request: RequestRecord): string[] {
+  return [...request.work, ...(request.closed?.work == null ? [] : [request.closed.work])];
 }
 
 function latest(times: readonly (string | null | undefined)[]): string | null {
@@ -329,18 +268,15 @@ function latest(times: readonly (string | null | undefined)[]): string | null {
   return best === null ? null : new Date(best).toISOString();
 }
 
-/** Blocker and owner from a blocked or waiting linked request, else from a protocol retention. */
-function blockage(
-  requests: readonly RequestEntry[],
-  protocol: readonly ProtocolEntry[],
-): { blocker: string | null; owner: string | null; blocked: boolean } {
+/** Blocker and owner from a blocked or waiting linked request. */
+function blockage(requests: readonly RequestEntry[]): {
+  blocker: string | null;
+  owner: string | null;
+  blocked: boolean;
+} {
   const request = requests.find((entry) => entry.state === "blocked" || entry.state === "waiting");
   if (request !== undefined) {
     return { blocked: true, blocker: request.reason, owner: request.requiredOwner };
-  }
-  const retained = protocol.find((entry) => entry.retention !== null)?.retention;
-  if (retained !== undefined && retained !== null) {
-    return { blocked: true, blocker: retained.reason, owner: retained.owner };
   }
   return { blocked: false, blocker: null, owner: null };
 }
@@ -359,8 +295,6 @@ function readRepository(
   context: StatusContext,
   layout: Layout,
   repository: Repository,
-  protocol: ProtocolSnapshot,
-  ledger: LedgerSnapshot,
   storeWork: StoreWorkSnapshot,
   verifySince: string,
 ): RepositoryItems {
@@ -448,40 +382,15 @@ function readRepository(
       }
     }
   }
-  const namespaces = new Set(repository.roles.map((role) => protocolRole(role)));
   const items: StatusItem[] = [];
   for (const work of workFiles) {
-    const joined: ProtocolEntry[] = [];
-    for (const namespace of [...namespaces].sort()) {
-      for (const record of protocol.publications.get(namespace) ?? []) {
-        const by: ("id" | "path")[] = [];
-        if (record.id === work.id) {
-          by.push("id");
-        }
-        if (record.publication.definition.plan.path === work.file.path) {
-          by.push("path");
-        }
-        if (by.length > 0) {
-          joined.push(protocolEntry(record, by));
-        }
-      }
-    }
-    const requestIds = new Set<string>();
-    for (const namespace of namespaces) {
-      for (const record of protocol.publications.get(namespace) ?? []) {
-        if (record.id === work.id || record.publication.definition.plan.path === work.file.path) {
-          record.publication.definition.requestIds.forEach((id) => requestIds.add(id));
-        }
-      }
-    }
-    if (ledger.requests.has(work.id)) {
-      requestIds.add(work.id);
-    }
-    requestIds.forEach((id) => linked.add(id));
-    const requests = [...requestIds].sort().flatMap((id) => {
-      const request = ledger.requests.get(id);
-      return request === undefined ? [] : [requestEntry(request)];
-    });
+    const linkedRequests = [...storeWork.requests.values()].filter(
+      (request) => request.id === work.id || requestWork(request).includes(work.id),
+    );
+    linkedRequests.forEach((request) => linked.add(request.id));
+    const requests = linkedRequests
+      .sort((left, right) => (left.id < right.id ? -1 : 1))
+      .map(requestEntry);
     const land = landing.get(work.id) ?? null;
     const covering = land === null ? undefined : marks.get(land.sha);
     const listing = listed.get(work.id);
@@ -515,7 +424,6 @@ function readRepository(
       frontMatter: work.status,
       landed: storeLanded || land !== null,
       started:
-        joined.length > 0 ||
         record?.startedAt != null ||
         requests.some((request) => ACTIVE_LEDGER_STATES.has(request.state as never)),
       supersededBy: supersededBy.get(work.id) ?? null,
@@ -525,7 +433,7 @@ function readRepository(
       ? { blocked: false, blocker: null, owner: null }
       : record?.block != null
         ? { blocked: true, blocker: record.block.reason, owner: record.block.owner }
-        : blockage(requests, joined);
+        : blockage(requests);
     items.push({
       ...block,
       delivery: {
@@ -555,10 +463,6 @@ function readRepository(
         record?.updatedAt,
         ...requests.map((request) => request.updatedAt),
       ]),
-      protocol:
-        protocol.state.status === "available" || protocol.state.status === "partial"
-          ? joined
-          : null,
       replacement: derived.replacement,
       repository: repository.name,
       requests,
@@ -595,55 +499,35 @@ function readRepository(
   };
 }
 
-/** Ledger requests and approvals that no work publication links (nor any descendant of one). */
+/** Open imported requests that no work file names: `requested` items of their owner's repository. */
 function requestedItems(
-  ledger: LedgerSnapshot,
-  protocol: ProtocolSnapshot,
+  storeWork: StoreWorkSnapshot,
   linked: ReadonlySet<string>,
   repositoryOf: (role: string) => string | null,
 ): StatusItem[] {
-  const covered = new Set(linked);
-  for (const records of protocol.publications.values()) {
-    for (const record of records) {
-      record.publication.definition.requestIds.forEach((id) => covered.add(id));
-    }
-  }
-  const stack = [...covered];
-  while (stack.length > 0) {
-    for (const child of ledger.requests.get(stack.pop()!)?.children ?? []) {
-      if (!covered.has(child)) {
-        covered.add(child);
-        stack.push(child);
-      }
-    }
-  }
   const items: StatusItem[] = [];
-  for (const request of [...ledger.requests.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) {
-    if (covered.has(request.id) || !["request", "approval"].includes(request.kind)) {
+  const requests = [...storeWork.requests.values()].sort((a, b) => (a.id < b.id ? -1 : 1));
+  for (const request of requests) {
+    if (linked.has(request.id) || request.closed !== null) {
       continue;
     }
-    const repository = repositoryOf(requestOwner(request));
+    const repository = repositoryOf(request.owner);
     if (repository === null) {
       continue;
     }
     const entry = requestEntry(request);
-    const derived = deriveLedgerOnly(request.state, request.replacementId);
-    const block = CLOSED.has(derived.status)
-      ? { blocked: false, blocker: null, owner: null }
-      : blockage([entry], []);
     items.push({
-      ...block,
+      ...blockage([entry]),
       delivery: { deployed: null, landing: null, onOrigin: null },
       deliveryEvidence: null,
       deliverySource: { deployment: null, landing: null },
       deliveryVerified: null,
       id: request.id,
       latestEvidenceAt: latest([request.updatedAt]),
-      protocol: null,
-      replacement: derived.replacement,
+      replacement: null,
       repository,
       requests: [entry],
-      status: derived.status,
+      status: "requested",
       store: null,
       title: request.summary,
       userOriginated: entry.userSource,
@@ -677,12 +561,10 @@ function selectScope(
   throw new StatusUsageError(`--scope names no game, kit or registered role: ${scope}`);
 }
 
-/** A role scope keeps items that role published, owns in the ledger or designs (games' areas). */
+/** A role scope keeps items that role owns in the store or designs (games' areas). */
 function ownedBy(role: string, item: StatusItem): boolean {
-  const namespace = protocolRole(role);
   const area = role.includes("/") ? role.split("/")[1] : null;
   return (
-    (item.protocol ?? []).some((entry) => entry.role === namespace) ||
     item.requests.some((request) => request.owner === role) ||
     item.store?.owner === role ||
     (area !== null && item.workFile?.design === area)
@@ -699,14 +581,10 @@ export function collectStatus(
   const registry = readRegistry(layout);
   const repos = repositories(context, layout, registry);
   const selected = selectScope(layout, registry, repos, options.scope);
-  const ledger = readLedger(context.io, layout, context.counters);
-  const protocol = readProtocol(layout, ledger, context.counters);
   const storeWork = readStoreWork(layout);
   const reports = repos
     .filter((repo) => selected.names.has(repo.name))
-    .map((repo) =>
-      readRepository(context, layout, repo, protocol, ledger, storeWork, options.verifySince),
-    );
+    .map((repo) => readRepository(context, layout, repo, storeWork, options.verifySince));
   const linked = new Set(reports.flatMap((report) => [...report.linked]));
   const coordinator = repos.find((repo) => repo.kind === "coordinator")?.name ?? null;
   const repositoryOf = (role: string): string | null => {
@@ -715,7 +593,7 @@ export function collectStatus(
   };
   let items = [
     ...reports.flatMap((report) => report.items),
-    ...requestedItems(ledger, protocol, linked, repositoryOf),
+    ...requestedItems(storeWork, linked, repositoryOf),
   ];
   if (selected.role !== null) {
     items = items.filter((item) => ownedBy(selected.role!, item));
@@ -744,8 +622,6 @@ export function collectStatus(
   );
   return {
     coordinator: {
-      ledger: ledger.state,
-      protocol: protocol.state,
       root: layout.root,
       store: storeWork.state,
     },
@@ -759,10 +635,7 @@ export function collectStatus(
 /** True when any source or selected repository could not be read; the command then exits 1. */
 export function incomplete(report: StatusReport): boolean {
   return (
-    report.coordinator.ledger.status === "unavailable" ||
     report.coordinator.store.status === "unavailable" ||
-    report.coordinator.protocol.status === "unavailable" ||
-    report.coordinator.protocol.status === "partial" ||
     report.repositories.some(
       (repo) =>
         repo.status === "unavailable" ||

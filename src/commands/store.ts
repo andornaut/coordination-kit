@@ -1,5 +1,5 @@
 // The store verbs: `msg send|done|retain|status|history`, `inbox` and
-// `store import|export|rebuild|cutover`, and the parsing helpers the question verbs share.
+// `store import|export|rebuild|retire`, and the parsing helpers the question verbs share.
 // Each prints one JSON object on stdout. A refusal prints `coordination-kit: CODE` on stderr and
 // exits 1; a usage error exits 2.
 import { isUtf8 } from "node:buffer";
@@ -10,13 +10,12 @@ import { parseArgs } from "node:util";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { loadLayout } from "../layout.ts";
 import { systemGit } from "../status/git.ts";
-import { storeCutover } from "../store/cutover.ts";
 import type { CallerOptions } from "../store/identity.ts";
+import { storeRetire } from "../store/retire.ts";
 import {
   storeDone,
   storeExport,
   storeHistory,
-  storeImport,
   storeInbox,
   storeRebuild,
   storeRetain,
@@ -77,14 +76,13 @@ export const STORE_IMPORT_OPTIONS = {
   ...CALLER,
   "approval-ledger": { type: "string" },
   "dry-run": { type: "boolean" },
-  "from-legacy": { type: "boolean" },
 } as const;
 
 export const STORE_EXPORT_OPTIONS = { since: { type: "string" } } as const;
 
 export const STORE_REBUILD_OPTIONS = {} as const;
 
-export const STORE_CUTOVER_OPTIONS = {
+export const STORE_RETIRE_OPTIONS = {
   ...CALLER,
   apply: { type: "boolean" },
   "dry-run": { type: "boolean" },
@@ -345,18 +343,12 @@ export const storeImportCommand: Handler = (io, root, args) =>
     "store import",
     args,
     (context, values) => {
-      const ledger = text(values, "approval-ledger");
-      if ((values["from-legacy"] === true) === (ledger !== undefined)) {
-        throw new Usage();
-      }
-      if (ledger !== undefined) {
-        return importApprovalLedger(
-          { coordinatorRoot: context.layout.root, env: context.env, git: systemGit(context.env) },
-          callerOf(values),
-          { dryRun: values["dry-run"] === true, file: resolve(io.cwd, ledger) },
-        );
-      }
-      return storeImport(context, callerOf(values), { dryRun: values["dry-run"] === true });
+      const ledger = required(values, "approval-ledger");
+      return importApprovalLedger(
+        { coordinatorRoot: context.layout.root, env: context.env, git: systemGit(context.env) },
+        callerOf(values),
+        { dryRun: values["dry-run"] === true, file: resolve(io.cwd, ledger) },
+      );
     },
     STORE_IMPORT_OPTIONS,
   );
@@ -374,17 +366,20 @@ export const storeExportCommand: Handler = (io, root, args) =>
 export const storeRebuildCommand: Handler = (io, root, args) =>
   run(io, root, "store rebuild", args, (context) => storeRebuild(context), STORE_REBUILD_OPTIONS);
 
-export const storeCutoverCommand: Handler = (io, root, args) =>
+export const storeRetireCommand: Handler = (io, root, args) =>
   run(
     io,
     root,
-    "store cutover",
+    "store retire",
     args,
     (context, values) => {
       if ((values.apply === true) === (values["dry-run"] === true)) {
         throw new Usage();
       }
-      return storeCutover(context, callerOf(values), { apply: values.apply === true });
+      if (values["dry-run"] === true && (values["native-id"] ?? values.worker) !== undefined) {
+        throw new Usage();
+      }
+      return storeRetire(context, callerOf(values), { apply: values.apply === true });
     },
-    STORE_CUTOVER_OPTIONS,
+    STORE_RETIRE_OPTIONS,
   );

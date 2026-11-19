@@ -15,15 +15,12 @@ import { dirname, join } from "node:path";
 
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { LedgerStore } from "../accounting/store.ts";
-import type { LedgerCommand, LedgerSource } from "../accounting/types.ts";
 import { EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
 import { loadLayout } from "../layout.ts";
-import { ProtocolStore } from "../protocol/core.ts";
-import { activateProtocolFixture } from "../protocol/testFixtures.ts";
-import { WorkStore } from "../protocol/work.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
-import { CLAUDE_COORDINATOR, CLAUDE_TECH, CODEX_TECH } from "../testFixtures.ts";
+import { Store } from "../store/db.ts";
+import { importRequest, type RequestImport } from "../store/requests.ts";
+import { CLAUDE_COORDINATOR, CLAUDE_TECH, CODEX_TECH, stateRootFixture } from "../testFixtures.ts";
 import {
   collectStatus,
   type StatusItem,
@@ -32,20 +29,28 @@ import {
 } from "./collect.ts";
 import { type GitRunner, systemGit } from "./git.ts";
 import { DIGEST_HEADINGS } from "./markdown.ts";
-import { sourceCounters } from "./sources.ts";
 
 const GAME = "sample-game";
 const KIT = "sample-kit";
-const ROLE = `games/${GAME}/tech`;
+const TECH_ROLE = `${GAME}/tech`;
 const AT = "2026-10-01T00:00:00.000Z";
-const BINDING = { harness: "claude" as const, nativeId: CLAUDE_TECH };
-const SOURCE: LedgerSource = {
-  native: null,
-  origin: "owner-attested",
-  reference: "fixture:approved-work",
-  wordingHash: null,
-};
-const USER_SOURCE: LedgerSource = { ...SOURCE, reference: "user, fixture request" };
+function request(id: string, owner: string, fields: Partial<RequestImport> = {}): RequestImport {
+  return {
+    id,
+    kind: "request",
+    owner,
+    question: null,
+    reason: null,
+    requiredOwner: null,
+    source: { origin: "owner-attested", reference: "fixture:approved-work" },
+    state: "open",
+    summary: `Fixture ${id}`,
+    updatedAt: AT,
+    work: [],
+    ...fields,
+  };
+}
+
 const ALL: StatusOptions = {
   audit: false,
   scope: "all",
@@ -126,91 +131,6 @@ interface Fixture {
   readonly stateRoot: string;
   readonly game: string;
   readonly sha: Record<string, string>;
-}
-
-async function ledgerApply(
-  ledger: LedgerStore,
-  actor: string,
-  source: LedgerSource,
-  commandId: string,
-  command: LedgerCommand,
-): Promise<void> {
-  await ledger.apply({
-    actor,
-    at: AT,
-    command,
-    commandId,
-    expectedRevision: ledger.read().revision,
-    schema: 1,
-    source,
-  });
-}
-
-function request(
-  id: string,
-  question: "pending" | null,
-  source: LedgerSource = SOURCE,
-): LedgerCommand {
-  return {
-    request: {
-      assignment: null,
-      dependencies: [],
-      id,
-      kind: "request",
-      parentId: null,
-      question:
-        question === null
-          ? null
-          : { native: null, options: null, resolutionRef: null, status: question, text: "Which?" },
-      reviewed: true,
-      source,
-      summary: `Fixture ${id}`,
-      targets: [
-        {
-          consumers: [],
-          criteria: [{ description: "Checked", id: "check", requiredEvidence: ["check"] }],
-          description: "Exact source",
-          id: "target",
-        },
-      ],
-    },
-    type: "register",
-  };
-}
-
-async function publish(
-  protocol: ProtocolStore,
-  ledger: LedgerStore,
-  id: string,
-  requestId: string,
-): Promise<void> {
-  const store = new WorkStore({ protocol, readRequest: (key) => ledger.read(key) });
-  await store.publish(
-    {
-      at: AT,
-      binding: BINDING,
-      epoch: protocol.read(ROLE).epoch,
-      expectedRevision: protocol.read(ROLE).revision,
-      id: `publish-${id}`,
-      role: ROLE,
-    },
-    {
-      definition: {
-        artifacts: [await protocol.putArtifact(Buffer.from(`essential ${id}`))],
-        clauseIds: [],
-        criteria: [{ consumers: [], id: "check", phases: ["check"], targetId: "target" }],
-        id,
-        messageIds: [],
-        plan: await protocol.putArtifact(Buffer.from(`plan ${id}`)),
-        requestIds: [requestId],
-        retention: null,
-        source: null,
-      },
-      expectedWorkRevision: 0,
-      ready: false,
-      replaces: null,
-    },
-  );
 }
 
 async function buildFixture(): Promise<Fixture> {
@@ -353,47 +273,43 @@ async function buildFixture(): Promise<Fixture> {
   writeFileSync(join(root, "var", "games", GAME, "bus", "last-deploy"), `${deployedAt}\n`);
   writeFileSync(join(events, `${sha.sg9}.state`), "{}\n");
 
-  const stateRoot = activateProtocolFixture(layout);
-  const protocol = new ProtocolStore({ directory: stateRoot, resolveBinding: () => true });
-  await protocol.claim({
-    at: AT,
-    binding: BINDING,
-    evidence: "fixture:owner",
-    expectedEpoch: 0,
-    role: ROLE,
-  });
-  const ledger = new LedgerStore({ directory: join(stateRoot, "accounting") });
-  await ledgerApply(
-    ledger,
-    "game-coordinator",
-    SOURCE,
-    "register-6",
-    request("request-sg6", "pending"),
+  const stateRoot = stateRootFixture(layout);
+  const store = Store.open(join(stateRoot, "coordination.db"));
+  const importer = { nativeId: null, role: "game-coordinator" };
+  importRequest(
+    store,
+    importer,
+    request("request-sg6", TECH_ROLE, { question: "pending", work: ["sg-0006"] }),
   );
-  await ledgerApply(
-    ledger,
-    "game-coordinator",
-    SOURCE,
-    "register-12",
-    request("request-sg12", null),
+  importRequest(
+    store,
+    importer,
+    request("request-sg12", TECH_ROLE, {
+      reason: "Waiting on the sidecar art",
+      requiredOwner: `${GAME}/art`,
+      state: "blocked",
+      work: ["sg-0012"],
+    }),
   );
-  await ledgerApply(
-    ledger,
-    `${GAME}/tech`,
-    USER_SOURCE,
-    "register-new",
-    request("request-new", null, USER_SOURCE),
+  importRequest(
+    store,
+    importer,
+    request("request-new", TECH_ROLE, {
+      source: { origin: "owner-attested", reference: "user, fixture request" },
+    }),
   );
-  await ledgerApply(ledger, "game-coordinator", SOURCE, "block-12", {
-    id: "request-sg12",
-    nextBoundary: "next review",
-    reason: "Waiting on the sidecar art",
-    requiredOwner: `${GAME}/art`,
-    state: "blocked",
-    type: "progress",
-  });
-  await publish(protocol, ledger, "sg-0006", "request-sg6");
-  await publish(protocol, ledger, "sg-0012", "request-sg12");
+  importRequest(store, importer, request("request-closed", TECH_ROLE));
+  store.transaction(() =>
+    store.append({
+      actor: { nativeId: CLAUDE_TECH, role: TECH_ROLE },
+      key: "request.closed:request-closed",
+      kind: "request.closed",
+      payload: { id: "request-closed", reason: "Carried by sg-0001", work: "sg-0001" },
+    }),
+  );
+  // Without WAL files, the read-only status read leaves the state root byte for byte.
+  store.db.exec("PRAGMA journal_mode = DELETE");
+  store.close();
   return { base, game, root, sha, stateRoot };
 }
 
@@ -432,11 +348,10 @@ function countingGit(calls: { cwd: string; command: string }[]): GitRunner {
 }
 
 function run(fixture: Fixture, options: Partial<StatusOptions> = {}): StatusReport {
-  return collectStatus(
-    { counters: sourceCounters(), git: systemGit({}), io: { env: {} } },
-    fixture.root,
-    { ...ALL, ...options },
-  );
+  return collectStatus({ git: systemGit({}), io: { env: {} } }, fixture.root, {
+    ...ALL,
+    ...options,
+  });
 }
 
 function item(report: StatusReport, id: string): StatusItem {
@@ -485,8 +400,7 @@ describe("status", () => {
       main: fixture.sha.sg14,
       originMain: fixture.sha.sg7,
     });
-    expect(report.coordinator.protocol).toEqual({ status: "available" });
-    expect(report.coordinator.ledger).toEqual({ status: "available" });
+    expect(report.coordinator).toEqual({ root: fixture.root, store: { status: "available" } });
   });
 
   it("derives each status by precedence", () => {
@@ -498,7 +412,7 @@ describe("status", () => {
       "sg-0003": "declined",
       "sg-0004": "cancelled",
       "sg-0005": "superseded",
-      "sg-0006": "in-progress",
+      "sg-0006": "approved",
       "sg-0007": "landed",
       "sg-0008": "done",
       "sg-0009": "deployed",
@@ -611,40 +525,29 @@ describe("status", () => {
     });
   });
 
-  it("joins protocol publications, ledger requests, blockers and pending questions", () => {
+  it("joins imported requests, blockers and pending questions", () => {
     const sg6 = item(report, "sg-0006");
-    expect(sg6.protocol).toEqual([
-      {
-        accepted: 0,
-        authorization: "reviewed",
-        beforeWork: "refused",
-        criteriaSatisfied: false,
-        guarded: true,
-        historicallyClosed: false,
-        joinedBy: ["id"],
-        ready: false,
-        receipts: 0,
-        retention: null,
-        revision: 1,
-        role: ROLE,
-        workers: [],
-      },
-    ]);
+    expect(sg6).not.toHaveProperty("protocol");
     expect(sg6.requests).toMatchObject([{ id: "request-sg6", question: "pending", state: "open" }]);
     expect(sg6).toMatchObject({ blocked: false, waitingOnUser: true });
     expect(item(report, "sg-0012")).toMatchObject({
       blocked: true,
       blocker: "Waiting on the sidecar art",
       owner: `${GAME}/art`,
+      status: "in-progress",
       waitingOnUser: false,
     });
-    expect(item(report, "sg-0012").protocol?.[0]?.beforeWork).toBe("admissible");
     expect(item(report, "sg-0001")).toMatchObject({
       blocked: false,
       blocker: null,
       owner: null,
-      protocol: [],
-      requests: [],
+      requests: [{ id: "request-closed", owner: TECH_ROLE, state: "closed" }],
+    });
+    expect(report.items.map((entry) => entry.id)).not.toContain("request-closed");
+    expect(item(report, "request-new")).toMatchObject({
+      owner: null,
+      requests: [{ id: "request-new", owner: TECH_ROLE, state: "open", userSource: true }],
+      status: "requested",
     });
     expect(item(report, "sg-0002").waitingOnUser).toBe(true);
   });
@@ -689,7 +592,7 @@ describe("status", () => {
   it("prints JSON by default and a digest per repository with --format markdown", async () => {
     const json = await cli(fixture);
     expect(json.code).toBe(EXIT_OK);
-    expect(JSON.parse(json.out)).toMatchObject({ schema: 1 });
+    expect(JSON.parse(json.out)).toMatchObject({ schema: 2 });
     const digest = await cli(fixture, "--format", "markdown");
     expect(digest.code).toBe(EXIT_OK);
     const section = digest.out.split(`## ${GAME}\n`)[1]!.split("\n## ")[0]!;
@@ -733,20 +636,16 @@ describe("status", () => {
     expect([...fingerprint(fixture.base), ...fingerprint(fixture.stateRoot)]).toEqual(before);
   });
 
-  it("reads each repository in a fixed number of git calls and the state once", () => {
+  it("reads each repository in a fixed number of git calls", () => {
     const measure = () => {
       const calls: { cwd: string; command: string }[] = [];
-      const counters = sourceCounters();
-      collectStatus({ counters, git: countingGit(calls), io: { env: {} } }, fixture.root, ALL);
-      return { calls, counters };
+      collectStatus({ git: countingGit(calls), io: { env: {} } }, fixture.root, ALL);
+      return { calls };
     };
     const first = measure();
     const logs = first.calls.filter((call) => call.command === "log");
     expect(logs).toHaveLength(6);
     expect(first.calls.filter((call) => call.command === "rev-parse")).toHaveLength(4);
-    expect(first.counters.ledgerReads).toBe(1);
-    expect([...first.counters.roleReads.values()].every((count) => count === 1)).toBe(true);
-    expect(first.counters.roleReads.has(ROLE)).toBe(true);
 
     const files: Record<string, string> = {};
     for (let index = 100; index < 400; index += 1) {
@@ -760,8 +659,6 @@ describe("status", () => {
     expect(second.calls.map((call) => call.command)).toEqual(
       first.calls.map((call) => call.command),
     );
-    expect(second.counters.ledgerReads).toBe(1);
-    expect([...second.counters.roleReads.values()].every((count) => count === 1)).toBe(true);
     const bulk = run(fixture, { scope: GAME, states: ["landed"] }).items.filter((entry) =>
       entry.id.startsWith("sg-01"),
     );

@@ -12,6 +12,26 @@ import { secretShape } from "./secrets.ts";
 import type { Actor, MessageLink } from "./types.ts";
 
 /** The runner's role in the registry, the sender of every message this module stores. */
+/** Runner progress types stored as events only, with no message. */
+export const QUIET_KINDS: ReadonlySet<string> = new Set([
+  "ci_pending",
+  "ci_running",
+  "deploy_pending",
+  "deploy_retry",
+  "gate_passed",
+  "gate_skipped",
+]);
+
+const CLEAN_LIMIT = 1800;
+
+/** Control characters as spaces, cut to 1800 characters. */
+export function clean(value: string): string {
+  // eslint-disable-next-line no-control-regex
+  return Array.from(value.replace(/[\x00-\x1f\x7f]/g, " "))
+    .slice(0, CLEAN_LIMIT)
+    .join("");
+}
+
 export const DELIVERY_KIT_ROLE = "delivery-kit";
 export const DELIVERY_KIT_ACTOR: Actor = { nativeId: null, role: DELIVERY_KIT_ROLE };
 

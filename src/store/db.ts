@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import type { Layout } from "../layout.ts";
-import { captureProtocolSelection } from "../protocol/selection.ts";
+import { stateRoot } from "../stateRoot.ts";
 import { type Projection, PROJECTIONS } from "./projections.ts";
 import {
   type Actor,
@@ -26,11 +26,11 @@ export const MEMORY = ":memory:";
 const BUSY_TIMEOUT_MS = 5000;
 
 /**
- * The store's directory: the active work protocol's state root, else the coordinator's `var/`
- * (unmanaged or pending management). The wake files live beside it under `wake/`.
+ * The store's directory: the configured state root, else the coordinator's `var/`. The wake files
+ * live beside it under `wake/`.
  */
 export function storeRoot(layout: Layout): string {
-  return captureProtocolSelection(layout).protocol?.stateRoot ?? layout.varDir;
+  return stateRoot(layout);
 }
 
 export function storePath(layout: Layout): string {

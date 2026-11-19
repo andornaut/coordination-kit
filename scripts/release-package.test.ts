@@ -56,7 +56,7 @@ describe("actual release package", () => {
     execFileSync("tar", ["-xzf", archive, "-C", extracted]);
     const pkg = join(extracted, "package");
     const readme = readFileSync(join(pkg, "README.md"), "utf8");
-    expect(readme).toMatch(/\]\((?:\.\/)?docs\/request-accounting\.md(?:#[^)]*)?\)/u);
+    expect(readme).toMatch(/\]\((?:\.\/)?docs\/store\.md(?:#[^)]*)?\)/u);
     for (const doc of packagedDocs(root)) {
       expect(readFileSync(join(pkg, doc))).toEqual(readFileSync(join(root, doc)));
     }
@@ -69,14 +69,10 @@ describe("actual release package", () => {
         "--input-type=module",
         "-e",
         `
-      const accounting = await import('@andornaut/coordination-kit/build/accounting');
-      const protocol = await import('@andornaut/coordination-kit/build/protocol');
+      const store = await import('@andornaut/coordination-kit/build/store');
       const review = await import('@andornaut/coordination-kit/build/review');
-      const required = ['ProtocolStore', 'WorkStore', 'ProtocolMessages', 'resolveProtocolLayout'];
-      if (!required.every(name => typeof protocol[name] === 'function')) process.exit(1);
-      if (typeof review.deliverScheduledReview !== 'function') process.exit(1);
-      if (!['LedgerStore', 'IntakeStore', 'projectOwnerBinding']
-        .every(name => typeof accounting[name] === 'function')) process.exit(1);
+      if (!['Store', 'storeRetire', 'closeRequest'].every(name => typeof store[name] === 'function')) process.exit(1);
+      if (typeof review.deliverReview !== 'function') process.exit(1);
     `,
       ],
       { cwd: pkg, stdio: "pipe" },

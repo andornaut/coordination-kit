@@ -18,16 +18,17 @@ import {
 import { join } from "node:path";
 
 import { writeDurable } from "../durable.ts";
-import { clean, QUIET_KINDS } from "../events.ts";
 import type { GameLayout, Layout } from "../layout.ts";
 import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
 import type { ReasonToken, SeamStatus } from "../review/outcome.ts";
 import { Store } from "./db.ts";
 import { REF } from "./messages.ts";
 import {
+  clean,
   DELIVERY_KIT_ACTOR,
   derivedId,
   type Notice,
+  QUIET_KINDS,
   reportsRecipient,
   storeNotice,
 } from "./notices.ts";

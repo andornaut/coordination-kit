@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
@@ -6,9 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { readWakeFile, wakeFilePath } from "../adapters/claude/wakeFile.ts";
 import type { Collected, CollectRequest } from "../adapters/types.ts";
 import { EXIT_OK, main } from "../cli.ts";
-import { type EventAdapter, eventsDir, flushEventsWith, recordEvent } from "../events.ts";
 import { gameLayout, type Layout } from "../layout.ts";
-import { storeCutover } from "../store/cutover.ts";
 import { Store } from "../store/db.ts";
 import { derivedId } from "../store/notices.ts";
 import { storeSend } from "../store/service.ts";
@@ -44,7 +42,7 @@ async function storeModeFixture(
     config.reports.workerParents = workerParents;
     writeFixtureJson(gameLayout(fixture.layout, GAME).configFile, config);
   }
-  await storeCutover({ env: SENDER, layout: fixture.layout }, {}, { apply: true });
+  await Promise.resolve();
   return fixture;
 }
 
@@ -177,12 +175,12 @@ describe("stored review brief", () => {
   });
 });
 
-describe("coordination events in store mode", () => {
+describe("coordination events", () => {
   it("go to the store as messages, never to the event outbox", async () => {
     const { layout } = await storeModeFixture();
     const game = gameLayout(layout, GAME);
     coordinationEmit(layout, game, "Archie")("review-stuck", "k-1", "needs reconciliation");
-    expect(existsSync(eventsDir(game))).toBe(false);
+    expect(existsSync(join(game.busDir, "events"))).toBe(false);
     expect(briefs(layout)).toEqual([
       expect.objectContaining({
         body: "Archie bus: needs reconciliation",
@@ -190,35 +188,6 @@ describe("coordination events in store mode", () => {
         to_role: "game-coordinator",
       }),
     ]);
-  });
-
-  it("go to the event outbox in legacy mode", () => {
-    const { layout } = storeFixture();
-    const game = gameLayout(layout, GAME);
-    coordinationEmit(layout, game, "Archie")("review-stuck", "k-1", "needs reconciliation");
-    expect(readdirSync(eventsDir(game)).filter((name) => name.endsWith(".json"))).toHaveLength(1);
-  });
-
-  it("leave events flush working for 6.0 runners after the cutover", async () => {
-    const { layout } = await storeModeFixture();
-    const game = gameLayout(layout, GAME);
-    recordEvent(game, { project: "Archie" }, "ci_success", "abc", "CI passed");
-    const deliver = vi.fn((_path: string, requestId: string) =>
-      Promise.resolve({ requestId, status: "accepted" as const }),
-    );
-    const adapter = {
-      ack: vi.fn(),
-      deliver,
-      harness: "claude",
-      inventory: vi.fn(),
-      status: vi.fn(),
-    };
-    const result = await flushEventsWith(
-      { claude: () => adapter as unknown as EventAdapter },
-      game,
-    );
-    expect(result).toMatchObject({ delivered: 1, held: 0, status: "delivered" });
-    expect(deliver).toHaveBeenCalledTimes(1);
   });
 });
 

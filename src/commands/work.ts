@@ -106,7 +106,7 @@ export const workReport: Handler = (io, root, args) => {
     io.err("coordination-kit: usage: coordination-kit work report [--root DIR]\n");
     return EXIT_USAGE;
   }
-  const report = reportWork(io, coordinatorRoot(io.env), root);
+  const report = reportWork(coordinatorRoot(io.env), root);
   io.out(`${JSON.stringify(report)}\n`);
   return report.coordinator.status === "unavailable" ? EXIT_INVALID : EXIT_OK;
 };

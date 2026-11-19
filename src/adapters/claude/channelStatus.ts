@@ -1,5 +1,5 @@
 // The channel server's status file: `<stateRoot>/channel/<conversation>.json` (or
-// `var/channel/` without an active work protocol), written once when `claude channel` starts. It
+// `var/channel/` without a configured state root), written once when `claude channel` starts. It
 // names the CLI version and dist digest the server loaded and its launch command, so
 // `harness doctor` can report what a session is running without contacting it.
 import { mkdirSync } from "node:fs";
@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 
 import { readJsonIfExists, writeJsonDurable } from "../../durable.ts";
 import type { Layout } from "../../layout.ts";
-import { captureProtocolSelection } from "../../protocol/selection.ts";
+import { stateRoot } from "../../stateRoot.ts";
 import { canonicalUuid } from "../shared/ids.ts";
 import { isRecord } from "../shared/pyjson.ts";
 
@@ -23,7 +23,7 @@ export interface ChannelStatus {
 }
 
 export function channelStatusPath(layout: Layout, conversation: string): string {
-  const root = captureProtocolSelection(layout).protocol?.stateRoot ?? layout.varDir;
+  const root = stateRoot(layout);
   return join(root, "channel", `${canonicalUuid(conversation)}.json`);
 }
 

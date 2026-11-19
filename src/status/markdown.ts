@@ -75,10 +75,11 @@ export function renderMarkdown(report: StatusReport): string {
     ...(filters.audit ? ["audit"] : []),
   ];
   out.push(`Filters: ${applied.join("; ")}.`, "");
-  const sources = [
-    sourceLine("Protocol", report.coordinator.protocol),
-    sourceLine("Ledger", report.coordinator.ledger),
-  ].filter((value) => value !== null);
+  const store =
+    report.coordinator.store.status === "absent"
+      ? null
+      : sourceLine("Store", report.coordinator.store);
+  const sources = store === null ? [] : [store];
   if (sources.length > 0) {
     out.push("Sources not fully read:", "", ...sources, "");
   }

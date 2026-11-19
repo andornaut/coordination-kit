@@ -1,5 +1,5 @@
-// Per-conversation wake files. `<stateRoot>/wake/<conversation>.json` (or `var/wake/` without an
-// active work protocol) holds `{"schema":1,"seq":N,"role":ROLE,"count":C}` with a monotonic `seq`.
+// Per-conversation wake files. `<stateRoot>/wake/<conversation>.json` (or `var/wake/` without a
+// configured state root) holds `{"schema":1,"seq":N,"role":ROLE,"count":C}` with a monotonic `seq`.
 // A writer replaces it atomically; the Claude channel announces each increase once. A wake carries
 // no payload: the recipient pulls its messages.
 import { mkdirSync } from "node:fs";
@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { readJsonIfExists, writeJsonDurable } from "../../durable.ts";
 import type { Layout } from "../../layout.ts";
 import { withLock } from "../../lock.ts";
-import { captureProtocolSelection } from "../../protocol/selection.ts";
+import { stateRoot } from "../../stateRoot.ts";
 import { canonicalUuid } from "../shared/ids.ts";
 import { isRecord } from "../shared/pyjson.ts";
 
@@ -21,9 +21,9 @@ export interface Wake {
 const KEYS = ["count", "role", "schema", "seq"];
 const ROLE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$/;
 
-/** The wake file of `conversation`: under the active protocol's state root, else under var/. */
+/** The wake file of `conversation`: under the state root. */
 export function wakeFilePath(layout: Layout, conversation: string): string {
-  const root = captureProtocolSelection(layout).protocol?.stateRoot ?? layout.varDir;
+  const root = stateRoot(layout);
   return join(root, "wake", `${canonicalUuid(conversation)}.json`);
 }
 
