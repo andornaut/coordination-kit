@@ -10,6 +10,7 @@ import { gameLayout, type Layout, loadLayout } from "../layout.ts";
 import { protocolRole } from "../protocol/core.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
+import type { WorkRecord } from "../store/work.ts";
 import { CONVENTION_FILE, parseFrontMatter } from "../work/files.ts";
 import {
   deploymentMarks,
@@ -37,7 +38,9 @@ import {
   type PublicationRecord,
   readLedger,
   readProtocol,
+  readStoreWork,
   type SourceCounters,
+  type StoreWorkSnapshot,
 } from "./sources.ts";
 
 export const STATUS_SCHEMA = 1;
@@ -140,6 +143,13 @@ export interface StatusItem {
   /** Null when the protocol state is unconfigured or unavailable. */
   readonly protocol: readonly ProtocolEntry[] | null;
   readonly requests: readonly RequestEntry[];
+  /** The item's store work record; null when the store is absent or holds none. */
+  readonly store: WorkRecord | null;
+  /** Which evidence set `landed` and `deployed`: store stage evidence is preferred to Git. */
+  readonly deliverySource: {
+    readonly landing: "store" | "git" | null;
+    readonly deployment: "store" | "git" | null;
+  };
   readonly delivery: {
     readonly landing: Landing | null;
     readonly onOrigin: boolean | null;
@@ -160,6 +170,7 @@ export interface StatusReport {
     readonly root: string;
     readonly protocol: ProtocolSnapshot["state"];
     readonly ledger: LedgerSnapshot["state"];
+    readonly store: StoreWorkSnapshot["state"];
   };
   readonly filters: StatusOptions;
   readonly repositories: readonly RepositoryStatus[];
@@ -172,7 +183,7 @@ export interface StatusContext {
   readonly counters: SourceCounters;
 }
 
-interface Repository {
+export interface Repository {
   readonly name: string;
   readonly kind: RepositoryKind;
   readonly path: string;
@@ -201,7 +212,11 @@ function configPath(layout: Layout, role: string): string {
 }
 
 /** The distinct repositories behind the registry's roles, resolved through git and deduplicated. */
-function repositories(context: StatusContext, layout: Layout, registry: Registry): Repository[] {
+export function repositories(
+  context: Pick<StatusContext, "git">,
+  layout: Layout,
+  registry: Registry,
+): Repository[] {
   const known = new Map<string, { name: string; kind: RepositoryKind }>();
   for (const [id, entry] of Object.entries(layout.config.games)) {
     const path = real(resolve(layout.root, entry.path));
@@ -345,6 +360,7 @@ function readRepository(
   repository: Repository,
   protocol: ProtocolSnapshot,
   ledger: LedgerSnapshot,
+  storeWork: StoreWorkSnapshot,
   verifySince: string,
 ): RepositoryItems {
   const channel: DeploymentChannel =
@@ -485,21 +501,31 @@ function readRepository(
             tag: mark.point.tag,
             via: mark.point.via,
           };
+    const record = storeWork.records.get(`${repository.name}\n${work.id}`) ?? null;
+    const storeLanded = record?.evidence.some((item) => item.stage === "merged") === true;
+    const storeDeployed =
+      record?.evidence.some(
+        (item) =>
+          item.stage === "deployed" || (channel === "release-tag" && item.stage === "published"),
+      ) === true;
     const derived = deriveWorkFile({
       channel,
-      deployed: deployed !== null,
+      deployed: storeDeployed || deployed !== null,
       doneAt: doneAt.get(work.file.path)?.at ?? work.file.at,
       frontMatter: work.status,
-      landed: land !== null,
+      landed: storeLanded || land !== null,
       started:
         joined.length > 0 ||
+        record?.startedAt != null ||
         requests.some((request) => ACTIVE_LEDGER_STATES.has(request.state as never)),
       supersededBy: supersededBy.get(work.id) ?? null,
       verifySince,
     });
     const block = CLOSED.has(derived.status)
       ? { blocked: false, blocker: null, owner: null }
-      : blockage(requests, joined);
+      : record?.block != null
+        ? { blocked: true, blocker: record.block.reason, owner: record.block.owner }
+        : blockage(requests, joined);
     items.push({
       ...block,
       delivery: {
@@ -508,12 +534,17 @@ function readRepository(
         onOrigin: land === null || onOrigin === null ? null : onOrigin.has(land.sha),
       },
       deliveryEvidence: derived.deliveryEvidence,
+      deliverySource: {
+        deployment: storeDeployed ? "store" : deployed === null ? null : "git",
+        landing: storeLanded ? "store" : land === null ? null : "git",
+      },
       deliveryVerified: derived.deliveryVerified,
       id: work.id,
       latestEvidenceAt: latest([
         work.file.at,
         land?.at,
         deployed?.at,
+        record?.updatedAt,
         ...requests.map((request) => request.updatedAt),
       ]),
       protocol:
@@ -524,6 +555,7 @@ function readRepository(
       repository: repository.name,
       requests,
       status: derived.status,
+      store: record,
       title: work.title,
       userOriginated:
         /^user\b/i.test(work.approved ?? "") || requests.some((request) => request.userSource),
@@ -595,6 +627,7 @@ function requestedItems(
       ...block,
       delivery: { deployed: null, landing: null, onOrigin: null },
       deliveryEvidence: null,
+      deliverySource: { deployment: null, landing: null },
       deliveryVerified: null,
       id: request.id,
       latestEvidenceAt: latest([request.updatedAt]),
@@ -603,6 +636,7 @@ function requestedItems(
       repository,
       requests: [entry],
       status: derived.status,
+      store: null,
       title: request.summary,
       userOriginated: entry.userSource,
       waitingOnUser: entry.question === "pending",
@@ -642,6 +676,7 @@ function ownedBy(role: string, item: StatusItem): boolean {
   return (
     (item.protocol ?? []).some((entry) => entry.role === namespace) ||
     item.requests.some((request) => request.owner === role) ||
+    item.store?.owner === role ||
     (area !== null && item.workFile?.design === area)
   );
 }
@@ -658,9 +693,12 @@ export function collectStatus(
   const selected = selectScope(layout, registry, repos, options.scope);
   const ledger = readLedger(context.io, layout, context.counters);
   const protocol = readProtocol(layout, ledger, context.counters);
+  const storeWork = readStoreWork(layout);
   const reports = repos
     .filter((repo) => selected.names.has(repo.name))
-    .map((repo) => readRepository(context, layout, repo, protocol, ledger, options.verifySince));
+    .map((repo) =>
+      readRepository(context, layout, repo, protocol, ledger, storeWork, options.verifySince),
+    );
   const linked = new Set(reports.flatMap((report) => [...report.linked]));
   const coordinator = repos.find((repo) => repo.kind === "coordinator")?.name ?? null;
   const repositoryOf = (role: string): string | null => {
@@ -697,7 +735,12 @@ export function collectStatus(
       (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
   );
   return {
-    coordinator: { ledger: ledger.state, protocol: protocol.state, root: layout.root },
+    coordinator: {
+      ledger: ledger.state,
+      protocol: protocol.state,
+      root: layout.root,
+      store: storeWork.state,
+    },
     filters: options,
     items,
     repositories: reports.map((report) => report.status),
@@ -709,6 +752,7 @@ export function collectStatus(
 export function incomplete(report: StatusReport): boolean {
   return (
     report.coordinator.ledger.status === "unavailable" ||
+    report.coordinator.store.status === "unavailable" ||
     report.coordinator.protocol.status === "unavailable" ||
     report.coordinator.protocol.status === "partial" ||
     report.repositories.some(

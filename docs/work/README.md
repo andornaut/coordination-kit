@@ -1,7 +1,8 @@
 # Work items
 
 Each approved task is one file, `docs/work/<id>.md`. It records scope and milestones; live
-progress (claims, blocks, receipts and acceptance) stays in the work protocol state root. The
+progress (start, blocks, stage evidence and finish) is recorded in the coordination store with the
+`work` verbs. The
 [design index](../design/README.md) lists the work items of each area.
 
 | Front matter | Content                                                                                                                   |
@@ -13,9 +14,11 @@ progress (claims, blocks, receipts and acceptance) stays in the work protocol st
 | `design`     | The design area in `docs/design/`.                                                                                        |
 | `related`    | A list of related work IDs.                                                                                               |
 | `supersedes` | The ID of the item this one replaces; omitted otherwise.                                                                  |
+| `owner`      | The registry role that owns the item, when the repository's roles leave it ambiguous; omitted otherwise.                  |
 
 The sections are Scope, Criteria, Decisions and Outcome. Decisions and Outcome state what was
-decided or delivered, and why, in a line or two each.
+decided or delivered, and why, in a line or two each. A decision line is
+`- D<n> (BY, YYYY-MM-DD[; answers Q][; supersedes Dk]): text`.
 
 - Every user request gets a work file. A request not yet approved is a `proposed` stub; a refused
   one becomes `declined`, and an approved one `approved`.

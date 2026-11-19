@@ -8,6 +8,7 @@ import {
   LEDGER_REPORT_OPTIONS,
 } from "./accounting.ts";
 import { DOCTOR_OPTIONS } from "./doctor.ts";
+import { GRAPH_INDEX_OPTIONS, GRAPH_OPTIONS, GRAPH_WHY_OPTIONS } from "./graph.ts";
 import {
   MESSAGE_DISPATCH_OPTIONS,
   MESSAGE_RECONCILE_OPTIONS,
@@ -57,7 +58,15 @@ import {
   STORE_REBUILD_OPTIONS,
 } from "./store.ts";
 import { type CommandSpec, formSynopsis, usageText } from "./usage.ts";
-import { WORK_OPTIONS } from "./work.ts";
+import {
+  WORK_BLOCK_OPTIONS,
+  WORK_CHECK_OPTIONS,
+  WORK_EVIDENCE_OPTIONS,
+  WORK_OPTIONS,
+  WORK_READ_OPTIONS,
+  WORK_START_OPTIONS,
+  WORK_WRITE_OPTIONS,
+} from "./work.ts";
 export type { CommandSpec, Options } from "./usage.ts";
 export const BINARY = "coordination-kit";
 /** The placeholder each string option shows in help. */
@@ -107,6 +116,7 @@ const VALUES: Readonly<Record<string, string>> = {
 /** Help groups, in help order. */
 export const GROUPS = {
   decisions: "questions, holds and decisions (owner writes fenced by the registry)",
+  graph: "decision graph",
   harness: "harness (claude, codex)",
   inbox: "inbox (recipient)",
   ledger: "request accounting",
@@ -171,6 +181,26 @@ export const SPECS = {
     options: EVENTS_INGEST_OPTIONS,
     summary:
       "ingest the game's runner event log into the store from its cursor; prints one typed JSON result line",
+  },
+  graph: {
+    forms: [["work?", "depth?", "format?"]],
+    group: "graph",
+    options: GRAPH_OPTIONS,
+    summary: "print the decision graph, or one work item's neighbourhood, as JSON or DOT",
+    values: { depth: "N", format: "json|dot", work: "[REPOSITORY:]WORK_ID" },
+  },
+  "graph index": {
+    forms: [[]],
+    group: "graph",
+    options: GRAPH_INDEX_OPTIONS,
+    summary: "rebuild the derived edges index from the registered repositories and the store",
+  },
+  "graph why": {
+    forms: [["decision"]],
+    group: "graph",
+    options: GRAPH_WHY_OPTIONS,
+    summary: "print a decision's supersedes chain with each item's approval reference",
+    values: { decision: "[REPOSITORY:]WORK_ID/Dn" },
   },
   "harness doctor": {
     forms: [["game", "role?"], ["role"]],
@@ -626,10 +656,15 @@ export const SPECS = {
     summary: "list sends, closes and retentions recorded after a time, for rollback re-recording",
   },
   "store import": {
-    forms: [["from-legacy", "dry-run?", "native-id?", "worker?"]],
+    forms: [
+      ["from-legacy", "dry-run?", "native-id?", "worker?"],
+      ["approval-ledger", "dry-run?", "native-id?", "worker?"],
+    ],
     group: "store",
     options: STORE_IMPORT_OPTIONS,
-    summary: "import the legacy message stores with their original IDs; --dry-run writes nothing",
+    summary:
+      "import the legacy message stores, or map the approval ledger to work records; --dry-run writes nothing",
+    values: { "approval-ledger": "FILE" },
   },
   "store rebuild": {
     forms: [[]],
@@ -637,18 +672,72 @@ export const SPECS = {
     options: STORE_REBUILD_OPTIONS,
     summary: "verify the event hash chain and recreate every projection from the events",
   },
-  "work check": {
-    forms: [[]],
+  "work block": {
+    forms: [["ID", "reason", "owner?", "native-id?", "worker?"]],
     group: "work",
-    options: WORK_OPTIONS,
+    options: WORK_BLOCK_OPTIONS,
+    summary: "record your work item blocked, with a reason and the role that can clear it",
+  },
+  "work check": {
+    forms: [["decisions?"]],
+    group: "work",
+    options: WORK_CHECK_OPTIONS,
     summary:
       "validate docs/design index tables and docs/work front matter in the --root repository",
+  },
+  "work evidence": {
+    forms: [["ID", "stage", "sha", "ref?", "native-id?", "worker?"]],
+    group: "work",
+    options: WORK_EVIDENCE_OPTIONS,
+    summary: "record a stage commit of your work item, with an optional reference",
+    values: {
+      ref: "REF",
+      sha: "SHA",
+      stage: "implemented|merged|verified|published|deployed",
+    },
+  },
+  "work finish": {
+    forms: [["ID", "native-id?", "worker?"]],
+    group: "work",
+    options: WORK_WRITE_OPTIONS,
+    summary: "record your work item finished; its work file must be done on main",
+  },
+  "work history": {
+    forms: [["ID"]],
+    group: "work",
+    options: WORK_READ_OPTIONS,
+    summary: "print a work item's store events in order",
+  },
+  "work ready": {
+    forms: [["ID", "native-id?", "worker?"]],
+    group: "work",
+    options: WORK_WRITE_OPTIONS,
+    summary: "record your started work item ready for integration",
   },
   "work report": {
     forms: [[]],
     group: "work",
     options: WORK_OPTIONS,
     summary: "print each work item's milestone, with live protocol state when a coordinator is set",
+  },
+  "work show": {
+    forms: [["ID"]],
+    group: "work",
+    options: WORK_READ_OPTIONS,
+    summary: "print a work item's owner, work-file status, store record and covering holds",
+  },
+  "work start": {
+    forms: [["ID", "parent?", "native-id?", "worker?"]],
+    group: "work",
+    options: WORK_START_OPTIONS,
+    summary: "start your work item: approved on main and not held; --parent links a parent item",
+    values: { parent: "REPOSITORY:WORK_ID" },
+  },
+  "work unblock": {
+    forms: [["ID", "native-id?", "worker?"]],
+    group: "work",
+    options: WORK_WRITE_OPTIONS,
+    summary: "clear your work item's open block",
   },
 } as const satisfies Readonly<Record<string, GroupedSpec>>;
 export type Command = keyof typeof SPECS;

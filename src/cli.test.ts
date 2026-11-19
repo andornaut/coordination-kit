@@ -41,7 +41,7 @@ describe("dispatcher", () => {
     expect(help.out).not.toContain("harness doctor [");
     expect(help.out).toContain("[--parent ROLE]");
     expect(help.out).toContain("message status --recipient ROLE [--include-body]");
-    expect(help.out).toContain("work check\n");
+    expect(help.out).toContain("work check [--decisions]\n");
     expect(help.out).not.toContain("check-config");
     expect(await run(root, "scheduled-once")).toMatchObject({ code: EXIT_USAGE });
     expect(await run(root, "run", "--game", "archies-dog-walks")).toMatchObject({

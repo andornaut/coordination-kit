@@ -11,9 +11,15 @@ import type { Projection } from "./projections.ts";
 import { secretShape } from "./secrets.ts";
 import { type Actor, type Json, type JsonObject, type StoredEvent, StoreError } from "./types.ts";
 import type { WakeGuard } from "./wake.ts";
+import { type CoveringHold, type HoldLookup, holdOpen } from "./work.ts";
 
-/** Question and hold IDs: role-scoped `q-<role>-<n>` when generated, any safe token when given. */
-export const RECORD_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
+/**
+ * Question and hold IDs: role-scoped `q-<role>-<n>` when generated, else lower-case letters, digits
+ * and `-`, so a decision line's `answers` names any question.
+ */
+export const RECORD_ID = /^[a-z0-9][a-z0-9-]{0,127}$/;
+/** A hold ID as `hold release` accepts it, including imported `approval-ledger:<id>` holds. */
+const HOLD_REF = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/;
 const DECISION_REF = /^D([1-9][0-9]{0,5})$/;
 /** A registry role key, as `messages.ts` checks it; repeated so this projection imports no writer. */
 const ROLE = /^[a-z0-9][a-z0-9-]{0,63}(?:\/[a-z0-9][a-z0-9-]{0,63})?$/;
@@ -65,9 +71,15 @@ export interface DecisionRow {
 
 export interface HoldView {
   readonly id: string;
-  readonly role: string;
-  /** `work:<id>`, `role` (the owner itself) or `game:<id>`. */
+  /** The owner; null for an imported hold whose ledger names no registered owner. */
+  readonly role: string | null;
+  /**
+   * `work:<id>`, `role` (the owner itself) or `game:<id>`. An imported hold is `work:` and its
+   * `<repository>:<id>` items joined by `,`.
+   */
   readonly scope: string;
+  /** `approval-ledger` for an imported hold, else null. */
+  readonly source: string | null;
   readonly reason: string;
   readonly state: HoldState;
   readonly setAt: string;
@@ -118,8 +130,11 @@ CREATE TABLE IF NOT EXISTS decisions (
 CREATE INDEX IF NOT EXISTS decisions_role ON decisions (role, seq);
 CREATE TABLE IF NOT EXISTS holds (
   id TEXT PRIMARY KEY,
-  role TEXT NOT NULL,
+  role TEXT,
   scope TEXT NOT NULL,
+  work TEXT NOT NULL DEFAULT '[]',
+  source TEXT,
+  ledger_state TEXT,
   reason TEXT NOT NULL,
   state TEXT NOT NULL CHECK (state IN ('active', 'released')),
   set_at TEXT NOT NULL,
@@ -177,10 +192,51 @@ const cancelled = (db: DatabaseSync, event: StoredEvent): void => {
 
 const holdSet = (db: DatabaseSync, event: StoredEvent): void => {
   const p = event.payload;
+  const scope = text(p, "scope")!;
+  const work = scope.startsWith("work:") ? [{ id: scope.slice(5), repository: null }] : [];
   db.prepare(
-    `INSERT INTO holds (id, role, scope, reason, state, set_at, set_seq)
-     VALUES (?, ?, ?, ?, 'active', ?, ?)`,
-  ).run(text(p, "id"), text(p, "role"), text(p, "scope"), text(p, "reason"), event.at, event.seq);
+    `INSERT INTO holds (id, role, scope, work, reason, state, set_at, set_seq)
+     VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
+  ).run(
+    text(p, "id"),
+    text(p, "role"),
+    scope,
+    JSON.stringify(work),
+    text(p, "reason"),
+    event.at,
+    event.seq,
+  );
+};
+
+/**
+ * An approval-ledger hold (`store import --approval-ledger`): its recorded owner, or none, and the
+ * work items it names. An open ledger state is `active`; a closed one is history, `released` with
+ * no release time. Import never releases a hold; only its owner's `hold release` does.
+ */
+const holdImported = (db: DatabaseSync, event: StoredEvent): void => {
+  const p = event.payload;
+  const work = (Array.isArray(p.work) ? (p.work as readonly JsonObject[]) : []).flatMap((item) =>
+    typeof item.repository === "string" && typeof item.id === "string"
+      ? [{ id: item.id, repository: item.repository }]
+      : [],
+  );
+  const state = text(p, "state");
+  db.prepare(
+    `INSERT OR IGNORE INTO holds (id, role, scope, work, source, ledger_state, reason, state, set_at,
+       set_seq)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    text(p, "id") ?? event.key,
+    text(p, "owner"),
+    `work:${work.map((item) => `${item.repository}:${item.id}`).join(",")}`,
+    JSON.stringify(work),
+    text(p, "source"),
+    state,
+    text(p, "reason") ?? "",
+    holdOpen(state) ? "active" : "released",
+    event.at,
+    event.seq,
+  );
 };
 
 const holdReleased = (db: DatabaseSync, event: StoredEvent): void => {
@@ -193,6 +249,7 @@ const holdReleased = (db: DatabaseSync, event: StoredEvent): void => {
 /** Questions, their decisions and holds. */
 export const QUESTIONS_PROJECTION: Projection = {
   apply: {
+    "hold.imported": holdImported,
     "hold.released": holdReleased,
     "hold.set": holdSet,
     "question.answered": answered,
@@ -506,7 +563,7 @@ export function cancelQuestion(
 
 /** Questions in opening order, optionally of one owner and in the given states. */
 export function listQuestions(
-  store: Store,
+  store: Pick<Store, "db">,
   filter: { readonly role?: string; readonly states?: readonly QuestionState[] } = {},
 ): QuestionView[] {
   const states = filter.states ?? QUESTION_STATES;
@@ -522,7 +579,7 @@ export function listQuestions(
 
 /** Decision records in recording order, optionally of one work item and one owning role. */
 export function listDecisions(
-  store: Store,
+  store: Pick<Store, "db">,
   filter: { readonly work?: string; readonly role?: string } = {},
 ): DecisionRow[] {
   return (
@@ -562,9 +619,10 @@ function holdView(row: Row): HoldView {
     id: row.id as string,
     reason: row.reason as string,
     releasedAt: (row.released_at as string | null) ?? null,
-    role: row.role as string,
+    role: (row.role as string | null) ?? null,
     scope: row.scope as string,
     setAt: row.set_at as string,
+    source: (row.source as string | null) ?? null,
     state: row.state as HoldState,
   };
 }
@@ -612,7 +670,7 @@ export function setHold(
 /** Release the caller's own hold. Only its owner can; repeating a release is a no-op. */
 export function releaseHold(store: Store, actor: Actor, id: string): HoldResult {
   const role = ownerOf(actor);
-  ensure(RECORD_ID.test(id), "invalid-id");
+  ensure(HOLD_REF.test(id), "invalid-id");
   return store.transaction(() => {
     const row = holdRow(store, id);
     ensure(row !== undefined, "missing");
@@ -662,3 +720,29 @@ export function questionHoldGuard(store: Store, role: string): WakeGuard {
   }
   return { status: "clear" };
 }
+
+/**
+ * The `work start` and `work show` hold port: active holds that cover the item. A `work:` hold
+ * covers it by ID (and repository, for an imported hold), a `role` hold when its owner is the
+ * item's owner, and a `game:` hold when the item's repository is that game.
+ */
+export const storeHolds: HoldLookup = (store, ref, cover) =>
+  (store.db.prepare("SELECT * FROM holds WHERE state = 'active' ORDER BY set_seq").all() as Row[])
+    .filter((row) => {
+      const scope = row.scope as string;
+      if (scope === "role") {
+        return cover?.owner != null && row.role === cover.owner;
+      }
+      if (scope.startsWith("game:")) {
+        return cover?.game != null && scope === `game:${cover.game}`;
+      }
+      return (JSON.parse(row.work as string) as { id: string; repository: string | null }[]).some(
+        (item) =>
+          item.id === ref.id && (item.repository === null || item.repository === ref.repository),
+      );
+    })
+    .map((row): CoveringHold => ({
+      id: row.id as string,
+      owner: (row.role as string | null) ?? null,
+      reason: row.reason as string,
+    }));

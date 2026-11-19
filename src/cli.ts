@@ -13,6 +13,7 @@ import {
 } from "./commands/accounting.ts";
 import { channel } from "./commands/channel.ts";
 import { harnessDoctor } from "./commands/doctor.ts";
+import { graph, graphIndex, graphWhy } from "./commands/graph.ts";
 import { harnessSelect } from "./commands/harness.ts";
 import { inboxAck, inboxSnapshot } from "./commands/inbox.ts";
 import {
@@ -80,7 +81,18 @@ import {
   storeImportCommand,
   storeRebuildCommand,
 } from "./commands/store.ts";
-import { workCheck, workReport } from "./commands/work.ts";
+import {
+  workBlock,
+  workCheck,
+  workEvidence,
+  workFinish,
+  workHistory,
+  workReady,
+  workReport,
+  workShow,
+  workStart,
+  workUnblock,
+} from "./commands/work.ts";
 import { coordinatorRoot, EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "./io.ts";
 import { cliIdentity, VERSION } from "./version.ts";
 export { EXIT_INVALID, EXIT_OK, EXIT_REFUSED, EXIT_USAGE, type Handler, type Io } from "./io.ts";
@@ -162,6 +174,17 @@ export const COMMANDS = [
   "status",
   "work check",
   "work report",
+  "work start",
+  "work evidence",
+  "work block",
+  "work unblock",
+  "work ready",
+  "work finish",
+  "work show",
+  "work history",
+  "graph",
+  "graph why",
+  "graph index",
 ] as const satisfies readonly Command[];
 export type { Command };
 const GROUP_ORDER = [
@@ -176,6 +199,7 @@ const GROUP_ORDER = [
   "protocol",
   "status",
   "work",
+  "graph",
 ] as const;
 /** Help text, generated from each command's parser options and grouped by audience. */
 export const USAGE = [
@@ -197,8 +221,8 @@ export const USAGE = [
   "  --version --json  print {schema, version, distSha256} as one JSON line",
   "",
   "game-coordinator is --root (in any position, once), else COORDINATION_KIT_ROOT, else",
-  "DELIVERY_KIT_ROOT, else the working directory. For work check and work report, --root names",
-  "the repository (default: the working directory) and the coordinator root comes only from",
+  "DELIVERY_KIT_ROOT, else the working directory. For the work commands, --root names the",
+  "repository (default: the working directory) and the coordinator root comes only from",
   "COORDINATION_KIT_ROOT or DELIVERY_KIT_ROOT.",
   "",
 ].join("\n");
@@ -212,6 +236,9 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "decision list": decisionList,
   "events flush": eventsFlush,
   "events ingest": eventsIngest,
+  graph,
+  "graph index": graphIndex,
+  "graph why": graphWhy,
   "harness doctor": harnessDoctor,
   "harness ready": harnessReady,
   "harness select": harnessSelect,
@@ -280,8 +307,16 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "store export": storeExportCommand,
   "store import": storeImportCommand,
   "store rebuild": storeRebuildCommand,
+  "work block": workBlock,
   "work check": workCheck,
+  "work evidence": workEvidence,
+  "work finish": workFinish,
+  "work history": workHistory,
+  "work ready": workReady,
   "work report": workReport,
+  "work show": workShow,
+  "work start": workStart,
+  "work unblock": workUnblock,
 };
 /** Take every `--root DIR` out of the arguments; at most one is allowed. */
 function extractRoot(args: string[]): {

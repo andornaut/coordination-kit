@@ -1,6 +1,6 @@
 // @andornaut/coordination-kit/build/store: the SQLite coordination store, its message lifecycle,
-// wakes, the registry writer fence, the legacy import, runner event ingest, the cutover, and
-// questions, holds and decisions.
+// wakes, the registry writer fence, the legacy import, runner event ingest, the cutover, work
+// records, and questions, holds and decisions.
 export { COORDINATOR_ROLE, type CutoverOutput, storeCutover } from "./store/cutover.ts";
 export type { AppendResult, VerifyResult } from "./store/db.ts";
 export {
@@ -110,6 +110,7 @@ export {
   releaseHold,
   requireOwnQuestion,
   setHold,
+  storeHolds,
 } from "./store/questions.ts";
 export {
   type AnswerOutput,
@@ -168,3 +169,27 @@ export {
   wakeState,
   type WakeStatus,
 } from "./store/wake.ts";
+export {
+  blockWork,
+  type CoveringHold,
+  finishWork,
+  type HoldCover,
+  type HoldLookup,
+  importedHolds,
+  readWorkRecord,
+  readWorkRecords,
+  readyWork,
+  recordEvidence,
+  retainWorkItem,
+  startWork,
+  unblockWork,
+  WORK_KINDS,
+  WORK_PROJECTION,
+  WORK_STAGES,
+  type WorkEvidence,
+  workHistory,
+  type WorkRecord,
+  type WorkRef,
+  type WorkStage,
+  type WorkState,
+} from "./store/work.ts";

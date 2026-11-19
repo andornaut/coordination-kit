@@ -5,13 +5,34 @@ Moving from coordination-kit 2.0 to 2.1, from 1.3 to 2.0, from 1.1 to 1.2, and f
 
 ## From 2.0
 
-2.1 adds questions, holds and decisions to the [coordination store](store.md#questions-holds-and-decisions).
-The store file, its schema version and every 2.0 event are unchanged; a 2.0 store gets the new
-`questions`, `decisions` and `holds` tables when 2.1 first opens it.
+2.1 adds [work records](store.md#work-records), the [decision graph](store.md#decision-graph), the
+[approval-ledger import](store.md#approval-ledger-import) and
+[questions, holds and decisions](store.md#questions-holds-and-decisions). The store file, its
+schema version and every 2.0 event are unchanged; message and runner behaviour is unchanged apart
+from the wake guard below.
 
-- New verbs: `question open|answer|cancel|list`, `hold set|release|list` and `decision list`.
+- Work verbs: `work start`, `work evidence`, `work block`, `work unblock`, `work ready`,
+  `work finish`, `work show`, `work history`, `graph`, `graph why`, `graph index`, and
+  `store import --approval-ledger FILE`.
+- Store: the `work`, `work_evidence`, `work_retained`, `questions`, `decisions` and `holds`
+  projections are added when a 2.0 store is first opened by 2.1, filled from existing events; the schema version stays 1. `graph index`
+  adds derived tables that are safe to delete.
+- Work files: `owner` is a new optional front-matter field and Decisions sections may carry
+  decision lines. A 2.0 `work check` reports `owner` as `field-unknown`: release 2.1, bump every
+  repository's pin, then add the field.
+- `status`: adds `coordinator.store`, and `store` and `deliverySource` per item. Store stage
+  evidence is preferred to Git for `landed` and `deployed`, an open store block sets `blocked`, and
+  an unavailable store exits 1. Existing fields keep their meaning.
+- Approval ledger: freeze `approval-ledger.json`, run `store import --approval-ledger FILE
+--dry-run` and check that the outcome counts sum to the entry count, then import as
+  game-coordinator. Owners stub the listed entries without a work file. Imported holds are never
+  released by import.
+- Question verbs: `question open|answer|cancel|list`, `hold set|release|list` and `decision list`.
   Writes go through the registry fence, and only the owning role answers, cancels or releases its
   own records.
+- Holds: `work start` refuses an item that an active hold covers (its `work:` scope, its owner's
+  `role` hold or its `game:` hold), including imported approval-ledger holds, which keep their
+  recorded owner.
 - Decisions: `question answer` records a typed decision and appends its `- D<n> (...)` line to
   `docs/work/<id>.md` in the main checkout of the caller's repository, left unstaged. Commit it
   with the role's next commit.

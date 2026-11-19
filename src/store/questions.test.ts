@@ -213,6 +213,54 @@ describe("holds", () => {
   });
 });
 
+describe("imported holds", () => {
+  it("projects hold.imported with its recorded owner and never releases it by import", () => {
+    const store = memory();
+    const imported = (id: string, owner: string | null, state: string | null) =>
+      store.append({
+        actor: COORDINATOR_ACTOR,
+        key: `hold.imported:approval-ledger:${id}`,
+        kind: "hold.imported",
+        payload: {
+          entries: ["entry-1"],
+          id: `approval-ledger:${id}`,
+          owner,
+          reason: "Imported hold",
+          source: "approval-ledger",
+          state,
+          work: [{ id: "ag-0001", repository: "archies-dog-walks" }],
+        },
+      });
+    imported("open", TECH_ROLE, "preserved");
+    imported("orphan", null, null);
+    imported("closed", TECH_ROLE, "released");
+    imported("open", "game-coordinator", "released");
+    expect(listHolds(store)).toEqual([
+      expect.objectContaining({
+        id: "approval-ledger:open",
+        role: TECH_ROLE,
+        scope: "work:archies-dog-walks:ag-0001",
+        source: "approval-ledger",
+        state: "active",
+      }),
+      expect.objectContaining({ id: "approval-ledger:orphan", role: null, state: "active" }),
+      expect.objectContaining({
+        id: "approval-ledger:closed",
+        releasedAt: null,
+        state: "released",
+      }),
+    ]);
+    expect(codeOf(() => releaseHold(store, COORDINATOR_ACTOR, "approval-ledger:open"))).toBe(
+      "not-owner",
+    );
+    expect(releaseHold(store, TECH_ACTOR, "approval-ledger:open").hold.state).toBe("released");
+    store.rebuild();
+    expect(listHolds(store, { states: ["active"] }).map((hold) => hold.id)).toEqual([
+      "approval-ledger:orphan",
+    ]);
+  });
+});
+
 describe("wake guard", () => {
   it("withholds wakes while a question is pending or a role hold is active, then wakes", async () => {
     const { layout } = storeFixture();

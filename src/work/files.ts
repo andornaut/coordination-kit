@@ -18,7 +18,7 @@ export const STATUSES = [
 ] as const;
 export type WorkStatus = (typeof STATUSES)[number];
 export const REQUIRED_FIELDS = ["id", "title", "status", "approved", "design"] as const;
-export const OPTIONAL_FIELDS = ["related", "supersedes"] as const;
+export const OPTIONAL_FIELDS = ["related", "supersedes", "owner"] as const;
 
 export type FrontMatterValue = string | readonly string[];
 
