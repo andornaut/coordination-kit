@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
 import { readRegistry } from "../registry/store.ts";
+import { Store } from "../store/db.ts";
 import { checkpointPath } from "../store/sessionService.ts";
 import { COORDINATOR, GAMEPLAY, storeFixture, TECH, TECH_CODEX } from "../store/testStore.ts";
 
@@ -269,7 +270,7 @@ describe("handoff", () => {
   });
 
   it("wakes the target through its handoff hold once harness select binds it", async () => {
-    const { coordinator, kit, select } = setup();
+    const { coordinator, kit, layout, select } = setup();
     await coordinator("handoff", "open", "--scope", KIT, "--to", "codex");
     await kit("handoff", "ready");
     await coordinator("handoff", "state", "prepared", "--id", "h-1");
@@ -280,6 +281,17 @@ describe("handoff", () => {
     await select(KIT);
     const target = await coordinator("msg", "send", "--to", KIT, "--body", "Run complete.");
     expect(target.code, target.err).toBe(EXIT_OK);
-    expect((target.json as { wake?: { status?: string } }).wake?.status).not.toBe("guarded");
+    // The store guard passes it: the wake is claimed for the Codex target (the fixture has no
+    // control socket, so the native attempt itself does not succeed).
+    const store = Store.forLayout(layout);
+    try {
+      const last = store.db
+        .prepare("SELECT harness, conversation, detail FROM wakes WHERE role = ? ORDER BY seq DESC")
+        .get(KIT) as { harness: string; conversation: string | null; detail: string | null };
+      expect(last).toMatchObject({ conversation: KIT_CODEX, harness: "codex" });
+      expect(last.detail).not.toBe("recipient-hold-active");
+    } finally {
+      store.close();
+    }
   });
 });
