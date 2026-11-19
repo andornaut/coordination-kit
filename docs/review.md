@@ -87,7 +87,8 @@ it, a timeout or unparsable output as no delivery claimed, with the `cli-error` 
 | ----------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `route-unavailable`     | The review route, its worker parents or an endpoint harness is invalid; the route owner must fix it.            |
 | `recipient-unavailable` | The recipient has no session, conversation, listing, socket or native metadata, or refused the send.            |
-| `recipient-busy`        | The recipient's session is blocked or mid-turn, its channel has not claimed a spooled event, or a lock is held. |
+| `recipient-busy`        | The recipient's session is blocked or mid-turn, or a lock is held.                                              |
+| `in-flight`             | A spooled entry is waiting for the recipient's channel to accept it; the next pass completes it.                |
 | `question-pending`      | A recipient decision, question or clearance guard refused the send.                                             |
 | `held`                  | The route is held: no review, and events to its recipient wait.                                                 |
 | `receipt-ambiguous`     | A previous send's outcome is unknown; it is never resent.                                                       |

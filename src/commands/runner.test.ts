@@ -372,7 +372,7 @@ describe("reason tokens", () => {
         "recipient-busy",
       ],
       ["busy", null, "recipient-busy"],
-      ["sending", null, "recipient-busy"],
+      ["sending", null, "in-flight"],
       [
         "deferred",
         "recipient-bound user-decision clearance missing, invalid or pending",

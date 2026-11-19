@@ -15,6 +15,7 @@ export const REASON_TOKENS = [
   "no-events",
   "cli-error",
   "outbox-unreadable",
+  "in-flight",
 ] as const;
 
 export type ReasonToken = (typeof REASON_TOKENS)[number];
@@ -48,7 +49,10 @@ export function reasonToken(status: string, reason?: string | null): ReasonToken
   if (status === "ambiguous") {
     return "receipt-ambiguous";
   }
-  if (status === "busy" || status === "sending") {
+  if (status === "sending") {
+    return "in-flight";
+  }
+  if (status === "busy") {
     return "recipient-busy";
   }
   const text = reason ?? "";
