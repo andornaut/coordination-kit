@@ -89,7 +89,7 @@ Three additions:
 - **Compatibility:** 5.0.2 and 6.0 runners coexist (formats and slot receipts unchanged). Old and new channel servers both drain the legacy spool under `unblock.lock`.
 - **Risks:** a missing or out-of-range CLI defers reviews ("no delivery claimed"); capture off weakens coverage reports, which Phase 4 retires.
 - **Rollback:** restore the previous `package.json` and lockfile pins in game-coordinator and the game, `npm ci`, replace the runner idle; restore the previous MCP command and reconnect; re-enable `--capture`.
-- **Exit:** all Claude sessions on the stable path; one coordination-kit patch adopted by `npm ci` plus reconnect with zero relaunches; three runners on 6.0 with 24 consecutive reviews delivered; ledger growth under 20 events a day.
+- **Exit:** all Claude sessions on the stable path; one coordination-kit patch adopted by `npm ci` plus reconnect with zero relaunches; three runners on 6.0, with 24 consecutive reviews delivered by the route host and 24 slots with no malformed seam result on the other runners; ledger growth under 20 events a day.
 
 ### Phase 2: one store and one message path (L)
 
