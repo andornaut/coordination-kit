@@ -28,6 +28,16 @@ import {
   PROTOCOL_ROOT_OPTIONS,
 } from "./protocol.ts";
 import {
+  DECISION_LIST_OPTIONS,
+  HOLD_LIST_OPTIONS,
+  HOLD_RELEASE_OPTIONS,
+  HOLD_SET_OPTIONS,
+  QUESTION_ANSWER_OPTIONS,
+  QUESTION_CANCEL_OPTIONS,
+  QUESTION_LIST_OPTIONS,
+  QUESTION_OPEN_OPTIONS,
+} from "./questions.ts";
+import {
   EVENTS_FLUSH_OPTIONS,
   EVENTS_INGEST_OPTIONS,
   REVIEW_DELIVER_OPTIONS,
@@ -55,6 +65,7 @@ const VALUES: Readonly<Record<string, string>> = {
   at: "ISO_TIMESTAMP",
   body: "TEXT",
   "body-file": "FILE",
+  by: "user|ROLE",
   conversation: "UUID",
   disposition: "handled|superseded|retained",
   evidence: "REF",
@@ -70,6 +81,7 @@ const VALUES: Readonly<Record<string, string>> = {
   link: "KIND=REF",
   "native-id": "ID",
   "next-boundary": "TEXT",
+  "options-file": "FILE",
   owner: "ROLE",
   "owner-role": "ROLE",
   parent: "ROLE|UUID",
@@ -85,12 +97,16 @@ const VALUES: Readonly<Record<string, string>> = {
   snapshot: "UUID",
   "state-dir": "STATE/unblock",
   "superseded-by": "ID",
+  supersedes: "D<N>",
+  text: "TEXT",
+  title: "TEXT",
   to: "ROLE",
   work: "WORK_ID",
   worker: "NAME",
 };
 /** Help groups, in help order. */
 export const GROUPS = {
+  decisions: "questions, holds and decisions (owner writes fenced by the registry)",
   harness: "harness (claude, codex)",
   inbox: "inbox (recipient)",
   ledger: "request accounting",
@@ -137,6 +153,12 @@ export const SPECS = {
   },
   "claude ready": READY,
   "codex ready": READY,
+  "decision list": {
+    forms: [["work?", "role?"]],
+    group: "decisions",
+    options: DECISION_LIST_OPTIONS,
+    summary: "list decision records in recording order",
+  },
   "events flush": {
     forms: [["game"]],
     group: "review",
@@ -174,6 +196,26 @@ export const SPECS = {
       harness: { type: "string" },
     },
     summary: "atomically select harness overrides for an explicit scope without activating roles",
+  },
+  "hold list": {
+    forms: [["role?", "state?"]],
+    group: "decisions",
+    options: HOLD_LIST_OPTIONS,
+    summary: "list holds in setting order",
+    values: { state: "active|released" },
+  },
+  "hold release": {
+    forms: [["id", "native-id?", "worker?"]],
+    group: "decisions",
+    options: HOLD_RELEASE_OPTIONS,
+    summary: "release your own hold",
+  },
+  "hold set": {
+    forms: [["id", "scope", "reason", "native-id?", "worker?"]],
+    group: "decisions",
+    options: HOLD_SET_OPTIONS,
+    summary: "set a hold owned by your role",
+    values: { scope: "work:WORK_ID|role|game:ID" },
   },
   inbox: {
     forms: [["include-body?", "all?", "native-id?", "worker?"]],
@@ -302,10 +344,14 @@ export const SPECS = {
     summary: "close your own message as handled, or superseded with --superseded-by, in one write",
   },
   "msg history": {
-    forms: [["role?", "since?", "limit?"]],
+    forms: [
+      ["role?", "since?", "limit?"],
+      ["include-body", "role?", "since?", "limit?", "native-id?", "worker?"],
+    ],
     group: "msg",
     options: MSG_HISTORY_OPTIONS,
-    summary: "read message events in order, without bodies",
+    summary:
+      "read message events in order; bodies only with --include-body, to their sender, recipient or game-coordinator",
   },
   "msg retain": {
     forms: [["ID", "reason", "next-boundary", "owner?", "native-id?", "worker?"]],
@@ -513,6 +559,32 @@ export const SPECS = {
     group: "protocol",
     options: PROTOCOL_MUTATING_OPTIONS,
     summary: "Explicit protocol work-submit operation; no native delivery or owner activation",
+  },
+  "question answer": {
+    forms: [["id", "work", "text", "by?", "supersedes?", "native-id?", "worker?"]],
+    group: "decisions",
+    options: QUESTION_ANSWER_OPTIONS,
+    summary:
+      "close your own question with a decision record and append its line, unstaged, to the work file on main",
+  },
+  "question cancel": {
+    forms: [["id", "reason", "native-id?", "worker?"]],
+    group: "decisions",
+    options: QUESTION_CANCEL_OPTIONS,
+    summary: "cancel your own pending question",
+  },
+  "question list": {
+    forms: [["role?", "state?"]],
+    group: "decisions",
+    options: QUESTION_LIST_OPTIONS,
+    summary: "list questions in opening order",
+    values: { state: "pending|answered|cancelled" },
+  },
+  "question open": {
+    forms: [["title", "id?", "work?", "options-file?", "native-id?", "worker?"]],
+    group: "decisions",
+    options: QUESTION_OPEN_OPTIONS,
+    summary: "record a pending prompt owned by your role; the ID defaults to q-<role>-<n>",
   },
   "review deliver": {
     forms: [["game", "slot", "capture?"]],

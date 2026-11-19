@@ -1,5 +1,5 @@
 // The store verbs: `msg send|done|retain|status|history`, `inbox` and
-// `store import|export|rebuild|cutover`.
+// `store import|export|rebuild|cutover`, and the parsing helpers the question verbs share.
 // Each prints one JSON object on stdout. A refusal prints `coordination-kit: CODE` on stderr and
 // exits 1; a usage error exits 2.
 import { isUtf8 } from "node:buffer";
@@ -58,6 +58,8 @@ export const MSG_RETAIN_OPTIONS = {
 export const MSG_STATUS_OPTIONS = {} as const;
 
 export const MSG_HISTORY_OPTIONS = {
+  ...CALLER,
+  "include-body": { type: "boolean" },
   limit: { type: "string" },
   role: { type: "string" },
   since: { type: "string" },
@@ -85,9 +87,9 @@ export const STORE_CUTOVER_OPTIONS = {
   "dry-run": { type: "boolean" },
 } as const;
 
-type Values = Record<string, string | boolean | string[] | undefined>;
+export type Values = Record<string, string | boolean | string[] | undefined>;
 
-class Usage extends Error {}
+export class Usage extends Error {}
 
 function parse(
   spec: Options,
@@ -128,12 +130,12 @@ function parse(
   return { positionals: parsed.positionals, values };
 }
 
-function text(values: Values, key: string): string | undefined {
+export function text(values: Values, key: string): string | undefined {
   const value = values[key];
   return typeof value === "string" ? value : undefined;
 }
 
-function required(values: Values, key: string): string {
+export function required(values: Values, key: string): string {
   const value = text(values, key);
   if (value === undefined) {
     throw new Usage();
@@ -141,7 +143,7 @@ function required(values: Values, key: string): string {
   return value;
 }
 
-function callerOf(values: Values): CallerOptions {
+export function callerOf(values: Values): CallerOptions {
   const nativeId = text(values, "native-id");
   const worker = text(values, "worker");
   return {
@@ -158,7 +160,7 @@ function instant(value: string): string {
   return new Date(value).toISOString();
 }
 
-async function run(
+export async function run(
   io: Io,
   root: string,
   command: string,
@@ -305,7 +307,12 @@ export const msgHistory: Handler = (io, root, args) =>
       if (limit !== undefined && !/^[1-9][0-9]{0,5}$/.test(limit)) {
         throw new Usage();
       }
+      const includeBody = values["include-body"] === true;
+      if (!includeBody && (values["native-id"] !== undefined || values.worker !== undefined)) {
+        throw new Usage();
+      }
       return storeHistory(context, {
+        ...(includeBody ? { caller: callerOf(values), includeBody } : {}),
         ...(limit === undefined ? {} : { limit: Number(limit) }),
         ...(role === undefined ? {} : { role }),
         ...(since === undefined ? {} : { since: instant(since) }),
