@@ -353,7 +353,7 @@ describe("events ingest", () => {
     );
     expect(await ingestEvents(test.context, test.game)).toMatchObject({
       completed: 3,
-      // gate_passed is quiet: three events per commit and the three COMPLETEs are delivered.
+      // delivered counts committed lines; quiet gate_passed lines are stored but not messages.
       delivered: 12,
     });
     expect(messages(test.layout).filter((message) => message.body.includes("gate_passed"))).toEqual(

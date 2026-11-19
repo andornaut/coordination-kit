@@ -38,7 +38,7 @@ suite("events ingest", () => {
     const result = await run(ws, ["events", "ingest"]);
     expect(result).toMatchObject({
       completed: 1,
-      delivered: 6,
+      delivered: 7,
       game: ws.game,
       held: 1,
       ingested: 8,
