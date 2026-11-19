@@ -38,7 +38,7 @@ suite("events ingest", () => {
     const result = await run(ws, ["events", "ingest"]);
     expect(result).toMatchObject({
       completed: 1,
-      delivered: 7,
+      delivered: 6,
       game: ws.game,
       held: 1,
       ingested: 8,
@@ -77,10 +77,13 @@ suite("events ingest", () => {
     });
     const messages = inbox.messages as { body: string; from: string; links: unknown[] }[];
     expect(messages.every((message) => message.from === "delivery-kit")).toBe(true);
-    // Six runner events become messages; ci_pending is quiet and stays an event only.
-    expect(messages).toHaveLength(7);
-    expect(messages.some((message) => message.body.includes("ci_pending"))).toBe(false);
-    expect(messages[3]!.body).toBe(
+    // Five runner events and the COMPLETE become messages; gate_passed and ci_pending are quiet
+    // and stay events only.
+    expect(messages).toHaveLength(6);
+    expect(
+      messages.some((m) => m.body.includes("ci_pending") || m.body.includes("gate_passed")),
+    ).toBe(false);
+    expect(messages[2]!.body).toBe(
       `Fixture bus: pushed ok ${SHA.slice(0, 12)}: imported at 6.1 start`,
     );
     const last = messages.at(-1)!;
