@@ -10,13 +10,6 @@ export interface Result {
   stderr: string;
 }
 
-/** One bus event a producer records. */
-export interface RecordedEvent {
-  kind: string;
-  key: string;
-  message: string;
-}
-
 export interface Command {
   argv: string[];
   cwd: string;
@@ -33,18 +26,6 @@ export interface Implementation {
   command(ws: Workspace, words: string[]): Command;
   /** A command line without configuration or state context. */
   bare(ws: Workspace, words: string[]): Command;
-  /**
-   * One scheduled review pass at `slot`, as delivery-kit's runner observer makes it through the
-   * built public seam: `deliverScheduledReview`, its runner log line, then `flushEvents`.
-   */
-  review(ws: Workspace, slot: number): Command;
-  /**
-   * One producer pass through the built `recordEvent`: each event in order, in one process, with
-   * the game's `reports.project`, as delivery-kit's runner records them.
-   */
-  record(ws: Workspace, events: readonly RecordedEvent[]): Command;
-  /** One event flush pass through the built `flushEvents`, as the runner observer ends a pass. */
-  flush(ws: Workspace): Command;
   /** The Claude channel consumer (stdio MCP server). */
   channel(ws: Workspace, args: string[]): Command;
 }

@@ -1,13 +1,70 @@
 # Upgrading
 
-Moving from coordination-kit 2.0 to 2.1, from 1.3 to 2.0, from 1.1 to 1.2, and from delivery-kit
+Moving from coordination-kit 2.1 to 3.0, from 2.0 to 2.1, from 1.3 to 2.0, from 1.1 to 1.2, and from delivery-kit
 4.7 to coordination-kit 1.0.
 
 ## From 2.1
 
-- New verbs: `session start` and `handoff open|ready|state|active|show`, with the `sessions`,
+3.0 removes the Phase 4 layers of the [simplification plan](design/simplification.md#phase-4-thin-protocol-and-retirement).
+Identity and fencing come from the registry binding alone.
+
+Removed:
+
+- Commands: every `protocol` command, every `ledger` command, `message send|dispatch|status|reconcile|retire-spool`,
+  `inbox snapshot|ack`, `events flush`, `store cutover`, `store import --from-legacy`, `--capture`,
+  `claude channel --state-dir` and `question open --options-file` (now repeated `--option LABEL`).
+- Mechanisms: epochs, claims, enrollment, adoption, coverage, intake offers, the request ledger,
+  protocol journals, the legacy message store, the Claude spool, the transport outbox, the bus
+  `events/` outbox, review snapshots, acknowledgements and reconciliation, the legacy native
+  review path, Codex worker verification and the Codex worker inbox. `claude channel` only
+  emits wakes.
+- Package subpaths: `build/protocol`, `build/accounting`, `build/transport` and `build/events`.
+  `build/review` drops `deliverScheduledReview`, `reviewOutcome` and `DEFERRED_PREFIX` and adds
+  `deliverReview`; `build/store` drops the legacy import, `storeMode`, `isStoreMode` and
+  `storeCutover` and adds the request and retirement functions. `build/registry` and
+  `build/shared` are unchanged.
+- Output: `status` is schema 2 without `coordinator.protocol`, `coordinator.ledger` and
+  item `protocol` ([status](commands.md#status)); `work report` has no `publications` and no
+  `unconfigured` state; `claude ready` and `codex ready` print no `accounting`; `harness doctor`
+  reports `channel_reference` as the wake file (`source: "wake_file"`).
+
+Added:
+
+- Commands: `session start` and `handoff open|ready|state|active|show`,
+  with the `sessions`,
   `handoffs` and `handoff_roles` projections, added when a 2.1 store is first opened; see
   [sessions and handoffs](store.md#sessions-and-handoffs). The schema version stays 1.
+
+`var/work-protocol.json` becomes `{"schema":2,"stateRoot":"/abs"}`. 3.0 still reads the 2.1
+shape and ignores `work-protocol-fence.json` and `<stateRoot>/workspace.json`.
+
+### Retirement runbook
+
+Run it once at the 3.0 cutover, in a window after a scheduled review with no planned handoff.
+
+1. Pin 3.0 at the coordinator root (`npm ci`) and replace each runner with delivery-kit 7.0 while
+   idle. No 2.1 writer remains, so the ledger and protocol journals are frozen.
+2. Back up the state root and `var/work-protocol-fence.json`.
+3. Run `store retire --dry-run` and match `requests` and `paths` against the inventory.
+   `requests.unowned` lists requests no binding can close; give them an owner or close them
+   after import as `game-coordinator` through a work item.
+4. Run `store retire --apply` as `game-coordinator` and keep its `archive.sha256`.
+5. Rewrite `var/work-protocol.json` to `{"schema":2,"stateRoot":...}` with the same state root.
+6. Each owner maps its imported requests to work files, or closes them with `request close`.
+
+The originals stay in place; deleting them needs separate user approval.
+
+### Rollback
+
+1. Restore the archive over the state root (`tar -xzf phase4-<date>.tar.gz -C <stateRoot>`, and
+   `var/work-protocol-fence.json` from its `var/` member) and the 2.1 `work-protocol.json`.
+2. Pin coordination-kit 2.1.2 at the coordinator root and delivery-kit 6.1 in each game, `npm ci`,
+   and replace the runners while idle.
+3. The frozen state restores exactly. Store events recorded since, including the imported
+   requests and `store.retired`, remain in `coordination.db` as history; 2.1 ignores them.
+
+To read the archive without rolling back, extract it to scratch and run the 2.1.2 CLI that the
+manifest's `readWith` names against that copy.
 
 ## From 2.1.1
 

@@ -2,16 +2,18 @@
 
 The SQLite store behind the `msg`, `inbox`, `work`, `graph`, `question`, `hold`, `decision`,
 `session` and `handoff` commands: its schema, the library API, the writer fence, wakes, questions, holds and decisions,
-the store-mode switch, runner event ingest, work records, the decision graph, the legacy and
-approval-ledger import mappings, the cutover runbook and rollback. The design is in
+runner event ingest, work records, the decision graph, the approval-ledger import, imported
+requests and the Phase 4 retirement. The design is in
 [simplification](design/simplification.md#phase-2-one-store-and-one-message-path) and
-[Phase 3](design/simplification.md#phase-3-work-decisions-questions-and-holds).
+[Phase 3](design/simplification.md#phase-3-work-decisions-questions-and-holds) and
+[Phase 4](design/simplification.md#phase-4-thin-protocol-and-retirement).
 
 ## Location and settings
 
-The store is one file, `coordination.db`, in the active work protocol's state root
-(`<stateRoot>/coordination.db`). Without an active protocol (unmanaged, or a required declaration
-still pending) it is `var/coordination.db` under the coordinator root. Wake files sit beside it
+The store is one file, `coordination.db`, in the state root that `var/work-protocol.json` names
+(`<stateRoot>/coordination.db`; see [state](configuration.md#state)). Without that file it is
+`var/coordination.db` under the coordinator root. Every command uses the store: 3.0 has no legacy
+mode, and the 2.0 cutover fence is no longer read. Wake files sit beside it
 under `wake/`, as in [review](review.md#wake-files).
 
 It opens through `node:sqlite` (`DatabaseSync`, built into Node 24.21 with no flag) with
@@ -62,6 +64,8 @@ Projections, updated in the same transaction as their event:
   the cancellation reason. Indexed by `(role, state, opened_seq)`.
 - `decisions`: one row per decision, `{id, work, n, question, by, at, role, supersedes, text}`,
   unique per `(work, n)`, where `id` is `<work>/D<n>` and `supersedes` is `<work>/D<k>` or null.
+- `requests`: one row per [imported request](#requests) with its owner, kind, summary, ledger
+  state, question status, source, named work IDs, reason, required owner and close.
 - `holds`: one row per hold with its owning role (null for an imported hold without one), scope,
   covered work items, source, ledger state, reason, state (`active` or `released`) and times.
   Indexed by `(role, state, set_seq)`.
@@ -74,7 +78,8 @@ Event kinds: `msg.sent`, `msg.imported`, `inbox.read`, `msg.closed`, `msg.retain
 `review.brief`, `store.cutover`, `work.started`, `work.evidence`, `work.blocked`,
 `work.unblocked`, `work.ready`, `work.finished`, `work.retained`, `question.opened`,
 `question.answered`, `question.cancelled`, `hold.set`, `hold.released`, `hold.imported`,
-`session.started`, `handoff.opened`, `handoff.ready`, `handoff.state` and `handoff.active`. A kind with no projection is still stored and chained, so a
+`request.imported`, `request.closed`, `store.retired`, `session.started`, `handoff.opened`,
+`handoff.ready`, `handoff.state` and `handoff.active`. A kind with no projection is still stored and chained, so a
 later projection can read it on its next rebuild. A store written before a projection existed
 gets that projection's tables when it is opened, filled from the existing events in one
 transaction; the events and their hashes are untouched.
@@ -122,8 +127,8 @@ that holds no secret is rephrased:
 ## Writer fence
 
 Every writing verb (`msg send`, `inbox`, `msg done`, `msg retain`, `store import`, the `work`
-writes, `question open|answer|cancel` and `hold set|release`, `session start`, `handoff open|ready|state|active`) and
-`msg history --include-body`
+writes, `question open|answer|cancel`, `hold set|release`, `request close`,
+`store retire --apply`, `session start` and `handoff open|ready|state|active`) and `msg history --include-body`
 resolve their
 caller before it opens the store: the caller is the registry role whose effective harness
 conversation ID equals the caller's native ID. The native ID is `--native-id ID`, else, for each
@@ -145,7 +150,8 @@ role on the event and the message. It is not verified: any caller bound to the r
 worker, so it is a label for reading history, not an identity.
 
 Reads (`msg status`, `msg history` without `--include-body`, `question list`, `hold list`,
-`decision list`, `store export`, `store rebuild`, `store import --dry-run`, `work show`,
+`decision list`, `store export`, `store rebuild`, `store import --dry-run`,
+`store retire --dry-run`, `work show`,
 `work history`, `handoff show` and `graph`) take no caller, and neither does `graph index`, which writes only the
 derived index.
 
@@ -289,58 +295,6 @@ A handoff moves a scope of roles from their current harness to `--to`:
 - `handoff show [--id ID]` prints the handoff, else the latest, with per-role ready and active
   times and its holds.
 
-## Store mode
-
-The store is the selected mode when both hold:
-
-1. `var/work-protocol-fence.json` is a store cutover fence (`"kind": "store-cutover"`), which only
-   `store cutover --apply` writes; and
-2. `coordination.db` exists at the store path.
-
-A cutover fence without the store is refused with `store-missing`, since legacy writers are fenced
-and the store cannot be read. Without the cutover fence every path behaves as in 1.3. In store
-mode:
-
-- `review deliver` stores the brief as one message ([review](review.md#stored-brief)); it sends no
-  native brief and spools nothing.
-- Events this kit produces itself (review health such as `review-stuck`) are stored as messages
-  from `delivery-kit` to the game's `reports.recipient`, with IDs derived from (game, kind, key).
-  They never go to the event outbox or the runner's `events.jsonl`. The recipient is woken by the
-  next send to it or the next review.
-- Legacy message writes (`message send`, `dispatch`, `reconcile`, `retire-spool` and every other
-  write through the legacy message store) are refused with `store-cutover`; legacy reads such as
-  `message status` read the frozen records. `claude channel` stops draining the generic message
-  spool, whose unclaimed entries were imported as `sent`; game spools still drain.
-- `events flush` and the event outbox are unchanged, for 6.0 runners.
-
-The switch is the fence, not a setting in `config.json`, so a 1.3 CLI never sees a field it does
-not know. Restoring the previous fence switches this kit back to legacy mode and lets a 1.3 CLI
-run again.
-
-### Cutover fence
-
-```json
-{
-  "schema": 1,
-  "kind": "store-cutover",
-  "generation": 2,
-  "cutoverAt": "2026-11-19T20:40:00.000Z",
-  "previous": { "schema": 1, "workspaceId": "W", "stateRoot": "/abs", "generation": 1 }
-}
-```
-
-`previous` is the fence it replaced: the active work protocol configuration, or `null` when the
-coordinator is unmanaged. `generation` is one above the previous generation (1 when unmanaged).
-The configuration file and `<stateRoot>/workspace.json` keep the previous generation, so role
-epochs and enrollment are untouched.
-
-- This kit resolves the previous selection unchanged from `previous`, so the state root and the
-  store path do not move.
-- A 1.3 CLI requires the fence to equal the configuration (or, unmanaged, to be absent or a
-  pending fence), so every 1.3 command that resolves the protocol selection fails closed with
-  `protocol-generation-conflict` (or `protocol-fenced` when unmanaged). Runners that bundle a 1.x
-  copy see the same refusal in their protocol reads; departures do not depend on it.
-
 ## Runner events
 
 `events ingest --game G` reads the runner's per-game log into the store. The runner is the only
@@ -436,7 +390,7 @@ through the open descriptor. It then resumes:
 
 ### Result
 
-`events ingest` prints one line with the `events flush` keys and three counts, and the same exit
+`events ingest` prints one line with the seam keys and the ingest counts, and the same exit
 codes (0 for every typed result, 2 for a usage error, 1 for an internal failure):
 
 ```json
@@ -591,8 +545,7 @@ inserted and unchanged events per type (`events`), SHA fields that are not objec
 
 ## Library API
 
-`@andornaut/coordination-kit/build/store` exports the store for the later Phase 2 work (events
-ingest, briefs as stored messages and the review seam):
+`@andornaut/coordination-kit/build/store` exports:
 
 - `Store.open(path)`, `Store.forLayout(layout)`, `storePath(layout)` and `storeRoot(layout)`;
   `store.append({key, kind, actor, payload, at?})` returns `{event, duplicate}` and applies the
@@ -607,9 +560,8 @@ ingest, briefs as stored messages and the review seam):
 - Projections: `PROJECTIONS` and `MESSAGES_PROJECTION`. A new projection is a `Projection` with
   its tables, DDL and one applier per event kind, appended to `PROJECTIONS`; `rebuild` recreates
   it from the existing events.
-- Import: `legacySources`, `mapLegacyRecord` and `importLegacy`.
-- Mode and cutover: `storeMode(layout)`, `isStoreMode(layout)`, `storeCutover` and
-  `COORDINATOR_ROLE`.
+- Requests and retirement: `importRequest`, `closeRequest`, `readRequests`, `REQUESTS_PROJECTION`,
+  `storeRetire`, `readLedgerRequests`, `RETIRED_PATHS`, `READ_WITH` and `COORDINATOR_ROLE`.
 - Runner events: `ingestEvents(context, game)`, `parseBusLine`, `busEventId`, `readCursor`,
   `LOG_FILE`, `CURSOR_FILE`, `QUARANTINE_FILE`, `EVENT_KINDS` and `EVENT_STATUSES`.
 - Notices from the runner's role: `DELIVERY_KIT_ROLE`, `DELIVERY_KIT_ACTOR`, `derivedId`,
@@ -634,115 +586,85 @@ ingest, briefs as stored messages and the review seam):
   alone. They trust their `Actor`;
   the owner check is the CLI's.
 - The CLI services `storeSend`, `storeInbox`, `storeDone`, `storeRetain`, `storeStatus`,
-  `storeHistory`, `storeImport`, `storeExport`, `storeRebuild`, `storeQuestionOpen`,
+  `storeHistory`, `storeExport`, `storeRebuild`, `storeQuestionOpen`,
   `storeQuestionAnswer`, `storeQuestionCancel`, `storeQuestionList`, `storeHoldSet`,
   `storeHoldRelease`, `storeHoldList` and `storeDecisionList`, and `StoreError` with its `code`.
 
 The stored review brief (`storeReview`, `showBrief`, `composeBrief`) and the coordination event
 port (`coordinationEmit`) are in `@andornaut/coordination-kit/build/review`.
 
-## Legacy import
+## Requests
 
-`store import --from-legacy` reads the legacy records (`<sha256(id)>.json`, schema 1) from
-`<stateRoot>/transport/messages` and, when present, the pre-activation `var/game-dev/messages`. It
-never writes, moves or locks them. Each record's envelope must reproduce its stored payload hash
-and file name, or it is reported `invalid` and skipped. An ID in both sources is imported once,
-from the state root; the other copy is a `duplicate`, flagged `differs-from-earlier-source` when
-its mapped content differs.
+`store retire --apply` imports each request of the retired request ledger that is not closed
+(`completed`, `cancelled` or `superseded`) as one `request.imported` event with the key
+`request.imported:<id>`:
 
-| Legacy state                                                | Imported as                                                      |
-| ----------------------------------------------------------- | ---------------------------------------------------------------- |
-| `queued`, `blocked`, no attempt                             | `sent`                                                           |
-| `accepted`, `parent-required`                               | `delivered` at the accepted attempt's completion                 |
-| `sending`, `ambiguous`                                      | `delivered` with `unconfirmed: true`, never woken                |
-| `sending`, `ambiguous` with an unclaimed Claude spool entry | `sent`, since the consumer never took it                         |
-| `handled`, `superseded`                                     | closed in that state with every evidence reference as `kind:ref` |
-| `retained`, `held`                                          | `retained` with the legacy owner, reason and next boundary       |
+```json
+{
+  "id": "R",
+  "owner": "ROLE",
+  "kind": "request",
+  "summary": "TEXT",
+  "state": "open",
+  "question": "pending",
+  "source": { "origin": "owner-attested", "reference": "TEXT" },
+  "work": ["ck-0017"],
+  "reason": "TEXT or null",
+  "requiredOwner": "ROLE or null",
+  "updatedAt": "ISO"
+}
+```
 
-An unconfirmed message is listed to its recipient on every pull until closed; the recipient alone
-can say whether it acted. The import keeps the original ID, body, `body_sha256`, the legacy
-payload hash and state (`legacy`), and a worker target as a `worker-target` link. Legacy close
-times are not recorded, so `closedAt` is null.
+`owner` is the ledger assignment's role, else the request's creator. `work` lists the request's
+own ID and its target IDs that have the work-ID shape (`<prefix>-<4 digits>`). `status` lists an
+open imported request as a `requested` item of its owner's repository until a work file names it
+or its owner closes it, and as one of the `requests` of each work item it names.
 
-`--dry-run` takes no caller, writes nothing (it uses an in-memory store when no store file
-exists) and prints per-state counts (`legacy`, `mapped`, `actions`) and a per-ID diff with each
-record's action: `insert`, `unchanged`, `changed`, `invalid` or `duplicate`. A real import records
-the fenced caller on each `msg.imported` event, in transactions of 250 records, then sends one
-guarded wake per recipient left with `sent` messages. Re-running is a no-op: an imported ID is
-`unchanged`, and a legacy record changed since its import is reported `changed` and left as it
-was.
+`request close --id R --reason TEXT [--work W]` records `request.closed`; only the owner's
+binding can (`not-owner`). `--work` names the work item that now carries the request, which then
+lists it with state `closed`. The same close again is a no-op (`duplicate: true`); another
+reason or work is `already-closed`. Reasons are one line of at most 1000 characters with no
+secret shape.
 
-## Cutover
+## Retirement
 
-`store cutover --dry-run` takes no caller and writes nothing (it uses an in-memory store when no
-store file exists). It prints the fence it would write (`management`, `previousGeneration`,
-`generation`), the import counts as `store import --dry-run` reports them, `importedUndelivered`
-(imported messages that would be `sent`) and the recipients already holding undelivered
-messages.
+`store retire` is the one-time 3.0 migration of the retired protocol state. Exactly one of
+`--dry-run` and `--apply` is required.
 
-`store cutover --apply` requires the caller to be `game-coordinator` through the
-[writer fence](#writer-fence) (`not-coordinator` otherwise) and refuses a pending work protocol
-(`protocol-pending`). It then, in order:
+- `--dry-run` takes no caller and writes nothing; it reads an existing store read-only.
+- `--apply` requires the caller to be `game-coordinator` through the
+  [writer fence](#writer-fence) (`not-coordinator`).
 
-1. creates `coordination.db` if needed;
-2. writes the [cutover fence](#cutover-fence) under the exclusive protocol lease, which waits for
-   legacy writers holding the shared lease, so every later legacy message write is refused;
-3. imports the legacy message stores with their original IDs ([legacy import](#legacy-import));
-4. records a `store.cutover` event with `cutoverAt`, the generations and the import counts; and
-5. sends one guarded wake per recipient left with undelivered messages.
+It reads the frozen request ledger from `<stateRoot>/accounting/checkpoint.json`, which must be
+intact and cover every journal event (`ledger-checkpoint-stale`), and counts the pending intake
+offers under `accounting/intake/`, which are dropped. An apply then:
 
-A repeated `--apply` after a completed cutover does nothing and reports `applied: true`. One
-interrupted after the fence resumes from the import with the fence's `cutoverAt`.
+1. archives `roles/`, `accounting/`, `transport/`, `locks/`, `migration/`, `migration-plan.json`
+   and the coordinator's `var/work-protocol-fence.json`, whichever exist, as one tar.gz written by
+   the system `tar` to `<stateRoot>/archive/phase4-<UTC date>.tar.gz` (state-root members by
+   their relative path, the fence as `var/work-protocol-fence.json`);
+2. writes the manifest beside it, `phase4-<UTC date>.json`: `{schema, kind: "phase4-archive",
+archive: {name, sha256, bytes}, paths: [{path, files, bytes}], readWith, stateRoot,
+createdAt}`, where `readWith` names the coordination-kit 2.1.2 release to read it with;
+3. records every `request.imported` event and one `store.retired` event (key
+   `store.retired:phase4`, whose payload is the printed result) in one transaction.
 
-### Runbook
+It never deletes or changes an original; deleting them needs separate user approval. A repeated
+`--apply`, or a dry run after it, prints the recorded result with `duplicate: true` and writes
+nothing. Output, one JSON object:
 
-Run it in one window after a scheduled review, from :35 to :55 America/Toronto, on a day with no
-planned handoff.
+```text
+schema        1
+kind          store-retire
+dryRun        true | false
+applied       true once store.retired is recorded
+duplicate     true when an earlier apply recorded it
+stateRoot     the resolved state root
+paths         [{path, present, files, bytes}]
+requests      {ledger, closed, imported, alreadyImported, unowned: [ID], byState: {STATE: N}}
+intakeOffers  {dropped}
+archive       {path, manifest, sha256, bytes}   (sha256 and bytes null on a dry run)
+```
 
-Preconditions:
-
-- The coordinator root still pins 1.3.x: delivery-kit 6.0 runners accept only `>=1.2.0 <2.0.0` and
-  defer reviews and event flushes when the root CLI is outside that range, so 2.0 is pinned inside
-  the window, never before it.
-- delivery-kit 6.1 (`>=2.0.0 <3.0.0`) is tagged and ready to replace each runner.
-- Every Claude role's channel MCP server runs the stable command
-  `node <root>/node_modules/@andornaut/coordination-kit/dist/cli.js --root <root> claude channel`.
-- Roles have finished in-flight sends and closes.
-
-Steps, all in the window:
-
-1. Pin 2.0 at the coordinator root (`npm ci`). From here 6.0 runners defer reviews and event
-   flushes; their outbox is retained and departures continue.
-2. Reconnect every Claude channel (`/mcp`) onto 2.0; `harness doctor` shows `channel_command`
-   `stable` where the shared config is used and `channel_server` version `2.0.0` for channels that
-   report their status.
-3. Back up the state root, `var/work-protocol-fence.json` and `var/game-dev/messages`.
-4. Run `store cutover --dry-run` and match its counts against the message inventory; for a per-ID
-   diff, run `store import --from-legacy --dry-run`.
-5. Run `store cutover --apply` as `game-coordinator` and record its `cutoverAt`.
-6. Replace every runner with delivery-kit 6.1 while idle (all are idle after their own
-   departures); each imports its unsent 6.0 outbox at start.
-7. Check `review show` after the next scheduled review, and `msg history --since <cutoverAt>`.
-
-Native prompts, registry held flags, route state and delivery controls are not touched. A
-recipient whose question state is unknown gets no wake and pulls at its next boundary.
-
-## Rollback
-
-Messages are never sent natively, so rollback re-records what the store holds:
-
-1. Ask the roles to stop sending and closing, then run `store export --since <cutoverAt>`. It
-   lists every `msg.sent` recorded after it with its body, and every `msg.closed` and
-   `msg.retained` with its actor, in seq order. Imports are excluded.
-2. Restore `var/work-protocol-fence.json` from the backup, or write the cutover fence's
-   `previous` back to it (delete the file when `previous` is `null`). This kit is then in legacy
-   mode and a 1.3 CLI resolves the protocol selection again.
-3. Before any 6.0 runner starts, ingest the remaining `events.jsonl` lines once with 2.0
-   (`events ingest`), as delivery-kit's 6.1 to 6.0 rollback requires.
-4. Restore the 1.3 pins at the coordinator root (`npm ci`), replace runners with 6.0 if they were
-   moved to 6.1, and reconnect the channels. 1.3 has no
-   store verbs and ignores `coordination.db`, which stays as the record.
-5. Re-record each exported message with `message send` under its original ID and dispatch it
-   through the legacy guarded path; recipients re-close the exported closes.
-
-A later cutover records a new `store.cutover` event with its own time.
+`unowned` lists imported requests whose owner is not a registered role, which no binding can
+close. The runbook and rollback are in [upgrading](upgrading.md#from-21).

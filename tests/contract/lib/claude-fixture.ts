@@ -2,9 +2,8 @@
 // scheduled review tick through the built seam, and an MCP channel client.
 import { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync } from "node:fs";
 
-import { type Command, execute, impl, type Resident, type Result, start } from "./adapter.ts";
+import { type Command, impl, type Resident, type Result, start } from "./adapter.ts";
 import type { CodexSocket } from "./codex-socket.ts";
 import type { Workspace } from "./workspace.ts";
 import type { Json } from "./json.ts";
@@ -113,25 +112,6 @@ export function claudeGame(ws: Workspace, options: { recipient?: boolean } = {})
   agents(ws, "idle");
 }
 
-export interface Tick extends Result {
-  /** Parsed `bus: scheduled review SLOT: JSON` lines, in order. */
-  review: Array<{ slot: number; result: Record<string, unknown> }>;
-}
-
-function parseReview(stdout: string): Tick["review"] {
-  const rows: Tick["review"] = [];
-  for (const match of stdout.matchAll(/bus: scheduled review (\d+): (\{.*\})/g)) {
-    rows.push({ slot: Number(match[1]), result: JSON.parse(match[2]!) as Record<string, unknown> });
-  }
-  return rows;
-}
-
-/** One scheduled review pass at `slot` through the built seam, as the runner observer makes it. */
-export async function tick(ws: Workspace, slot: number): Promise<Tick> {
-  const result = await execute(impl.review(ws, slot));
-  return { ...result, review: parseReview(result.stdout) };
-}
-
 /** Hold a flock on a state file from another process until released. */
 export async function holdLock(path: string): Promise<() => Promise<void>> {
   const holder: ChildProcess = spawn(
@@ -172,10 +152,10 @@ export class Channel {
     });
   }
 
-  static open(ws: Workspace, stateDirs: string[], conversation = RECIPIENT): Channel {
-    const args = ["--conversation", conversation, "--poll-seconds", "0.05"];
-    for (const dir of stateDirs) args.push("--state-dir", dir);
-    return new Channel(impl.channel(ws, args));
+  static open(ws: Workspace, conversation = RECIPIENT): Channel {
+    return new Channel(
+      impl.channel(ws, ["--conversation", conversation, "--poll-seconds", "0.05"]),
+    );
   }
 
   send(message: Message): void {
@@ -218,28 +198,6 @@ export class Channel {
   }
 }
 
-/** Deliver every spooled entry once through a short consumer session, as `deliver_pending` did. */
-export async function deliver(
-  ws: Workspace,
-  stateDirs = [ws.path("unblock")],
-  conversation = RECIPIENT,
-): Promise<Message[]> {
-  const spool = (dir: string) =>
-    existsSync(`${dir}/claude-spool`)
-      ? readdirSync(`${dir}/claude-spool`).filter((n) => n.endsWith(".json"))
-      : [];
-  const channel = Channel.open(ws, stateDirs, conversation);
-  channel.initialize();
-  channel.initialized();
-  await channel.waitFor(
-    () => stateDirs.every((dir) => spool(dir).length === 0) && channel.messages.length > 0,
-  );
-  await channel.collect(200);
-  await channel.close();
-  return channel.channel();
-}
-
-/** The default Codex world of the original fixtures: active recipient mid-turn, empty history. */
 export function codexWorld(
   socket: CodexSocket,
   queues: Record<string, unknown[]> = {},

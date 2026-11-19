@@ -7,10 +7,11 @@ import type { Layout } from "../../layout.ts";
 import type { Registry } from "../../registry/schema.ts";
 import { harnessReadiness } from "../../review/readiness.ts";
 import { coordinatorConfig, registryInput } from "../../testFixtures.ts";
-import { resolveCodexControlSocket } from "../../transport.ts";
-import { codexAdapter, SOCKET_MISSING } from "../codex/index.ts";
 import { connectControl } from "../codex/rpc.ts";
-import { resolveCodexEndpoint } from "./endpoints.ts";
+import { resolveCodexControlSocket, resolveCodexEndpoint } from "./endpoints.ts";
+
+const SOCKET_MISSING =
+  "set CODEX_CONTROL_SOCKET to an available absolute Codex control socket path";
 
 vi.mock("node:os", async (original) => ({
   ...(await original<typeof import("node:os")>()),
@@ -73,10 +74,6 @@ describe("Codex endpoint selection", () => {
     });
     const layout = { config: coordinatorConfig() } as unknown as Layout;
     const registry = registryInput() as unknown as Registry;
-    expect(await codexAdapter(layout, { env: {} }).status("unused-recipient")).toEqual({
-      reason: SOCKET_MISSING,
-      status: "unavailable",
-    });
     const ready = await harnessReadiness({}, layout, registry, "codex", {
       roles: ["archies-dog-walks/tech"],
     });

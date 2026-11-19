@@ -1,152 +1,54 @@
-// The stdio MCP channel consumer. The consumer is driven as a Claude Code client drives it.
-import { renameSync } from "node:fs";
+// The stdio MCP channel server, driven as a Claude Code client drives it: it emits one wake
+// notification per increase of the conversation's wake file seq and never carries a payload.
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { expect } from "vitest";
 
-import { execute, impl } from "../lib/adapter.ts";
-import {
-  ARCHIE,
-  Channel,
-  claudeGame,
-  claudeRoute,
-  deliver,
-  RECIPIENT,
-  tick,
-} from "../lib/claude-fixture.ts";
+import { ARCHIE, Channel, claudeGame, RECIPIENT } from "../lib/claude-fixture.ts";
 import { contract, suite, workspaces } from "../lib/cases.ts";
-import { at } from "../lib/time.ts";
 import type { Workspace } from "../lib/workspace.ts";
-import type { Json } from "../lib/json.ts";
 
-const SLOT = at(20);
-const NEXT = at(50);
-const ACCEPTED_AT = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
-
-function receipt(ws: Workspace, slot = SLOT): Json {
-  return ws.readJson(`unblock/${RECIPIENT}-${slot}.json`);
+function wake(ws: Workspace, seq: number, count: number, conversation = RECIPIENT): void {
+  const directory = join(ws.coordinator, "var", "wake");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, `${conversation}.json`),
+    JSON.stringify({ count, role: "game-coordinator", schema: 1, seq }),
+  );
 }
 
-function spooled(ws: Workspace): string[] {
-  return ws.list("unblock", "claude-spool").filter((name) => name.endsWith(".json"));
-}
-
-suite("claude channel consumer", () => {
+suite("claude channel server", () => {
   const workspace = workspaces();
 
-  contract("the consumer emits exactly once per request ID across restarts", async () => {
+  contract("emits one wake per seq increase, only after initialization", async () => {
     const ws = workspace();
     claudeGame(ws);
-    await tick(ws, SLOT);
-    expect(await deliver(ws)).toHaveLength(1);
-    await tick(ws, NEXT);
-    const channel = Channel.open(ws, [ws.path("unblock")]);
+    const channel = Channel.open(ws);
     channel.initialize();
-    channel.initialized();
-    await channel.waitFor(() => channel.channel().length > 0);
-    await channel.collect(500);
-    const initialize = channel.messages[0]!;
-    expect(initialize.id).toBe(1);
-    expect(initialize.result.capabilities).toEqual({ experimental: { "claude/channel": {} } });
-    expect(initialize.result.protocolVersion).toBe("2025-06-18");
-    const notifications = channel.channel();
-    expect(notifications.map((m) => m.params.meta.slot)).toEqual([String(NEXT)]);
-    expect(notifications[0]!.params.meta.kind).toBe("review");
-    for (const slot of [SLOT, NEXT]) {
-      expect(receipt(ws, slot).status).toBe("accepted");
-      expect(receipt(ws, slot).acceptedAt).toMatch(ACCEPTED_AT);
-    }
-    // Stop the consumer's polling before the duplicate tick takes the shared unblock lock.
-    expect((await channel.close()).code).toBe(0);
-    expect((await tick(ws, SLOT)).review[0]!.result).toMatchObject({
-      previousStatus: "accepted",
-      status: "deduplicated",
+    await channel.collect(300);
+    expect(channel.messages[0]!.result.capabilities).toEqual({
+      experimental: { "claude/channel": {} },
     });
-    const restarted = Channel.open(ws, [ws.path("unblock")]);
-    restarted.initialize();
-    restarted.initialized();
-    await restarted.collect(500);
-    expect(restarted.channel()).toEqual([]);
-    expect((await restarted.close()).code).toBe(0);
+    wake(ws, 1, 2);
+    await channel.collect(300);
+    expect(channel.channel()).toEqual([]);
+    channel.initialized();
+    await channel.waitFor(() => channel.channel().length === 1);
+    wake(ws, 1, 2);
+    wake(ws, 2, 3, ARCHIE);
+    await channel.collect(300);
+    wake(ws, 2, 3);
+    await channel.waitFor(() => channel.channel().length === 2);
+    expect(channel.channel().map((message) => message.params)).toEqual([
+      {
+        content: "2 new messages for game-coordinator: run coordination-kit inbox",
+        meta: { kind: "wake", seq: "1" },
+      },
+      {
+        content: "3 new messages for game-coordinator: run coordination-kit inbox",
+        meta: { kind: "wake", seq: "2" },
+      },
+    ]);
+    expect((await channel.close()).code).toBe(0);
   });
-
-  contract("nothing is emitted before initialization or for another recipient", async () => {
-    const ws = workspace();
-    claudeGame(ws);
-    await tick(ws, SLOT);
-    const early = Channel.open(ws, [ws.path("unblock")]);
-    early.initialize();
-    await early.collect(400);
-    expect(early.channel()).toEqual([]);
-    await early.close();
-    const other = Channel.open(ws, [ws.path("unblock")], ARCHIE);
-    other.initialize();
-    other.initialized();
-    await other.collect(400);
-    expect(other.channel()).toEqual([]);
-    await other.close();
-    expect(receipt(ws).status).toBe("sending");
-    expect(spooled(ws)).toHaveLength(1);
-  });
-
-  contract(
-    "a failed channel write and an interrupted claim are ambiguous and never resent",
-    async () => {
-      const ws = workspace();
-      claudeGame(ws);
-      await tick(ws, SLOT);
-      const broken = Channel.open(ws, [ws.path("unblock")]);
-      broken.initialize();
-      await broken.waitFor(() => broken.messages.length > 0);
-      // The client stops reading: the consumer's next write fails.
-      broken.resident.child.stdout.destroy();
-      broken.initialized();
-      const failed = await broken.resident.done;
-      // The consumer exits nonzero once its output is unusable.
-      expect(failed.code).not.toBe(0);
-      expect(receipt(ws).status).toBe("ambiguous");
-      expect(await deliver(ws)).toEqual([]);
-      await tick(ws, NEXT);
-      const [pending] = spooled(ws);
-      renameSync(
-        ws.path("unblock", "claude-spool", pending!),
-        ws.path("unblock", "claude-spool", pending!.replace(/\.json$/, ".claimed")),
-      );
-      expect(await deliver(ws)).toEqual([]);
-      expect(receipt(ws, NEXT).status).toBe("ambiguous");
-    },
-  );
-
-  contract(
-    "one consumer drains each project state once and rejects a repeated state directory",
-    async () => {
-      const host = workspace();
-      const other = workspace();
-      claudeGame(host);
-      claudeGame(other);
-      // Each project dispatches only while it is the route host.
-      other.writeRoute(claudeRoute(other));
-      await tick(other, SLOT);
-      await tick(host, SLOT);
-      const dirs = [host.path("unblock"), other.path("unblock")];
-      const channel = Channel.open(host, dirs);
-      channel.initialize();
-      channel.initialized();
-      await channel.waitFor(() => channel.channel().length >= 2);
-      await channel.collect(500);
-      expect(channel.channel()).toHaveLength(2);
-      await channel.close();
-      for (const ws of [host, other]) {
-        expect(receipt(ws).status).toBe("accepted");
-        expect(ws.list("unblock", "claude-delivered")).toHaveLength(1);
-      }
-      const repeated = impl.channel(host, [
-        "--conversation",
-        RECIPIENT,
-        "--state-dir",
-        dirs[0]!,
-        "--state-dir",
-        dirs[0]!,
-      ]);
-      expect((await execute(repeated)).code).toBe(2);
-    },
-  );
 });

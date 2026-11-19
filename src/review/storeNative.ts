@@ -3,21 +3,74 @@
 // (`collectAll`: question state, then child health, under its shared 256-call budget and
 // deadline) over one control connection. Read-only. A capability that cannot be read is unknown,
 // never clear.
+import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 
-import { unblockDir } from "../adapters/claude/spool.ts";
 import { collectAll, unavailableCollected } from "../adapters/codex/collect.ts";
 import { connectControl, type RpcClient } from "../adapters/codex/rpc.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
+import { isRecord } from "../adapters/shared/pyjson.ts";
 import type { Collected, CollectRequest } from "../adapters/types.ts";
 import { loadReportsConfig } from "../config.ts";
 import type { GameLayout, Layout } from "../layout.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
-import { list, pendingProven, rec, workerFailures } from "./reconcile.ts";
 
-/** The legacy review's connection budget; the collectors reserve five seconds of it. */
+type Json = Record<string, unknown>;
+
+function rec(value: unknown): Json {
+  return isRecord(value) ? value : {};
+}
+
+function list(value: unknown): unknown[] {
+  return Array.isArray(value) ? (value as unknown[]) : [];
+}
+
+/** Verified latest failed child turns as sorted [parent, child, turn, error_code] references. */
+function workerFailures(snapshot: Json): unknown[][] {
+  const references: unknown[] = [];
+  for (const [parent, health] of Object.entries(rec(snapshot.worker_health))) {
+    for (const value of list(rec(health).children)) {
+      const child = rec(value);
+      if (
+        child.parent_id === parent &&
+        child.lineage_verified === true &&
+        child.requires_parent_action === true &&
+        child.turn_status === "failed" &&
+        ["child_id", "turn_id", "error_code"].every(
+          (field) => typeof child[field] === "string" && child[field] !== "",
+        )
+      ) {
+        references.push([parent, child.child_id, child.turn_id, child.error_code]);
+      }
+    }
+  }
+  const unique = new Map(references.map((row) => [JSON.stringify(row), row as unknown[]]));
+  return [...unique.keys()].sort().map((key) => unique.get(key)!);
+}
+
+/** An owner-attested pending question on its owner's latest turn. */
+function pendingProven(owner: string, question: Json): boolean {
+  const proofs = question.proof_refs;
+  return (
+    question.state === "pending" &&
+    question.proof_complete === true &&
+    question.proof_scope === "latest_turn" &&
+    Array.isArray(proofs) &&
+    (proofs as unknown[]).some(
+      (proof) =>
+        isRecord(proof) &&
+        proof.kind === "owner_pending_attestation" &&
+        proof.recipient === owner &&
+        proof.question_turn_id === question.turn_id &&
+        proof.question_item_id === question.item_id &&
+        proof.question_index === question.question_index,
+    )
+  );
+}
+
+/** The review's connection budget; the collectors reserve five seconds of it. */
 const CONNECT_MS = 25_000;
 const TITLE_CHARS = 80;
 
@@ -193,7 +246,7 @@ export async function surveyNative(
     recipients,
     routeMembers: recipients,
     slot,
-    unblockDir: unblockDir(game.busDir),
+    unblockDir: join(game.busDir, "unblock"),
   };
   const collected = await (context.collect ?? defaultCollect(context))(request);
   return {

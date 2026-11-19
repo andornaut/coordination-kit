@@ -1,13 +1,10 @@
-// Events this kit produces itself, such as review health (`review-stuck`). In store mode each goes
-// straight to the store as a message from delivery-kit to the game's reports.recipient; it is
-// never written to the event outbox or the runner's events.jsonl. In legacy mode it goes to the
-// event outbox as in 1.3. The recipient is woken by the next send to it or the next review.
-import { clean, recordEvent } from "../events.ts";
+// Events this kit produces itself, such as review health (`review-stuck`). Each goes straight to the
+// store as a message from delivery-kit to the game's reports.recipient; it is never written to
+// the runner's events.jsonl. The recipient is woken by the next send to it or the next review.
 import type { GameLayout, Layout } from "../layout.ts";
 import { Store } from "../store/db.ts";
-import { isStoreMode } from "../store/mode.ts";
-import { derivedId, type Notice, reportsRecipient, storeNotice } from "../store/notices.ts";
-import type { HealthEmit } from "./health.ts";
+import { clean, derivedId, type Notice, reportsRecipient, storeNotice } from "../store/notices.ts";
+export type HealthEmit = (kind: string, key: string, message: string) => void;
 
 /** The stored form of one coordination event; its ID derives from (game, kind, key). */
 export function coordinationNotice(
@@ -25,13 +22,9 @@ export function coordinationNotice(
   };
 }
 
-/** The emit port for review health: the store in store mode, the event outbox otherwise. */
+/** The emit port for review health: one stored notice. */
 export function coordinationEmit(layout: Layout, game: GameLayout, project: string): HealthEmit {
   return (kind, key, message) => {
-    if (!isStoreMode(layout)) {
-      recordEvent(game, { project }, kind, key, message);
-      return;
-    }
     const store = Store.forLayout(layout);
     try {
       const notice = coordinationNotice(reportsRecipient(layout, game), game, project, {

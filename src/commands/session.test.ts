@@ -1,3 +1,6 @@
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
@@ -86,6 +89,18 @@ describe("session start", () => {
     expect((second.json!.session as { seq: number }).seq).toBeGreaterThan(
       (first.json!.session as { seq: number }).seq,
     );
+  });
+
+  it("writes the store under a stateRoot-only work-protocol.json", async () => {
+    const { base, kit, layout } = setup();
+    const state = join(base, "state");
+    mkdirSync(state, { mode: 0o700 });
+    writeFileSync(
+      join(layout.varDir, "work-protocol.json"),
+      JSON.stringify({ schema: 2, stateRoot: state }),
+    );
+    expect((await kit("session", "start")).code).toBe(EXIT_OK);
+    expect(existsSync(join(state, "coordination.db"))).toBe(true);
   });
 
   it("derives the checkpoint for game, kit and coordinator roles", () => {

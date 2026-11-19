@@ -79,16 +79,7 @@ export function inspectPackage(
   });
   if (version.status !== 0 || version.stdout.trim() !== manifest.version)
     throw new Error("package CLI version differs from package.json");
-  const modules = [
-    "accounting",
-    "events",
-    "protocol",
-    "registry",
-    "review",
-    "shared",
-    "store",
-    "transport",
-  ];
+  const modules = ["registry", "review", "shared", "store"];
   const expectedExports = ["./package.json", ...modules.map((name) => `./build/${name}`)].sort();
   if (JSON.stringify(Object.keys(manifest.exports).sort()) !== JSON.stringify(expectedExports))
     throw new Error("package must export only explicit build APIs and metadata");
@@ -118,27 +109,10 @@ export function inspectPackage(
   ]);
   node(pkg, "--input-type=module", [
     "-e",
-    "import * as transport from '@andornaut/coordination-kit/build/transport'; " +
-      "if (JSON.stringify(Object.keys(transport).sort()) !== JSON.stringify(['messageChannelStateDir', 'resolveCodexControlSocket'])) process.exit(1); " +
-      "const { resolveCodexControlSocket, messageChannelStateDir } = transport; " +
-      "const endpoint = resolveCodexControlSocket({ env: {}, home: '/fixture' }); " +
-      "const channel = messageChannelStateDir({ reviewDir: '/review' }, '00000000-0000-4000-8000-000000000001'); " +
-      "if (channel !== '/review/messages/recipients/00000000-0000-4000-8000-000000000001/unblock') process.exit(1); " +
-      "if (endpoint.source !== 'managed' || endpoint.path !== '/fixture/.codex/app-server-control/app-server-control.sock') process.exit(1);",
-  ]);
-  node(pkg, "--input-type=module", [
-    "-e",
-    "import { LedgerStore, LedgerError, snapshotIntake, messageIntake, auditIntake, " +
-      "captureAccounting, accountingStatus } from '@andornaut/coordination-kit/build/accounting'; " +
-      "if (![LedgerStore, LedgerError, snapshotIntake, messageIntake, auditIntake, " +
-      "captureAccounting, accountingStatus].every(value => typeof value === 'function')) process.exit(1);",
-  ]);
-  node(pkg, "--input-type=module", [
-    "-e",
-    "import { deliverScheduledReview, readRoleRoute, routeRecipient, DEFERRED_PREFIX } from '@andornaut/coordination-kit/build/review'; " +
-      "import { flushEvents, recordEvent, enqueueEvent, eventsDir } from '@andornaut/coordination-kit/build/events'; " +
-      "if (![deliverScheduledReview, readRoleRoute, routeRecipient, flushEvents, recordEvent, enqueueEvent, eventsDir]" +
-      ".every(value => typeof value === 'function') || DEFERRED_PREFIX !== 'bus: review deferred: ') process.exit(1);",
+    "import { deliverReview, readRoleRoute, routeRecipient, storeReview } from '@andornaut/coordination-kit/build/review'; " +
+      "import { Store, storeRetire, closeRequest, readRequests } from '@andornaut/coordination-kit/build/store'; " +
+      "if (![deliverReview, readRoleRoute, routeRecipient, storeReview, Store, storeRetire, closeRequest, readRequests]" +
+      ".every(value => typeof value === 'function')) process.exit(1);",
   ]);
   const consumer = join(proof, "consumer");
   const scope = join(consumer, "node_modules", "@andornaut");
@@ -149,84 +123,28 @@ export function inspectPackage(
   readRegistry, updateRegistry, RevisionConflict, type Registry, type Layout,
 } from "@andornaut/coordination-kit/build/registry";
 import {
-  resolveCodexControlSocket, messageChannelStateDir, type CodexControlSocketEndpoint,
-  type DeliveryDiagnostic, type NativeRpcCode,
-} from "@andornaut/coordination-kit/build/transport";
-import {
-  deliverScheduledReview, readRoleRoute, type RoleRoute,
+  deliverReview, readRoleRoute, type ReviewResult, type RoleRoute,
 } from "@andornaut/coordination-kit/build/review";
-import { flushEvents, recordEvent, type BusEvent, type EmitOptions, type FlushResult } from "@andornaut/coordination-kit/build/events";
 import {
   holdLock, loadProjectConfig, writeJsonDurable, type LockHandle, type ProjectConfig, type GameLayout,
 } from "@andornaut/coordination-kit/build/shared";
-import {
-  LedgerStore, LedgerError, snapshotIntake, accountingStatus,
-  type LedgerTransaction, type LedgerState, type IntakeContext,
-} from "@andornaut/coordination-kit/build/accounting";
-import { ProtocolStore, WorkStore, ProtocolMessages, resolveProtocolLayout, EnrollmentStore, resolveProtocolManagement, resolveEnrollmentScope,
- type ProtocolWriter, type WorkEvaluation, type ProtocolLayout } from "@andornaut/coordination-kit/build/protocol";
-const protocolClaim = (store: ProtocolStore, writer: ProtocolWriter) => store.withWriter(writer, () => 1);
-const protocolLayout: ProtocolLayout | null = null;
-// @ts-expect-error Writer epochs remain numeric.
-const invalidEpoch: ProtocolWriter["epoch"] = "1";
-export { protocolClaim, protocolLayout, invalidEpoch, WorkStore, ProtocolMessages, resolveProtocolLayout, EnrollmentStore, resolveProtocolManagement, resolveEnrollmentScope };
-export type { WorkEvaluation };
-const ledgerState: LedgerState = "checked";
-const ledgerCommit = (store: LedgerStore, input: LedgerTransaction) => store.apply(input);
-const ledgerIntake = (context: IntakeContext) => snapshotIntake(context, {});
-const ledgerReadiness = (layout: Layout) => accountingStatus(layout);
-// @ts-expect-error Accounting states remain a finite union.
-const invalidLedgerState: LedgerState = "native-accepted-means-complete";
-// @ts-expect-error Ledger revisions must remain numbers, not untyped JSON.
-const invalidLedgerRevision: LedgerTransaction["expectedRevision"] = "1";
-export { LedgerStore, LedgerError, ledgerState, ledgerCommit, ledgerIntake, ledgerReadiness,
-  invalidLedgerState, invalidLedgerRevision };
-const endpoint: CodexControlSocketEndpoint = resolveCodexControlSocket({ env: {}, home: "/fixture" });
-const channel: string = messageChannelStateDir(
-  { reviewDir: "/review" }, "00000000-0000-4000-8000-000000000001",
-);
-const rpcCode: NativeRpcCode = -32000;
-const diagnostic: DeliveryDiagnostic = {
-  stage: "native-send", category: "rpc-refusal", classification: "native-rejected",
-  method: "thread/queue/add", rpcCode,
-};
-const localDiagnostic: DeliveryDiagnostic = {
-  stage: "local", category: "decision-clearance", classification: "guarded",
-};
-const diagnosticFields: Record<keyof DeliveryDiagnostic, true> = {
-  stage: true, category: true, classification: true, method: true, rpcCode: true,
-};
-// @ts-expect-error Public diagnostic stages remain a finite union, not any or string.
-const wrongStage: DeliveryDiagnostic["stage"] = "raw-native-stage";
-// @ts-expect-error Public diagnostic categories cannot expose arbitrary native messages.
-const wrongCategory: DeliveryDiagnostic["category"] = "raw-native-message";
-// @ts-expect-error Classifications retain the finite safe diagnostic contract.
-const wrongClassification: DeliveryDiagnostic["classification"] = "raw-native-classification";
-// @ts-expect-error Methods cannot expose arbitrary native method names.
-const wrongMethod: DeliveryDiagnostic["method"] = "private/native-method";
-// @ts-expect-error Unknown native codes are omitted, not widened to arbitrary numbers.
-const wrongRpcCode: NativeRpcCode = -31999;
+import { Store, storeRetire, type RetireOutput } from "@andornaut/coordination-kit/build/store";
 const revision: (registry: Registry) => number = registry => registry.revision;
 // @ts-expect-error Registry declarations must preserve the numeric revision type.
 const wrongRevision: (registry: Registry) => string = registry => registry.revision;
-// @ts-expect-error Endpoint sources must remain a finite union rather than any.
-const wrongSource: "other" = endpoint.source;
-// @ts-expect-error The named transport export requires a string conversation ID.
-messageChannelStateDir({ reviewDir: "/review" }, 42);
-const review = (layout: Layout, game: GameLayout): Promise<string> => deliverScheduledReview(layout, game, 0);
+const review = (layout: Layout, game: GameLayout): Promise<ReviewResult | undefined> =>
+  deliverReview(layout, game, 0);
 // @ts-expect-error A review slot is an epoch-seconds number.
-deliverScheduledReview({} as Layout, {} as GameLayout, "0");
+deliverReview({} as Layout, {} as GameLayout, "0");
 const route = (layout: Layout): RoleRoute | null => readRoleRoute(layout);
-const flush = (game: GameLayout): Promise<FlushResult> => flushEvents(game);
-const emit: EmitOptions = { project: "Fixture", underLock: (directory: string) => void directory };
-const record = (game: GameLayout) => recordEvent(game, emit, "push", "key", "message");
-const sent = (event: BusEvent): boolean => event.sent;
 const lock: (path: string) => LockHandle = (path) => holdLock(path);
 const project = (path: string): ProjectConfig["reports"] => loadProjectConfig(path).reports;
 const durable = (path: string) => writeJsonDurable(path, {});
-export { channel, endpoint, revision, wrongRevision, wrongSource, readRegistry, updateRegistry, RevisionConflict,
-  review, route, flush, record, sent, lock, project, durable,
-  diagnostic, localDiagnostic, diagnosticFields, rpcCode };
+const retired = (output: RetireOutput): boolean => output.applied;
+const retire = storeRetire;
+const open = (path: string): Store => Store.open(path);
+export { revision, wrongRevision, readRegistry, updateRegistry, RevisionConflict,
+  review, route, lock, project, durable, retired, retire, open };
 `;
   writeFileSync(source, consumerSource);
 

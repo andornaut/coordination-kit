@@ -5,8 +5,12 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import * as durable from "../../durable.ts";
-import { codexQueueTransport, type NativeMessage } from "../../messages/transports.ts";
-import { type QueueGuards, queueMessage } from "./queue.ts";
+import {
+  codexQueueTransport,
+  type NativeMessage,
+  type QueueGuards,
+  queueMessage,
+} from "./queue.ts";
 import { type RpcClient, RpcError } from "./rpc.ts";
 
 const message: NativeMessage = {

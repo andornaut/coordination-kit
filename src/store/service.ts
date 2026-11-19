@@ -11,7 +11,6 @@ import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 import { MEMORY, Store, storePath } from "./db.ts";
 import { type CallerOptions, resolveCaller } from "./identity.ts";
-import { importLegacy, type ImportReport, legacySources } from "./legacy.ts";
 import {
   type CloseInput,
   closeMessage,
@@ -31,13 +30,7 @@ import {
   type MessageView,
   StoreError,
 } from "./types.ts";
-import {
-  pendingWakeRoles,
-  type WakePorts,
-  wakeRecipient,
-  type WakeResult,
-  type WakeStatus,
-} from "./wake.ts";
+import { type WakePorts, wakeRecipient, type WakeStatus } from "./wake.ts";
 
 export interface StoreServiceContext {
   readonly layout: Layout;
@@ -237,49 +230,6 @@ export async function storeHistory(
     }),
     schema: 1 as const,
   }));
-}
-
-export interface ImportOutput extends ImportReport {
-  readonly wakes: readonly { readonly role: string; readonly status: WakeResult["status"] }[];
-}
-
-/**
- * Import the legacy message stores. A dry run needs no caller and writes nothing; a real import
- * records the fenced caller and then sends one guarded wake per recipient left with undelivered
- * messages. Imported `unconfirmed` messages are never woken.
- */
-export async function storeImport(
-  context: StoreServiceContext,
-  options: CallerOptions,
-  selection: { readonly dryRun: boolean },
-): Promise<ImportOutput> {
-  const actor: Actor = selection.dryRun ? { nativeId: null, role: null } : caller(context, options);
-  const sources = legacySources(context.layout);
-  return withStore(
-    context,
-    async (store) => {
-      const report = importLegacy(store, actor, sources, selection);
-      const wakes: { role: string; status: WakeStatus }[] = [];
-      if (!selection.dryRun) {
-        for (const role of pendingWakeRoles(store)) {
-          // One recipient at a time: each wake is guarded on its own fresh registry read.
-          // eslint-disable-next-line no-await-in-loop
-          const wake = await wakeRecipient(
-            {
-              env: context.env,
-              layout: context.layout,
-              store,
-              ...(context.ports === undefined ? {} : { ports: context.ports }),
-            },
-            role,
-          );
-          wakes.push({ role, status: wake.status });
-        }
-      }
-      return { ...report, wakes };
-    },
-    { createMissing: !selection.dryRun },
-  );
 }
 
 export async function storeExport(

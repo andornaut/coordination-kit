@@ -45,8 +45,8 @@ its delivery sections: `git`, `schedule`, `gate`, `resources`, `ci` and `deploy`
 
 The top-level shape is an object holding exactly `schema` (1), the six delivery sections and
 `reports`, with no secret-like key. This kit's readers (`loadReportsConfig`) pass the delivery
-sections through unread, so a new delivery-kit setting does not refuse an inbox snapshot, a
-scheduled review or an event flush. `loadProjectConfig` and `validateProjectConfig` keep the full
+sections through unread, so a new delivery-kit setting does not refuse a
+scheduled review or an event ingest. `loadProjectConfig` and `validateProjectConfig` keep the full
 rules that delivery-kit loads its configuration with ([libraries](libraries.md)).
 
 This kit uses only `reports`:
@@ -54,38 +54,34 @@ This kit uses only `reports`:
 - `project`: the game's display name, matching its `name` in `config.json`.
 - `scheduledTicks`: whether the game's runner reports scheduled departure slots.
 - `recipient`: a registered role key. It receives the game's events and, when the game hosts the
-  route, its scheduled reviews. `inbox snapshot`, `inbox ack` and `claude channel` default to it.
-- `workerParents`: registered role keys whose verified workers the scheduled review covers. Each
+  route, its scheduled reviews. `claude channel` defaults to it.
+- `workerParents`: registered Codex role keys whose child health the scheduled review reads. Each
   must belong to the active review route.
 
 ## State
 
-The legacy default is game-coordinator's ignored `var/`. These paths remain there even when the
-work protocol is active:
+game-coordinator's ignored `var/` holds:
 
 - `registry.json` and `registry.lock`.
 - `route.json`: the review route.
 - `handoffs/<scope>/`: checkpoints the registry references.
-- `game-dev/`: review and inbox snapshots, health history, acknowledgements, retentions and the
-  legacy message store. This persisted directory keeps its name.
-- `games/<g>/bus/events.jsonl` and rotated `events.<epochSeconds>.jsonl`: the 6.1 runner's event
+- `games/<g>/bus/events.jsonl` and rotated `events.<epochSeconds>.jsonl`: the runner's event
   log, which only the runner writes; `events.cursor` and `events.quarantine.jsonl`, which only
   `events ingest` writes, and its `events.ingest.lock` (see
   [runner events](store.md#runner-events)).
-- `games/<g>/bus/events/`: the 6.0 event outbox (see [review](review.md#event-outbox)) and
-  `games/<g>/bus/unblock/`: the scheduled review slot receipts, the recorded `review deliver`
-  results in `review-deliver/`, the Claude spool and recipient decision records. The rest of
-  `games/<g>/bus/` belongs to delivery-kit's runner.
-- `work-protocol.json` and `work-protocol-fence.json`: the work protocol's configuration pointer
-  and cutover fence. After `store cutover --apply` the fence is the
-  [store cutover fence](store.md#cutover-fence), which selects store mode.
+- `games/<g>/bus/unblock/`: the recorded `review deliver` results in `review-deliver/` and the
+  recipient decision records the Codex wake guard reads. The rest of `games/<g>/bus/` belongs to
+  delivery-kit's runner.
+- `work-protocol.json`: the state root pointer, `{"schema":2,"stateRoot":"/abs"}`. The 2.1 shape
+  (`schema` 1 with `workspaceId` and `generation`) is still read, never written. The root must be
+  absolute and outside every configured repository, registered worktree and Git checkout
+  (`state-root-excluded`); a malformed file is `invalid-state-root-config`.
 
-An active work protocol uses its external `stateRoot` for publications and artifacts,
-`<stateRoot>/accounting` for the request ledger and intake, `<stateRoot>/transport/messages`
-for derived message transport state and recipient spools, `<stateRoot>/coordination.db` for the
-[coordination store](store.md), `<stateRoot>/wake/` for [wake files](review.md#wake-files) and
-`<stateRoot>/channel/` for [channel status files](review.md#channel-status-file). Without one,
-these are `var/coordination.db`, `var/wake/` and `var/channel/`.
+The state root holds `coordination.db` (the [coordination store](store.md)), `wake/` for
+[wake files](review.md#wake-files), `channel/` for
+[channel status files](review.md#channel-status-file), `artifacts/` and, after
+[retirement](store.md#retirement), `archive/`. Without `work-protocol.json` these are under
+`var/`.
 
 Every state write is a temp file, fsync, rename, then a directory fsync. Locks are `flock(1)` on
 files under the selected state directories. The kit writes nothing under any `.claude/`

@@ -7,7 +7,6 @@ import { collectStatus, incomplete, StatusUsageError } from "../status/collect.t
 import { DEFAULT_VERIFY_SINCE, STATE_FILTERS, type StateFilter } from "../status/derive.ts";
 import { systemGit } from "../status/git.ts";
 import { renderMarkdown } from "../status/markdown.ts";
-import { sourceCounters } from "../status/sources.ts";
 
 export const STATUS_OPTIONS = {
   audit: { type: "boolean" },
@@ -49,7 +48,7 @@ export const status: Handler = (io, root, args) => {
   }
   let report;
   try {
-    report = collectStatus({ counters: sourceCounters(), git: systemGit(io.env), io }, root, {
+    report = collectStatus({ git: systemGit(io.env), io }, root, {
       audit: values.audit === true,
       scope: values.scope ?? "all",
       since,

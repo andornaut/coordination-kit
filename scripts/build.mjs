@@ -10,14 +10,10 @@ import { build } from "vite";
 
 const { version } = JSON.parse(readFileSync("package.json", "utf8"));
 const LIBRARIES = {
-  accounting: "src/accounting.ts",
-  events: "src/events.ts",
-  protocol: "src/protocol.ts",
   registry: "src/registry/index.ts",
   review: "src/review.ts",
   shared: "src/shared.ts",
   store: "src/store.ts",
-  transport: "src/transport.ts",
 };
 const COMMON = {
   configFile: false,

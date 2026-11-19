@@ -5,12 +5,12 @@ import { performance } from "node:perf_hooks";
 
 import { listingOrNull, recipientAvailability } from "../adapters/claude/agents.ts";
 import { readChannelStatus } from "../adapters/claude/channelStatus.ts";
+import { wakeFilePath } from "../adapters/claude/wakeFile.ts";
 import { connectControl, type RpcClient } from "../adapters/codex/rpc.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
 import { isRecord } from "../adapters/shared/pyjson.ts";
 import { readJsonIfExists } from "../durable.ts";
 import type { Layout } from "../layout.ts";
-import { messageChannelStateDir } from "../messages/paths.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Harness, Registry } from "../registry/schema.ts";
 import { resolveSelectedRoles, type RoleSelection } from "../registry/selection.ts";
@@ -32,7 +32,7 @@ export interface RoleDiagnosis {
   };
   readonly channel_reference: {
     readonly path: string;
-    readonly source: "message_channel_state_dir";
+    readonly source: "wake_file";
   } | null;
   readonly config_reference: { readonly path: string; readonly source: "registry" };
   /** Claude only: the channel MCP server's configured launch command against the stable path. */
@@ -177,7 +177,7 @@ function initial(layout: Layout, registry: Registry, role: string): RoleDiagnosi
     channel_command: harness === "claude" ? channelCommand(layout) : null,
     channel_reference:
       harness === "claude" && id !== null
-        ? { path: messageChannelStateDir(layout, id), source: "message_channel_state_dir" }
+        ? { path: wakeFilePath(layout, id), source: "wake_file" }
         : null,
     channel_server: harness === "claude" ? channelServer(layout, id) : null,
     config_reference: { path: layout.registryFile, source: "registry" },

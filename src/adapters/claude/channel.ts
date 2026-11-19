@@ -1,243 +1,13 @@
-// Channel consumer: a stdio MCP server started by the recipient session itself.
-// It delivers each spooled entry once, records `accepted` (delivery, not handling) or
-// `ambiguous` on a failed write, and never resends.
-import { mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
-
-import { fsyncDirectory, readJsonIfExists, writeJsonDurable } from "../../durable.ts";
-import { holdLockAsync } from "../../lock.ts";
-import { channelNotification, initializeResult, wakeNotification } from "./protocol.ts";
-import {
-  deliveredDir,
-  entryKind,
-  type Json,
-  LOCK_FILE,
-  readEntry,
-  RECEIPT_KEYS,
-  spoolDir,
-  type SpoolEntry,
-  unblockDir,
-} from "./spool.ts";
+// Channel server: a stdio MCP server started by the recipient Claude session itself. It answers
+// the MCP handshake and, after `notifications/initialized`, emits one notification per increase of
+// the conversation's wake file seq. A wake carries no payload: the recipient pulls its messages.
+import { initializeResult, wakeNotification } from "./protocol.ts";
 import { wakeText, type WakeWatcher } from "./wakeFile.ts";
 
 /** Writes one complete line synchronously; throws when the channel output is unusable. */
 export type LineWriter = (line: string) => void;
 
-export interface MessageChannelGuard {
-  (message: {
-    readonly requestId: string;
-    readonly recipient: string;
-    readonly text: string;
-  }):
-    | { readonly status: "clear" | "blocked" | "unavailable" }
-    | Promise<{ readonly status: "clear" | "blocked" | "unavailable" }>;
-  /** Opens one guard view for a drain under unblock.lock; it is discarded when the drain ends. */
-  readonly drain?: () => MessageChannelGuard;
-}
-
-export interface MessageChannelOptions {
-  /** Fresh exact source/role/harness/native binding, HOLD and qualified question clearance. */
-  readonly beforeMessage?: MessageChannelGuard;
-}
-
-const RECEIPT = /^(?:unblock|events\/native)\/[A-Za-z0-9_-]+\.json$/;
-
-export function now(): string {
-  return `${new Date().toISOString().slice(0, 19)}Z`;
-}
-
-function receiptFor(busDir: string, entry: Json): string {
-  const name = entry.receipt;
-  if (entryKind(entry.kind) === undefined || typeof name !== "string" || !RECEIPT.test(name)) {
-    throw new Error("invalid receipt reference");
-  }
-  return join(busDir, name);
-}
-
-function matches(receipt: Json, entry: Json): boolean {
-  return (
-    receipt[RECEIPT_KEYS[entryKind(entry.kind) ?? "event"]] === entry.requestId &&
-    receipt.status === "sending" &&
-    (entry.kind !== "message" ||
-      (receipt.kind === "message" &&
-        receipt.recipient === entry.recipient &&
-        receipt.text === entry.text))
-  );
-}
-
-function mark(receipt: Json, status: string, fields: Json = {}): void {
-  Object.assign(receipt, fields, { status });
-  const attempts = receipt.attempts;
-  if (Array.isArray(attempts) && attempts.length > 0) {
-    Object.assign(attempts[attempts.length - 1] as Json, { status });
-  }
-}
-
-function readReceipt(path: string): Json | undefined {
-  const value = readJsonIfExists(path);
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Json)
-    : undefined;
-}
-
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-function names(directory: string, suffix: string): string[] {
-  try {
-    // A sorted listing keeps delivery order deterministic.
-    return readdirSync(directory)
-      .filter((name) => name.endsWith(suffix))
-      .sort();
-  } catch {
-    return [];
-  }
-}
-
-/** A claimed entry with a sending receipt was interrupted mid-delivery; never resend it. */
-function reconcileClaims(busDir: string): void {
-  const spool = spoolDir(busDir);
-  for (const name of names(spool, ".claimed")) {
-    try {
-      const entry = readEntry(join(spool, name));
-      if (entry === undefined) {
-        continue;
-      }
-      const path = receiptFor(busDir, entry);
-      const receipt = readReceipt(path);
-      if (receipt !== undefined && matches(receipt, entry)) {
-        mark(receipt, "ambiguous", { reason: "channel delivery interrupted; do not resend" });
-        writeJsonDurable(path, receipt);
-      }
-    } catch {
-      // An unreadable claim stays in place as evidence for manual reconciliation.
-    }
-  }
-}
-
-async function deliverLocked(
-  options: MessageChannelOptions,
-  write: LineWriter,
-  busDir: string,
-  recipient: string,
-): Promise<boolean> {
-  reconcileClaims(busDir);
-  const spool = spoolDir(busDir);
-  let guard: MessageChannelGuard | undefined;
-  for (const name of names(spool, ".json")) {
-    const pending = join(spool, name);
-    let claimed: string;
-    let entry: Json;
-    let path: string;
-    let receipt: Json;
-    let line: string;
-    try {
-      const loaded = readEntry(pending);
-      if (
-        loaded === undefined ||
-        loaded.recipient !== recipient ||
-        name !== `${String(loaded.requestId)}.json` ||
-        typeof loaded.text !== "string"
-      ) {
-        continue;
-      }
-      entry = loaded;
-      path = receiptFor(busDir, entry);
-      let current = readReceipt(path);
-      if (current === undefined || !matches(current, entry)) {
-        continue;
-      }
-      if (entry.kind === "message") {
-        if (options.beforeMessage === undefined) {
-          continue;
-        }
-        guard ??= options.beforeMessage.drain?.() ?? options.beforeMessage;
-        // The service verifies exact durable source and fresh ownership/clearance under this claim lock.
-        // eslint-disable-next-line no-await-in-loop
-        const clearance = await guard({
-          recipient,
-          requestId: entry.requestId as string,
-          text: entry.text as string,
-        });
-        if (clearance.status !== "clear") {
-          continue;
-        }
-        // Awaiting service clearance permits concurrent edits. Recheck exact spool and receipt before claiming.
-        const latest = readEntry(pending);
-        current = readReceipt(path);
-        if (
-          latest?.kind !== "message" ||
-          latest.requestId !== entry.requestId ||
-          latest.recipient !== recipient ||
-          latest.text !== entry.text ||
-          latest.receipt !== entry.receipt ||
-          current === undefined ||
-          !matches(current, latest)
-        ) {
-          continue;
-        }
-      }
-      receipt = current;
-      line = JSON.stringify(channelNotification(entry as unknown as SpoolEntry));
-      claimed = `${pending.slice(0, -".json".length)}.claimed`;
-      renameSync(pending, claimed);
-    } catch {
-      continue;
-    }
-    try {
-      // Persist the claim before output so a host crash cannot restore a pending entry and replay it.
-      fsyncDirectory(spool);
-    } catch {
-      mark(receipt, "ambiguous", { reason: "channel claim sync failed; do not resend" });
-      writeJsonDurable(path, receipt);
-      return false;
-    }
-    try {
-      write(`${line}\n`);
-    } catch {
-      mark(receipt, "ambiguous", { reason: "channel write failed; do not resend" });
-      writeJsonDurable(path, receipt);
-      return false;
-    }
-    const acceptedAt = now();
-    // The delivered copy is the recipient's acknowledgeable inventory (inbox ack).
-    mkdirSync(deliveredDir(busDir), { mode: 0o700, recursive: true });
-    writeJsonDurable(join(deliveredDir(busDir), name), { ...entry, acceptedAt });
-    mark(receipt, "accepted", { acceptedAt });
-    writeJsonDurable(path, receipt);
-    unlinkSync(claimed);
-  }
-  return true;
-}
-
-/**
- * Deliver every pending entry for `recipient` in one bus directory. False once output fails. A bus
- * without a spool directory has nothing to deliver and is left as it is: nothing is created.
- */
-export async function deliverPending(
-  write: LineWriter,
-  busDir: string,
-  recipient: string,
-  options: MessageChannelOptions = {},
-): Promise<boolean> {
-  if (!isDirectory(spoolDir(busDir))) {
-    return true;
-  }
-  const lock = await holdLockAsync(join(unblockDir(busDir), LOCK_FILE));
-  try {
-    return await deliverLocked(options, write, busDir, recipient);
-  } catch {
-    // A claim survives any post-output persistence failure. Reconciliation must never replay it.
-    return false;
-  } finally {
-    lock.release();
-  }
-}
+type Json = Record<string, unknown>;
 
 interface Message {
   readonly id?: unknown;
@@ -263,30 +33,20 @@ export function handle(write: LineWriter, message: Message): boolean {
   return false;
 }
 
-export interface ServeOptions extends MessageChannelOptions {
+export interface ServeOptions {
   readonly pollMs: number;
-  /** Refreshed on the existing poll, after independent static game feeds. */
-  readonly refreshFeeds?: () => readonly ChannelFeed[];
-  /** Polled after every spool drain; each seq increase emits one wake notification. */
+  /** Polled after every message and every poll; each seq increase emits one notification. */
   readonly wake?: WakeWatcher;
 }
 
-export interface ChannelFeed {
-  readonly busDir: string;
-  /** Acquire the generation lease before the spool lock and retain it through all receipt writes. */
-  readonly withLease?: (action: () => Promise<boolean>) => Promise<boolean>;
-}
-
 /**
- * Serve until input ends (exit 0) or the output fails (exit 1). Entries are delivered only after
+ * Serve until input ends (exit 0) or the output fails (exit 1). Wakes are emitted only after
  * `notifications/initialized`, then after every message and every poll.
  */
 export function serve(
   options: ServeOptions,
   input: NodeJS.ReadableStream,
   write: LineWriter,
-  busDirs: readonly string[],
-  recipient: string,
 ): Promise<number> {
   return new Promise((resolve) => {
     let initialized = false;
@@ -304,40 +64,12 @@ export function serve(
         resolve(code);
       }
     };
-    const drain = async (): Promise<void> => {
+    const drain = (): void => {
       if (!initialized || running || finished) {
         return;
       }
       running = true;
       try {
-        for (const busDir of busDirs) {
-          // Projects are drained in order; a failed write stops the consumer.
-          // eslint-disable-next-line no-await-in-loop
-          if (!(await deliverPending(write, busDir, recipient, options))) {
-            finish(1);
-            return;
-          }
-        }
-        let feeds: readonly ChannelFeed[];
-        try {
-          feeds = options.refreshFeeds?.() ?? [];
-        } catch {
-          // An unavailable generic root cannot suppress independent scheduled game feeds.
-          feeds = [];
-        }
-        for (const feed of feeds) {
-          if (!isDirectory(spoolDir(feed.busDir))) {
-            continue;
-          }
-          const consume = () => deliverPending(write, feed.busDir, recipient, options);
-          // Each generation lease precedes its spool lock, including interrupted-claim reconciliation.
-          // eslint-disable-next-line no-await-in-loop
-          if (!(await (feed.withLease === undefined ? consume() : feed.withLease(consume)))) {
-            finish(1);
-            return;
-          }
-        }
-        // The wake follows the legacy spools, so spool delivery never waits on it.
         const wake = options.wake?.poll();
         if (wake !== undefined) {
           try {
@@ -350,7 +82,7 @@ export function serve(
         running = false;
       }
     };
-    const timer = setInterval(() => void drain(), options.pollMs);
+    const timer = setInterval(() => drain(), options.pollMs);
     input.setEncoding?.("utf8");
     input.on("data", (chunk: string | Buffer) => {
       buffer += chunk.toString();
@@ -374,7 +106,7 @@ export function serve(
           }
         }
       }
-      void drain();
+      drain();
     });
     input.once("end", () => finish(0));
     input.once("error", () => finish(1));

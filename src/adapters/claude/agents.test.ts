@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { claudeFixture, RECIPIENT } from "../../review/fixtures.ts";
+import { RECIPIENT } from "../../review/fixtures.ts";
 import { BLOCKED_REASON, MISSING_REASON, recipientAvailability, sessionStatus } from "./agents.ts";
-import { claudeAdapter } from "./index.ts";
 
 const interactive = (status: unknown) => ({ kind: "interactive", sessionId: RECIPIENT, status });
 
@@ -46,27 +45,5 @@ describe("recipientAvailability", () => {
     expect(sessionStatus([interactive("waiting")], RECIPIENT)).toBe("waiting");
     expect(sessionStatus([interactive("shell")], RECIPIENT)).toBe("shell");
     expect(sessionStatus([interactive("Bad token")], RECIPIENT)).toBe("unknown");
-  });
-});
-
-describe("claudeAdapter status", () => {
-  it.each([
-    [[interactive("idle")], { status: "available" }],
-    [[interactive("busy")], { status: "busy" }],
-    [[interactive("shell")], { status: "busy" }],
-    [[interactive("waiting")], { status: "busy" }],
-    [
-      [interactive("missing")],
-      { reason: "recipient session state unknown (reported: missing)", status: "unavailable" },
-    ],
-    [[], { reason: MISSING_REASON, status: "missing" }],
-    [
-      [{ kind: "background", sessionId: RECIPIENT, state: "blocked" }],
-      { reason: BLOCKED_REASON, status: "blocked" },
-    ],
-  ])("maps listing %j to %j", async (rows, expected) => {
-    const fixture = claudeFixture();
-    fixture.agents(rows);
-    expect(await claudeAdapter(fixture.env, fixture.game).status(RECIPIENT)).toEqual(expected);
   });
 });

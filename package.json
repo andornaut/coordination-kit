@@ -1,7 +1,7 @@
 {
   "name": "@andornaut/coordination-kit",
-  "version": "2.1.2",
-  "description": "Role registry, durable role messages and their transports, harness adapters, the request ledger, the filesystem work protocol and work-file checks for the game and kit roles.",
+  "version": "3.0.0",
+  "description": "Role registry, the SQLite coordination store with its message lifecycle and wakes, harness adapters, the runner seam and work-file checks for the game and kit roles.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -16,25 +16,9 @@
       "types": "./dist/registry.d.ts",
       "import": "./dist/registry.js"
     },
-    "./build/transport": {
-      "types": "./dist/transport.d.ts",
-      "import": "./dist/transport.js"
-    },
-    "./build/accounting": {
-      "types": "./dist/accounting.d.ts",
-      "import": "./dist/accounting.js"
-    },
-    "./build/protocol": {
-      "types": "./dist/protocol.d.ts",
-      "import": "./dist/protocol.js"
-    },
     "./build/review": {
       "types": "./dist/review.d.ts",
       "import": "./dist/review.js"
-    },
-    "./build/events": {
-      "types": "./dist/events.d.ts",
-      "import": "./dist/events.js"
     },
     "./build/shared": {
       "types": "./dist/shared.d.ts",
@@ -53,12 +37,10 @@
     "docs/libraries.md",
     "docs/messages.md",
     "docs/registry.md",
-    "docs/request-accounting.md",
     "docs/review.md",
     "docs/store.md",
     "docs/upgrading.md",
     "docs/work-files.md",
-    "docs/work-protocol.md",
     "docs/design/README.md",
     "docs/design/coordination.md",
     "docs/design/messages.md",

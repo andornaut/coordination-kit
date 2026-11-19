@@ -10,16 +10,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { packagedDocs } from "./docs-check.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const LIBRARIES = [
-  "accounting",
-  "events",
-  "protocol",
-  "registry",
-  "review",
-  "shared",
-  "store",
-  "transport",
-];
+const LIBRARIES = ["registry", "review", "shared", "store"];
 const BUNDLES = ["dist/cli.js", ...LIBRARIES.map((name) => `dist/${name}.js`)];
 const METADATA = ["LICENSE", "SOURCE_COMMIT", "package.json", ...packagedDocs(root)];
 
@@ -66,20 +57,9 @@ describe("dist/cli.js", () => {
   });
 
   it("exports from each API bundle exactly the names its source entry exports", async () => {
-    const events = (await import(join(root, "dist/events.js"))) as Record<string, unknown>;
-    expect(Object.keys(events).sort()).toEqual([
-      "DELIVERY_BUDGET",
-      "QUIET_KINDS",
-      "clean",
-      "deliveryMessage",
-      "enqueueEvent",
-      "eventId",
-      "eventsDir",
-      "flushEvents",
-      "flushEventsWith",
-      "recordEvent",
-      "writeEventState",
-    ]);
+    const review = (await import(join(root, "dist/review.js"))) as Record<string, unknown>;
+    expect(review.deliverReview).toBeTypeOf("function");
+    expect(review).not.toHaveProperty("deliverScheduledReview");
     const apis = await Promise.all(
       LIBRARIES.map(
         async (name) => (await import(join(root, `dist/${name}.js`))) as Record<string, unknown>,
@@ -113,51 +93,16 @@ describe("dist/registry.js", () => {
     ]) {
       expect(registry[name], name).toBeDefined();
     }
-    const transport = (await import(join(root, "dist/transport.js"))) as {
-      messageChannelStateDir: (layout: { reviewDir: string }, id: string) => string;
-    };
-    const accounting = (await import(join(root, "dist/accounting.js"))) as Record<string, unknown>;
-    for (const name of [
-      "LedgerStore",
-      "LedgerError",
-      "snapshotIntake",
-      "captureAccounting",
-      "accountingStatus",
-    ]) {
-      expect(typeof accounting[name]).toBe("function");
-    }
-    expect(
-      transport.messageChannelStateDir(
-        { reviewDir: "/review" },
-        "00000000-0000-4000-8000-000000000001",
-      ),
-    ).toBe("/review/messages/recipients/00000000-0000-4000-8000-000000000001/unblock");
     const consumer = join(mkdtempSync(join(tmpdir(), "registry-consumer-")), "consumer.mts");
     const target = JSON.stringify(join(root, "dist/registry.js"));
     writeFileSync(
       consumer,
       `import { readRegistry, type Registry, RevisionConflict, updateRegistry } from ${target};
-import {
-  messageChannelStateDir, resolveCodexControlSocket, type CodexControlSocketEndpoint,
-} from ${JSON.stringify(join(root, "dist/transport.js"))};
-import {
-  LedgerStore, type LedgerState, type LedgerTransaction, type IntakeContext, snapshotIntake,
-} from ${JSON.stringify(join(root, "dist/accounting.js"))};
-const ledgerState: LedgerState = "checked";
-const ledgerApply = (store: LedgerStore, input: LedgerTransaction) => store.apply(input);
-const ledgerIntake = (context: IntakeContext) => snapshotIntake(context, {});
-// @ts-expect-error Accounting states do not widen to arbitrary strings.
-const badLedgerState: LedgerState = "transport-accepted";
-// @ts-expect-error Accounting revisions preserve numeric CAS values.
-const badLedgerRevision: LedgerTransaction["expectedRevision"] = "1";
-export { ledgerState, ledgerApply, ledgerIntake, badLedgerState, badLedgerRevision };
-const endpoint: CodexControlSocketEndpoint = resolveCodexControlSocket({ env: {}, home: "/fixture" });
-// @ts-expect-error Endpoint sources are a finite union, not arbitrary strings.
-const source: "other" = endpoint.source;
-const channel: string = messageChannelStateDir(
-  { reviewDir: "/review" }, "00000000-0000-4000-8000-000000000001",
-);
-export { endpoint, source, channel };
+import { type RetireOutput, storeRetire } from ${JSON.stringify(join(root, "dist/store.js"))};
+const applied = (output: RetireOutput): boolean => output.applied;
+// @ts-expect-error Retirement output keeps a boolean applied flag.
+const notApplied: (output: RetireOutput) => string = (output) => output.applied;
+export { applied, notApplied, storeRetire };
 const check: (registry: Registry) => number = (registry) => registry.revision;
 // @ts-expect-error A resolved Registry type rejects this; an unresolved one would be any.
 const wrong: (registry: Registry) => string = (registry) => registry.revision;

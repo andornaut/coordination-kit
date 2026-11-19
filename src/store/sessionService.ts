@@ -6,7 +6,6 @@ import { randomUUID } from "node:crypto";
 
 import { resolveHarness } from "../registry/resolve.ts";
 import type { Harness, Registry } from "../registry/schema.ts";
-import { COORDINATOR_ROLE } from "./cutover.ts";
 import type { Store } from "./db.ts";
 import {
   activeHandoff,
@@ -25,6 +24,7 @@ import {
 import { type CallerOptions, resolveCaller } from "./identity.ts";
 import type { HoldView } from "./questions.ts";
 import { wakeOwner } from "./questionService.ts";
+import { COORDINATOR_ROLE } from "./retire.ts";
 import { registry, type StoreServiceContext, withStore } from "./service.ts";
 import { type Actor, StoreError } from "./types.ts";
 import type { WakeStatus } from "./wake.ts";
