@@ -3,6 +3,11 @@
 Moving from coordination-kit 2.0 to 2.1, from 1.3 to 2.0, from 1.1 to 1.2, and from delivery-kit
 4.7 to coordination-kit 1.0.
 
+## From 2.1.1
+
+- `gate_passed` (delivery-kit 6.1.2 and later) is a quiet type: stored as an event, not delivered,
+  and it proves the gate for COMPLETE.
+
 ## From 2.1.0
 
 - `work check` no longer requires `approved` on a `proposed` or `declined` item, and accepts

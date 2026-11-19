@@ -333,7 +333,7 @@ offset equals its size and the size exceeds 1 MiB. Ingest is the only reader:
   `bus.event:<id>`, unique per (game, type, key). Blocked events stay apart per type.
 - Every non-quiet event is also stored as a message from `delivery-kit` to `reports.recipient`
   with an ID derived from the event ID. The quiet progress types (`ci_pending`, `ci_running`,
-  `deploy_pending`, `deploy_retry` and `gate_skipped`) are stored as events only.
+  `deploy_pending`, `deploy_retry`, `gate_passed` and `gate_skipped`) are stored as events only.
 - The events, their messages and any COMPLETE are one transaction. Then the recipient is woken,
   quarantined lines are appended, the cursor is written atomically, and only then are rotated
   files the cursor has passed deleted.
@@ -342,8 +342,8 @@ offset equals its size and the size exceeds 1 MiB. Ingest is the only reader:
 
 A commit's COMPLETE is derived once per (game, sha), as a `bus.complete` event with the key
 `bus.complete:<game>:<sha>` and a message to `reports.recipient` whose ID derives from (game,
-sha). It fires when, for that sha, a gate passed (`ok`, or `skipped` for the docs-only
-`gate_skipped`), a push and CI are `ok`, and a deploy is `ok` or `skipped` (`deploy_disabled` for a
+sha). It fires when, for that sha, a gate passed (`gate_passed` or another `ok` gate line, or
+`skipped` for the docs-only `gate_skipped`), a push and CI are `ok`, and a deploy is `ok` or `skipped` (`deploy_disabled` for a
 game without deployment). Other progress types never count. The synthetic `push` line a 6.1 runner
 appends at its first start (detail `imported at 6.1 start`) is a normal push. Ingest never reads
 the game's delivery configuration.

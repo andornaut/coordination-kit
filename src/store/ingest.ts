@@ -57,6 +57,8 @@ export const EVENT_STATUSES: ReadonlySet<string> = new Set([
 ]);
 /** The imported legacy `complete` line: that commit's COMPLETE. */
 const LEGACY_COMPLETE = "complete";
+/** Quiet gate types that still prove the gate passed for COMPLETE. */
+const GATE_PASSES: ReadonlySet<string> = new Set(["gate_passed", "gate_skipped"]);
 
 /** One runner event line, as the contract defines it. */
 export interface BusLine {
@@ -412,7 +414,7 @@ function deriveComplete(
   const legacy = rows.find(
     (row) => row.type === LEGACY_COMPLETE && row.kind === "runner" && row.status === "ok",
   );
-  // Progress types never count as success; gate_skipped is the docs-only gate and does.
+  // Progress types never count as success; gate_passed and the docs-only gate_skipped do.
   const passed = (kind: string, statuses: readonly string[]) =>
     rows
       .filter(
@@ -420,7 +422,7 @@ function deriveComplete(
           row.kind === kind &&
           row.status !== null &&
           statuses.includes(row.status) &&
-          (!QUIET_KINDS.has(row.type) || row.type === "gate_skipped"),
+          (!QUIET_KINDS.has(row.type) || GATE_PASSES.has(row.type)),
       )
       .at(-1);
   const gate = passed("gate", ["ok", "skipped"]);

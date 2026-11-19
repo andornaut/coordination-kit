@@ -37,6 +37,7 @@ export const QUIET_KINDS: ReadonlySet<string> = new Set([
   "ci_running",
   "deploy_pending",
   "deploy_retry",
+  "gate_passed",
   "gate_skipped",
 ]);
 

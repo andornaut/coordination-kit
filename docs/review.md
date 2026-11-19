@@ -302,7 +302,7 @@ shares one identity, so a changed block reason is not recorded again. `recordEve
 event once under `events/state.lock` and runs the producer's optional `underLock` step under the
 same lock; delivery-kit uses that step to track each pushed commit's CI and deployment state and
 to add its `complete` event. Progress kinds (`ci_pending`, `ci_running`, `deploy_pending`,
-`deploy_retry` and `gate_skipped`) are never recorded, and any already queued is marked
+`deploy_retry`, `gate_passed` and `gate_skipped`) are never recorded, and any already queued is marked
 `suppressed` at the next flush.
 
 `flushEvents(game)` delivers unsent events in creation order under the non-blocking
