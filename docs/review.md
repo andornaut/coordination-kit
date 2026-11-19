@@ -83,20 +83,20 @@ Exit status is 0 for every typed result, 2 for a usage error (a missing or malfo
 failure prints nothing on stdout and one `coordination-kit:` line on stderr; the runner reports
 it, a timeout or unparsable output as no delivery claimed, with the `cli-error` token.
 
-| Token                   | Meaning                                                                                                         |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `route-unavailable`     | The review route, its worker parents or an endpoint harness is invalid; the route owner must fix it.            |
-| `recipient-unavailable` | The recipient has no session, conversation, listing, socket or native metadata, or refused the send.            |
-| `recipient-busy`        | The recipient's session is blocked or mid-turn, or a lock is held.                                              |
-| `in-flight`             | A spooled entry is waiting for the recipient's channel to accept it; the next pass completes it.                |
-| `question-pending`      | A recipient decision, question or clearance guard refused the send.                                             |
-| `held`                  | The route is held: no review, and events to its recipient wait.                                                 |
-| `receipt-ambiguous`     | A previous send's outcome is unknown; it is never resent.                                                       |
-| `already-delivered`     | The seam's slot receipt shows this slot was already delivered.                                                  |
-| `nothing-due`           | This game does not host the route, or there is no route.                                                        |
-| `no-events`             | The outbox has no unsent event.                                                                                 |
-| `cli-error`             | The runner's token for a failed CLI call; the CLI never prints it.                                              |
-| `outbox-unreadable`     | An event file cannot be read, so the flush stops before any send.                                               |
+| Token                   | Meaning                                                                                              |
+| ----------------------- | ---------------------------------------------------------------------------------------------------- |
+| `route-unavailable`     | The review route, its worker parents or an endpoint harness is invalid; the route owner must fix it. |
+| `recipient-unavailable` | The recipient has no session, conversation, listing, socket or native metadata, or refused the send. |
+| `recipient-busy`        | The recipient's session is blocked or mid-turn, or a lock is held.                                   |
+| `in-flight`             | A spooled entry is waiting for the recipient's channel to accept it; the next pass completes it.     |
+| `question-pending`      | A recipient decision, question or clearance guard refused the send.                                  |
+| `held`                  | The route is held: no review, and events to its recipient wait.                                      |
+| `receipt-ambiguous`     | A previous send's outcome is unknown; it is never resent.                                            |
+| `already-delivered`     | The seam's slot receipt shows this slot was already delivered.                                       |
+| `nothing-due`           | This game does not host the route, or there is no route.                                             |
+| `no-events`             | The outbox has no unsent event.                                                                      |
+| `cli-error`             | The runner's token for a failed CLI call; the CLI never prints it.                                   |
+| `outbox-unreadable`     | An event file cannot be read, so the flush stops before any send.                                    |
 
 A review maps as follows. A Claude brief written to the spool (`sending`) or an accepted Codex
 turn is `delivered`. A game that does not host the route, or no route, is `skipped` with
