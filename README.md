@@ -26,7 +26,7 @@ commit the lockfile integrity:
 
 ```json
 "devDependencies": {
-  "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v1.3.1/coordination-kit-1.3.1.tgz"
+  "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v2.0.0/coordination-kit-2.0.0.tgz"
 }
 ```
 
@@ -45,14 +45,14 @@ take the coordinator root only from `COORDINATION_KIT_ROOT` or `DELIVERY_KIT_ROO
 | ---------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `msg`      | `send`, `done`, `retain`, `status`, `history`                                            | Store messages: send with one guarded wake, close or retain in one write, read.                 |
 | `inbox`    | (none), `snapshot`, `ack`                                                                | Read your store inbox; capture a recipient's legacy inbox snapshot; acknowledge items from it.  |
-| `store`    | `import`, `export`, `rebuild`                                                            | Import the legacy message stores, export for rollback, verify and rebuild the store.            |
+| `store`    | `import`, `export`, `rebuild`, `cutover`                                                 | Import the legacy message stores, export for rollback, verify and rebuild, switch to the store. |
 | `message`  | `send`, `dispatch`, `status`, `reconcile`, `retire-spool`                                | Legacy role messages: store, guarded delivery, status, reconciliation and Claude spool cleanup. |
 | `ledger`   | `intake`, `apply`, `show`, `report`, `history`, `coverage`, `reconcile`, `boundary`      | The request ledger.                                                                             |
 | `harness`  | `ready`, `select`, `doctor`                                                              | Readiness by effective harness, scoped harness selection and diagnosis.                         |
 | `claude`   | `ready`, `channel`                                                                       | The Claude readiness probe and the stdio MCP channel server.                                    |
 | `codex`    | `ready`                                                                                  | The Codex readiness probe.                                                                      |
-| `review`   | `deliver`                                                                                | The runner seam: one slot's scheduled review, as one typed JSON line.                           |
-| `events`   | `flush`                                                                                  | The runner seam: one event outbox flush, as one typed JSON line.                                |
+| `review`   | `deliver`, `show`                                                                        | The runner seam: one slot's scheduled review, as one typed JSON line; show a stored brief.      |
+| `events`   | `flush`, `ingest`                                                                        | The runner seam: one event outbox flush or event log ingest, as one typed JSON line.            |
 | `protocol` | `status`, `enroll`, `boundary`, `work-publish`, `message-publish`, `inbox`, and the rest | The explicit filesystem work protocol.                                                          |
 | `status`   | (none)                                                                                   | Read-only status of every registered repository's work items, as JSON or a Markdown digest.     |
 | `work`     | `check`, `report`                                                                        | Validate a repository's work files; join their milestones with live protocol state.             |
@@ -73,7 +73,7 @@ Errors go to stderr prefixed `coordination-kit:`. Commands with a JSON result ke
 | [docs/configuration.md](docs/configuration.md)           | The coordinator root, `config.json`, the `reports` fields of `delivery-kit.json` and the state layout              |
 | [docs/registry.md](docs/registry.md)                     | `var/registry.json`, scoped harness selection, send-time resolution, the readiness probe and the harness doctor    |
 | [docs/messages.md](docs/messages.md)                     | Store messages, and legacy message send, status, dispatch, delivery guards and reconciliation                      |
-| [docs/store.md](docs/store.md)                           | The SQLite coordination store: schema, library API, writer fence, wakes, legacy import and rollback                |
+| [docs/store.md](docs/store.md)                           | The SQLite coordination store: schema, API, fence, wakes, store mode, event ingest, import, cutover and rollback   |
 | [docs/review.md](docs/review.md)                         | The review route, the runner seam, the Claude and Codex adapters, inbox snapshots, wake files and the event outbox |
 | [docs/request-accounting.md](docs/request-accounting.md) | Requested outcomes tracked separately from message delivery and handling                                           |
 | [docs/work-protocol.md](docs/work-protocol.md)           | Fenced role publications, message originals, recipient handling receipts and external `stateRoot` activation       |

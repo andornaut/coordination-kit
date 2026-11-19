@@ -68,17 +68,24 @@ work protocol is active:
 - `handoffs/<scope>/`: checkpoints the registry references.
 - `game-dev/`: review and inbox snapshots, health history, acknowledgements, retentions and the
   legacy message store. This persisted directory keeps its name.
-- `games/<g>/bus/events/`: the event outbox (see [review](review.md#event-outbox)) and
+- `games/<g>/bus/events.jsonl` and rotated `events.<epochSeconds>.jsonl`: the 6.1 runner's event
+  log, which only the runner writes; `events.cursor` and `events.quarantine.jsonl`, which only
+  `events ingest` writes, and its `events.ingest.lock` (see
+  [runner events](store.md#runner-events)).
+- `games/<g>/bus/events/`: the 6.0 event outbox (see [review](review.md#event-outbox)) and
   `games/<g>/bus/unblock/`: the scheduled review slot receipts, the recorded `review deliver`
   results in `review-deliver/`, the Claude spool and recipient decision records. The rest of
   `games/<g>/bus/` belongs to delivery-kit's runner.
 - `work-protocol.json` and `work-protocol-fence.json`: the work protocol's configuration pointer
-  and cutover fence.
+  and cutover fence. After `store cutover --apply` the fence is the
+  [store cutover fence](store.md#cutover-fence), which selects store mode.
 
 An active work protocol uses its external `stateRoot` for publications and artifacts,
 `<stateRoot>/accounting` for the request ledger and intake, `<stateRoot>/transport/messages`
-for derived message transport state and recipient spools, and `<stateRoot>/wake/` for
-[wake files](review.md#wake-files). Without one, wake files are in `var/wake/`.
+for derived message transport state and recipient spools, `<stateRoot>/coordination.db` for the
+[coordination store](store.md), `<stateRoot>/wake/` for [wake files](review.md#wake-files) and
+`<stateRoot>/channel/` for [channel status files](review.md#channel-status-file). Without one,
+these are `var/coordination.db`, `var/wake/` and `var/channel/`.
 
 Every state write is a temp file, fsync, rename, then a directory fsync. Locks are `flock(1)` on
 files under the selected state directories. The kit writes nothing under any `.claude/`

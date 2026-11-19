@@ -1,7 +1,8 @@
 # Coordination store
 
 The SQLite store behind the `msg` and `inbox` commands: its schema, the library API, the writer
-fence, wakes, the legacy import mapping and rollback. The design is in
+fence, wakes, the store-mode switch, runner event ingest, the legacy import mapping, the cutover
+runbook and rollback. The design is in
 [simplification](design/simplification.md#phase-2-one-store-and-one-message-path).
 
 ## Location and settings
@@ -45,9 +46,17 @@ Projections, updated in the same transaction as their event:
 - `wakes`: the wake log, one row per claimed or guarded wake with its harness, conversation,
   count, outcome and detail.
 
+- `bus_events`: one row per runner event, unique per (game, type, key), indexed by (game, sha).
+- `bus_completes`: one row per (game, sha) COMPLETE with its source, message ID and work IDs.
+- `bus_work`: each work ID once per game, with the commit whose COMPLETE first listed it.
+- `review_briefs`: one row per (game, slot) stored review brief with its recipient and message ID.
+
 Event kinds: `msg.sent`, `msg.imported`, `inbox.read`, `msg.closed`, `msg.retained`,
-`wake.claimed`, `wake.completed`, `wake.guarded` and `wake.rearmed`. A kind with no projection is
-still stored and chained, so a later projection can read it on its next rebuild.
+`wake.claimed`, `wake.completed`, `wake.guarded`, `wake.rearmed`, `bus.event`, `bus.complete`,
+`review.brief` and `store.cutover`. A kind with no projection is still stored and chained, so a
+later projection can read it on its next rebuild. A store written before a projection existed
+gets that projection's tables when it is opened, filled from the existing events in one
+transaction; the events and their hashes are untouched.
 
 `store rebuild` recomputes every hash from seq 1, refuses with `chain-broken` at the first
 mismatch, then drops and recreates the projection tables and replays every event in one
@@ -139,6 +148,182 @@ The store's own question and hold records arrive in Phase 3. Until then the `sto
 `wakeRecipient` passes every recipient; Phase 3 supplies one that blocks on an open question or
 hold record.
 
+## Store mode
+
+The store is the selected mode when both hold:
+
+1. `var/work-protocol-fence.json` is a store cutover fence (`"kind": "store-cutover"`), which only
+   `store cutover --apply` writes; and
+2. `coordination.db` exists at the store path.
+
+A cutover fence without the store is refused with `store-missing`, since legacy writers are fenced
+and the store cannot be read. Without the cutover fence every path behaves as in 1.3. In store
+mode:
+
+- `review deliver` stores the brief as one message ([review](review.md#stored-brief)); it sends no
+  native brief and spools nothing.
+- Events this kit produces itself (review health such as `review-stuck`) are stored as messages
+  from `delivery-kit` to the game's `reports.recipient`, with IDs derived from (game, kind, key).
+  They never go to the event outbox or the runner's `events.jsonl`. The recipient is woken by the
+  next send to it or the next review.
+- Legacy message writes (`message send`, `dispatch`, `reconcile`, `retire-spool` and every other
+  write through the legacy message store) are refused with `store-cutover`; legacy reads such as
+  `message status` read the frozen records. `claude channel` stops draining the generic message
+  spool, whose unclaimed entries were imported as `sent`; game spools still drain.
+- `events flush` and the event outbox are unchanged, for 6.0 runners.
+
+The switch is the fence, not a setting in `config.json`, so a 1.3 CLI never sees a field it does
+not know. Restoring the previous fence switches this kit back to legacy mode and lets a 1.3 CLI
+run again.
+
+### Cutover fence
+
+```json
+{
+  "schema": 1,
+  "kind": "store-cutover",
+  "generation": 2,
+  "cutoverAt": "2026-11-19T20:40:00.000Z",
+  "previous": { "schema": 1, "workspaceId": "W", "stateRoot": "/abs", "generation": 1 }
+}
+```
+
+`previous` is the fence it replaced: the active work protocol configuration, or `null` when the
+coordinator is unmanaged. `generation` is one above the previous generation (1 when unmanaged).
+The configuration file and `<stateRoot>/workspace.json` keep the previous generation, so role
+epochs and enrollment are untouched.
+
+- This kit resolves the previous selection unchanged from `previous`, so the state root and the
+  store path do not move.
+- A 1.3 CLI requires the fence to equal the configuration (or, unmanaged, to be absent or a
+  pending fence), so every 1.3 command that resolves the protocol selection fails closed with
+  `protocol-generation-conflict` (or `protocol-fenced` when unmanaged). Runners that bundle a 1.x
+  copy see the same refusal in their protocol reads; departures do not depend on it.
+
+## Runner events
+
+`events ingest --game G` reads the runner's per-game log into the store. The runner is the only
+writer of `var/games/<g>/bus/events.jsonl` (one JSON object per line, `\n`-terminated, one
+`O_APPEND` write under 4096 bytes) and rotates it to `events.<epochSeconds>.jsonl` when the cursor
+offset equals its size and the size exceeds 1 MiB. Ingest is the only reader:
+
+```json
+{
+  "schema": 1,
+  "id": "sha256(game\ntype\nkey)",
+  "game": "G",
+  "kind": "deploy",
+  "type": "deploy_success",
+  "key": "K",
+  "at": "ISO",
+  "sha": "40 hex or null",
+  "status": "ok",
+  "detail": "TEXT or null",
+  "work": ["ck-0017"]
+}
+```
+
+- `kind` is `attempt`, `gate`, `push`, `ci`, `deploy` or `runner`; `status` is `ok`, `failed`,
+  `blocked`, `skipped` or `timeout`; `type` is the exact legacy kind string, such as
+  `ci_success` or `blocked-full-gate`. A line whose `id` is not the sha256 of
+  `${game}\n${type}\n${key}`, whose `game` is another game, or that is not valid JSON in this
+  shape is malformed.
+- Each complete malformed line is appended to `bus/events.quarantine.jsonl` and skipped. An
+  unterminated last line of `events.jsonl` is never consumed; the runner terminates a torn tail at
+  start and after a failed append. A rotated file has no writer left, so its unterminated tail is
+  quarantined.
+- Each valid line is committed once as a `bus.event` event with the unique key
+  `bus.event:<id>`, unique per (game, type, key). Blocked events stay apart per type.
+- Every non-quiet event is also stored as a message from `delivery-kit` to `reports.recipient`
+  with an ID derived from the event ID. The quiet progress types (`ci_pending`, `ci_running`,
+  `deploy_pending`, `deploy_retry` and `gate_skipped`) are stored as events only.
+- The events, their messages and any COMPLETE are one transaction. Then the recipient is woken,
+  quarantined lines are appended, the cursor is written atomically, and only then are rotated
+  files the cursor has passed deleted.
+
+### COMPLETE
+
+A commit's COMPLETE is derived once per (game, sha), as a `bus.complete` event with the key
+`bus.complete:<game>:<sha>` and a message to `reports.recipient` whose ID derives from (game,
+sha). It fires when, for that sha, a gate passed (`ok`, or `skipped` for the docs-only
+`gate_skipped`), a push and CI are `ok`, and a deploy is `ok` or `skipped` (`deploy_disabled` for a
+game without deployment). Other progress types never count. The synthetic `push` line a 6.1 runner
+appends at its first start (detail `imported at 6.1 start`) is a normal push. Ingest never reads
+the game's delivery configuration.
+
+- `work` comes from the passing deploy event: the IDs whose work file became `status: done` since
+  the previous COMPLETE, `[]` for none and `null` for unknown. Each work ID is recorded once per
+  game; the first COMPLETE that lists it keeps it, and later ones leave it out.
+- An imported legacy `complete` line (type `complete`, kind `runner`, status `ok`) is that sha's
+  COMPLETE, with its own detail and `work`, and sends no separate event message.
+- A COMPLETE already delivered under 1.x, an imported legacy message to the recipient that names
+  the commit and `COMPLETE`, is recorded with that message's ID and no new message.
+
+### Cursor
+
+`bus/events.cursor` is written atomically after every commit:
+
+```json
+{
+  "schema": 1,
+  "file": "events.jsonl",
+  "offset": 0,
+  "lines": 0,
+  "lastId": null,
+  "firstId": null,
+  "inode": 0,
+  "dev": 0,
+  "at": "ISO"
+}
+```
+
+`offset` and `lines` are what ingest has committed of the live file; `lastId` is the last consumed
+line's id (null when it was malformed); `firstId` is the id of the live file's first line, and
+`inode` and `dev` its identity. The runner computes `drained` (offset equals size, no rotated
+files, no torn line) from it without reading the store.
+
+Ingest opens the live file before listing rotated files, so a rotation in between is read once,
+through the open descriptor. It then resumes:
+
+1. In the live file at `offset` when its first line's id equals `firstId`. A file whose first line
+   is absent, torn or malformed has no first id: a cursor whose `firstId` is null matches only a
+   live file that also has none and the same inode and dev.
+2. Otherwise in the rotated file whose first line id equals `firstId`, finished from `offset`,
+   then the newer rotated files and the live file from 0.
+3. Otherwise every rotated file and the live file from 0, which the unique key makes safe.
+
+### Result
+
+`events ingest` prints one line with the `events flush` keys and three counts, and the same exit
+codes (0 for every typed result, 2 for a usage error, 1 for an internal failure):
+
+```json
+{
+  "schema": 1,
+  "kind": "events-ingest",
+  "game": "G",
+  "status": "delivered",
+  "reason": null,
+  "detail": "TEXT",
+  "delivered": 3,
+  "held": 0,
+  "ingested": 4,
+  "quarantined": 1,
+  "completed": 1,
+  "cli": { "version": "2.0.0", "distSha256": "HEX" }
+}
+```
+
+- `delivered`: valid lines this call committed; lines already stored are not counted.
+- `held`: 1 when an unterminated last line awaits its terminator, else 0.
+- `ingested`: complete lines the cursor moved past, whether committed, already stored or
+  quarantined. `quarantined`: malformed lines; `completed`: COMPLETE messages stored.
+- `status` is `delivered` when `delivered` is above 0; else `deferred` with `in-flight` while a
+  torn last line is held; else `skipped` with `no-events`. Lock contention is `deferred` with
+  `recipient-busy`; an unreadable cursor is `deferred` with `outbox-unreadable`; a
+  `reports.recipient` that does not resolve is `deferred` with `recipient-unavailable`. None of
+  these consumes anything.
+
 ## Library API
 
 `@andornaut/coordination-kit/build/store` exports the store for the later Phase 2 work (events
@@ -158,9 +343,19 @@ ingest, briefs as stored messages and the review seam):
   its tables, DDL and one applier per event kind, appended to `PROJECTIONS`; `rebuild` recreates
   it from the existing events.
 - Import: `legacySources`, `mapLegacyRecord` and `importLegacy`.
+- Mode and cutover: `storeMode(layout)`, `isStoreMode(layout)`, `storeCutover` and
+  `COORDINATOR_ROLE`.
+- Runner events: `ingestEvents(context, game)`, `parseBusLine`, `busEventId`, `readCursor`,
+  `LOG_FILE`, `CURSOR_FILE`, `QUARANTINE_FILE`, `EVENT_KINDS` and `EVENT_STATUSES`.
+- Notices from the runner's role: `DELIVERY_KIT_ROLE`, `DELIVERY_KIT_ACTOR`, `derivedId`,
+  `reportsRecipient` and `storeNotice`.
+- Projections: `DELIVERY_PROJECTION` beside `MESSAGES_PROJECTION`.
 - The CLI services `storeSend`, `storeInbox`, `storeDone`, `storeRetain`, `storeStatus`,
   `storeHistory`, `storeImport`, `storeExport` and `storeRebuild`, and `StoreError` with its
   `code`.
+
+The stored review brief (`storeReview`, `showBrief`, `composeBrief`) and the coordination event
+port (`coordinationEmit`) are in `@andornaut/coordination-kit/build/review`.
 
 ## Legacy import
 
@@ -193,14 +388,69 @@ guarded wake per recipient left with `sent` messages. Re-running is a no-op: an 
 `unchanged`, and a legacy record changed since its import is reported `changed` and left as it
 was.
 
+## Cutover
+
+`store cutover --dry-run` takes no caller and writes nothing (it uses an in-memory store when no
+store file exists). It prints the fence it would write (`management`, `previousGeneration`,
+`generation`), the import counts as `store import --dry-run` reports them, `importedUndelivered`
+(imported messages that would be `sent`) and the recipients already holding undelivered
+messages.
+
+`store cutover --apply` requires the caller to be `game-coordinator` through the
+[writer fence](#writer-fence) (`not-coordinator` otherwise) and refuses a pending work protocol
+(`protocol-pending`). It then, in order:
+
+1. creates `coordination.db` if needed;
+2. writes the [cutover fence](#cutover-fence) under the exclusive protocol lease, which waits for
+   legacy writers holding the shared lease, so every later legacy message write is refused;
+3. imports the legacy message stores with their original IDs ([legacy import](#legacy-import));
+4. records a `store.cutover` event with `cutoverAt`, the generations and the import counts; and
+5. sends one guarded wake per recipient left with undelivered messages.
+
+A repeated `--apply` after a completed cutover does nothing and reports `applied: true`. One
+interrupted after the fence resumes from the import with the fence's `cutoverAt`.
+
+### Runbook
+
+Run it in one window after a scheduled review, from :35 to :55 America/Toronto, on a day with no
+planned handoff.
+
+Preconditions:
+
+- 2.0 is installed at the coordinator root (`npm ci`), before any 6.1 runner starts; runners may
+  be 6.0 or 6.1. 6.0 runners keep using `events flush`, which is unchanged.
+- Every Claude role's channel MCP server runs the stable command
+  `node <root>/node_modules/@andornaut/coordination-kit/dist/cli.js --root <root> claude channel`
+  and has reconnected (`/mcp`) onto 2.0, which `harness doctor` shows as `channel_command`
+  `stable` and `channel_server` version `2.0.0`. A session on another command needs a relaunch.
+- Roles have finished in-flight sends and closes.
+
+Steps:
+
+1. Back up the state root, `var/work-protocol-fence.json` and `var/game-dev/messages`.
+2. Run `store cutover --dry-run` and match its counts against the message inventory; for a per-ID
+   diff, run `store import --from-legacy --dry-run`.
+3. Run `store cutover --apply` as `game-coordinator` and record its `cutoverAt`.
+4. Check `review show` after the next scheduled review, and `msg history --since <cutoverAt>`.
+
+Native prompts, registry held flags, route state and delivery controls are not touched. A
+recipient whose question state is unknown gets no wake and pulls at its next boundary.
+
 ## Rollback
 
 Messages are never sent natively, so rollback re-records what the store holds:
 
-1. Ask the roles to stop sending and closing, then run `store export --since ISO` with the cutover
-   time. It lists every `msg.sent` recorded after it with its body, and every `msg.closed` and
+1. Ask the roles to stop sending and closing, then run `store export --since <cutoverAt>`. It
+   lists every `msg.sent` recorded after it with its body, and every `msg.closed` and
    `msg.retained` with its actor, in seq order. Imports are excluded.
-2. Restore the backup and the previous pins. The previous CLI has no store verbs, so store writes
-   stop there.
-3. Re-record each exported message with `message send` under its original ID and dispatch it
+2. Restore `var/work-protocol-fence.json` from the backup, or write the cutover fence's
+   `previous` back to it (delete the file when `previous` is `null`). This kit is then in legacy
+   mode and a 1.3 CLI resolves the protocol selection again.
+3. Before any 6.0 runner starts, ingest the remaining `events.jsonl` lines once with 2.0
+   (`events ingest`), as delivery-kit's 6.1 to 6.0 rollback requires.
+4. Restore the 1.3 pins at the coordinator root (`npm ci`) and reconnect the channels. 1.3 has no
+   store verbs and ignores `coordination.db`, which stays as the record.
+5. Re-record each exported message with `message send` under its original ID and dispatch it
    through the legacy guarded path; recipients re-close the exported closes.
+
+A later cutover records a new `store.cutover` event with its own time.

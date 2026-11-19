@@ -5,13 +5,14 @@ coordination-kit 1.0.
 
 ## From 1.3
 
-2.0 adds the [coordination store](store.md), `coordination.db` beside the wake files, and its
-verbs. The legacy message store and the `message` commands are unchanged and still work; the
-cutover below freezes them.
+2.0 adds the [coordination store](store.md), `coordination.db` beside the wake files, its verbs,
+runner event ingest, the stored review brief and the cutover. Until `store cutover --apply`, every
+1.3 path behaves as before: the legacy message store, the `message` commands, native review
+briefs, `events flush` and the event outbox.
 
-- New verbs: `msg send`, `inbox`, `msg done`, `msg retain`, `msg status`, `msg history`, and
-  `store import`, `store export` and `store rebuild`. `inbox` alone is the store read; `inbox
-snapshot` and `inbox ack` are unchanged.
+- New verbs: `msg send`, `inbox`, `msg done`, `msg retain`, `msg status`, `msg history`,
+  `store import`, `store export`, `store rebuild`, `store cutover`, `events ingest` and
+  `review show`. `inbox` alone is the store read; `inbox snapshot` and `inbox ack` are unchanged.
 - Identity: writing verbs take no `--from`. The caller is the role whose effective registry
   binding equals `--native-id`, `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`; no enrollment or
   epoch is involved. Workers write under their parent with an unverified `--worker NAME`.
@@ -20,13 +21,24 @@ snapshot` and `inbox ack` are unchanged.
   payload; recipients run `coordination-kit inbox`. There is no `dispatch` or `reconcile`.
 - Closing: `msg done ID` or `msg retain ID --reason R --next-boundary B` replaces the receipt,
   artifact and `message reconcile` sequence.
-- Library: `@andornaut/coordination-kit/build/store` is a new subpath; the others are unchanged.
-- Cutover, in one window after a review: roles finish in-flight sends and closes; back up; run
-  `store import --from-legacy --dry-run` and match its counts and IDs against the inventory; bump
-  the protocol generation so legacy writers fail closed; run `store import --from-legacy`, which
-  sends one guarded wake per recipient left with undelivered messages. Imported uncertain
-  deliveries are listed to their recipients as `unconfirmed` and never woken.
-- Rollback: [store rollback](store.md#rollback).
+- Runner seam: delivery-kit 6.1 runners append to `var/games/<g>/bus/events.jsonl` and call
+  `events ingest`, which stores runner events and COMPLETE as messages from `delivery-kit`
+  ([runner events](store.md#runner-events)). 6.0 runners keep `events flush`. Install 2.0 at the
+  coordinator root before any 6.1 runner starts; 6.1 requires `>=2.0.0 <3.0.0`.
+- Store mode: the [store cutover fence](store.md#store-mode) selects it. Then `review deliver`
+  stores a one-page brief per (game, slot) ([stored brief](review.md#stored-brief)), review
+  health goes to the store, and legacy message writes are refused with `store-cutover`.
+- Doctor: Claude rows report `channel_command` (the configured channel command against the stable
+  path) and `channel_server` (the version and digest the running channel wrote at start).
+- Channel: `claude channel` writes a [status file](review.md#channel-status-file) at start. Move
+  every channel MCP config to the stable command
+  `node <root>/node_modules/@andornaut/coordination-kit/dist/cli.js --root <root> claude channel`
+  before the cutover; an `npx` command needs one relaunch onto it.
+- Library: `@andornaut/coordination-kit/build/store` is a new subpath, and `build/review` adds the
+  stored brief; the others are unchanged.
+- Cutover: follow the [runbook](store.md#runbook), in one window from :35 to :55 after a review.
+- Rollback: [store rollback](store.md#rollback). Restoring the previous fence returns this kit to
+  legacy mode, and restoring the 1.3 pins makes a 1.3 CLI work again; `coordination.db` stays.
 
 ## From 1.1
 

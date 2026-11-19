@@ -1,8 +1,8 @@
 # Review route, scheduled review and harness adapters
 
 The scheduled review route `var/route.json`, the seam between delivery-kit's runner and this
-kit, how the Claude and Codex adapters deliver briefs and events, mixed inbox snapshots, wake
-files and the event outbox.
+kit, the stored brief, how the Claude and Codex adapters deliver legacy briefs and events, mixed
+inbox snapshots, wake files, the channel status file and the event outbox.
 
 ## Review route
 
@@ -49,7 +49,7 @@ exactly one stdout line, shown expanded here:
   "status": "delivered",
   "reason": null,
   "detail": "TEXT",
-  "cli": { "version": "1.2.0", "distSha256": "HEX" }
+  "cli": { "version": "2.0.0", "distSha256": "HEX" }
 }
 ```
 
@@ -65,9 +65,14 @@ exactly one stdout line, shown expanded here:
   "detail": "TEXT",
   "delivered": 0,
   "held": 1,
-  "cli": { "version": "1.2.0", "distSha256": "HEX" }
+  "cli": { "version": "2.0.0", "distSha256": "HEX" }
 }
 ```
+
+`coordination-kit --root R events ingest --game G` ingests the runner's `events.jsonl` into the
+store and prints the same keys with `kind` `events-ingest` and three more counts, `ingested`,
+`quarantined` and `completed`; see [runner events](store.md#runner-events). 6.1 runners call it;
+6.0 runners keep calling `events flush`.
 
 - `status` is `delivered`, `deferred` or `skipped`.
 - `reason` is `null` for `delivered`, otherwise a token from `REASON_TOKENS` (below).
@@ -120,6 +125,9 @@ current `cli` and calls nothing else. Lock contention, on `unblock.lock` or on a
 internal failure. The seam's own slot receipt, deduplication, ambiguity and stale-turn rules are
 unchanged underneath.
 
+In [store mode](store.md#store-mode) `review deliver` stores the [brief](#stored-brief) instead
+of running the native seam, and records its result in the same per-slot file.
+
 SIGTERM aborts `review deliver`. A Codex send in flight closes its connection and keeps its
 `sending` receipt, which the next read marks `ambiguous` and never resends; a stop before the slot
 receipt is written leaves the slot as it was. The call then records nothing, prints nothing and
@@ -143,10 +151,43 @@ effective harness. It returns one line for the runner to log:
 `options.capture` the review captures accounting automatically; see
 [request accounting](request-accounting.md#automatic-capture).
 
-A review health event (`review-stuck`) goes to the game's event outbox through `recordEvent`. The
-runner then flushes the outbox with `flushEvents(game)` from
+A review health event (`review-stuck`) goes through `coordinationEmit`: in store mode it is
+stored as a message from `delivery-kit` to the game's `reports.recipient`
+([store mode](store.md#store-mode)); otherwise it goes to the game's event outbox through
+`recordEvent`. In legacy mode the runner then flushes the outbox with `flushEvents(game)` from
 `@andornaut/coordination-kit/build/events`, which returns the flush result above without `cli`.
 Slot receipts, snapshots and health records keep the paths and formats delivery-kit 4.7.0 wrote.
+
+## Stored brief
+
+In store mode `review deliver` resolves the route as above: no route, a route this game does not
+host, a held route, an invalid route and an unregistered recipient give the same typed results.
+It then composes the brief from the store and stores it as one message from `delivery-kit` to the
+route recipient, in one transaction with a `review.brief` record of the slot. The message ID
+derives from (game, slot), so a repeated call, even without the per-slot result file, stores
+nothing and returns the recorded result: `delivered`, with a detail naming the message, the open
+count and the exception count.
+
+The brief is at most one page, 60 lines and 4096 bytes: open message counts by state and by
+recipient, unconfirmed messages, outstanding, failed, ambiguous and guarded wakes, runner events
+and COMPLETE records since the game's previous brief, then the exceptions while the page has room,
+then `review show` for the rest. Exceptions are:
+
+- `stalled`: a message still `sent` or `delivered` that was open at the game's previous brief,
+  that is, open across two distinct slots;
+- `unconfirmed`: an imported uncertain delivery the recipient has not closed;
+- `wake-failed` and `wake-ambiguous`: an outstanding wake with that outcome;
+- `wake-guarded`: a wake-pending recipient whose last wake a guard refused.
+
+The first brief of an episode with stalled messages also stores one `review-stuck` message. After
+the commit the review rearms each failed or ambiguous outstanding wake, then wakes the recipient
+and every wake-pending role, with no payload. Native questions and worker turns are not part of
+the stored brief: the brief says they are unknown, never clear.
+
+`coordination-kit --root R review show [--game G] [--slot S]` prints the recorded brief for the
+slot, or the latest one, as one JSON line: `kind` `review-show`, the game, slot, recipient,
+message ID, recording time, result, counts, every exception, the open message IDs and the body.
+A missing brief exits 1 with `brief-missing`.
 
 ## Harness adapters
 
@@ -215,7 +256,30 @@ lower seq is never announced. The first read sets the baseline: a wake present w
 starts is not announced, and an absent file counts as seq 0. A missing, torn or malformed file is
 skipped until a later poll.
 
+## Channel status file
+
+`claude channel` writes `<stateRoot>/channel/<conversation>.json` (`var/channel/` without an active
+work protocol) once at start, for the conversation it serves:
+
+```json
+{
+  "schema": 1,
+  "conversation": "UUID",
+  "version": "2.0.0",
+  "distSha256": "HEX",
+  "pid": 4242,
+  "startedAt": "ISO",
+  "argv": ["/usr/bin/node", "/root/node_modules/@andornaut/coordination-kit/dist/cli.js", "..."]
+}
+```
+
+A failed write never stops the channel. `harness doctor` reads it to report the loaded CLI; see
+[the scoped doctor](registry.md#scoped-harness-doctor).
+
 ## Event outbox
+
+The outbox is the 6.0 runner's event path and is unchanged in 2.0. A 6.1 runner writes
+`events.jsonl` instead, which `events ingest` reads ([runner events](store.md#runner-events)).
 
 `games/<g>/bus/events/` holds one `<sha256(kind:key)>.json` file per event; every `blocked-*` kind
 shares one identity, so a changed block reason is not recorded again. `recordEvent` enqueues an

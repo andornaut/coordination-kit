@@ -6,28 +6,31 @@ every form and flag.
 
 ## Command forms
 
-| Command                                                                                                                                                  | Purpose                                                                                                         |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `msg send --to ROLE (--body-file FILE \| --body TEXT) [--intent queue\|unblock] [--id UUID] [--link KIND=REF]...`                                        | Store a message, then attempt one guarded wake; see [store](store.md#message-lifecycle).                        |
-| `inbox [--include-body] [--all]`                                                                                                                         | List your undelivered and open store messages and record them `delivered`.                                      |
-| `msg done ID [--work WORK_ID] [--superseded-by ID] [--evidence REF]...`, `msg retain ID --reason TEXT --next-boundary TEXT [--owner ROLE]`               | Close or retain your own message in one write.                                                                  |
-| `msg status ID`, `msg history [--role ROLE] [--since ISO_TIMESTAMP] [--limit N]`                                                                         | Read a message's metadata, or message events in order, without bodies.                                          |
-| `store import --from-legacy [--dry-run]`, `store export --since ISO_TIMESTAMP`, `store rebuild`                                                          | Import the legacy stores, export for rollback, verify the chain and rebuild projections; see [store](store.md). |
-| `inbox snapshot --game ID [--recipient ROLE] [--parent ROLE]... [--history-cursor CURSOR] [--capture]`                                                   | Capture the recipient's inbox snapshot.                                                                         |
-| `inbox ack --game ID --snapshot UUID --queue-id ID... --disposition handled\|superseded\|retained [--reason TEXT] [--recipient ROLE] [--parent ROLE]...` | Acknowledge queue items from that snapshot. `retained` requires a reason.                                       |
-| `message send`, `dispatch`, `status`, `reconcile`, `retire-spool`                                                                                        | Durable role messages; see [messages](messages.md).                                                             |
-| `ledger intake`, `apply`, `show`, `report`, `history`, `coverage`, `reconcile`, `boundary`                                                               | The request ledger; see [request accounting](request-accounting.md).                                            |
-| `claude ready [--game ID]... [--role ROLE]...`, `codex ready [--game ID]... [--role ROLE]...`                                                            | The handoff readiness probe, optionally scoped; see [readiness](registry.md#readiness-probe).                   |
-| `harness ready [--game ID]... [--role ROLE]...`                                                                                                          | Read-only readiness using each selected role's effective harness.                                               |
-| `harness select --harness claude\|codex\|default --expected-revision N [--game ID]... [--role ROLE]...`                                                  | Atomic selection for at least one explicit game or role, without activation.                                    |
-| `harness doctor --game ID ... [--role ROLE ...]`, `harness doctor --role ROLE ...`                                                                       | Diagnose explicitly selected roles without sending or activating.                                               |
-| `claude channel [--game ID]... [--conversation UUID] [--state-dir DIR]... [--poll-seconds N]`                                                            | The stdio MCP server the Claude recipient session starts.                                                       |
-| `review deliver --game ID --slot ISO_TIMESTAMP [--capture]`                                                                                              | Deliver one slot's scheduled review once; see [review](review.md#cli-seam).                                     |
-| `events flush --game ID`                                                                                                                                 | Flush the game's event outbox; see [review](review.md#cli-seam).                                                |
-| `protocol ...`                                                                                                                                           | The explicit filesystem work protocol; see [work protocol](work-protocol.md).                                   |
-| `status [--scope all\|GAME\|KIT\|ROLE] [--since ISO_TIMESTAMP] [--state STATE]... [--audit] [--verify-since ISO_TIMESTAMP] [--format json\|markdown]`    | Read-only status of every registered repository's work items; see [status](#status).                            |
-| `work check [--root DIR]`, `work report [--root DIR]`                                                                                                    | Validate a repository's work files and report their state; see [work files](work-files.md).                     |
-| `help`, `--help`, `--version`, `--version --json`                                                                                                        | Usage, the version, and the version with the `dist/cli.js` sha256 as one JSON line.                             |
+| Command                                                                                                                                                  | Purpose                                                                                                          |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `msg send --to ROLE (--body-file FILE \| --body TEXT) [--intent queue\|unblock] [--id UUID] [--link KIND=REF]...`                                        | Store a message, then attempt one guarded wake; see [store](store.md#message-lifecycle).                         |
+| `inbox [--include-body] [--all]`                                                                                                                         | List your undelivered and open store messages and record them `delivered`.                                       |
+| `msg done ID [--work WORK_ID] [--superseded-by ID] [--evidence REF]...`, `msg retain ID --reason TEXT --next-boundary TEXT [--owner ROLE]`               | Close or retain your own message in one write.                                                                   |
+| `msg status ID`, `msg history [--role ROLE] [--since ISO_TIMESTAMP] [--limit N]`                                                                         | Read a message's metadata, or message events in order, without bodies.                                           |
+| `store import --from-legacy [--dry-run]`, `store export --since ISO_TIMESTAMP`, `store rebuild`                                                          | Import the legacy stores, export for rollback, verify the chain and rebuild projections; see [store](store.md).  |
+| `store cutover --dry-run`, `store cutover --apply`                                                                                                       | Switch to the store: fence legacy writers, import, record the cutover and wake; see [cutover](store.md#cutover). |
+| `inbox snapshot --game ID [--recipient ROLE] [--parent ROLE]... [--history-cursor CURSOR] [--capture]`                                                   | Capture the recipient's inbox snapshot.                                                                          |
+| `inbox ack --game ID --snapshot UUID --queue-id ID... --disposition handled\|superseded\|retained [--reason TEXT] [--recipient ROLE] [--parent ROLE]...` | Acknowledge queue items from that snapshot. `retained` requires a reason.                                        |
+| `message send`, `dispatch`, `status`, `reconcile`, `retire-spool`                                                                                        | Durable role messages; see [messages](messages.md).                                                              |
+| `ledger intake`, `apply`, `show`, `report`, `history`, `coverage`, `reconcile`, `boundary`                                                               | The request ledger; see [request accounting](request-accounting.md).                                             |
+| `claude ready [--game ID]... [--role ROLE]...`, `codex ready [--game ID]... [--role ROLE]...`                                                            | The handoff readiness probe, optionally scoped; see [readiness](registry.md#readiness-probe).                    |
+| `harness ready [--game ID]... [--role ROLE]...`                                                                                                          | Read-only readiness using each selected role's effective harness.                                                |
+| `harness select --harness claude\|codex\|default --expected-revision N [--game ID]... [--role ROLE]...`                                                  | Atomic selection for at least one explicit game or role, without activation.                                     |
+| `harness doctor --game ID ... [--role ROLE ...]`, `harness doctor --role ROLE ...`                                                                       | Diagnose explicitly selected roles without sending or activating.                                                |
+| `claude channel [--game ID]... [--conversation UUID] [--state-dir DIR]... [--poll-seconds N]`                                                            | The stdio MCP server the Claude recipient session starts.                                                        |
+| `review deliver --game ID --slot ISO_TIMESTAMP [--capture]`                                                                                              | Deliver one slot's scheduled review once; see [review](review.md#cli-seam).                                      |
+| `review show [--game ID] [--slot ISO_TIMESTAMP]`                                                                                                         | Print a stored brief's full record; see [stored brief](review.md#stored-brief).                                  |
+| `events flush --game ID`                                                                                                                                 | Flush the game's event outbox; see [review](review.md#cli-seam).                                                 |
+| `events ingest --game ID`                                                                                                                                | Ingest the runner's event log into the store; see [runner events](store.md#runner-events).                       |
+| `protocol ...`                                                                                                                                           | The explicit filesystem work protocol; see [work protocol](work-protocol.md).                                    |
+| `status [--scope all\|GAME\|KIT\|ROLE] [--since ISO_TIMESTAMP] [--state STATE]... [--audit] [--verify-since ISO_TIMESTAMP] [--format json\|markdown]`    | Read-only status of every registered repository's work items; see [status](#status).                             |
+| `work check [--root DIR]`, `work report [--root DIR]`                                                                                                    | Validate a repository's work files and report their state; see [work files](work-files.md).                      |
+| `help`, `--help`, `--version`, `--version --json`                                                                                                        | Usage, the version, and the version with the `dist/cli.js` sha256 as one JSON line.                              |
 
 ## Command semantics
 
@@ -50,11 +53,18 @@ every form and flag.
   body from exactly one of `--body-file` (relative to the working directory, valid UTF-8) and
   `--body`, and `--link` values as `KIND=REF`, such as `work=ck-0017`. `msg history` lists at
   most `--limit` events (default 1000). `--since` takes an ISO 8601 instant.
-- `review deliver` and `events flush`: the runner seam. Each prints exactly one typed JSON line
-  and exits 0 for every typed result, 2 for a usage error and 1 for an internal failure, with
-  nothing on stdout. `--slot` is an ISO 8601 minute start with an offset. A repeated
+- `review deliver`, `events flush` and `events ingest`: the runner seam. Each prints exactly one
+  typed JSON line and exits 0 for every typed result, 2 for a usage error and 1 for an internal
+  failure, with nothing on stdout. `--slot` is an ISO 8601 minute start with an offset. A repeated
   `review deliver` for a slot prints the recorded result. SIGTERM aborts it with exit 1 and no
-  result. See [review](review.md#cli-seam).
+  result. In store mode `review deliver` stores the brief as a message. See
+  [review](review.md#cli-seam) and [runner events](store.md#runner-events).
+- `review show`: prints the recorded stored brief for `--slot` (default: the latest) of `--game`
+  (default: any game) as one JSON line; exit 1 with `brief-missing` when there is none.
+- `store cutover`: exactly one of `--dry-run` and `--apply`. `--dry-run` takes no caller and
+  writes nothing. `--apply` identifies the caller through the registry fence and accepts only
+  `game-coordinator`. Refusals print `coordination-kit: CODE` and exit 1: `not-coordinator`,
+  `protocol-pending` and the fence codes. See [cutover](store.md#cutover).
 - `--version --json` prints `{"schema":1,"version":V,"distSha256":H}`, where `H` is the sha256 of
   the running `dist/cli.js` bytes, or 64 zeros from source. Plain `--version` prints `V` alone.
 - `--capture` on `inbox snapshot`, `review deliver`, `message send`, `protocol boundary` and the

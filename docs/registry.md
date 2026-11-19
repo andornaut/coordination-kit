@@ -153,6 +153,23 @@ active bindings. A readable native thread does not prove a healthy TUI, HTTP MCP
 channel, native HOLD clearance or activation. Bridge diagnosis and recovery require the native
 owner; doctor never probes authenticated HTTP ports or opens private configuration.
 
+Each Claude row also carries two read-only channel checks; Codex rows carry `null` for both.
+
+- `channel_command` compares the channel MCP server in `<root>/var/claude-channel.mcp.json` (the
+  first server whose arguments include `claude channel`) with the stable command
+  `node <root>/node_modules/@andornaut/coordination-kit/dist/cli.js --root <root> claude channel`,
+  further arguments allowed. `status` is `stable` (`stable_path`), `unstable`
+  (`command_not_stable_path`, such as an `npx` command, which needs a relaunch to change) or
+  `unknown` (`channel_config_missing`, `channel_config_unreadable` or
+  `channel_server_not_configured`). It reports the config path, server name, configured command
+  and the expected one. A session keeps the command it launched with, so a stable config does not
+  prove a running session uses it.
+- `channel_server` reports the version, dist digest, start time, pid and argv from the role
+  conversation's [channel status file](review.md#channel-status-file) (`reported`,
+  `status_file_read`), or `unknown` (`status_file_missing`) when the channel wrote none. Neither
+  check is clearance or proof of a connected channel, and neither changes `failed_layer` or the
+  exit status.
+
 Claude diagnosis uses only `claude agents --json` and an exact session ID match. Session
 reported state does not provide native history, queue or authoritative question state. Channel
 connection remains unknown: a configured spool or receipt alone does not prove a connected
