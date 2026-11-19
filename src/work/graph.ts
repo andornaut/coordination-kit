@@ -12,7 +12,7 @@ import { listQuestions } from "../store/questions.ts";
 import { StoreError } from "../store/types.ts";
 import { readWorkRecords } from "../store/work.ts";
 import { parseDecisions } from "./decisions.ts";
-import { CONVENTION_FILE, type FrontMatterValue, parseFrontMatter } from "./files.ts";
+import { CONVENTION_FILE, fieldIds, type FrontMatterValue, parseFrontMatter } from "./files.ts";
 import { type Coordinator, storeDecisions, workOwner } from "./live.ts";
 
 export const EDGE_KINDS = [
@@ -168,10 +168,11 @@ export function buildGraph(
     if (owner !== null) {
       builder.edge("owned-by", work, builder.node("role", owner), "git");
     }
-    const supersedes = value(file.fields, "supersedes");
-    const replaced = supersedes === null ? null : builder.resolveWork(supersedes, repository);
-    if (replaced !== null) {
-      builder.edge("supersedes", work, replaced, "git");
+    for (const id of fieldIds(file.fields.supersedes)) {
+      const replaced = builder.resolveWork(id, repository);
+      if (replaced !== null) {
+        builder.edge("supersedes", work, replaced, "git");
+      }
     }
     const related = file.fields.related;
     for (const id of Array.isArray(related) ? related : []) {

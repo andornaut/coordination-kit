@@ -3,6 +3,13 @@
 Moving from coordination-kit 2.0 to 2.1, from 1.3 to 2.0, from 1.1 to 1.2, and from delivery-kit
 4.7 to coordination-kit 1.0.
 
+## From 2.1.0
+
+- `work check` no longer requires `approved` on a `proposed` or `declined` item, and accepts
+  `supersedes` as one ID or a list, checking every target.
+- `status` reports `workFile.supersedes` as a list of IDs (empty when there is none) instead of
+  one ID or null; each named item is `superseded` by this one.
+
 ## From 2.0
 
 2.1 adds [work records](store.md#work-records), the [decision graph](store.md#decision-graph), the

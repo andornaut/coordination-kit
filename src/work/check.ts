@@ -10,11 +10,13 @@ import {
   DESIGN_DIR,
   type DesignFile,
   field,
+  fieldIds,
   OPTIONAL_FIELDS,
   readDesignFiles,
   readWorkFiles,
   REQUIRED_FIELDS,
   STATUSES,
+  UNAPPROVED_STATUSES,
   WORK_DIR,
   type WorkFile,
 } from "./files.ts";
@@ -76,8 +78,12 @@ function frontMatterFindings(file: WorkFile): Finding[] {
     path,
   }));
   const { fields } = file.frontMatter;
+  const unapproved = typeof fields.status === "string" && UNAPPROVED_STATUSES.has(fields.status);
   for (const key of REQUIRED_FIELDS) {
     const value = fields[key];
+    if (key === "approved" && unapproved && value === undefined) {
+      continue;
+    }
     if (value === undefined) {
       findings.push({ code: "field-missing", message: `${key} is required`, path });
     } else if (typeof value !== "string" || value === "") {
@@ -94,8 +100,17 @@ function frontMatterFindings(file: WorkFile): Finding[] {
     findings.push({ code: "field-invalid", message: "related must be a list of IDs", path });
   }
   const supersedes = fields.supersedes;
-  if (supersedes !== undefined && (typeof supersedes !== "string" || supersedes === "")) {
-    findings.push({ code: "field-invalid", message: "supersedes must be one ID", path });
+  if (
+    supersedes !== undefined &&
+    (typeof supersedes === "string"
+      ? supersedes === ""
+      : supersedes.length === 0 || supersedes.some((id) => id === ""))
+  ) {
+    findings.push({
+      code: "field-invalid",
+      message: "supersedes must be an ID or a list of IDs",
+      path,
+    });
   }
   const owner = fields.owner;
   if (owner !== undefined && (typeof owner !== "string" || !ROLE_NAME.test(owner))) {
@@ -175,13 +190,14 @@ function idFindings(files: readonly WorkFile[]): Finding[] {
     }
   }
   for (const file of files) {
-    const target = field(file, "supersedes");
-    if (target !== undefined && target !== "" && !byId.has(target)) {
-      findings.push({
-        code: "supersedes-missing",
-        message: `supersedes ${target}, which is not a work item`,
-        path: file.path,
-      });
+    for (const target of fieldIds(file.frontMatter?.fields.supersedes)) {
+      if (!byId.has(target)) {
+        findings.push({
+          code: "supersedes-missing",
+          message: `supersedes ${target}, which is not a work item`,
+          path: file.path,
+        });
+      }
     }
     const design = field(file, "design");
     if (design !== undefined && design !== "" && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(design)) {

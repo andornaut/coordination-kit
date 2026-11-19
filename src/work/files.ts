@@ -246,6 +246,17 @@ export function readDesignFiles(root: string): DesignFile[] {
 }
 
 /** One field as a string, or undefined when it is absent or a list. */
+/** The IDs a list-or-scalar field names: one ID or a list, with empty entries dropped. */
+export function fieldIds(value: FrontMatterValue | undefined): string[] {
+  if (value === undefined) {
+    return [];
+  }
+  return (typeof value === "string" ? [value] : [...value]).filter((id) => id !== "");
+}
+
+/** Statuses of an item that was never approved, which therefore carries no `approved` field. */
+export const UNAPPROVED_STATUSES: ReadonlySet<string> = new Set(["proposed", "declined"]);
+
 export function field(file: WorkFile, key: string): string | undefined {
   const value = file.frontMatter?.fields[key];
   return typeof value === "string" ? value : undefined;

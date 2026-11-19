@@ -238,6 +238,47 @@ describe("checkWork", () => {
     expect(checkWork(root)).toMatchObject({ findings: [], ok: true });
   });
 
+  it("requires approved only for items that were approved", () => {
+    const root = copy();
+    const unapproved = (status: string) => (text: string) =>
+      text.replace("status: done", `status: ${status}`).replace(/^approved: .*\n/m, "");
+    edit(root, "docs/work/dk-0002.md", unapproved("proposed"));
+    edit(root, "docs/work/dk-0003.md", (text) =>
+      text.replace(/^status: .*$/m, "status: declined").replace(/^approved: .*\n/m, ""),
+    );
+    expect(checkWork(root)).toMatchObject({ findings: [], ok: true });
+    edit(root, "docs/work/dk-0002.md", (text) => text.replace("status: proposed", "status: done"));
+    expect(checkWork(root).findings).toEqual([
+      { code: "field-missing", message: "approved is required", path: "docs/work/dk-0002.md" },
+    ]);
+  });
+
+  it("accepts supersedes as one ID or a list and checks every target", () => {
+    const root = copy();
+    edit(root, "docs/work/dk-0009.md", (text) =>
+      text.replace(/^design: (.*)$/m, "design: $1\nsupersedes: [dk-0001, dk-0404]"),
+    );
+    expect(checkWork(root).findings).toEqual([
+      {
+        code: "supersedes-missing",
+        message: "supersedes dk-0404, which is not a work item",
+        path: "docs/work/dk-0009.md",
+      },
+    ]);
+    edit(root, "docs/work/dk-0009.md", (text) =>
+      text.replace("supersedes: [dk-0001, dk-0404]", "supersedes: [dk-0001, dk-0002]"),
+    );
+    expect(checkWork(root)).toMatchObject({ findings: [], ok: true });
+    edit(root, "docs/work/dk-0009.md", (text) =>
+      text.replace("supersedes: [dk-0001, dk-0002]", "supersedes: []"),
+    );
+    expect(checkWork(root).findings).toContainEqual({
+      code: "field-invalid",
+      message: "supersedes must be an ID or a list of IDs",
+      path: "docs/work/dk-0009.md",
+    });
+  });
+
   it("requires unique IDs and existing supersedes targets", () => {
     const root = copy();
     edit(root, "docs/work/dk-0008.md", (text) => text.replace("id: dk-0008", "id: dk-0007"));

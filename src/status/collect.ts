@@ -11,7 +11,7 @@ import { protocolRole } from "../protocol/core.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 import type { WorkRecord } from "../store/work.ts";
-import { CONVENTION_FILE, parseFrontMatter } from "../work/files.ts";
+import { CONVENTION_FILE, fieldIds, parseFrontMatter } from "../work/files.ts";
 import {
   deploymentMarks,
   type DeployPoint,
@@ -135,7 +135,8 @@ export interface StatusItem {
     readonly status: string | null;
     readonly approved: string | null;
     readonly design: string | null;
-    readonly supersedes: string | null;
+    /** The IDs the work file's `supersedes` names: one ID or a list. */
+    readonly supersedes: readonly string[];
     readonly addedIn: string | null;
     readonly commit: string;
     readonly committedAt: string;
@@ -429,7 +430,7 @@ function readRepository(
         file,
         id: text(fields.id) ?? basename(file.path, ".md"),
         status: text(fields.status),
-        supersedes: text(fields.supersedes),
+        supersedes: fieldIds(fields.supersedes),
         title: text(fields.title),
       };
     });
@@ -441,11 +442,10 @@ function readRepository(
   );
   const supersededBy = new Map<string, string>();
   for (const work of workFiles) {
-    if (
-      work.supersedes !== null &&
-      !["proposed", "declined", "cancelled"].includes(work.status ?? "proposed")
-    ) {
-      supersededBy.set(work.supersedes, work.id);
+    if (!["proposed", "declined", "cancelled"].includes(work.status ?? "proposed")) {
+      for (const id of work.supersedes) {
+        supersededBy.set(id, work.id);
+      }
     }
   }
   const namespaces = new Set(repository.roles.map((role) => protocolRole(role)));
