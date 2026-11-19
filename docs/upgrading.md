@@ -3,6 +3,11 @@
 Moving from coordination-kit 2.1 to 3.0, from 2.0 to 2.1, from 1.3 to 2.0, from 1.1 to 1.2, and from delivery-kit
 4.7 to coordination-kit 1.0.
 
+## From 3.0.0
+
+- A handoff hold no longer withholds wakes once `harness select` binds the role on the handoff's
+  target harness, so the target session can be woken to run `handoff active`.
+
 ## From 2.1
 
 3.0 removes the Phase 4 layers of the [simplification plan](design/simplification.md#phase-4-thin-protocol-and-retirement).

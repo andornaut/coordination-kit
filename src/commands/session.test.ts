@@ -267,4 +267,19 @@ describe("handoff", () => {
       wake: { status: "accepted" },
     });
   });
+
+  it("wakes the target through its handoff hold once harness select binds it", async () => {
+    const { coordinator, kit, select } = setup();
+    await coordinator("handoff", "open", "--scope", KIT, "--to", "codex");
+    await kit("handoff", "ready");
+    await coordinator("handoff", "state", "prepared", "--id", "h-1");
+    await coordinator("handoff", "state", "sent", "--id", "h-1");
+    expect((await coordinator("msg", "send", "--to", KIT, "--body", "Source.")).json).toMatchObject(
+      { wake: { status: "guarded" } },
+    );
+    await select(KIT);
+    const target = await coordinator("msg", "send", "--to", KIT, "--body", "Run complete.");
+    expect(target.code, target.err).toBe(EXIT_OK);
+    expect((target.json as { wake?: { status?: string } }).wake?.status).not.toBe("guarded");
+  });
 });

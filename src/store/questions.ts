@@ -703,7 +703,7 @@ export function listHolds(
  * The store wake guard: a recipient with a pending question or an active `role` hold gets no
  * wake. It reads the projections only; a wake never answers or clears either.
  */
-export function questionHoldGuard(store: Store, role: string): WakeGuard {
+export function questionHoldGuard(store: Store, role: string, harness?: string | null): WakeGuard {
   if (
     store.db
       .prepare("SELECT 1 FROM questions WHERE role = ? AND state = 'pending' LIMIT 1")
@@ -713,8 +713,17 @@ export function questionHoldGuard(store: Store, role: string): WakeGuard {
   }
   if (
     store.db
-      .prepare("SELECT 1 FROM holds WHERE role = ? AND scope = 'role' AND state = 'active' LIMIT 1")
-      .get(role) !== undefined
+      // A handoff hold quiets the idle source only: once the role is bound on the handoff's target
+      // harness, the target must be woken to run `handoff active`, which releases the hold.
+      .prepare(
+        `SELECT 1 FROM holds h WHERE h.role = ? AND h.scope = 'role' AND h.state = 'active'
+           AND NOT EXISTS (
+             SELECT 1 FROM handoff_roles r JOIN handoffs o ON o.id = r.handoff
+             WHERE r.role = h.role AND o.to_harness = ?
+               AND h.id = 'handoff-' || r.handoff || '-' || replace(r.role, '/', '-'))
+         LIMIT 1`,
+      )
+      .get(role, harness ?? "") !== undefined
   ) {
     return { reason: "recipient-hold-active", status: "blocked" };
   }

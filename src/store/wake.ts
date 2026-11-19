@@ -37,7 +37,7 @@ export interface WakeGuard {
  * `questionHoldGuard`, blocks a recipient with a pending question or an active `role` hold; the
  * Codex native question check still runs after it.
  */
-export type StoreWakeGuard = (store: Store, role: string) => WakeGuard;
+export type StoreWakeGuard = (store: Store, role: string, harness?: Harness | null) => WakeGuard;
 
 /** A guard that passes every recipient, for callers that check questions and holds themselves. */
 export const NO_STORE_GUARD: StoreWakeGuard = () => ({ status: "clear" });
@@ -252,7 +252,7 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
   const guard =
     "reason" in target
       ? ({ reason: target.reason, status: "blocked" } as const)
-      : (context.ports?.storeGuard ?? questionHoldGuard)(store, role);
+      : (context.ports?.storeGuard ?? questionHoldGuard)(store, role, target.harness);
   const wake = randomUUID();
   const claim = store.transaction((): WakeResult | { readonly count: number } => {
     const state = wakeState(store, role);

@@ -286,8 +286,10 @@ A handoff moves a scope of roles from their current harness to `--to`:
   is `not-in-handoff`. `ready` requires the caller's effective harness to be the role's source
   (`not-source`) and `active` the target (`not-target`).
 - The handoff hold is a `role` hold owned by the role, so the [wake guard](#wakes) withholds wakes
-  while the role sits ready and idle. The role's `handoff active` or the coordinator's `cancelled`
-  releases it, then attempts one guarded wake.
+  while the role sits ready and idle on its source harness. Once `harness select` binds the role on
+  the handoff's target harness, the guard skips that hold, so the target session can be woken to
+  run `handoff active`. The role's `handoff active` or the coordinator's `cancelled` releases it,
+  then attempts one guarded wake.
 - Order to complete: after `sent`, game-coordinator runs `harness select` for the scope, then each
   target session runs `session start` and `handoff active`, then game-coordinator sets
   `completed`. The fence admits a target session only after select, which also fences out the
