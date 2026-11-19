@@ -1,7 +1,29 @@
 # Upgrading
 
-Moving from coordination-kit 1.3 to 2.0, from 1.1 to 1.2, and from delivery-kit 4.7 to
-coordination-kit 1.0.
+Moving from coordination-kit 2.0 to 2.1, from 1.3 to 2.0, from 1.1 to 1.2, and from delivery-kit
+4.7 to coordination-kit 1.0.
+
+## From 2.0
+
+2.1 adds questions, holds and decisions to the [coordination store](store.md#questions-holds-and-decisions).
+The store file, its schema version and every 2.0 event are unchanged; a 2.0 store gets the new
+`questions`, `decisions` and `holds` tables when 2.1 first opens it.
+
+- New verbs: `question open|answer|cancel|list`, `hold set|release|list` and `decision list`.
+  Writes go through the registry fence, and only the owning role answers, cancels or releases its
+  own records.
+- Decisions: `question answer` records a typed decision and appends its `- D<n> (...)` line to
+  `docs/work/<id>.md` in the main checkout of the caller's repository, left unstaged. Commit it
+  with the role's next commit.
+- Wakes: a recipient with a pending question or an active `role` hold gets no wake, logged
+  `guarded`. Each owner records its existing pending prompts with `question open` so the guard
+  sees them; the native prompt is not touched. The Codex native question check still runs.
+- History: `msg history` without `--include-body` is unchanged. `--include-body` identifies the
+  caller and shows bodies only to the message's sender, its recipient and `game-coordinator`.
+- Library: `@andornaut/coordination-kit/build/store` adds the question, hold and decision functions,
+  `QUESTIONS_PROJECTION` and `questionHoldGuard`, which is now the default `storeGuard` of
+  `wakeRecipient`. Pass `NO_STORE_GUARD` to keep the 2.0 behaviour.
+- Rollback: a 2.0 CLI ignores the new event kinds and tables; they stay in the store as history.
 
 ## From 1.3
 

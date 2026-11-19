@@ -46,6 +46,9 @@ take the coordinator root only from `COORDINATION_KIT_ROOT` or `DELIVERY_KIT_ROO
 | `msg`      | `send`, `done`, `retain`, `status`, `history`                                            | Store messages: send with one guarded wake, close or retain in one write, read.                 |
 | `inbox`    | (none), `snapshot`, `ack`                                                                | Read your store inbox; capture a recipient's legacy inbox snapshot; acknowledge items from it.  |
 | `store`    | `import`, `export`, `rebuild`, `cutover`                                                 | Import the legacy message stores, export for rollback, verify and rebuild, switch to the store. |
+| `question` | `open`, `answer`, `cancel`, `list`                                                       | Pending prompts owned by a role; an answer records a decision and its work-file line.           |
+| `hold`     | `set`, `release`, `list`                                                                 | Holds owned by the role that set them; only that role releases them.                            |
+| `decision` | `list`                                                                                   | Read the decision records.                                                                      |
 | `message`  | `send`, `dispatch`, `status`, `reconcile`, `retire-spool`                                | Legacy role messages: store, guarded delivery, status, reconciliation and Claude spool cleanup. |
 | `ledger`   | `intake`, `apply`, `show`, `report`, `history`, `coverage`, `reconcile`, `boundary`      | The request ledger.                                                                             |
 | `harness`  | `ready`, `select`, `doctor`                                                              | Readiness by effective harness, scoped harness selection and diagnosis.                         |

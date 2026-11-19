@@ -24,7 +24,9 @@ coordination-kit msg retain 00000000-0000-4000-8000-000000000002 --reason "waits
 - Native session messages and channel notifications are wakes only; `msg send` is the one payload
   path between roles.
 - Output is one JSON object, identical for Claude and Codex callers. `msg status ID` and
-  `msg history` read without writing and never print a body.
+  `msg history` read without writing and print no body. `msg history --include-body` identifies
+  the caller through the registry fence and prints the bodies of messages it sent or received, or
+  every body to `game-coordinator`; other messages stay metadata.
 
 Schema, wakes, the import mapping and rollback are in [the coordination store](store.md).
 

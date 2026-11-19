@@ -1,9 +1,10 @@
 # Coordination store
 
-The SQLite store behind the `msg` and `inbox` commands: its schema, the library API, the writer
-fence, wakes, the store-mode switch, runner event ingest, the legacy import mapping, the cutover
-runbook and rollback. The design is in
-[simplification](design/simplification.md#phase-2-one-store-and-one-message-path).
+The SQLite store behind the `msg`, `inbox`, `question`, `hold` and `decision` commands: its
+schema, the library API, the writer fence, wakes, questions, holds and decisions, the store-mode
+switch, runner event ingest, the legacy import mapping, the cutover runbook and rollback. The
+design is in [simplification](design/simplification.md#phase-2-one-store-and-one-message-path)
+and [Phase 3](design/simplification.md#phase-3-work-decisions-questions-and-holds).
 
 ## Location and settings
 
@@ -51,9 +52,18 @@ Projections, updated in the same transaction as their event:
 - `bus_work`: each work ID once per game, with the commit whose COMPLETE first listed it.
 - `review_briefs`: one row per (game, slot) stored review brief with its recipient and message ID.
 
+- `questions`: one row per question with its owning role, title, work ID, options, state
+  (`pending`, `answered` or `cancelled`), opening and closing times, the answering decision and
+  the cancellation reason. Indexed by `(role, state, opened_seq)`.
+- `decisions`: one row per decision, `{id, work, n, question, by, at, role, supersedes, text}`,
+  unique per `(work, n)`, where `id` is `<work>/D<n>` and `supersedes` is `<work>/D<k>` or null.
+- `holds`: one row per hold with its owning role, scope, reason, state (`active` or `released`)
+  and times. Indexed by `(role, state, set_seq)`.
+
 Event kinds: `msg.sent`, `msg.imported`, `inbox.read`, `msg.closed`, `msg.retained`,
 `wake.claimed`, `wake.completed`, `wake.guarded`, `wake.rearmed`, `bus.event`, `bus.complete`,
-`review.brief` and `store.cutover`. A kind with no projection is still stored and chained, so a
+`review.brief`, `store.cutover`, `question.opened`, `question.answered`, `question.cancelled`,
+`hold.set` and `hold.released`. A kind with no projection is still stored and chained, so a
 later projection can read it on its next rebuild. A store written before a projection existed
 gets that projection's tables when it is opened, filled from the existing events in one
 transaction; the events and their hashes are untouched.
@@ -100,7 +110,8 @@ that holds no secret is rephrased:
 
 ## Writer fence
 
-Every writing verb (`msg send`, `inbox`, `msg done`, `msg retain`, `store import`) resolves its
+Every writing verb (`msg send`, `inbox`, `msg done`, `msg retain`, `store import`,
+`question open|answer|cancel` and `hold set|release`) and `msg history --include-body` resolve their
 caller before it opens the store: the caller is the registry role whose effective harness
 conversation ID equals the caller's native ID. The native ID is `--native-id ID`, else, for each
 role, the variable of that role's effective harness: `CLAUDE_CODE_SESSION_ID` for Claude and
@@ -120,8 +131,8 @@ A worker writes under its parent's binding. `--worker NAME` records an attributi
 role on the event and the message. It is not verified: any caller bound to the role may name any
 worker, so it is a label for reading history, not an identity.
 
-Reads (`msg status`, `msg history`, `store export`, `store rebuild` and `store import --dry-run`)
-take no caller.
+Reads (`msg status`, `msg history` without `--include-body`, `question list`, `hold list`,
+`decision list`, `store export`, `store rebuild` and `store import --dry-run`) take no caller.
 
 ## Wakes
 
@@ -144,9 +155,79 @@ wake is logged and stays outstanding: it is not retried before the recipient's n
 next review, which may call `rearmWake`. A wake interrupted between its claim and its outcome
 stays outstanding with no outcome, which reads as ambiguous.
 
-The store's own question and hold records arrive in Phase 3. Until then the `storeGuard` port of
-`wakeRecipient` passes every recipient; Phase 3 supplies one that blocks on an open question or
-hold record.
+After the registry checks, the store guard (`questionHoldGuard`, the default `storeGuard` port of
+`wakeRecipient`) withholds the wake while the recipient has a pending question or an active hold
+with scope `role`; it is logged `guarded` with `recipient-question-pending` or
+`recipient-hold-active`. Work and game holds do not withhold wakes. For Codex the native question
+check still runs after it. A wake carries no payload, so it never answers or clears a prompt or
+hold. When the owner answers or cancels its question or releases its hold, that command attempts
+one guarded wake for it, which goes out only if no other guard remains.
+
+## Message history
+
+`msg history` prints message events in seq order without bodies. With `--include-body` the caller
+is resolved through the [writer fence](#writer-fence), and the `msg.sent` and `msg.imported`
+events of messages it sent or received carry their `body`; `game-coordinator` sees every body.
+Other events stay metadata, and a caller the fence refuses gets no output.
+
+## Questions, holds and decisions
+
+Each record is owned by the role whose binding wrote it, and only that role's binding can answer,
+cancel or release it (`not-owner`); import and reviews never do. Native prompts are never read or
+touched: a question record mirrors a prompt the owner has opened in its own session.
+
+### Questions
+
+- `question open --title TEXT` records a pending question owned by the caller. Without `--id` it
+  gets the next role-scoped ID `q-<role>-<n>`, with `/` in a game role written as `-`
+  (`q-archies-dog-walks-tech-3`), one above the highest such ID in the store. A retry that must
+  not open a second question passes `--id`; repeating it with the same owner, title, work and
+  options is a no-op (`duplicate: true`), and any other reuse is `id-conflict`.
+- `question answer --id Q --work W --text T [--by user] [--supersedes Dk]` closes the caller's
+  pending question and records its decision in one `question.answered` event. A question opened
+  with `--work` must be answered for that work item (`work-mismatch`). The decision's number is one
+  above the highest in the store and in the work file for `W`, and `--supersedes` must name one of
+  them (`invalid-supersedes`). `--by` defaults to `user`.
+- `question cancel --id Q --reason R` cancels the caller's pending question. Answering or
+  cancelling a closed question is a no-op when it repeats the recorded close, else
+  `already-closed`.
+
+Titles, reasons and options are single lines with no secret shape. Decision text also goes into a
+public work file, so it is one line of at most 1000 characters with no secret shape,
+home-directory path, UUID or this machine's host name (`text-not-public`); the host name is read
+at run time and never stored.
+
+### Decision lines
+
+After the store write, `question answer` appends the decision line to `docs/work/<W>.md` in the
+main checkout of the caller's repository: the repository of the caller's registered worktree, as
+`git rev-parse --git-common-dir` resolves it.
+
+```text
+- D<n> (<by>, YYYY-MM-DD; answers <Q>[; supersedes D<k>]): <text>
+```
+
+The date is the UTC date of the decision time. The line goes after the last line of the
+`## Decisions` section, replacing a lone `None yet.`. The file is written in place and left
+unstaged for the role's next commit; nothing is staged or committed. Before the store write it
+refuses `worktree-unavailable` when Git cannot resolve the worktree, `main-checkout-not-main`
+when that checkout is not on `main`, `work-file-missing` and `decisions-section-missing`, so a
+refused answer leaves the question pending. Repeating the same answer writes the line only if the
+file lacks decision `n`.
+
+### Holds
+
+`hold set --id H --scope work:W|role|game:G --reason R` records an active hold owned by the
+caller; `role` scopes it to the owner itself. Repeating it with the same owner, scope and reason
+while active is a no-op; any other reuse of the ID, including after release, is `id-conflict`.
+`hold release --id H` releases the caller's own hold; a repeated release is a no-op.
+
+### Lists
+
+`question list [--role R] [--state pending|answered|cancelled]`, `hold list [--role R]
+[--state active|released]` and `decision list [--work W] [--role R]` take no caller and print
+`{schema, questions}`, `{schema, holds}` and `{schema, decisions}` in recording order. An absent
+store reads as empty.
 
 ## Store mode
 
@@ -350,10 +431,16 @@ ingest, briefs as stored messages and the review seam):
   `LOG_FILE`, `CURSOR_FILE`, `QUARANTINE_FILE`, `EVENT_KINDS` and `EVENT_STATUSES`.
 - Notices from the runner's role: `DELIVERY_KIT_ROLE`, `DELIVERY_KIT_ACTOR`, `derivedId`,
   `reportsRecipient` and `storeNotice`.
-- Projections: `DELIVERY_PROJECTION` beside `MESSAGES_PROJECTION`.
+- Projections: `DELIVERY_PROJECTION` and `QUESTIONS_PROJECTION` beside `MESSAGES_PROJECTION`.
+- Questions, holds and decisions: `openQuestion`, `answerQuestion`, `cancelQuestion`,
+  `requireOwnQuestion`, `listQuestions`, `setHold`, `releaseHold`, `listHolds`, `listDecisions`
+  (the `DecisionRow` records a graph reads), `questionHoldGuard`, `publicText`, `holdScope` and
+  `normalizeOptions`; the work-file half `mainWorkFile`, `fileDecisionNumbers`, `decisionLine` and
+  `appendDecisionLine`. Writers trust their `Actor` and refuse another owner's record.
 - The CLI services `storeSend`, `storeInbox`, `storeDone`, `storeRetain`, `storeStatus`,
-  `storeHistory`, `storeImport`, `storeExport` and `storeRebuild`, and `StoreError` with its
-  `code`.
+  `storeHistory`, `storeImport`, `storeExport`, `storeRebuild`, `storeQuestionOpen`,
+  `storeQuestionAnswer`, `storeQuestionCancel`, `storeQuestionList`, `storeHoldSet`,
+  `storeHoldRelease`, `storeHoldList` and `storeDecisionList`, and `StoreError` with its `code`.
 
 The stored review brief (`storeReview`, `showBrief`, `composeBrief`) and the coordination event
 port (`coordinationEmit`) are in `@andornaut/coordination-kit/build/review`.
