@@ -144,6 +144,59 @@ function configuration(value: unknown): value is ProtocolConfiguration {
     Number(v.generation) > 0
   );
 }
+/**
+ * The fence `store cutover --apply` writes: the previous fence (the active configuration, or null
+ * when unmanaged) under a generation one higher. A reader that does not know this kind sees a
+ * fence that differs from the configuration and fails closed with `protocol-generation-conflict`
+ * (or `protocol-fenced` when unmanaged); this kit resolves the previous selection unchanged.
+ */
+export interface StoreCutoverFence {
+  readonly schema: 1;
+  readonly kind: "store-cutover";
+  readonly generation: number;
+  readonly cutoverAt: string;
+  readonly previous: ProtocolConfiguration | null;
+}
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/u;
+/** The parsed cutover fence, null for any other value; a malformed cutover fence is refused. */
+export function storeCutoverFence(value: unknown): StoreCutoverFence | null {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    (value as Record<string, unknown>).kind !== "store-cutover"
+  ) {
+    return null;
+  }
+  const v = value as Record<string, unknown>;
+  if (
+    !isDeepStrictEqual(Object.keys(v).sort(), [
+      "cutoverAt",
+      "generation",
+      "kind",
+      "previous",
+      "schema",
+    ]) ||
+    v.schema !== 1 ||
+    !Number.isSafeInteger(v.generation) ||
+    Number(v.generation) < 1 ||
+    typeof v.cutoverAt !== "string" ||
+    !ISO_INSTANT.test(v.cutoverAt) ||
+    !(v.previous === null || configuration(v.previous))
+  ) {
+    fail("invalid-protocol-config");
+  }
+  return v as unknown as StoreCutoverFence;
+}
+/** The store cutover fence when one is in place, else null. Read-only. */
+export function readStoreCutover(layout: Pick<Layout, "varDir">): StoreCutoverFence | null {
+  try {
+    return storeCutoverFence(optionalFile(protocolPaths(layout).fence));
+  } catch (error) {
+    throw error instanceof ProtocolLayoutError
+      ? error
+      : new ProtocolLayoutError("protocol-unavailable");
+  }
+}
 /** Resolve existing aliases without creating a missing destination. */
 export function canonicalProtocolPath(path: string): string {
   if (!isAbsolute(path) || path.includes("\0")) {
@@ -229,7 +282,10 @@ function selection(layout: Layout): {
   try {
     const paths = protocolPaths(layout);
     const value = optionalFile(paths.config);
-    const fence = optionalFile(paths.fence);
+    const written = optionalFile(paths.fence);
+    // A store cutover fence keeps the previous selection for this kit.
+    const cutover = storeCutoverFence(written);
+    const fence = cutover === null ? written : (cutover.previous ?? undefined);
     if (value === undefined) {
       if (pending(fence)) {
         return {

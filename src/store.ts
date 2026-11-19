@@ -1,5 +1,6 @@
 // @andornaut/coordination-kit/build/store: the SQLite coordination store, its message lifecycle,
-// wakes, the registry writer fence and the legacy import.
+// wakes, the registry writer fence, the legacy import, runner event ingest and the cutover.
+export { COORDINATOR_ROLE, type CutoverOutput, storeCutover } from "./store/cutover.ts";
 export type { AppendResult, VerifyResult } from "./store/db.ts";
 export {
   canonicalJson,
@@ -11,6 +12,21 @@ export {
   storeRoot,
 } from "./store/db.ts";
 export { type CallerOptions, NATIVE_ID_VARIABLES, resolveCaller } from "./store/identity.ts";
+export {
+  busEventId,
+  type BusLine,
+  type Cursor,
+  CURSOR_FILE,
+  EVENT_KINDS,
+  EVENT_STATUSES,
+  type IngestContext,
+  ingestEvents,
+  type IngestResult,
+  LOG_FILE,
+  parseBusLine,
+  QUARANTINE_FILE,
+  readCursor,
+} from "./store/ingest.ts";
 export {
   type ImportAction,
   type ImportDiff,
@@ -41,7 +57,21 @@ export {
   type SendResult,
   type WriteResult,
 } from "./store/messages.ts";
-export { MESSAGES_PROJECTION, type Projection, PROJECTIONS } from "./store/projections.ts";
+export { isStoreMode, type StoreMode, storeMode, type StoreModeName } from "./store/mode.ts";
+export {
+  DELIVERY_KIT_ACTOR,
+  DELIVERY_KIT_ROLE,
+  derivedId,
+  type Notice,
+  reportsRecipient,
+  storeNotice,
+} from "./store/notices.ts";
+export {
+  DELIVERY_PROJECTION,
+  MESSAGES_PROJECTION,
+  type Projection,
+  PROJECTIONS,
+} from "./store/projections.ts";
 export { SECRET_SHAPES, secretShape } from "./store/secrets.ts";
 export {
   storeDone,

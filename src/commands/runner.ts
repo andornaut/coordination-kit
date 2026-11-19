@@ -1,4 +1,4 @@
-// `review deliver` and `events flush`: the seam delivery-kit's runner spawns from the
+// `review deliver`, `events flush` and `events ingest`: the seam delivery-kit's runner spawns from the
 // coordinator-installed CLI. Each prints exactly one JSON line on stdout and exits 0 for every
 // typed outcome, 2 for a usage error and 1 for an internal failure, which prints nothing on
 // stdout and one `coordination-kit:` line on stderr.
@@ -9,6 +9,9 @@ import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.
 import { type GameLayout, gameLayout, type Layout, loadLayout, UnknownGame } from "../layout.ts";
 import { deliverReview, reviewDeliverLine } from "../review/deliver.ts";
 import { type CliIdentity, cliMember } from "../review/outcome.ts";
+import { showBrief } from "../review/storeBrief.ts";
+import { ingestEvents, type IngestResult } from "../store/ingest.ts";
+import { StoreError } from "../store/types.ts";
 import { cliIdentity } from "../version.ts";
 
 export const REVIEW_DELIVER_OPTIONS = {
@@ -18,6 +21,13 @@ export const REVIEW_DELIVER_OPTIONS = {
 } as const;
 
 export const EVENTS_FLUSH_OPTIONS = { game: { type: "string" } } as const;
+
+export const EVENTS_INGEST_OPTIONS = { game: { type: "string" } } as const;
+
+export const REVIEW_SHOW_OPTIONS = {
+  game: { type: "string" },
+  slot: { type: "string" },
+} as const;
 
 class Usage extends Error {}
 
@@ -146,5 +156,100 @@ export const eventsFlush: Handler = async (io, root, args) => {
   } catch (error) {
     io.err(`coordination-kit: events flush failed: ${message(error)}\n`);
     return EXIT_INVALID;
+  }
+};
+
+/** The one stdout line of `events ingest`: the `events flush` keys plus the ingest counts. */
+export function eventsIngestLine(cli: CliIdentity, game: string, result: IngestResult): string {
+  return `${JSON.stringify(
+    Object.fromEntries([
+      ["schema", 1],
+      ["kind", "events-ingest"],
+      ["game", game],
+      ["status", result.status],
+      ["reason", result.reason],
+      ["detail", result.detail],
+      ["delivered", result.delivered],
+      ["held", result.held],
+      ["ingested", result.ingested],
+      ["quarantined", result.quarantined],
+      ["completed", result.completed],
+      ["cli", cliMember(cli)],
+    ]),
+  )}\n`;
+}
+
+export const eventsIngest: Handler = async (io, root, args) => {
+  let values;
+  try {
+    ({ values } = parseArgs({ args, options: EVENTS_INGEST_OPTIONS, strict: true }));
+  } catch (error) {
+    io.err(`coordination-kit: ${message(error)}\n`);
+    return EXIT_USAGE;
+  }
+  const resolved = context(io, root, values.game);
+  if (typeof resolved === "number") {
+    return resolved;
+  }
+  try {
+    const result = await ingestEvents({ env: io.env, layout: resolved.layout }, resolved.game);
+    io.out(eventsIngestLine(resolved.cli, resolved.game.id, result));
+    return EXIT_OK;
+  } catch (error) {
+    io.err(`coordination-kit: events ingest failed: ${message(error)}\n`);
+    return EXIT_INVALID;
+  }
+};
+
+/** `review show`: the recorded stored brief for a slot, or the latest, with its full detail. */
+export const reviewShow: Handler = (io, root, args) => {
+  let values;
+  let slot: number | undefined;
+  try {
+    ({ values } = parseArgs({ args, options: REVIEW_SHOW_OPTIONS, strict: true }));
+    slot = values.slot === undefined ? undefined : slotSeconds(values.slot);
+  } catch (error) {
+    io.err(`coordination-kit: ${message(error)}\n`);
+    return Promise.resolve(EXIT_USAGE);
+  }
+  let layout: Layout;
+  try {
+    layout = loadLayout(root);
+    if (values.game !== undefined) {
+      gameLayout(layout, values.game);
+    }
+  } catch (error) {
+    io.err(`coordination-kit: ${message(error)}\n`);
+    return Promise.resolve(error instanceof UnknownGame ? EXIT_USAGE : EXIT_INVALID);
+  }
+  try {
+    const brief = showBrief(layout, {
+      ...(values.game === undefined ? {} : { game: values.game }),
+      ...(slot === undefined ? {} : { slot }),
+    });
+    io.out(
+      `${JSON.stringify(
+        Object.fromEntries([
+          ["schema", 1],
+          ["kind", "review-show"],
+          ["game", brief.game],
+          ["slot", new Date(brief.slot * 1000).toISOString()],
+          ["recipient", brief.recipient],
+          ["messageId", brief.messageId],
+          ["at", brief.at],
+          ["result", brief.result],
+          ["counts", brief.counts],
+          ["exceptions", brief.exceptions],
+          ["open", brief.open],
+          ["body", brief.body],
+        ]),
+      )}\n`,
+    );
+    return Promise.resolve(EXIT_OK);
+  } catch (error) {
+    io.err(
+      `coordination-kit: ${error instanceof StoreError ? error.code : "review show failed"}\n`,
+    );
+    return Promise.resolve(EXIT_INVALID);
   }
 };

@@ -27,7 +27,12 @@ import {
   PROTOCOL_ROLE_OPTIONS,
   PROTOCOL_ROOT_OPTIONS,
 } from "./protocol.ts";
-import { EVENTS_FLUSH_OPTIONS, REVIEW_DELIVER_OPTIONS } from "./runner.ts";
+import {
+  EVENTS_FLUSH_OPTIONS,
+  EVENTS_INGEST_OPTIONS,
+  REVIEW_DELIVER_OPTIONS,
+  REVIEW_SHOW_OPTIONS,
+} from "./runner.ts";
 import { STATUS_OPTIONS } from "./status.ts";
 import {
   INBOX_OPTIONS,
@@ -36,6 +41,7 @@ import {
   MSG_RETAIN_OPTIONS,
   MSG_SEND_OPTIONS,
   MSG_STATUS_OPTIONS,
+  STORE_CUTOVER_OPTIONS,
   STORE_EXPORT_OPTIONS,
   STORE_IMPORT_OPTIONS,
   STORE_REBUILD_OPTIONS,
@@ -136,6 +142,13 @@ export const SPECS = {
     group: "review",
     options: EVENTS_FLUSH_OPTIONS,
     summary: "flush the game's event outbox; prints one typed JSON result line",
+  },
+  "events ingest": {
+    forms: [["game"]],
+    group: "review",
+    options: EVENTS_INGEST_OPTIONS,
+    summary:
+      "ingest the game's runner event log into the store from its cursor; prints one typed JSON result line",
   },
   "harness doctor": {
     forms: [["game", "role?"], ["role"]],
@@ -507,6 +520,12 @@ export const SPECS = {
     options: REVIEW_DELIVER_OPTIONS,
     summary: "deliver the scheduled review for one slot once; prints one typed JSON result line",
   },
+  "review show": {
+    forms: [["game?", "slot?"]],
+    group: "review",
+    options: REVIEW_SHOW_OPTIONS,
+    summary: "print a stored review brief's full record: the slot's, else the latest",
+  },
   status: {
     forms: [["scope?", "since?", "state?", "audit?", "verify-since?", "format?"]],
     group: "status",
@@ -520,6 +539,13 @@ export const SPECS = {
       state: "STATE",
       "verify-since": "ISO_TIMESTAMP",
     },
+  },
+  "store cutover": {
+    forms: [["dry-run"], ["apply", "native-id?", "worker?"]],
+    group: "store",
+    options: STORE_CUTOVER_OPTIONS,
+    summary:
+      "switch to the store: fence legacy writers, import, record the cutover and wake; --dry-run writes nothing",
   },
   "store export": {
     forms: [["since"]],

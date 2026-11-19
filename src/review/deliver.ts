@@ -10,6 +10,7 @@ import { isRecord } from "../adapters/shared/pyjson.ts";
 import { readJsonIfExists, writeJsonDurable } from "../durable.ts";
 import type { GameLayout, Layout } from "../layout.ts";
 import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
+import { isStoreMode } from "../store/mode.ts";
 import {
   type CliIdentity,
   cliMember,
@@ -18,6 +19,7 @@ import {
   reasonToken,
   type SeamStatus,
 } from "./outcome.ts";
+import { storeReview } from "./storeBrief.ts";
 import { outcomeLine, type ReviewOptions, type ReviewOutcome, reviewOutcome } from "./wake.ts";
 
 export interface ReviewResult {
@@ -165,6 +167,21 @@ export async function deliverReview(
     }
     if (signal?.aborted === true) {
       return undefined;
+    }
+    if (isStoreMode(layout)) {
+      // Store mode: the brief is one stored message per (game, slot); natives only wake.
+      const stored = await storeReview(
+        {
+          env: options.env ?? process.env,
+          layout,
+          ...(options.wakePorts === undefined ? {} : { ports: options.wakePorts }),
+          ...(options.now === undefined ? {} : { now: options.now }),
+        },
+        game,
+        slot,
+      );
+      record(game, slot, stored);
+      return stored;
     }
     const mapped = mapReviewOutcome(await reviewOutcome(layout, game, slot, signal, options));
     if (mapped === undefined) {

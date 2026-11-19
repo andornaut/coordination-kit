@@ -1,4 +1,5 @@
-// The store verbs: `msg send|done|retain|status|history`, `inbox` and `store import|export|rebuild`.
+// The store verbs: `msg send|done|retain|status|history`, `inbox` and
+// `store import|export|rebuild|cutover`.
 // Each prints one JSON object on stdout. A refusal prints `coordination-kit: CODE` on stderr and
 // exits 1; a usage error exits 2.
 import { isUtf8 } from "node:buffer";
@@ -8,6 +9,7 @@ import { parseArgs } from "node:util";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { loadLayout } from "../layout.ts";
+import { storeCutover } from "../store/cutover.ts";
 import type { CallerOptions } from "../store/identity.ts";
 import {
   storeDone,
@@ -76,6 +78,12 @@ export const STORE_IMPORT_OPTIONS = {
 export const STORE_EXPORT_OPTIONS = { since: { type: "string" } } as const;
 
 export const STORE_REBUILD_OPTIONS = {} as const;
+
+export const STORE_CUTOVER_OPTIONS = {
+  ...CALLER,
+  apply: { type: "boolean" },
+  "dry-run": { type: "boolean" },
+} as const;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
 
@@ -347,3 +355,18 @@ export const storeExportCommand: Handler = (io, root, args) =>
 
 export const storeRebuildCommand: Handler = (io, root, args) =>
   run(io, root, "store rebuild", args, (context) => storeRebuild(context), STORE_REBUILD_OPTIONS);
+
+export const storeCutoverCommand: Handler = (io, root, args) =>
+  run(
+    io,
+    root,
+    "store cutover",
+    args,
+    (context, values) => {
+      if ((values.apply === true) === (values["dry-run"] === true)) {
+        throw new Usage();
+      }
+      return storeCutover(context, callerOf(values), { apply: values.apply === true });
+    },
+    STORE_CUTOVER_OPTIONS,
+  );

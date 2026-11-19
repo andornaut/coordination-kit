@@ -12,7 +12,11 @@ import { fsyncDirectory, readJsonIfExists, writeJsonDurable } from "../durable.t
 import type { Layout } from "../layout.ts";
 import { holdLockAsync, type LockHandle } from "../lock.ts";
 import { protocolRole, ProtocolStore } from "../protocol/core.ts";
-import { acquireProtocolLayout, type ProtocolLayout } from "../protocol/layout.ts";
+import {
+  acquireProtocolLayout,
+  type ProtocolLayout,
+  readStoreCutover,
+} from "../protocol/layout.ts";
 import { ProtocolMessages } from "../protocol/messages.ts";
 import {
   captureProtocolSelection,
@@ -347,6 +351,8 @@ export class MessageStore {
 
   private async lock(id: string): Promise<LockHandle> {
     this.path(id);
+    // After the store cutover every legacy message write fails closed; reads stay available.
+    requireThat(this.layout === null || readStoreCutover(this.layout) === null, "store-cutover");
     const generation =
       this.layout === null
         ? null

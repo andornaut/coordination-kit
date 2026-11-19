@@ -8,7 +8,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import type { Layout } from "../layout.ts";
 import { captureProtocolSelection } from "../protocol/selection.ts";
-import { PROJECTIONS } from "./projections.ts";
+import { type Projection, PROJECTIONS } from "./projections.ts";
 import {
   type Actor,
   type EventInput,
@@ -119,6 +119,46 @@ function rowEvent(row: Row): StoredEvent {
   };
 }
 
+function tableExists(db: DatabaseSync, table: string): boolean {
+  return (
+    db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !==
+    undefined
+  );
+}
+
+/**
+ * A store written before a projection existed gets its tables on open, filled from the events the
+ * projection reads, in one transaction. The events and their hashes are untouched.
+ */
+function addMissingProjections(db: DatabaseSync): void {
+  const missing = (): Projection[] =>
+    PROJECTIONS.filter((projection) => projection.tables.some((table) => !tableExists(db, table)));
+  if (missing().length === 0) {
+    return;
+  }
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    // Checked again under the write lock: another process may have added them meanwhile.
+    for (const projection of missing()) {
+      db.exec(projection.ddl);
+      const kinds = Object.keys(projection.apply);
+      const rows = db
+        .prepare(
+          `SELECT * FROM events WHERE kind IN (${kinds.map(() => "?").join(",")}) ORDER BY seq`,
+        )
+        .all(...kinds) as Row[];
+      for (const row of rows) {
+        const event = rowEvent(row);
+        projection.apply[event.kind]?.(db, event);
+      }
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export interface AppendResult {
   readonly event: StoredEvent;
   /** True when an event with this idempotency key already existed; nothing was written. */
@@ -186,6 +226,8 @@ export class Store {
           db.exec("ROLLBACK");
           throw error;
         }
+      } else {
+        addMissingProjections(db);
       }
     } catch (error) {
       db.close();

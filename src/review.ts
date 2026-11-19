@@ -9,12 +9,22 @@ export {
   routeRecipient,
   validateRoleRoute,
 } from "./adapters/shared/route.ts";
+export { coordinationEmit, coordinationNotice } from "./review/emit.ts";
 export {
   type CliIdentity,
   REASON_TOKENS,
   type ReasonToken,
   type SeamStatus,
 } from "./review/outcome.ts";
+export {
+  BRIEF_MAX_BYTES,
+  BRIEF_MAX_LINES,
+  type BriefException,
+  type BriefRecord,
+  composeBrief,
+  showBrief,
+  storeReview,
+} from "./review/storeBrief.ts";
 export {
   DEFERRED_PREFIX,
   deliverScheduledReview,

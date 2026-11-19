@@ -55,7 +55,7 @@ import {
   protocolWorkSubmit,
 } from "./commands/protocol.ts";
 import { claudeReady, codexReady, harnessReady } from "./commands/ready.ts";
-import { eventsFlush, reviewDeliver } from "./commands/runner.ts";
+import { eventsFlush, eventsIngest, reviewDeliver, reviewShow } from "./commands/runner.ts";
 import { type Command, GROUPS, SPECS, synopsis } from "./commands/spec.ts";
 import { status } from "./commands/status.ts";
 import {
@@ -65,6 +65,7 @@ import {
   msgRetain,
   msgSend,
   msgStatus,
+  storeCutoverCommand,
   storeExportCommand,
   storeImportCommand,
   storeRebuildCommand,
@@ -84,6 +85,7 @@ export const COMMANDS = [
   "store import",
   "store export",
   "store rebuild",
+  "store cutover",
   "inbox snapshot",
   "inbox ack",
   "claude ready",
@@ -93,7 +95,9 @@ export const COMMANDS = [
   "harness select",
   "claude channel",
   "review deliver",
+  "review show",
   "events flush",
+  "events ingest",
   "message send",
   "message dispatch",
   "message status",
@@ -187,6 +191,7 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "claude ready": claudeReady,
   "codex ready": codexReady,
   "events flush": eventsFlush,
+  "events ingest": eventsIngest,
   "harness doctor": harnessDoctor,
   "harness ready": harnessReady,
   "harness select": harnessSelect,
@@ -242,7 +247,9 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "protocol work-receipt": protocolWorkReceipt,
   "protocol work-submit": protocolWorkSubmit,
   "review deliver": reviewDeliver,
+  "review show": reviewShow,
   status,
+  "store cutover": storeCutoverCommand,
   "store export": storeExportCommand,
   "store import": storeImportCommand,
   "store rebuild": storeRebuildCommand,

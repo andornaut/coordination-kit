@@ -32,12 +32,13 @@ import {
 import type { HarnessAdapter, Inventory } from "../adapters/types.ts";
 import { loadReportsConfig } from "../config.ts";
 import { readJson } from "../durable.ts";
-import { recordEvent } from "../events.ts";
 import type { GameLayout, Layout } from "../layout.ts";
 import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
 import { resolveRole } from "../registry/resolve.ts";
 import type { Harness } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
+import type { WakePorts } from "../store/wake.ts";
+import { coordinationEmit } from "./emit.ts";
 import {
   type HealthEmit,
   MESSAGE_HEALTH_FIELDS,
@@ -317,7 +318,7 @@ async function codexSlot(
     busDir: game.busDir,
     capture,
     claude: claudeAdapter(process.env, game),
-    emit: (kind, key, message) => recordEvent(game, { project }, kind, key, message),
+    emit: coordinationEmit(layout, game, project),
     harnesses:
       scope.harnesses ??
       Object.fromEntries(
@@ -339,6 +340,10 @@ async function codexSlot(
 export interface ReviewOptions {
   /** Automatic accounting capture at the review boundary; off unless set. */
   readonly capture?: boolean;
+  /** Store mode: the environment and wake ports for the brief's wakes, and the store clock. */
+  readonly env?: NodeJS.ProcessEnv;
+  readonly wakePorts?: WakePorts;
+  readonly now?: () => string;
 }
 
 /**
