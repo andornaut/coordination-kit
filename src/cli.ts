@@ -67,6 +67,14 @@ import {
 } from "./commands/questions.ts";
 import { claudeReady, codexReady, harnessReady } from "./commands/ready.ts";
 import { eventsFlush, eventsIngest, reviewDeliver, reviewShow } from "./commands/runner.ts";
+import {
+  handoffActive,
+  handoffOpen,
+  handoffReady,
+  handoffShow,
+  handoffState,
+  sessionStart,
+} from "./commands/session.ts";
 import { type Command, GROUPS, SPECS, synopsis } from "./commands/spec.ts";
 import { status } from "./commands/status.ts";
 import {
@@ -116,6 +124,12 @@ export const COMMANDS = [
   "hold release",
   "hold list",
   "decision list",
+  "session start",
+  "handoff open",
+  "handoff ready",
+  "handoff state",
+  "handoff active",
+  "handoff show",
   "inbox snapshot",
   "inbox ack",
   "claude ready",
@@ -191,6 +205,7 @@ const GROUP_ORDER = [
   "msg",
   "store",
   "decisions",
+  "session",
   "inbox",
   "message",
   "ledger",
@@ -239,6 +254,11 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   graph,
   "graph index": graphIndex,
   "graph why": graphWhy,
+  "handoff active": handoffActive,
+  "handoff open": handoffOpen,
+  "handoff ready": handoffReady,
+  "handoff show": handoffShow,
+  "handoff state": handoffState,
   "harness doctor": harnessDoctor,
   "harness ready": harnessReady,
   "harness select": harnessSelect,
@@ -302,6 +322,7 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "question open": questionOpen,
   "review deliver": reviewDeliver,
   "review show": reviewShow,
+  "session start": sessionStart,
   status,
   "store cutover": storeCutoverCommand,
   "store export": storeExportCommand,

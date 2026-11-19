@@ -196,7 +196,15 @@ export async function run(
       error instanceof StoreError && /^[a-z][a-z-]{0,63}$/.test(error.code)
         ? error.code
         : "store_operation_failed";
-    io.err(`coordination-kit: ${code}\n`);
+    // A refusal with a short reason, such as `session-held: phase held`, prints it after the code.
+    const reason =
+      error instanceof StoreError &&
+      "reason" in error &&
+      typeof error.reason === "string" &&
+      /^[a-z0-9 -]{1,64}$/.test(error.reason)
+        ? `: ${error.reason}`
+        : "";
+    io.err(`coordination-kit: ${code}${reason}\n`);
     return EXIT_INVALID;
   }
 }

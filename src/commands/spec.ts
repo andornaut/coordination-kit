@@ -44,6 +44,13 @@ import {
   REVIEW_DELIVER_OPTIONS,
   REVIEW_SHOW_OPTIONS,
 } from "./runner.ts";
+import {
+  HANDOFF_OPEN_OPTIONS,
+  HANDOFF_ROLE_OPTIONS,
+  HANDOFF_SHOW_OPTIONS,
+  HANDOFF_STATE_OPTIONS,
+  SESSION_START_OPTIONS,
+} from "./session.ts";
 import { STATUS_OPTIONS } from "./status.ts";
 import {
   INBOX_OPTIONS,
@@ -124,6 +131,7 @@ export const GROUPS = {
   msg: "store messages (caller identified by the registry fence)",
   protocol: "explicit filesystem work protocol",
   review: "runner seam (delivery-kit)",
+  session: "sessions and harness handoffs (writes fenced by the registry)",
   status: "cross-repository status",
   store: "coordination store maintenance",
   work: "repository work files",
@@ -201,6 +209,39 @@ export const SPECS = {
     options: GRAPH_WHY_OPTIONS,
     summary: "print a decision's supersedes chain with each item's approval reference",
     values: { decision: "[REPOSITORY:]WORK_ID/Dn" },
+  },
+  "handoff active": {
+    forms: [["id?", "native-id?", "worker?"]],
+    group: "session",
+    options: HANDOFF_ROLE_OPTIONS,
+    summary: "record your role active from its target binding and release its handoff hold",
+  },
+  "handoff open": {
+    forms: [["scope", "to", "id?", "native-id?", "worker?"]],
+    group: "session",
+    options: HANDOFF_OPEN_OPTIONS,
+    summary: "open a handoff for roles or all (game-coordinator only)",
+    values: { id: "ID", scope: "ROLE|all", to: "claude|codex" },
+  },
+  "handoff ready": {
+    forms: [["id?", "native-id?", "worker?"]],
+    group: "session",
+    options: HANDOFF_ROLE_OPTIONS,
+    summary: "record your role ready from its source binding and set its handoff hold",
+  },
+  "handoff show": {
+    forms: [["id?"]],
+    group: "session",
+    options: HANDOFF_SHOW_OPTIONS,
+    summary: "print a handoff, else the latest, with per-role times and its holds",
+    values: { id: "ID" },
+  },
+  "handoff state": {
+    forms: [["STATE", "id", "native-id?", "worker?"]],
+    group: "session",
+    options: HANDOFF_STATE_OPTIONS,
+    summary: "move a handoff to prepared, sent, completed or cancelled (game-coordinator only)",
+    values: { id: "ID" },
   },
   "harness doctor": {
     forms: [["game", "role?"], ["role"]],
@@ -627,6 +668,12 @@ export const SPECS = {
     group: "review",
     options: REVIEW_SHOW_OPTIONS,
     summary: "print a stored review brief's full record: the slot's, else the latest",
+  },
+  "session start": {
+    forms: [["native-id?", "worker?"]],
+    group: "session",
+    options: SESSION_START_OPTIONS,
+    summary: "record your session start and print your binding, checkpoint and open counts",
   },
   status: {
     forms: [["scope?", "since?", "state?", "audit?", "verify-since?", "format?"]],

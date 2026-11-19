@@ -53,7 +53,7 @@ export interface HoldOutput {
 }
 
 /** One guarded wake for `role`, which wakes only when it is wake-pending with undelivered messages. */
-async function wakeOwner(
+export async function wakeOwner(
   context: StoreServiceContext,
   store: Store,
   role: string,

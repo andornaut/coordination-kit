@@ -4,6 +4,7 @@
 // add appliers for existing kinds and pick them up on the next rebuild.
 import type { DatabaseSync } from "node:sqlite";
 
+import { HANDOFFS_PROJECTION } from "./handoffs.ts";
 import { QUESTIONS_PROJECTION } from "./questions.ts";
 import type { JsonObject, StoredEvent } from "./types.ts";
 import { WORK_PROJECTION } from "./work.ts";
@@ -373,4 +374,5 @@ export const PROJECTIONS: readonly Projection[] = [
   DELIVERY_PROJECTION,
   QUESTIONS_PROJECTION,
   WORK_PROJECTION,
+  HANDOFFS_PROJECTION,
 ];

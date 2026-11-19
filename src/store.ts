@@ -20,6 +20,26 @@ export {
   mainWorkFile,
   type WorkFileTarget,
 } from "./store/decisionLine.ts";
+export {
+  activeHandoff,
+  HANDOFF_STATES,
+  HANDOFF_TRANSITIONS,
+  handoffHoldId,
+  handoffHolds,
+  type HandoffResult,
+  type HandoffRoleView,
+  HANDOFFS_PROJECTION,
+  type HandoffState,
+  type HandoffView,
+  latestHandoff,
+  OPEN_HANDOFF_STATES,
+  openHandoff,
+  openHandoffsFor,
+  readHandoff,
+  readyHandoff,
+  recordSession,
+  setHandoffState,
+} from "./store/handoffs.ts";
 export { type CallerOptions, NATIVE_ID_VARIABLES, resolveCaller } from "./store/identity.ts";
 export {
   busEventId,
@@ -138,6 +158,17 @@ export {
   type StoreServiceContext,
   storeStatus,
 } from "./store/service.ts";
+export {
+  checkpointPath,
+  type HandoffOutput,
+  type SessionOutput,
+  storeHandoffActive,
+  storeHandoffOpen,
+  storeHandoffReady,
+  storeHandoffShow,
+  storeHandoffState,
+  storeSessionStart,
+} from "./store/sessionService.ts";
 export {
   type Actor,
   type EventInput,
