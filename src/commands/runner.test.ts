@@ -399,6 +399,7 @@ describe("reason tokens", () => {
         "already-delivered",
         "cli-error",
         "held",
+        "in-flight",
         "no-events",
         "nothing-due",
         "outbox-unreadable",
@@ -473,7 +474,7 @@ describe("events flush", () => {
     expect(await flush()).toMatchObject({
       delivered: 0,
       held: 1,
-      reason: "recipient-busy",
+      reason: "in-flight",
       status: "deferred",
     });
     await deliverPending(() => undefined, fixture.game.busDir, RECIPIENT);
