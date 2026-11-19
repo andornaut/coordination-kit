@@ -416,7 +416,7 @@ function deriveComplete(
       .filter(
         (row) =>
           row.kind === kind &&
-          statuses.includes(row.status) &&
+          row.status !== null && statuses.includes(row.status) &&
           (!QUIET_KINDS.has(row.type) || row.type === "gate_skipped"),
       )
       .at(-1);
