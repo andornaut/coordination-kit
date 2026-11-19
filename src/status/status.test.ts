@@ -686,6 +686,24 @@ describe("status", () => {
     expect(() => run(fixture, { scope: "nowhere" })).toThrow(/--scope/);
   });
 
+  it("counts a last-deploy time only for the commit it names when filtering by since", () => {
+    const deployedAt = item(report, "sg-0015").delivery.deployed!.at!;
+    const inherited = report.items.filter(
+      (entry) =>
+        entry.repository === GAME &&
+        entry.delivery.deployed?.via === "last-deploy" &&
+        entry.delivery.deployed.sha !== entry.delivery.landing?.sha &&
+        entry.delivery.landing !== null &&
+        Date.parse(entry.delivery.landing.at) < Date.parse(deployedAt),
+    );
+    expect(inherited.length).toBeGreaterThan(0);
+    const kept = run(fixture, { scope: GAME, since: deployedAt }).items.map((entry) => entry.id);
+    expect(kept).toContain("sg-0015");
+    for (const entry of inherited) {
+      expect(kept).not.toContain(entry.id);
+    }
+  });
+
   it("prints JSON by default and a digest per repository with --format markdown", async () => {
     const json = await cli(fixture);
     expect(json.code).toBe(EXIT_OK);

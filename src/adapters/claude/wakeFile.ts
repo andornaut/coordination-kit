@@ -96,10 +96,11 @@ export function wakeText(wake: Wake): string {
 }
 
 /**
- * Polls one wake file and yields each seq increase once. The first read sets the baseline: a
- * wake present when the channel starts is not announced, and an absent file counts as seq 0.
- * Several increases between polls coalesce into one; a torn, malformed or unlocatable file is
- * skipped until a later poll; a lower seq is never announced.
+ * Polls one wake file and yields each seq increase once. A wake present when the channel starts
+ * is announced once, because it may have been written while no channel was watching; a repeat is
+ * harmless since a wake carries no payload. An absent file counts as seq 0. Several increases
+ * between polls coalesce into one; a torn, malformed or unlocatable file is skipped until a later
+ * poll; a lower seq is never announced.
  */
 export class WakeWatcher {
   readonly #locate: () => string;
@@ -123,11 +124,7 @@ export class WakeWatcher {
       this.#seen ??= 0;
       return undefined;
     }
-    if (this.#seen === undefined) {
-      this.#seen = wake.seq;
-      return undefined;
-    }
-    if (wake.seq <= this.#seen) {
+    if (this.#seen !== undefined && wake.seq <= this.#seen) {
       return undefined;
     }
     this.#seen = wake.seq;

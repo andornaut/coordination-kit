@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { readWakeFile, wakeFilePath } from "../adapters/claude/wakeFile.ts";
 import type { Collected, CollectRequest } from "../adapters/types.ts";
 import { EXIT_OK, main } from "../cli.ts";
 import { type EventAdapter, eventsDir, flushEventsWith, recordEvent } from "../events.ts";
@@ -11,11 +12,11 @@ import { storeCutover } from "../store/cutover.ts";
 import { Store } from "../store/db.ts";
 import { derivedId } from "../store/notices.ts";
 import { storeSend } from "../store/service.ts";
-import { ART, COORDINATOR, fakeCodex, GAME, storeFixture } from "../store/testStore.ts";
+import { ART, COORDINATOR, fakeCodex, GAME, storeFixture, TECH } from "../store/testStore.ts";
 import { projectConfig, writeFixtureJson } from "../testFixtures.ts";
 import { deliverReview, reviewResultsDir } from "./deliver.ts";
 import { coordinationEmit } from "./emit.ts";
-import { BRIEF_MAX_BYTES, BRIEF_MAX_LINES } from "./storeBrief.ts";
+import { BRIEF_MAX_BYTES, BRIEF_MAX_LINES, STALE_WAKE_MS } from "./storeBrief.ts";
 
 const TECH_ROLE = `${GAME}/tech`;
 const SLOT = Date.parse("2026-11-18T15:30:00Z") / 1000;
@@ -95,6 +96,24 @@ describe("stored review brief", () => {
     expect(await deliverReview(layout, game, SLOT, undefined, { env: {} })).toEqual(result);
     expect(existsSync(join(reviewResultsDir(game), `${SLOT}.json`))).toBe(true);
     expect(briefs(layout)).toHaveLength(1);
+  });
+
+  it("writes an accepted Claude wake again once it has gone unpulled for the stale interval", async () => {
+    const { layout } = await storeModeFixture();
+    const game = gameLayout(layout, GAME);
+    await send(layout, 1);
+    const seq = (): number | string => {
+      const wake = readWakeFile(wakeFilePath(layout, TECH));
+      return typeof wake === "string" ? wake : wake.seq;
+    };
+    expect(seq()).toBe(1);
+    const at = (ms: number) => () => new Date(Date.now() + ms).toISOString();
+    // Inside the interval the outstanding wake stands.
+    await deliverReview(layout, game, SLOT, undefined, { env: {}, now: at(STALE_WAKE_MS / 3) });
+    expect(seq()).toBe(1);
+    // Past it, the review rearms and the recipient's wake file gets the next seq.
+    await deliverReview(layout, game, NEXT, undefined, { env: {}, now: at(STALE_WAKE_MS * 2) });
+    expect(seq()).toBe(2);
   });
 
   it("caps the brief at one page, stores review-stuck once per episode and shows the detail", async () => {

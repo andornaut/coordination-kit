@@ -150,8 +150,9 @@ commands.
   store, or whose `design` area is the role's name (a game's `art`, `gameplay` or `tech`).
 - **Filters:** `--state` is repeatable and keeps items with any named status; `--state unverified`
   keeps done items whose delivery is unverified. `--since` keeps items
-  whose latest evidence time (work-file commit, landing, deployment or linked request update) is at
-  or after it. `--audit` keeps user-originated items: a work file whose `approved` reference starts
+  whose latest evidence time is at or after it: the newest work-file commit (for a closed item, the
+  commit that closed it), the landing, the deployment and linked request updates. A `last-deploy`
+  time counts only for the commit it names, since it also covers every older commit. `--audit` keeps user-originated items: a work file whose `approved` reference starts
   with `user`, or a linked request whose source reference starts with `user` or whose origin is
   `native-user`.
 

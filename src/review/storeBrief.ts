@@ -24,6 +24,8 @@ import { type NativeCollect, type NativeSurvey, surveyNative } from "./storeNati
 
 export const BRIEF_MAX_LINES = 60;
 export const BRIEF_MAX_BYTES = 4096;
+/** An accepted Claude wake still unpulled after this long is written again at the next review. */
+export const STALE_WAKE_MS = 30 * 60 * 1000;
 
 type Row = Record<string, SQLInputValue>;
 
@@ -472,15 +474,24 @@ export async function storeReview(
         store,
         ...(context.ports === undefined ? {} : { ports: context.ports }),
       };
-      // A failed or ambiguous wake waits for this review before it is attempted again.
+      // A failed or ambiguous wake waits for this review before it is attempted again. So does an
+      // accepted Claude wake the recipient has not pulled for STALE_WAKE_MS: a channel that
+      // restarted after the wake file was written may never have announced it. A Codex queue
+      // item persists in the recipient's queue, so an accepted one is not repeated.
+      const staleBefore = Date.parse(context.now?.() ?? new Date().toISOString()) - STALE_WAKE_MS;
       for (const role of pendingWakeRoles(store)) {
         const outstanding = wakeState(store, role).outstanding;
         const row =
           outstanding === null
             ? undefined
-            : (store.db.prepare("SELECT outcome FROM wakes WHERE id = ?").get(outstanding) as
-                Row | undefined);
-        if (outstanding !== null && row?.outcome !== "accepted") {
+            : (store.db
+                .prepare("SELECT outcome, harness, at FROM wakes WHERE id = ?")
+                .get(outstanding) as Row | undefined);
+        const unpulled =
+          row?.outcome === "accepted" &&
+          row.harness === "claude" &&
+          Date.parse(String(row.at)) <= staleBefore;
+        if (outstanding !== null && (row?.outcome !== "accepted" || unpulled)) {
           rearmWake(store, DELIVERY_KIT_ACTOR, role, `review ${game.id} ${slot}`);
         }
       }

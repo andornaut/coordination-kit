@@ -160,7 +160,10 @@ checks the registry: an unregistered, unbound or held recipient (`ownership` not
 `phase` `held` or `source-held`) gets no wake. For Codex the guarded queue path also requires the
 recipient-bound decision marker and runs the native question check on the same connection.
 A guard refusal is logged as `guarded`, leaves nothing outstanding, and the next send checks
-again. An accepted wake stays outstanding until the recipient's next pull. A failed or ambiguous
+again. An accepted wake stays outstanding until the recipient's next pull, except that a review rearms
+an accepted Claude wake still unpulled after 30 minutes, so a wake file written before a channel
+restart is written again. An accepted Codex queue item persists in the recipient's queue and is
+not repeated. A failed or ambiguous
 wake is logged and stays outstanding: it is not retried before the recipient's next pull or the
 next review, which may call `rearmWake`. A wake interrupted between its claim and its outcome
 stays outstanding with no outcome, which reads as ambiguous.

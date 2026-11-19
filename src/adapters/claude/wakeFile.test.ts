@@ -68,12 +68,13 @@ describe("WakeWatcher", () => {
     expect(watcher.poll()).toBeUndefined();
   });
 
-  it("takes a wake present at startup as the baseline and never announces a lower seq", () => {
+  it("announces a wake present at startup once and never announces a lower seq", () => {
     const { layout } = claudeFixture();
     const path = wakeFilePath(layout, RECIPIENT);
     writeWakeFile(layout, RECIPIENT, WAKE);
     writeWakeFile(layout, RECIPIENT, WAKE);
     const watcher = new WakeWatcher(() => path);
+    expect(watcher.poll()).toEqual({ ...WAKE, seq: 2 });
     expect(watcher.poll()).toBeUndefined();
     writeFileSync(path, JSON.stringify({ count: 1, role: "game-coordinator", schema: 1, seq: 1 }));
     expect(watcher.poll()).toBeUndefined();
@@ -99,8 +100,8 @@ describe("WakeWatcher", () => {
     writeFileSync(path, "{");
     expect(watcher.poll()).toBeUndefined();
     writeFileSync(path, JSON.stringify({ count: 1, role: "game-coordinator", schema: 1, seq: 4 }));
-    // The first readable wake is the baseline.
-    expect(watcher.poll()).toBeUndefined();
+    // The first readable wake is announced.
+    expect(watcher.poll()).toMatchObject({ seq: 4 });
     writeFileSync(path, '{"count":1,"role":"game-');
     expect(watcher.poll()).toBeUndefined();
     writeFileSync(path, JSON.stringify({ count: 1, role: "game-coordinator", schema: 1, seq: 5 }));

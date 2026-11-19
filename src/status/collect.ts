@@ -540,10 +540,18 @@ function readRepository(
       },
       deliveryVerified: derived.deliveryVerified,
       id: work.id,
+      // The item's own activity: a closed item's file edits after it closed (such as bulk
+      // front-matter updates) are not activity, and a `last-deploy` point stands for every older
+      // commit it contains, so its time counts only for the commit it names.
       latestEvidenceAt: latest([
-        work.file.at,
+        CLOSED.has(derived.status) ? (doneAt.get(work.file.path)?.at ?? null) : work.file.at,
         land?.at,
-        deployed?.at,
+        deployed === null ||
+        (deployed.via === "last-deploy" &&
+          deployed.matched === "landing" &&
+          deployed.sha !== land?.sha)
+          ? null
+          : deployed.at,
         record?.updatedAt,
         ...requests.map((request) => request.updatedAt),
       ]),

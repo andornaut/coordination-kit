@@ -268,8 +268,8 @@ the file atomically under a per-conversation lock and refuses a torn file, whose
 delivery never waits on it. Each seq increase emits one channel notification with the fixed text
 `N new messages for ROLE: run coordination-kit inbox` and `meta` `{"kind":"wake","seq":"N"}`.
 Increases between two polls coalesce into one notification, a seq is never announced twice and a
-lower seq is never announced. The first read sets the baseline: a wake present when the channel
-starts is not announced, and an absent file counts as seq 0. A missing, torn or malformed file is
+lower seq is never announced. A wake present when the channel starts is announced once, because it
+may have been written while no channel was watching, and an absent file counts as seq 0. A missing, torn or malformed file is
 skipped until a later poll.
 
 ## Channel status file
