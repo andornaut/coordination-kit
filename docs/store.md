@@ -1,7 +1,7 @@
 # Coordination store
 
-The SQLite store behind the `msg`, `inbox`, `work`, `graph`, `question`, `hold` and `decision`
-commands: its schema, the library API, the writer fence, wakes, questions, holds and decisions,
+The SQLite store behind the `msg`, `inbox`, `work`, `graph`, `question`, `hold`, `decision`,
+`session` and `handoff` commands: its schema, the library API, the writer fence, wakes, questions, holds and decisions,
 the store-mode switch, runner event ingest, work records, the decision graph, the legacy and
 approval-ledger import mappings, the cutover runbook and rollback. The design is in
 [simplification](design/simplification.md#phase-2-one-store-and-one-message-path) and
@@ -65,12 +65,16 @@ Projections, updated in the same transaction as their event:
 - `holds`: one row per hold with its owning role (null for an imported hold without one), scope,
   covered work items, source, ledger state, reason, state (`active` or `released`) and times.
   Indexed by `(role, state, set_seq)`.
+- `sessions`: the latest `session.started` per role: harness, native ID, CLI version, cwd and time.
+- `handoffs`: one row per handoff with its scope, from and to harness, state and opening and update
+  times; `handoff_roles` holds each role's source harness and ready and active times.
 
 Event kinds: `msg.sent`, `msg.imported`, `inbox.read`, `msg.closed`, `msg.retained`,
 `wake.claimed`, `wake.completed`, `wake.guarded`, `wake.rearmed`, `bus.event`, `bus.complete`,
 `review.brief`, `store.cutover`, `work.started`, `work.evidence`, `work.blocked`,
 `work.unblocked`, `work.ready`, `work.finished`, `work.retained`, `question.opened`,
-`question.answered`, `question.cancelled`, `hold.set`, `hold.released` and `hold.imported`. A kind with no projection is still stored and chained, so a
+`question.answered`, `question.cancelled`, `hold.set`, `hold.released`, `hold.imported`,
+`session.started`, `handoff.opened`, `handoff.ready`, `handoff.state` and `handoff.active`. A kind with no projection is still stored and chained, so a
 later projection can read it on its next rebuild. A store written before a projection existed
 gets that projection's tables when it is opened, filled from the existing events in one
 transaction; the events and their hashes are untouched.
@@ -118,7 +122,8 @@ that holds no secret is rephrased:
 ## Writer fence
 
 Every writing verb (`msg send`, `inbox`, `msg done`, `msg retain`, `store import`, the `work`
-writes, `question open|answer|cancel` and `hold set|release`) and `msg history --include-body`
+writes, `question open|answer|cancel` and `hold set|release`, `session start`, `handoff open|ready|state|active`) and
+`msg history --include-body`
 resolve their
 caller before it opens the store: the caller is the registry role whose effective harness
 conversation ID equals the caller's native ID. The native ID is `--native-id ID`, else, for each
@@ -141,7 +146,7 @@ worker, so it is a label for reading history, not an identity.
 
 Reads (`msg status`, `msg history` without `--include-body`, `question list`, `hold list`,
 `decision list`, `store export`, `store rebuild`, `store import --dry-run`, `work show`,
-`work history` and `graph`) take no caller, and neither does `graph index`, which writes only the
+`work history`, `handoff show` and `graph`) take no caller, and neither does `graph index`, which writes only the
 derived index.
 
 ## Wakes
@@ -243,6 +248,46 @@ while active is a no-op; any other reuse of the ID, including after release, is 
 [--state active|released]` and `decision list [--work W] [--role R]` take no caller and print
 `{schema, questions}`, `{schema, holds}` and `{schema, decisions}` in recording order. An absent
 store reads as empty.
+
+## Sessions and handoffs
+
+`session start` runs at a role's startup or resume. It resolves the caller through the fence,
+appends `session.started` with the role, harness, native ID, CLI version and cwd, and prints the
+role, harness and bound conversation, the registry revision, phase and ownership, the checkpoint
+`var/handoffs/<scope>/current.md` (`games/<game>/<role>`, `kits/<kit>` or `game-coordinator`),
+counts of pending questions, active holds (the role's own `role` holds and its game's `game:`
+holds) and open inbox messages (`sent`, `delivered` and `retained`), and each open handoff that
+includes the role. A role whose phase is `held` or `source-held` is refused `session-held` with
+the phase; an unbound caller gets the fence refusal. Repeating it appends another event.
+
+A handoff moves a scope of roles from their current harness to `--to`:
+
+| Command                    | Caller                    | From state                      | To state    | Requires                                  |
+| -------------------------- | ------------------------- | ------------------------------- | ----------- | ----------------------------------------- |
+| `handoff open --scope ...` | game-coordinator          | none                            | `preparing` | No open handoff covering any role.        |
+| `handoff ready`            | each role, source binding | `preparing`                     | unchanged   | Sets the hold `handoff-<id>-<role>`.      |
+| `handoff state prepared`   | game-coordinator          | `preparing`                     | `prepared`  | Every role ready (`handoff-not-ready`).   |
+| `handoff state sent`       | game-coordinator          | `prepared`                      | `sent`      |                                           |
+| `handoff active`           | each role, target binding | `sent`                          | unchanged   | Releases the role's handoff hold.         |
+| `handoff state completed`  | game-coordinator          | `sent`                          | `completed` | Every role active (`handoff-not-active`). |
+| `handoff state cancelled`  | game-coordinator          | `preparing`, `prepared`, `sent` | `cancelled` | Releases every handoff hold still active. |
+
+- `--scope all` takes every registered role not already on the target harness; a named role
+  already on it is `already-on-target`. Without `--id` the ID is `h-<n>`. Repeating `open` with
+  the same ID, scope and target, `ready`, `active` or the current state is a no-op; any other
+  order is `invalid-transition`, `handoff-not-preparing` or `handoff-not-sent`.
+- `handoff ready` and `handoff active` take the caller's open handoff, or `--id`; a role outside it
+  is `not-in-handoff`. `ready` requires the caller's effective harness to be the role's source
+  (`not-source`) and `active` the target (`not-target`).
+- The handoff hold is a `role` hold owned by the role, so the [wake guard](#wakes) withholds wakes
+  while the role sits ready and idle. The role's `handoff active` or the coordinator's `cancelled`
+  releases it, then attempts one guarded wake.
+- Order to complete: after `sent`, game-coordinator runs `harness select` for the scope, then each
+  target session runs `session start` and `handoff active`, then game-coordinator sets
+  `completed`. The fence admits a target session only after select, which also fences out the
+  source sessions (`caller-unbound`).
+- `handoff show [--id ID]` prints the handoff, else the latest, with per-role ready and active
+  times and its holds.
 
 ## Store mode
 
@@ -577,6 +622,12 @@ ingest, briefs as stored messages and the review seam):
   default `HoldLookup`), `questionHoldGuard`, `publicText`, `holdScope` and
   `normalizeOptions`; the work-file half `mainWorkFile`, `fileDecisionNumbers`, `decisionLine` and
   `appendDecisionLine`. Writers trust their `Actor` and refuse another owner's record.
+- Sessions and handoffs: `HANDOFFS_PROJECTION`, `recordSession`, `openHandoff`, `readyHandoff`,
+  `activeHandoff`, `setHandoffState`, `readHandoff`, `latestHandoff`, `openHandoffsFor`,
+  `handoffHolds`, `handoffHoldId`, `HANDOFF_STATES`, `OPEN_HANDOFF_STATES` and
+  `HANDOFF_TRANSITIONS`; the CLI services `storeSessionStart`, `storeHandoffOpen`,
+  `storeHandoffReady`, `storeHandoffState`, `storeHandoffActive`, `storeHandoffShow` and
+  `checkpointPath`.
 - Work records: `startWork`, `recordEvidence`, `blockWork`, `unblockWork`, `readyWork`,
   `finishWork`, `retainWorkItem`, `readWorkRecord`, `readWorkRecords`, `workHistory`, `WORK_STAGES`,
   `WORK_KINDS`, the `HoldLookup` seam with `HoldCover`, and `importedHolds`, which reads the imported events

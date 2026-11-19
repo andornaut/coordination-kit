@@ -3,6 +3,12 @@
 Moving from coordination-kit 2.0 to 2.1, from 1.3 to 2.0, from 1.1 to 1.2, and from delivery-kit
 4.7 to coordination-kit 1.0.
 
+## From 2.1
+
+- New verbs: `session start` and `handoff open|ready|state|active|show`, with the `sessions`,
+  `handoffs` and `handoff_roles` projections, added when a 2.1 store is first opened; see
+  [sessions and handoffs](store.md#sessions-and-handoffs). The schema version stays 1.
+
 ## From 2.1.1
 
 - `gate_passed` (delivery-kit 6.1.2 and later) is a quiet type: stored as an event, not delivered,

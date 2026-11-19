@@ -80,6 +80,12 @@ A scoped harness handoff selects only its approved roles, with no configuration 
 restart or delivery-state change. The other harness's IDs stay in place. Activation still needs
 its separate hold, acceptance and activation checks.
 
+The store's [handoff record](store.md#sessions-and-handoffs) orders it: each role runs
+`handoff ready` from its source session, game-coordinator sets `prepared` and `sent`, runs
+`harness select` for the scope, then each target session runs `session start` and
+`handoff active`, and game-coordinator sets `completed`. The fence admits a target session only
+after select, and select fences out the source sessions.
+
 Recipient decision records (`unblock/decisions/<conversation>.json`) stay keyed by conversation
 ID, because a pending question belongs to one conversation. Their owner writes them; coordination-kit
 only reads them, and a missing or invalid record is never clearance.
