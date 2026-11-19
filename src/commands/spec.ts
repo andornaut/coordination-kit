@@ -8,6 +8,7 @@ import {
   LEDGER_REPORT_OPTIONS,
 } from "./accounting.ts";
 import { DOCTOR_OPTIONS } from "./doctor.ts";
+import { GRAPH_INDEX_OPTIONS, GRAPH_OPTIONS, GRAPH_WHY_OPTIONS } from "./graph.ts";
 import {
   MESSAGE_DISPATCH_OPTIONS,
   MESSAGE_RECONCILE_OPTIONS,
@@ -99,6 +100,7 @@ const VALUES: Readonly<Record<string, string>> = {
 };
 /** Help groups, in help order. */
 export const GROUPS = {
+  graph: "decision graph",
   harness: "harness (claude, codex)",
   inbox: "inbox (recipient)",
   ledger: "request accounting",
@@ -157,6 +159,26 @@ export const SPECS = {
     options: EVENTS_INGEST_OPTIONS,
     summary:
       "ingest the game's runner event log into the store from its cursor; prints one typed JSON result line",
+  },
+  graph: {
+    forms: [["work?", "depth?", "format?"]],
+    group: "graph",
+    options: GRAPH_OPTIONS,
+    summary: "print the decision graph, or one work item's neighbourhood, as JSON or DOT",
+    values: { depth: "N", format: "json|dot", work: "[REPOSITORY:]WORK_ID" },
+  },
+  "graph index": {
+    forms: [[]],
+    group: "graph",
+    options: GRAPH_INDEX_OPTIONS,
+    summary: "rebuild the derived edges index from the registered repositories and the store",
+  },
+  "graph why": {
+    forms: [["decision"]],
+    group: "graph",
+    options: GRAPH_WHY_OPTIONS,
+    summary: "print a decision's supersedes chain with each item's approval reference",
+    values: { decision: "[REPOSITORY:]WORK_ID/Dn" },
   },
   "harness doctor": {
     forms: [["game", "role?"], ["role"]],
@@ -562,10 +584,15 @@ export const SPECS = {
     summary: "list sends, closes and retentions recorded after a time, for rollback re-recording",
   },
   "store import": {
-    forms: [["from-legacy", "dry-run?", "native-id?", "worker?"]],
+    forms: [
+      ["from-legacy", "dry-run?", "native-id?", "worker?"],
+      ["approval-ledger", "dry-run?", "native-id?", "worker?"],
+    ],
     group: "store",
     options: STORE_IMPORT_OPTIONS,
-    summary: "import the legacy message stores with their original IDs; --dry-run writes nothing",
+    summary:
+      "import the legacy message stores, or map the approval ledger to work records; --dry-run writes nothing",
+    values: { "approval-ledger": "FILE" },
   },
   "store rebuild": {
     forms: [[]],

@@ -625,13 +625,30 @@ export interface CoveringHold {
 
 /**
  * The hold seam of `work start`. Until the hold records ship, the open holds covering an item are
- * the imported ones (`hold.imported`) whose `work` list names it; import never releases a hold.
+ * the imported ones (`hold.imported`) in an open state whose `work` list names it; import never
+ * releases a hold.
  */
 export type HoldLookup = (store: Store, ref: WorkRef) => readonly CoveringHold[];
+
+/** Ledger hold states that no longer hold anything; an imported hold in one is history only. */
+export const CLOSED_HOLD_STATES: readonly string[] = [
+  "answered",
+  "cancelled",
+  "cleared",
+  "closed",
+  "released",
+  "superseded",
+];
+
+/** An imported hold is open unless its recorded state is a closed one. */
+export function holdOpen(state: string | null): boolean {
+  return state === null || !CLOSED_HOLD_STATES.includes(state);
+}
 
 export const importedHolds: HoldLookup = (store, ref) =>
   store
     .events({ kinds: ["hold.imported"] })
+    .filter((event) => holdOpen(text(event.payload, "state")))
     .filter((event) =>
       (Array.isArray(event.payload.work) ? (event.payload.work as readonly JsonObject[]) : []).some(
         (item) => item.repository === ref.repository && item.id === ref.id,

@@ -13,6 +13,7 @@ import {
 } from "./commands/accounting.ts";
 import { channel } from "./commands/channel.ts";
 import { harnessDoctor } from "./commands/doctor.ts";
+import { graph, graphIndex, graphWhy } from "./commands/graph.ts";
 import { harnessSelect } from "./commands/harness.ts";
 import { inboxAck, inboxSnapshot } from "./commands/inbox.ts";
 import {
@@ -163,6 +164,9 @@ export const COMMANDS = [
   "work finish",
   "work show",
   "work history",
+  "graph",
+  "graph why",
+  "graph index",
 ] as const satisfies readonly Command[];
 export type { Command };
 const GROUP_ORDER = [
@@ -176,6 +180,7 @@ const GROUP_ORDER = [
   "protocol",
   "status",
   "work",
+  "graph",
 ] as const;
 /** Help text, generated from each command's parser options and grouped by audience. */
 export const USAGE = [
@@ -211,6 +216,9 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "codex ready": codexReady,
   "events flush": eventsFlush,
   "events ingest": eventsIngest,
+  graph,
+  "graph index": graphIndex,
+  "graph why": graphWhy,
   "harness doctor": harnessDoctor,
   "harness ready": harnessReady,
   "harness select": harnessSelect,

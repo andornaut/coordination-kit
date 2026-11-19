@@ -60,7 +60,8 @@ A decision is one bullet in the work file's Decisions section:
 `D<n>` numbers the item's decisions. The parenthesis names who decided (`user` or a registry role
 name) and the date, then optionally the question it answers and the decision it supersedes, in
 that order: `D1` within the item, or `ck-0006/D1` in another. Other bullets in the section are
-prose.
+prose. The [decision graph](store.md#decision-graph) reads these lines from each repository's
+`main`.
 
 ## work report
 

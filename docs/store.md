@@ -1,8 +1,8 @@
 # Coordination store
 
-The SQLite store behind the `msg`, `inbox` and `work` commands: its schema, the library API, the
-writer fence, wakes, the store-mode switch, runner event ingest, work records, the legacy import
-mapping, the cutover runbook and rollback. The design is in
+The SQLite store behind the `msg`, `inbox`, `work` and `graph` commands: its schema, the library
+API, the writer fence, wakes, the store-mode switch, runner event ingest, work records, the decision
+graph, the legacy and approval-ledger import mappings, the cutover runbook and rollback. The design is in
 [simplification](design/simplification.md#phase-2-one-store-and-one-message-path).
 
 ## Location and settings
@@ -128,7 +128,8 @@ role on the event and the message. It is not verified: any caller bound to the r
 worker, so it is a label for reading history, not an identity.
 
 Reads (`msg status`, `msg history`, `store export`, `store rebuild`, `store import --dry-run`,
-`work show` and `work history`) take no caller.
+`work show`, `work history` and `graph`) take no caller, and neither does `graph index`, which
+writes only the derived index.
 
 ## Wakes
 
@@ -371,15 +372,17 @@ holds covering the item. `work history ID` prints the item's work events in orde
 ### Hold seam
 
 `work start` asks a `HoldLookup` port for the open holds covering the item. Until the hold records
-ship, the default reads the `hold.imported` events whose `work` list names the item; nothing
-releases them. The hold projection supplies the port when it lands and also applies
-`hold.imported`, which the approval-ledger import writes:
+ship, the default reads the `hold.imported` events whose `work` list names the item and whose
+`state` is open: null or any state other than `answered`, `cancelled`, `cleared`, `closed`,
+`released` or `superseded`. Nothing releases them. The hold projection supplies the port when it lands and also applies
+`hold.imported`:
 
 ```json
 {
   "id": "approval-ledger:<ledger hold ID>",
   "owner": "ROLE or null",
   "reason": "TEXT",
+  "state": "the ledger's hold state, such as preserved or released, or null",
   "work": [{ "repository": "R", "id": "W" }],
   "entries": ["<ledger entry ID>"],
   "source": "approval-ledger"
@@ -389,6 +392,63 @@ releases them. The hold projection supplies the port when it lands and also appl
 The event key is `hold.imported:approval-ledger:<first 32 hex of sha256(ledger hold ID)>`. An owner
 of null means the ledger names no registered owner: no caller can release the hold through the
 fence, so game-coordinator surfaces it to the user.
+
+## Decision graph
+
+Nodes are work items (`work:<repository>:<id>`), decisions (`decision:<repository>:<id>/D<n>`),
+questions (`question:<id>`), roles (`role:<name>`) and commits (`commit:<sha>`). Edges:
+
+| Edge         | From and to                        | Source                                                                       |
+| ------------ | ---------------------------------- | ---------------------------------------------------------------------------- |
+| `decides`    | decision to work                   | A [decision line](work-files.md#decision-lines), or a store decision record. |
+| `answers`    | decision to question               | The line's `answers`, or the record's `question`.                            |
+| `owned-by`   | work, or question, to role         | The item's [owner](#work-records); a store work or question record.          |
+| `supersedes` | decision to decision, work to work | The line's or record's `supersedes`; front matter `supersedes`.              |
+| `related`    | work to work                       | Front matter `related`.                                                      |
+| `implements` | commit to work, with the stage     | `work evidence`.                                                             |
+| `parent`     | child work to parent work          | `work start --parent`.                                                       |
+
+Git is the durable copy: the work files on each registered repository's `main` (one `git log` per
+repository). The store adds work records, its `decisions` table (columns `id` and `work`, and
+optionally `repository`, `question`, `by`, `at`, `role`, `supersedes` and `text`) and its
+`questions` table (`id`, and `owner` or `role`) when they exist; a work-file line wins over a store
+record of the same decision. A bare work ID resolves within its own repository first, else to the
+one repository that holds it.
+
+- `graph [--work [REPOSITORY:]ID] [--depth N] [--format json|dot]` prints every node and edge, or
+  the nodes within `--depth` edges (default 2, either direction) of one item, as JSON or Graphviz
+  DOT. `work-unknown` and `work-ambiguous` refuse an ID.
+- `graph why --decision [REPOSITORY:]WORK_ID/Dn` prints the decision, the older decisions it
+  supersedes and the newer ones that supersede it (nearest first), each with its work item's
+  approval reference, and `current`, the newest of the chain.
+- `graph index` rebuilds the derived `edges`, `graph_nodes` and `graph_index` tables in one
+  transaction. Queries read them when present (`index.status` `stored`, with its time) and build
+  live otherwise (`live`). They are not projections: `store rebuild` leaves them, deleting them
+  loses nothing, and no event records them. `unavailable` lists repositories that could not be
+  read.
+
+## Approval-ledger import
+
+`store import --approval-ledger FILE` maps each entry of the frozen approval ledger
+(`schemaVersion: 1`, `entries` as a list or keyed object, `independentHolds`) to a work item.
+`--dry-run` takes no caller and writes nothing (it reads the store when one exists, else uses an
+in-memory one); a real import requires the caller to be `game-coordinator` (`not-coordinator`),
+records everything in one transaction, and repeats as a no-op.
+
+| Ledger                                                     | Imported as                                                                                                                                                                                                                                                                                     |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Entry                                                      | The work item in the repository of its `owner` (a role name, or an object with a `role`) whose ID is the entry's `work` (or `workId`), its ID or its leading work ID (`mapped-id`), else whose title equals its `title` or `behavior`, ignoring case and a trailing full stop (`mapped-title`). |
+| `implementationSha`, `mainSha`, `deployedSha`              | `work evidence` at `implemented`, `merged` and `deployed`, with the reference `approval-ledger:<entry>`.                                                                                                                                                                                        |
+| `stage` `verified`, `published`, `deployed` with `mainSha` | `verified` (and, for `published`, `published`) at `mainSha`, once per `interactionProof` item: the item as one line, or `approval-ledger:<entry>/interactionProof/<n>` when longer than 512 characters or secret-shaped.                                                                        |
+| `unresolved` item                                          | A `work.retained` item: its text (or `gap`, `description`, ...), its owner (`owner` or `requiredOwner` when registered, else the entry owner) and next boundary (`nextBoundary`, `next` or `nextAction`, else `next scheduled review`).                                                         |
+| `independentHolds`                                         | One [`hold.imported`](#hold-seam) per hold, top level or inline in an entry, owned by its recorded owner, with its ledger `state` and its `behavior` or `reason` as the reason, covering the work items of the entries that name it. Never released by import.                                  |
+
+Outcomes per entry: `mapped-id`, `mapped-title`, `no-work-file`, `ambiguous` (several titles),
+`owner-unregistered`, `repository-unavailable` and `invalid`; they sum to `entries`. Import never
+creates a work file: `stubs` lists the unmapped entries per owner and repository for the owners to
+stub, and their evidence and retained items are counted under `skipped`. The output also counts
+inserted and unchanged events per type (`events`), SHA fields that are not object names
+(`skipped.invalidSha`), and holds in total, closed, without a registered owner and covering no item.
 
 ## Library API
 

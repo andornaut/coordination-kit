@@ -5,18 +5,26 @@ delivery-kit 4.7 to coordination-kit 1.0.
 
 ## From 2.0
 
-2.1 adds [work records](store.md#work-records). Message and runner behaviour is unchanged.
+2.1 adds [work records](store.md#work-records), the [decision graph](store.md#decision-graph) and
+the [approval-ledger import](store.md#approval-ledger-import). Message and runner behaviour is
+unchanged.
 
 - New verbs: `work start`, `work evidence`, `work block`, `work unblock`, `work ready`,
-  `work finish`, `work show` and `work history`.
+  `work finish`, `work show`, `work history`, `graph`, `graph why`, `graph index`, and
+  `store import --approval-ledger FILE`.
 - Store: the `work`, `work_evidence` and `work_retained` projections are added when a 2.0 store is
-  first opened by 2.1, filled from existing events; the schema version stays 1.
+  first opened by 2.1, filled from existing events; the schema version stays 1. `graph index`
+  adds derived tables that are safe to delete.
 - Work files: `owner` is a new optional front-matter field and Decisions sections may carry
   decision lines. A 2.0 `work check` reports `owner` as `field-unknown`: release 2.1, bump every
   repository's pin, then add the field.
 - `status`: adds `coordinator.store`, and `store` and `deliverySource` per item. Store stage
   evidence is preferred to Git for `landed` and `deployed`, an open store block sets `blocked`, and
   an unavailable store exits 1. Existing fields keep their meaning.
+- Approval ledger: freeze `approval-ledger.json`, run `store import --approval-ledger FILE
+--dry-run` and check that the outcome counts sum to the entry count, then import as
+  game-coordinator. Owners stub the listed entries without a work file. Imported holds are never
+  released by import.
 
 ## From 1.3
 

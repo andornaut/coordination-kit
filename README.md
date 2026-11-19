@@ -35,27 +35,28 @@ package and bundles it into its own runner.
 
 ## Usage
 
-Every command is a noun group and its verb, except `status`. Commands resolve game-coordinator from
+Every command is a noun group and its verb, except `status` and `graph`. Commands resolve game-coordinator from
 `--root DIR`, else `COORDINATION_KIT_ROOT`, else `DELIVERY_KIT_ROOT`, else the working directory.
 `--root` may appear anywhere on the command line, at most once. `--game` is always explicit. The
 `work` commands read `--root` as the repository to inspect (default: the working directory) and
 take the coordinator root only from `COORDINATION_KIT_ROOT` or `DELIVERY_KIT_ROOT`.
 
-| Group      | Verbs                                                                                            | Purpose                                                                                            |
-| ---------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| `msg`      | `send`, `done`, `retain`, `status`, `history`                                                    | Store messages: send with one guarded wake, close or retain in one write, read.                    |
-| `inbox`    | (none), `snapshot`, `ack`                                                                        | Read your store inbox; capture a recipient's legacy inbox snapshot; acknowledge items from it.     |
-| `store`    | `import`, `export`, `rebuild`, `cutover`                                                         | Import the legacy message stores, export for rollback, verify and rebuild, switch to the store.    |
-| `message`  | `send`, `dispatch`, `status`, `reconcile`, `retire-spool`                                        | Legacy role messages: store, guarded delivery, status, reconciliation and Claude spool cleanup.    |
-| `ledger`   | `intake`, `apply`, `show`, `report`, `history`, `coverage`, `reconcile`, `boundary`              | The request ledger.                                                                                |
-| `harness`  | `ready`, `select`, `doctor`                                                                      | Readiness by effective harness, scoped harness selection and diagnosis.                            |
-| `claude`   | `ready`, `channel`                                                                               | The Claude readiness probe and the stdio MCP channel server.                                       |
-| `codex`    | `ready`                                                                                          | The Codex readiness probe.                                                                         |
-| `review`   | `deliver`, `show`                                                                                | The runner seam: one slot's scheduled review, as one typed JSON line; show a stored brief.         |
-| `events`   | `flush`, `ingest`                                                                                | The runner seam: one event outbox flush or event log ingest, as one typed JSON line.               |
-| `protocol` | `status`, `enroll`, `boundary`, `work-publish`, `message-publish`, `inbox`, and the rest         | The explicit filesystem work protocol.                                                             |
-| `status`   | (none)                                                                                           | Read-only status of every registered repository's work items, as JSON or a Markdown digest.        |
-| `work`     | `check`, `report`, `start`, `evidence`, `block`, `unblock`, `ready`, `finish`, `show`, `history` | Validate a repository's work files and report them; record each item's live progress in the store. |
+| Group      | Verbs                                                                                            | Purpose                                                                                                                |
+| ---------- | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `msg`      | `send`, `done`, `retain`, `status`, `history`                                                    | Store messages: send with one guarded wake, close or retain in one write, read.                                        |
+| `inbox`    | (none), `snapshot`, `ack`                                                                        | Read your store inbox; capture a recipient's legacy inbox snapshot; acknowledge items from it.                         |
+| `store`    | `import`, `export`, `rebuild`, `cutover`                                                         | Import the legacy message stores or the approval ledger, export for rollback, verify and rebuild, switch to the store. |
+| `message`  | `send`, `dispatch`, `status`, `reconcile`, `retire-spool`                                        | Legacy role messages: store, guarded delivery, status, reconciliation and Claude spool cleanup.                        |
+| `ledger`   | `intake`, `apply`, `show`, `report`, `history`, `coverage`, `reconcile`, `boundary`              | The request ledger.                                                                                                    |
+| `harness`  | `ready`, `select`, `doctor`                                                                      | Readiness by effective harness, scoped harness selection and diagnosis.                                                |
+| `claude`   | `ready`, `channel`                                                                               | The Claude readiness probe and the stdio MCP channel server.                                                           |
+| `codex`    | `ready`                                                                                          | The Codex readiness probe.                                                                                             |
+| `review`   | `deliver`, `show`                                                                                | The runner seam: one slot's scheduled review, as one typed JSON line; show a stored brief.                             |
+| `events`   | `flush`, `ingest`                                                                                | The runner seam: one event outbox flush or event log ingest, as one typed JSON line.                                   |
+| `protocol` | `status`, `enroll`, `boundary`, `work-publish`, `message-publish`, `inbox`, and the rest         | The explicit filesystem work protocol.                                                                                 |
+| `status`   | (none)                                                                                           | Read-only status of every registered repository's work items, as JSON or a Markdown digest.                            |
+| `work`     | `check`, `report`, `start`, `evidence`, `block`, `unblock`, `ready`, `finish`, `show`, `history` | Validate a repository's work files and report them; record each item's live progress in the store.                     |
+| `graph`    | (none), `why`, `index`                                                                           | The decision graph over work files and the store; a decision's supersedes chain; the derived index.                    |
 
 `coordination-kit --help` lists every command form; it is generated from each command's parser
 options. Per-command semantics are in [docs/commands.md](docs/commands.md).

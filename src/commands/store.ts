@@ -9,6 +9,7 @@ import { parseArgs } from "node:util";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { loadLayout } from "../layout.ts";
+import { systemGit } from "../status/git.ts";
 import { storeCutover } from "../store/cutover.ts";
 import type { CallerOptions } from "../store/identity.ts";
 import {
@@ -24,6 +25,7 @@ import {
   storeStatus,
 } from "../store/service.ts";
 import { type MessageLink, StoreError } from "../store/types.ts";
+import { importApprovalLedger } from "../work/approvals.ts";
 import type { Options } from "./usage.ts";
 
 const CALLER = {
@@ -71,6 +73,7 @@ export const INBOX_OPTIONS = {
 
 export const STORE_IMPORT_OPTIONS = {
   ...CALLER,
+  "approval-ledger": { type: "string" },
   "dry-run": { type: "boolean" },
   "from-legacy": { type: "boolean" },
 } as const;
@@ -335,8 +338,16 @@ export const storeImportCommand: Handler = (io, root, args) =>
     "store import",
     args,
     (context, values) => {
-      if (values["from-legacy"] !== true) {
+      const ledger = text(values, "approval-ledger");
+      if ((values["from-legacy"] === true) === (ledger !== undefined)) {
         throw new Usage();
+      }
+      if (ledger !== undefined) {
+        return importApprovalLedger(
+          { coordinatorRoot: context.layout.root, env: context.env, git: systemGit(context.env) },
+          callerOf(values),
+          { dryRun: values["dry-run"] === true, file: resolve(io.cwd, ledger) },
+        );
       }
       return storeImport(context, callerOf(values), { dryRun: values["dry-run"] === true });
     },
