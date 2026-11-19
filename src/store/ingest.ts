@@ -355,7 +355,9 @@ function result(
 }
 
 function eventNotice(project: string, to: string, line: BusLine): Notice {
-  const head = `${project} bus: ${line.type}${line.status === null ? "" : ` ${line.status}`}${line.sha === null ? "" : ` ${line.sha.slice(0, 12)}`}`;
+  const status = line.status === null ? "" : ` ${line.status}`;
+  const sha = line.sha === null ? "" : ` ${line.sha.slice(0, 12)}`;
+  const head = `${project} bus: ${line.type}${status}${sha}`;
   const links: MessageLink[] = [{ kind: "event", ref: line.id }];
   if (line.sha !== null) {
     links.push({ kind: "commit", ref: line.sha });
