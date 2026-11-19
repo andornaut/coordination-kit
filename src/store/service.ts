@@ -1,0 +1,286 @@
+// The message verbs as the CLI runs them: resolve the caller through the registry fence, open the
+// store at the layout's root, apply one write, then attempt at most one wake. Every send reads
+// var/registry.json; nothing is cached across calls.
+import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+
+import { isCanonicalUuid } from "../adapters/shared/ids.ts";
+import type { Layout } from "../layout.ts";
+import { resolveRole } from "../registry/resolve.ts";
+import type { Registry } from "../registry/schema.ts";
+import { readRegistry } from "../registry/store.ts";
+import { MEMORY, Store, storePath } from "./db.ts";
+import { type CallerOptions, resolveCaller } from "./identity.ts";
+import { importLegacy, type ImportReport, legacySources } from "./legacy.ts";
+import {
+  type CloseInput,
+  closeMessage,
+  type ExportResult,
+  exportSince,
+  type HistoryEntry,
+  messageHistory,
+  messageStatus,
+  readInbox,
+  retainMessage,
+  sendMessage,
+} from "./messages.ts";
+import {
+  type Actor,
+  type MessageIntent,
+  type MessageLink,
+  type MessageView,
+  StoreError,
+} from "./types.ts";
+import {
+  pendingWakeRoles,
+  type WakePorts,
+  wakeRecipient,
+  type WakeResult,
+  type WakeStatus,
+} from "./wake.ts";
+
+export interface StoreServiceContext {
+  readonly layout: Layout;
+  readonly env: NodeJS.ProcessEnv;
+  readonly ports?: WakePorts;
+  /** Test hook: the store clock. */
+  readonly now?: () => string;
+}
+
+async function withStore<T>(
+  context: StoreServiceContext,
+  body: (store: Store) => T | Promise<T>,
+  options: { readonly createMissing?: boolean } = {},
+): Promise<T> {
+  const path = storePath(context.layout);
+  const store = Store.open(
+    options.createMissing === false && !existsSync(path) ? MEMORY : path,
+    context.now === undefined ? {} : { now: context.now },
+  );
+  try {
+    return await body(store);
+  } finally {
+    store.close();
+  }
+}
+
+function registry(context: StoreServiceContext): Registry {
+  try {
+    return readRegistry(context.layout);
+  } catch {
+    throw new StoreError("registry-unavailable");
+  }
+}
+
+function caller(
+  context: StoreServiceContext,
+  options: CallerOptions,
+): Actor & { readonly role: string } {
+  return resolveCaller(registry(context), context.env, options);
+}
+
+function registered(roles: Registry, role: string, code: string): string {
+  try {
+    return resolveRole(roles, role);
+  } catch {
+    throw new StoreError(code);
+  }
+}
+
+export interface SendRequest {
+  readonly to: string;
+  readonly body: string;
+  readonly intent?: MessageIntent;
+  readonly id?: string;
+  readonly links?: readonly MessageLink[];
+}
+
+export interface SendOutput {
+  readonly schema: 1;
+  readonly message: MessageView;
+  readonly duplicate: boolean;
+  readonly wake: { readonly status: WakeStatus };
+}
+
+/** Commit the original, then attempt one guarded wake. A repeated send retries only the wake. */
+export async function storeSend(
+  context: StoreServiceContext,
+  options: CallerOptions,
+  request: SendRequest,
+): Promise<SendOutput> {
+  const roles = registry(context);
+  const actor = resolveCaller(roles, context.env, options);
+  const to = registered(roles, request.to, "recipient-unregistered");
+  const id = request.id ?? randomUUID();
+  if (!isCanonicalUuid(id)) {
+    throw new StoreError("invalid-id");
+  }
+  return withStore(context, async (store) => {
+    const sent = sendMessage(store, actor, {
+      body: request.body,
+      id,
+      intent: request.intent ?? "queue",
+      links: request.links ?? [],
+      to,
+    });
+    const wake = await wakeRecipient(
+      {
+        env: context.env,
+        layout: context.layout,
+        store,
+        ...(context.ports === undefined ? {} : { ports: context.ports }),
+      },
+      to,
+    );
+    return {
+      duplicate: sent.duplicate,
+      message: sent.message,
+      schema: 1,
+      wake: { status: wake.status },
+    };
+  });
+}
+
+export interface InboxOutput {
+  readonly schema: 1;
+  readonly role: string;
+  readonly delivered: number;
+  readonly count: number;
+  readonly messages: readonly MessageView[];
+}
+
+export async function storeInbox(
+  context: StoreServiceContext,
+  options: CallerOptions,
+  selection: { readonly all?: boolean; readonly includeBody?: boolean },
+): Promise<InboxOutput> {
+  const actor = caller(context, options);
+  return withStore(context, (store) => {
+    const inbox = readInbox(store, actor, selection);
+    return {
+      count: inbox.messages.length,
+      delivered: inbox.delivered,
+      messages: inbox.messages,
+      role: inbox.role,
+      schema: 1,
+    };
+  });
+}
+
+export interface WriteOutput {
+  readonly schema: 1;
+  readonly message: MessageView;
+  readonly duplicate: boolean;
+}
+
+export async function storeDone(
+  context: StoreServiceContext,
+  options: CallerOptions,
+  id: string,
+  input: CloseInput,
+): Promise<WriteOutput> {
+  const actor = caller(context, options);
+  return withStore(context, (store) => ({
+    ...closeMessage(store, actor, id, input),
+    schema: 1 as const,
+  }));
+}
+
+export async function storeRetain(
+  context: StoreServiceContext,
+  options: CallerOptions,
+  id: string,
+  input: { readonly reason: string; readonly nextBoundary: string; readonly owner?: string },
+): Promise<WriteOutput> {
+  const roles = registry(context);
+  const actor = resolveCaller(roles, context.env, options);
+  const owner = registered(roles, input.owner ?? actor.role, "owner-unregistered");
+  return withStore(context, (store) => ({
+    ...retainMessage(store, actor, id, {
+      nextBoundary: input.nextBoundary,
+      owner,
+      reason: input.reason,
+    }),
+    schema: 1 as const,
+  }));
+}
+
+export async function storeStatus(
+  context: StoreServiceContext,
+  id: string,
+): Promise<{ readonly schema: 1; readonly message: MessageView }> {
+  return withStore(context, (store) => ({ message: messageStatus(store, id), schema: 1 as const }));
+}
+
+export async function storeHistory(
+  context: StoreServiceContext,
+  selection: { readonly role?: string; readonly since?: string; readonly limit?: number },
+): Promise<{ readonly schema: 1; readonly events: readonly HistoryEntry[] }> {
+  return withStore(context, (store) => ({
+    events: messageHistory(store, selection),
+    schema: 1 as const,
+  }));
+}
+
+export interface ImportOutput extends ImportReport {
+  readonly wakes: readonly { readonly role: string; readonly status: WakeResult["status"] }[];
+}
+
+/**
+ * Import the legacy message stores. A dry run needs no caller and writes nothing; a real import
+ * records the fenced caller and then sends one guarded wake per recipient left with undelivered
+ * messages. Imported `unconfirmed` messages are never woken.
+ */
+export async function storeImport(
+  context: StoreServiceContext,
+  options: CallerOptions,
+  selection: { readonly dryRun: boolean },
+): Promise<ImportOutput> {
+  const actor: Actor = selection.dryRun ? { nativeId: null, role: null } : caller(context, options);
+  const sources = legacySources(context.layout);
+  return withStore(
+    context,
+    async (store) => {
+      const report = importLegacy(store, actor, sources, selection);
+      const wakes: { role: string; status: WakeStatus }[] = [];
+      if (!selection.dryRun) {
+        for (const role of pendingWakeRoles(store)) {
+          // One recipient at a time: each wake is guarded on its own fresh registry read.
+          // eslint-disable-next-line no-await-in-loop
+          const wake = await wakeRecipient(
+            {
+              env: context.env,
+              layout: context.layout,
+              store,
+              ...(context.ports === undefined ? {} : { ports: context.ports }),
+            },
+            role,
+          );
+          wakes.push({ role, status: wake.status });
+        }
+      }
+      return { ...report, wakes };
+    },
+    { createMissing: !selection.dryRun },
+  );
+}
+
+export async function storeExport(
+  context: StoreServiceContext,
+  since: string,
+): Promise<{ readonly schema: 1 } & ExportResult> {
+  return withStore(context, (store) => ({ ...exportSince(store, since), schema: 1 as const }));
+}
+
+export async function storeRebuild(context: StoreServiceContext): Promise<{
+  readonly schema: 1;
+  readonly verified: true;
+  readonly events: number;
+  readonly head: { readonly seq: number; readonly hash: string };
+}> {
+  return withStore(context, (store) => ({
+    ...store.rebuild(),
+    schema: 1 as const,
+    verified: true as const,
+  }));
+}
