@@ -4,6 +4,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { parseDecisions } from "./decisions.ts";
 import {
   CONVENTION_FILE,
   DESIGN_DIR,
@@ -19,6 +20,9 @@ import {
 } from "./files.ts";
 
 export type FindingCode =
+  | "decision-invalid"
+  | "decision-unrecorded"
+  | "decisions-unavailable"
   | "design-unknown"
   | "field-invalid"
   | "field-missing"
@@ -57,6 +61,8 @@ export interface WorkCheck {
 export const ID_PATTERN = /^[a-z][a-z0-9]*-\d{4,}$/;
 const HOME_PATH = /\/(?:home|Users)\/[A-Za-z0-9._-]+|(?<![\w.-])\/root(?=\/)/;
 const SESSION_UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
+/** A registry role name, as `owner` names it. */
+const ROLE_NAME = /^[a-z0-9][a-z0-9-]{0,63}(?:\/[a-z0-9][a-z0-9-]{0,63})?$/;
 const KNOWN_FIELDS: ReadonlySet<string> = new Set([...REQUIRED_FIELDS, ...OPTIONAL_FIELDS]);
 
 function frontMatterFindings(file: WorkFile): Finding[] {
@@ -90,6 +96,13 @@ function frontMatterFindings(file: WorkFile): Finding[] {
   const supersedes = fields.supersedes;
   if (supersedes !== undefined && (typeof supersedes !== "string" || supersedes === "")) {
     findings.push({ code: "field-invalid", message: "supersedes must be one ID", path });
+  }
+  const owner = fields.owner;
+  if (owner !== undefined && (typeof owner !== "string" || !ROLE_NAME.test(owner))) {
+    findings.push({ code: "field-invalid", message: "owner must be one registry role name", path });
+  }
+  for (const problem of parseDecisions(file.text).problems) {
+    findings.push({ code: "decision-invalid", line: problem.line, message: problem.reason, path });
   }
   const id = field(file, "id");
   if (id !== undefined && id !== "") {

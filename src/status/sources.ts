@@ -1,5 +1,8 @@
 // The coordinator's live state for `status`, read once: every protocol role journal through a
 // caching read-only store, and the request ledger through one replay. Writes are refused.
+import { existsSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+
 import { LedgerStore } from "../accounting/store.ts";
 import type { LedgerRequest } from "../accounting/types.ts";
 import type { Io } from "../io.ts";
@@ -9,6 +12,8 @@ import { checkProtocolLayout, resolveProtocolLayout } from "../protocol/layout.t
 import { ledgerStorageOptions, protocolFailure } from "../protocol/runtime.ts";
 import type { ProtocolState } from "../protocol/types.ts";
 import { type WorkEvaluation, type WorkPublication, WorkStore } from "../protocol/work.ts";
+import { storePath } from "../store/db.ts";
+import { readWorkRecords, type WorkRecord } from "../store/work.ts";
 
 export interface SourceCounters {
   /** Role journal replays, by role; each role is replayed at most once per run. */
@@ -228,4 +233,49 @@ export function readProtocol(
     publications,
     state: unavailable.length === 0 ? { status: "available" } : { status: "partial", unavailable },
   };
+}
+
+export type StoreSourceState =
+  | { readonly status: "available" }
+  | { readonly status: "absent" }
+  | { readonly status: "unavailable"; readonly reason: string };
+
+export interface StoreWorkSnapshot {
+  readonly state: StoreSourceState;
+  /** Work records keyed `repository\nid`. */
+  readonly records: ReadonlyMap<string, WorkRecord>;
+}
+
+/**
+ * The store's work records, read through a read-only connection: nothing is created or migrated.
+ * No store file is `absent`; a store without the work tables has no records.
+ */
+export function readStoreWork(layout: Layout): StoreWorkSnapshot {
+  let path: string;
+  try {
+    path = storePath(layout);
+  } catch (error) {
+    return { records: new Map(), state: { reason: reason(error), status: "unavailable" } };
+  }
+  if (!existsSync(path)) {
+    return { records: new Map(), state: { status: "absent" } };
+  }
+  let db: DatabaseSync | undefined;
+  try {
+    db = new DatabaseSync(path, { readOnly: true, timeout: 5000 });
+    const present = db
+      .prepare(
+        `SELECT count(*) AS n FROM sqlite_master
+         WHERE type = 'table' AND name IN ('work', 'work_evidence', 'work_retained')`,
+      )
+      .get() as { n: number };
+    return {
+      records: Number(present.n) === 3 ? readWorkRecords(db) : new Map(),
+      state: { status: "available" },
+    };
+  } catch {
+    return { records: new Map(), state: { reason: "store-unreadable", status: "unavailable" } };
+  } finally {
+    db?.close();
+  }
 }

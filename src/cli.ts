@@ -70,7 +70,18 @@ import {
   storeImportCommand,
   storeRebuildCommand,
 } from "./commands/store.ts";
-import { workCheck, workReport } from "./commands/work.ts";
+import {
+  workBlock,
+  workCheck,
+  workEvidence,
+  workFinish,
+  workHistory,
+  workReady,
+  workReport,
+  workShow,
+  workStart,
+  workUnblock,
+} from "./commands/work.ts";
 import { coordinatorRoot, EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "./io.ts";
 import { cliIdentity, VERSION } from "./version.ts";
 export { EXIT_INVALID, EXIT_OK, EXIT_REFUSED, EXIT_USAGE, type Handler, type Io } from "./io.ts";
@@ -144,6 +155,14 @@ export const COMMANDS = [
   "status",
   "work check",
   "work report",
+  "work start",
+  "work evidence",
+  "work block",
+  "work unblock",
+  "work ready",
+  "work finish",
+  "work show",
+  "work history",
 ] as const satisfies readonly Command[];
 export type { Command };
 const GROUP_ORDER = [
@@ -178,8 +197,8 @@ export const USAGE = [
   "  --version --json  print {schema, version, distSha256} as one JSON line",
   "",
   "game-coordinator is --root (in any position, once), else COORDINATION_KIT_ROOT, else",
-  "DELIVERY_KIT_ROOT, else the working directory. For work check and work report, --root names",
-  "the repository (default: the working directory) and the coordinator root comes only from",
+  "DELIVERY_KIT_ROOT, else the working directory. For the work commands, --root names the",
+  "repository (default: the working directory) and the coordinator root comes only from",
   "COORDINATION_KIT_ROOT or DELIVERY_KIT_ROOT.",
   "",
 ].join("\n");
@@ -253,8 +272,16 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "store export": storeExportCommand,
   "store import": storeImportCommand,
   "store rebuild": storeRebuildCommand,
+  "work block": workBlock,
   "work check": workCheck,
+  "work evidence": workEvidence,
+  "work finish": workFinish,
+  "work history": workHistory,
+  "work ready": workReady,
   "work report": workReport,
+  "work show": workShow,
+  "work start": workStart,
+  "work unblock": workUnblock,
 };
 /** Take every `--root DIR` out of the arguments; at most one is allowed. */
 function extractRoot(args: string[]): {

@@ -42,7 +42,7 @@ describe("dist/cli.js", () => {
     const run = spawnSync(cli, ["work", "check", "--bogus"], { encoding: "utf8" });
     expect([run.status, run.stderr]).toEqual([
       2,
-      "coordination-kit: usage: coordination-kit work check [--root DIR]\n",
+      "coordination-kit: usage: coordination-kit work check [--decisions] [--root DIR]\n",
     ]);
   });
 

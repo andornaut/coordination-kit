@@ -5,6 +5,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import type { JsonObject, StoredEvent } from "./types.ts";
+import { WORK_PROJECTION } from "./work.ts";
 
 export interface Projection {
   readonly tables: readonly string[];
@@ -366,4 +367,8 @@ export const DELIVERY_PROJECTION: Projection = {
 };
 
 /** Every projection, in apply order. A later phase appends its own here. */
-export const PROJECTIONS: readonly Projection[] = [MESSAGES_PROJECTION, DELIVERY_PROJECTION];
+export const PROJECTIONS: readonly Projection[] = [
+  MESSAGES_PROJECTION,
+  DELIVERY_PROJECTION,
+  WORK_PROJECTION,
+];

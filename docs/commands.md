@@ -29,7 +29,10 @@ every form and flag.
 | `events ingest --game ID`                                                                                                                                | Ingest the runner's event log into the store; see [runner events](store.md#runner-events).                       |
 | `protocol ...`                                                                                                                                           | The explicit filesystem work protocol; see [work protocol](work-protocol.md).                                    |
 | `status [--scope all\|GAME\|KIT\|ROLE] [--since ISO_TIMESTAMP] [--state STATE]... [--audit] [--verify-since ISO_TIMESTAMP] [--format json\|markdown]`    | Read-only status of every registered repository's work items; see [status](#status).                             |
-| `work check [--root DIR]`, `work report [--root DIR]`                                                                                                    | Validate a repository's work files and report their state; see [work files](work-files.md).                      |
+| `work check [--decisions] [--root DIR]`, `work report [--root DIR]`                                                                                      | Validate a repository's work files and report their state; see [work files](work-files.md).                      |
+| `work start ID [--parent REPOSITORY:WORK_ID]`, `work evidence ID --stage STAGE --sha SHA [--ref REF]`                                                    | Start your approved item, or record a stage commit; see [work records](store.md#work-records).                   |
+| `work block ID --reason TEXT [--owner ROLE]`, `work unblock ID`, `work ready ID`, `work finish ID`                                                       | Record your item blocked, unblocked, ready, or finished once its work file is `done` on `main`.                  |
+| `work show ID`, `work history ID`                                                                                                                        | Read an item's owner, store record and covering holds, or its work events.                                       |
 | `help`, `--help`, `--version`, `--version --json`                                                                                                        | Usage, the version, and the version with the `dist/cli.js` sha256 as one JSON line.                              |
 
 ## Command semantics
@@ -95,6 +98,11 @@ every form and flag.
 - `work check` and `work report`: `--root` names the repository, not the coordinator.
   `work report` joins a work publication by its definition ID or its plan `path`. See
   [work files](work-files.md).
+- The `work` store verbs also read `--root` as the repository and take the coordinator from
+  `COORDINATION_KIT_ROOT` or `DELIVERY_KIT_ROOT` only. Writes identify the caller through the
+  [registry fence](store.md#writer-fence) and accept only the item's owner. Each prints one JSON
+  object with `duplicate` and the `record`; a refusal prints `coordination-kit: CODE` on stderr and
+  exits 1, and a usage error exits 2.
 
 ## status
 
@@ -120,9 +128,12 @@ commands.
   any ledger request with the item's ID. Ledger requests and approvals that no publication links,
   directly or through a parent, appear as items of their owner's repository (the assigned role,
   else the creator; else the coordinator).
+- **Store:** the [work records](store.md#work-records) of `<stateRoot>/coordination.db`, read once
+  through a read-only connection; nothing is created or migrated. A missing store file is
+  `absent`. Each item carries its record as `store` (null without one).
 - **Scope:** `all` (the default); a game or kit ID selects its repository; a registry role key
-  selects its repository and keeps the items that role publishes, owns in the ledger, or whose
-  `design` area is the role's name (a game's `art`, `gameplay` or `tech`).
+  selects its repository and keeps the items that role publishes, owns in the ledger or in the
+  store, or whose `design` area is the role's name (a game's `art`, `gameplay` or `tech`).
 - **Filters:** `--state` is repeatable and keeps items with any named status; `--state unverified`
   keeps done items whose delivery is unverified. `--since` keeps items
   whose latest evidence time (work-file commit, landing, deployment or linked request update) is at
@@ -153,6 +164,10 @@ commands.
   - A kit's points are its release tags (`vMAJOR.MINOR.PATCH`), each timed by its commit's
     committer date.
   - A SHA outside the history of `main` and `origin/main` counts for nothing.
+- **Store evidence:** store stage evidence is preferred to Git. A `merged` record counts as a
+  landing and a `deployed` record (or `published`, for a kit) as a deployment, even without a Git
+  landing or deployment point. `deliverySource.landing` and `deliverySource.deployment` name which
+  evidence set each (`store`, `git` or null); `delivery` keeps the Git evidence as before.
 - **Verification:** an item with deployment evidence has `deliveryVerified: true` and
   `deliveryEvidence: "deployed"`. A `done` item without evidence is checked against its done
   commit (the `done-flip` commit, else the work file's latest commit) and the cutoff, which
@@ -172,15 +187,17 @@ A work-file item takes the first that applies:
 3. `done`: front matter `done`, verified, assumed or unverified as above.
 4. `deployed`: deployment evidence for an item whose front matter is not `done`.
 5. `landed`: a landing commit for an item whose front matter is not `done`.
-6. `in-progress`: front matter `approved` and started: a joined publication or a linked request
-   in `started`, `blocked`, `waiting`, `ready`, `checked`, `integrated` or `delivered`.
+6. `in-progress`: front matter `approved` and started: a store record with a start, a joined
+   publication, or a linked request in `started`, `blocked`, `waiting`, `ready`, `checked`,
+   `integrated` or `delivered`.
 7. `approved`: front matter `approved`.
 8. `proposed`: front matter `proposed` or any other value.
 
 A ledger-only item is `superseded` (with the ledger's `replacementId`), `cancelled`, `done` for
 `completed`, else `requested`. An open item is `blocked` when a linked request is `blocked` or
 `waiting` (`blocker` is its reason, `owner` its required owner) or a publication records a
-retention (its reason and owner); otherwise `blocker` and `owner` are null. `waitingOnUser` is
+retention (its reason and owner); an open store block takes precedence (its reason and the role
+that can clear it). Otherwise `blocker` and `owner` are null. `waitingOnUser` is
 true for `proposed` items and for items with a linked request whose question is `pending`.
 
 ### Output
@@ -189,7 +206,8 @@ Stdout is one JSON object, schema 1; field order is not significant:
 
 ```text
 schema        1
-coordinator   {root, protocol: {status, reason?, unavailable?}, ledger: {status, reason?}}
+coordinator   {root, protocol: {status, reason?, unavailable?}, ledger: {status, reason?},
+               store: {status: available | absent | unavailable, reason?}}
               status: available | unconfigured | unavailable (protocol also partial)
 filters       {scope, since, states, audit, verifySince}
 repositories  [{name, kind, path, roles, status, reason, main, originMain,
@@ -207,6 +225,9 @@ items         [{repository, id, title, status, replacement, blocked, blocker, ow
                             workers: [{role, submissions, accepted}]}] | null,
                 requests: [{id, kind, state, owner, question, requiredOwner, reason,
                             updatedAt, userSource}],
+                store: {repository, id, owner, state, parent, children, startedAt, readyAt,
+                        finishedAt, block, evidence, retained, updatedAt} | null,
+                deliverySource: {landing: store | git | null, deployment: store | git | null},
                 delivery: {landing: {sha, at, rule: done-flip | id | title} | null,
                            onOrigin, deployed: {sha, at, via: complete | last-deploy | release,
                                                 tag, matched: landing | work-list} | null}}]
@@ -222,7 +243,7 @@ Outstanding (`approved`) and Waiting on the user (proposed items and pending que
 precedence), each item once. An unverified done item carries the marker `(unverified)` after its
 title.
 
-The command exits 0, or 1 when the protocol or ledger is unavailable or partial, a selected
+The command exits 0, or 1 when the protocol, ledger or store is unavailable (protocol also partial), a selected
 repository or a game's bus cannot be read, or a bus event file is unreadable; the output is still
 printed. A usage error, including an unknown `--scope` or `--state`, exits 2.
 

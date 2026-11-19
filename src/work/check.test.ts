@@ -164,7 +164,10 @@ describe("checkWork", () => {
   it("requires the front-matter fields, a valid status, a known design and the file's ID", () => {
     const root = copy();
     edit(root, "docs/work/dk-0001.md", (text) =>
-      text.replace("title: Accept Claude route targets in inbox snapshot and ack\n", "owner: me\n"),
+      text.replace(
+        "title: Accept Claude route targets in inbox snapshot and ack\n",
+        "assignee: me\n",
+      ),
     );
     edit(root, "docs/work/dk-0002.md", (text) => text.replace("status: done", "status: shipped"));
     edit(root, "docs/work/dk-0003.md", (text) => text.replace(/^design: .*$/m, "design: nowhere"));
@@ -180,6 +183,52 @@ describe("checkWork", () => {
       "id-mismatch",
       "front-matter-missing",
     ]);
+  });
+
+  it("accepts an owner and decision lines, and reports malformed ones by line", () => {
+    const root = copy();
+    edit(root, "docs/work/dk-0002.md", (text) =>
+      text.replace(/^design: (.*)$/m, "design: $1\nowner: delivery-kit"),
+    );
+    const decisions = [
+      "",
+      "## Decisions",
+      "",
+      "- D1 (user, 2026-11-18): Keep the queue.",
+      "- D2 (user, 2026-11-19; answers q-delivery-kit-3; supersedes D1): Use the store.",
+      "- D3 (game-coordinator, 2026-11-19; supersedes dk-0001/D1): Follow the policy.",
+      "- Prose that is not a decision.",
+      "",
+    ].join("\n");
+    edit(root, "docs/work/dk-0003.md", (text) => `${text}${decisions}`);
+    expect(checkWork(root)).toMatchObject({ findings: [], ok: true });
+    edit(root, "docs/work/dk-0004.md", (text) =>
+      text
+        .replace(/^design: (.*)$/m, "design: $1\nowner: Two Roles")
+        .concat(
+          [
+            "",
+            "## Decisions",
+            "",
+            "- D1 (user, 2026-11-18) Missing colon.",
+            "- D2 (user, 2026-02-30): Not a date.",
+            "- D3 (user, 2026-11-18; supersedes D9): Unknown target.",
+            "- D3 (user, 2026-11-18): Repeated.",
+            "",
+          ].join("\n"),
+        ),
+    );
+    const findings = checkWork(root).findings.filter((f) => f.path === "docs/work/dk-0004.md");
+    expect(findings.map((finding) => finding.code)).toEqual([
+      "field-invalid",
+      "decision-invalid",
+      "decision-invalid",
+      "decision-invalid",
+      "decision-invalid",
+    ]);
+    expect(findings.filter((f) => f.code === "decision-invalid").every((f) => f.line! > 0)).toBe(
+      true,
+    );
   });
 
   it("accepts proposed and declined items as well as the other statuses", () => {
