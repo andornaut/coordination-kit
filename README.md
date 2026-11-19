@@ -34,7 +34,7 @@ package and bundles it into its own runner.
 
 ## Usage
 
-Every command is a noun group and its verb. Commands resolve game-coordinator from
+Every command is a noun group and its verb, except `status`. Commands resolve game-coordinator from
 `--root DIR`, else `COORDINATION_KIT_ROOT`, else `DELIVERY_KIT_ROOT`, else the working directory.
 `--root` may appear anywhere on the command line, at most once. `--game` is always explicit. The
 `work` commands read `--root` as the repository to inspect (default: the working directory) and
@@ -51,6 +51,7 @@ take the coordinator root only from `COORDINATION_KIT_ROOT` or `DELIVERY_KIT_ROO
 | `review`   | `deliver`                                                                                | The runner seam: one slot's scheduled review, as one typed JSON line.                            |
 | `events`   | `flush`                                                                                  | The runner seam: one event outbox flush, as one typed JSON line.                                 |
 | `protocol` | `status`, `enroll`, `boundary`, `work-publish`, `message-publish`, `inbox`, and the rest | The explicit filesystem work protocol.                                                           |
+| `status`   | (none)                                                                                   | Read-only status of every registered repository's work items, as JSON or a Markdown digest.      |
 | `work`     | `check`, `report`                                                                        | Validate a repository's work files; join their milestones with live protocol state.              |
 
 `coordination-kit --help` lists every command form; it is generated from each command's parser

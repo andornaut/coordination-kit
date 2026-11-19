@@ -57,6 +57,7 @@ import {
 import { claudeReady, codexReady, harnessReady } from "./commands/ready.ts";
 import { eventsFlush, reviewDeliver } from "./commands/runner.ts";
 import { type Command, GROUPS, SPECS, synopsis } from "./commands/spec.ts";
+import { status } from "./commands/status.ts";
 import { workCheck, workReport } from "./commands/work.ts";
 import { coordinatorRoot, EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "./io.ts";
 import { cliIdentity, VERSION } from "./version.ts";
@@ -116,6 +117,7 @@ export const COMMANDS = [
   "protocol inbox",
   "protocol intake",
   "protocol boundary",
+  "status",
   "work check",
   "work report",
 ] as const satisfies readonly Command[];
@@ -127,6 +129,7 @@ const GROUP_ORDER = [
   "harness",
   "review",
   "protocol",
+  "status",
   "work",
 ] as const;
 /** Help text, generated from each command's parser options and grouped by audience. */
@@ -211,6 +214,7 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "protocol work-receipt": protocolWorkReceipt,
   "protocol work-submit": protocolWorkSubmit,
   "review deliver": reviewDeliver,
+  status,
   "work check": workCheck,
   "work report": workReport,
 };
@@ -233,7 +237,7 @@ function extractRoot(args: string[]): {
   }
   return { root: value };
 }
-/** The command a line names: a noun group and its verb. */
+/** The command a line names: a noun group and its verb, or a single-word command. */
 function commandOf(args: readonly string[]):
   | {
       command: Command;
@@ -244,6 +248,9 @@ function commandOf(args: readonly string[]):
   const pair = `${first} ${second}`;
   if ((COMMANDS as readonly string[]).includes(pair)) {
     return { command: pair as Command, rest: args.slice(2) };
+  }
+  if ((COMMANDS as readonly string[]).includes(first) && !first.includes(" ")) {
+    return { command: first as Command, rest: args.slice(1) };
   }
   return undefined;
 }

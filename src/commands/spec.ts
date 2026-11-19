@@ -28,6 +28,7 @@ import {
   PROTOCOL_ROOT_OPTIONS,
 } from "./protocol.ts";
 import { EVENTS_FLUSH_OPTIONS, REVIEW_DELIVER_OPTIONS } from "./runner.ts";
+import { STATUS_OPTIONS } from "./status.ts";
 import { type CommandSpec, formSynopsis, usageText } from "./usage.ts";
 import { WORK_OPTIONS } from "./work.ts";
 export type { CommandSpec, Options } from "./usage.ts";
@@ -70,6 +71,7 @@ export const GROUPS = {
   message: "durable role messages",
   protocol: "explicit filesystem work protocol",
   review: "runner seam (delivery-kit)",
+  status: "cross-repository status",
   work: "repository work files",
 } as const;
 export interface GroupedSpec extends CommandSpec {
@@ -442,6 +444,19 @@ export const SPECS = {
     group: "review",
     options: REVIEW_DELIVER_OPTIONS,
     summary: "deliver the scheduled review for one slot once; prints one typed JSON result line",
+  },
+  status: {
+    forms: [["scope?", "since?", "state?", "audit?", "format?"]],
+    group: "status",
+    options: STATUS_OPTIONS,
+    summary:
+      "read-only status of each registered repository's work items with protocol, ledger and delivery evidence",
+    values: {
+      format: "json|markdown",
+      scope: "all|GAME|KIT|ROLE",
+      since: "ISO_TIMESTAMP",
+      state: "STATE",
+    },
   },
   "work check": {
     forms: [[]],

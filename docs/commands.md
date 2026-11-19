@@ -20,6 +20,7 @@ every form and flag.
 | `review deliver --game ID --slot ISO_TIMESTAMP [--capture]`                                                                                              | Deliver one slot's scheduled review once; see [review](review.md#cli-seam).                   |
 | `events flush --game ID`                                                                                                                                 | Flush the game's event outbox; see [review](review.md#cli-seam).                              |
 | `protocol ...`                                                                                                                                           | The explicit filesystem work protocol; see [work protocol](work-protocol.md).                 |
+| `status [--scope all\|GAME\|KIT\|ROLE] [--since ISO_TIMESTAMP] [--state STATE]... [--audit] [--format json\|markdown]`                                   | Read-only status of every registered repository's work items; see [status](#status).          |
 | `work check [--root DIR]`, `work report [--root DIR]`                                                                                                    | Validate a repository's work files and report their state; see [work files](work-files.md).   |
 | `help`, `--help`, `--version`, `--version --json`                                                                                                        | Usage, the version, and the version with the `dist/cli.js` sha256 as one JSON line.           |
 
@@ -71,6 +72,116 @@ every form and flag.
 - `work check` and `work report`: `--root` names the repository, not the coordinator.
   `work report` joins a work publication by its definition ID or its plan `path`. See
   [work files](work-files.md).
+
+## status
+
+`status` reads every distinct Git repository behind the registry's roles and reports one derived
+status per work item. It writes nothing and uses no network: repositories are read through local
+refs only (`main` and, when present, `origin/main`), with no fetch or checkout, and the
+coordinator state is read once. `--root` names the coordinator, as for the other non-work
+commands.
+
+- **Repositories:** each role's registered worktree resolves with `git rev-parse` to its common Git
+  directory, whose parent is the repository; when the worktree is missing, the role's game or kit
+  path in `config.json` is tried. Roles sharing a repository are listed together. A repository is a
+  `game` or `kit` by its `config.json` path, `coordinator` for the coordinator root, else `other`.
+- **Reads:** per repository, one `git log` over `main` and `origin/main` (parents, committer dates,
+  messages, changes against the first parent with rename detection, and release tags) and one
+  first-parent `git log -p` over `docs/work/` on `main`, whose newest diff of each file holds its
+  current text. Each protocol role journal is replayed once, the request ledger once, and each
+  game's bus outbox directory once. The number of Git calls does not depend on the number of items.
+- **Items:** each `docs/work/<id>.md` on `main` (front matter `id`, `title`, `status`, `approved`,
+  `supersedes`), joined with the work publications in its repository's role namespaces whose
+  definition ID is the item's ID or whose plan path is its file, their linked ledger requests and
+  any ledger request with the item's ID. Ledger requests and approvals that no publication links,
+  directly or through a parent, appear as items of their owner's repository (the assigned role,
+  else the creator; else the coordinator).
+- **Scope:** `all` (the default); a game or kit ID selects its repository; a registry role key
+  selects its repository and keeps the items that role publishes, owns in the ledger, or whose
+  `design` area is the role's name (a game's `art`, `gameplay` or `tech`).
+- **Filters:** `--state` is repeatable and keeps items with any named status. `--since` keeps items
+  whose latest evidence time (work-file commit, landing, deployment or linked request update) is at
+  or after it. `--audit` keeps user-originated items: a work file whose `approved` reference starts
+  with `user`, or a linked request whose source reference starts with `user` or whose origin is
+  `native-user`.
+
+### Delivery evidence
+
+- **Landing:** the oldest commit reachable from local `main` that cites the item and is not
+  bookkeeping. A commit cites an item when its message names the ID as a whole token, when it
+  changes the item's work file or a path later renamed to it, or when its subject equals the
+  item's title. Bookkeeping never lands an item: a commit that changes only `docs/work/` and
+  `docs/design/`, and the commit that adds the item's work file (its proposal or approval, reported
+  as `workFile.addedIn`).
+- **On origin:** whether `origin/main` contains the landing commit; null without a landing or
+  without a local `origin/main`.
+- **Deployment:** for a game, the first runner COMPLETE event (`var/games/<g>/bus/events/*.json`
+  with kind `complete`) whose SHA has the landing commit as an ancestor, timed by the event's
+  `created` stamp. For a kit, the first release tag (`vMAJOR.MINOR.PATCH`) whose commit contains
+  the landing, timed by that commit's committer date. A SHA outside the history of `main` and
+  `origin/main` counts for nothing.
+
+### Status precedence
+
+A work-file item takes the first that applies:
+
+1. `superseded`: front matter `superseded`, or another work file that is not `proposed`,
+   `declined` or `cancelled` names it in `supersedes`; `replacement` is that file's ID, else null.
+2. `cancelled`, `declined`: the front-matter status.
+3. `done`: front matter `done` and deployed, or `done` in a repository with no deployment channel.
+4. `deployed`: deployment evidence, whatever the front matter.
+5. `landed`: a landing commit, or front matter `done` without deployment evidence.
+6. `in-progress`: front matter `approved` and started: a joined publication or a linked request
+   in `started`, `blocked`, `waiting`, `ready`, `checked`, `integrated` or `delivered`.
+7. `approved`: front matter `approved`.
+8. `proposed`: front matter `proposed` or any other value.
+
+A ledger-only item is `superseded` (with the ledger's `replacementId`), `cancelled`, `done` for
+`completed`, else `requested`. An open item is `blocked` when a linked request is `blocked` or
+`waiting` (`blocker` is its reason, `owner` its required owner) or a publication records a
+retention (its reason and owner); otherwise `blocker` and `owner` are null. `waitingOnUser` is
+true for `proposed` items and for items with a linked request whose question is `pending`.
+
+### Output
+
+Stdout is one JSON object, schema 1; field order is not significant:
+
+```text
+schema        1
+coordinator   {root, protocol: {status, reason?, unavailable?}, ledger: {status, reason?}}
+              status: available | unconfigured | unavailable (protocol also partial)
+filters       {scope, since, states, audit}
+repositories  [{name, kind, path, roles, status, reason, main, originMain,
+                deployment: {channel: bus | release-tag | none,
+                             status: available | absent | unavailable | not-applicable,
+                             unreadable}}]
+items         [{repository, id, title, status, replacement, blocked, blocker, owner,
+                waitingOnUser, userOriginated, latestEvidenceAt,
+                workFile: {path, status, approved, design, supersedes, addedIn, commit,
+                           committedAt} | null,
+                protocol: [{role, joinedBy, revision, ready, accepted, receipts,
+                            criteriaSatisfied, authorization, historicallyClosed, guarded,
+                            beforeWork: admissible | refused | null, retention,
+                            workers: [{role, submissions, accepted}]}] | null,
+                requests: [{id, kind, state, owner, question, requiredOwner, reason,
+                            updatedAt, userSource}],
+                delivery: {landing: {sha, at, rule: id | work-file | title} | null,
+                           onOrigin, deployed: {sha, at, via: complete | release,
+                                                tag} | null}}]
+```
+
+`protocol` is null when the protocol is unconfigured or unavailable, and an empty list when no
+publication joins. `beforeWork` is the work-reference half of the before-work admission (reviewed
+and unguarded); enrollment is not evaluated. Items are ordered by repository name, then ID.
+
+`--format markdown` prints a digest: per repository, the headings Done (`done`, `deployed`,
+`declined`, `cancelled`, `superseded`), In progress (`in-progress`, `landed`), New (`requested`),
+Outstanding (`approved`) and Waiting on the user (proposed items and pending questions, which take
+precedence), each item once.
+
+The command exits 0, or 1 when the protocol or ledger is unavailable or partial, a selected
+repository or a game's bus cannot be read, or a bus event file is unreadable; the output is still
+printed. A usage error, including an unknown `--scope` or `--state`, exits 2.
 
 ## Worker inbox reconciliation
 
