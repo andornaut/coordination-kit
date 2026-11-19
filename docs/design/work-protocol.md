@@ -9,7 +9,8 @@ needs its own current active receipt and the specific approved work reference. R
 accounting tracks requested outcomes separately from message delivery and handling. Migration
 copies legacy state byte-exact after a verified backup and restore.
 
-Reference: [work-protocol](../work-protocol.md), [request-accounting](../request-accounting.md).
+Retired in 3.0 ([simplification](simplification.md#phase-4-thin-protocol-and-retirement)); the
+state is in the Phase 4 archive ([retirement](../store.md#retirement)).
 
 ## Work items
 

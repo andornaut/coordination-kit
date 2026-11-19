@@ -1,23 +1,19 @@
 # Libraries
 
-The public Node build APIs: their subpaths, main symbols, the registry library and transport
-endpoint selection.
+The public Node build APIs: their subpaths, main symbols and the registry library. 3.0 removed
+the `build/transport`, `build/accounting`, `build/protocol` and `build/events` subpaths.
 
 ## Public build APIs
 
 All library APIs are Node build and operations tools, not APIs for a running game. Import their
 explicit subpaths:
 
-| Subpath                                        | Purpose                                                                                       | Main symbols                                                                                                                                                                                |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@andornaut/coordination-kit/build/registry`   | Registry configuration, routing and guarded updates.                                          | `loadLayout`, `gameLayout`, `roleKeys`, `readRegistry`, `createRegistry`, `updateRegistry`, `resolveRole`, `resolveConversation`, `resolveHarness`, `selectHarness`, `RegistrySchema`       |
-| `@andornaut/coordination-kit/build/transport`  | Read-only endpoint selection and message channel path references.                             | `resolveCodexControlSocket`, `messageChannelStateDir`, `DeliveryDiagnostic`, `NativeRpcCode`                                                                                                |
-| `@andornaut/coordination-kit/build/accounting` | Request ledger, intake retention and closure evidence ([guide](request-accounting.md)).       | `LedgerStore`, `IntakeStore`, `captureAccounting`, `accountingStatus`, `snapshotIntake`, `messageIntake`, `auditIntake`, `projectOwnerBinding`                                              |
-| `@andornaut/coordination-kit/build/protocol`   | Fenced filesystem work, message originals and recipient receipts ([guide](work-protocol.md)). | `ProtocolStore`, `runtimeProtocolStore`, `WorkStore`, `ProtocolMessages`, `EnrollmentStore`, `resolveProtocolLayout`, `resolveProtocolManagement`, `protocolNamespace`, migration functions |
-| `@andornaut/coordination-kit/build/review`     | The scheduled review seam and the review route ([guide](review.md#scheduled-review-seam)).    | `deliverScheduledReview`, `reviewOutcome`, `DEFERRED_PREFIX`, `REASON_TOKENS`, `readRoleRoute`, `routeRecipient`, `validateRoleRoute`, `RouteError`, `ROUTE_SCHEMA_1`                       |
-| `@andornaut/coordination-kit/build/events`     | The bus event outbox ([guide](review.md#event-outbox)).                                       | `recordEvent`, `enqueueEvent`, `writeEventState`, `flushEvents`, `flushEventsWith`, `FlushResult`, `eventsDir`, `eventId`, `deliveryMessage`, `QUIET_KINDS`, `BusEvent`, `EmitOptions`      |
-| `@andornaut/coordination-kit/build/store`      | The SQLite coordination store and its message lifecycle ([guide](store.md#library-api)).      | `Store`, `storePath`, `sendMessage`, `readInbox`, `closeMessage`, `retainMessage`, `wakeRecipient`, `rearmWake`, `resolveCaller`, `importLegacy`, `PROJECTIONS`, `StoreError`               |
-| `@andornaut/coordination-kit/build/shared`     | The utilities both kits run on.                                                               | Durable writes and JSON reads, `flock(1)` locks, the layout, validation, `delivery-kit.json` loading, exit codes, help synopses, identifiers and the persisted JSON form                    |
+| Subpath                                      | Purpose                                                                                    | Main symbols                                                                                                                                                                                                 |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `@andornaut/coordination-kit/build/registry` | Registry configuration, routing and guarded updates.                                       | `loadLayout`, `gameLayout`, `roleKeys`, `readRegistry`, `createRegistry`, `updateRegistry`, `resolveRole`, `resolveConversation`, `resolveHarness`, `selectHarness`, `RegistrySchema`                        |
+| `@andornaut/coordination-kit/build/review`   | The scheduled review seam and the review route ([guide](review.md#scheduled-review-seam)). | `deliverReview`, `storeReview`, `composeBrief`, `showBrief`, `coordinationEmit`, `REASON_TOKENS`, `readRoleRoute`, `routeRecipient`, `validateRoleRoute`, `RouteError`                                       |
+| `@andornaut/coordination-kit/build/store`    | The SQLite coordination store and its message lifecycle ([guide](store.md#library-api)).   | `Store`, `storePath`, `sendMessage`, `readInbox`, `closeMessage`, `retainMessage`, `wakeRecipient`, `rearmWake`, `resolveCaller`, `storeRetire`, `closeRequest`, `readRequests`, `PROJECTIONS`, `StoreError` |
+| `@andornaut/coordination-kit/build/shared`   | The utilities both kits run on.                                                            | Durable writes and JSON reads, `flock(1)` locks, the layout, validation, `delivery-kit.json` loading, exit codes, help synopses, identifiers and the persisted JSON form                                     |
 
 There is no root barrel, wildcard export, public runtime API or public test API. Fixtures,
 harnesses and private modules are not exported. The `./package.json` export is package metadata.
@@ -73,12 +69,3 @@ come first and the subject last.
   `selectHarness(layout, expectedRevision, {harness, games?, roles?}, options?)` validates the
   entire explicit selection and changes only those overrides under `registry.lock`.
 - `RegistrySchema`, `validateRegistry`, `HARNESSES` and `TRANSFER_PHASES`, with the record types.
-
-## Transport endpoint selection
-
-Import `resolveCodexControlSocket` from `@andornaut/coordination-kit/build/transport`. It returns
-`{ path, source }`, selecting the explicit `controlSocket` option, then `CODEX_CONTROL_SOCKET`
-from the supplied environment, then the managed socket under
-`home/.codex/app-server-control/app-server-control.sock`. Invalid explicit paths throw without
-fallback. Selection performs no connection or authentication probe. Existing runtime adapters and
-`codex ready` still require configured endpoints.

@@ -1,8 +1,7 @@
 # Coordination
 
-The kit owns the role registry, durable role messages and their transports, the harness
-adapters, inbox snapshots and acknowledgements, the scheduled review brief, the event outbox, the
-request ledger, the filesystem work protocol and the work-file checks. delivery-kit owns the
+The kit owns the role registry, the coordination store and its messages, wakes and work
+records, the harness adapters, the scheduled review brief and the work-file checks. delivery-kit owns the
 resident runner, departures, the gate container, CI watches, deployment, scheduled delivery,
 resource sampling, the pin guard, status and source and gate identity.
 

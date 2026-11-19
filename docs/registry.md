@@ -25,14 +25,6 @@ own: `transfers` carries the hold, acceptance and activation markers.
   supported resident-adoption recording. The harness-selection CLI changes only selected roles' `harness` overrides and
   registry revision metadata; it preserves all other fields, including `operations`.
 
-`protocol observer-adoption` durably records the owner's resident-inspection evidence and its
-audit, binds the command in the role journal, then updates `lastAdoption` under registry revision
-CAS. Managed activation verifies the committed command, `evidenceRef` pointer, audit and referenced
-resident proof together. A package pin, matching
-version/hash or returned-only result is not that durable adoption evidence. See
-[declaration, enrollment and rollout](work-protocol.md#declaration-enrollment-and-rollout)
-for the supported producer and partial-update reconciliation contract.
-
 ## Scoped harness selection
 
 `roles.<role>.harness`, when present, is `claude` or `codex`. An absent override falls back to the
@@ -69,8 +61,8 @@ started and no runner is restarted by selection.
 
 ## Send-time resolution
 
-Route, configuration, briefs and events name roles, never conversation IDs. Each wake, event
-delivery, inbox snapshot, acknowledgement and readiness probe reads `var/registry.json` when it
+Route, configuration, briefs and events name roles, never conversation IDs. Each send, wake and
+readiness probe reads `var/registry.json` when it
 sends: the role's optional `harness` override, otherwise the registry default, selects the adapter;
 `roles.<role>.conversations.<effective harness>` gives the ID.
 Nothing is cached across sends. A missing or null ID is reported `unavailable` for that role,
