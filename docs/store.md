@@ -417,21 +417,28 @@ planned handoff.
 
 Preconditions:
 
-- 2.0 is installed at the coordinator root (`npm ci`), before any 6.1 runner starts; runners may
-  be 6.0 or 6.1. 6.0 runners keep using `events flush`, which is unchanged.
+- The coordinator root still pins 1.3.x: delivery-kit 6.0 runners accept only `>=1.2.0 <2.0.0` and
+  defer reviews and event flushes when the root CLI is outside that range, so 2.0 is pinned inside
+  the window, never before it.
+- delivery-kit 6.1 (`>=2.0.0 <3.0.0`) is tagged and ready to replace each runner.
 - Every Claude role's channel MCP server runs the stable command
-  `node <root>/node_modules/@andornaut/coordination-kit/dist/cli.js --root <root> claude channel`
-  and has reconnected (`/mcp`) onto 2.0, which `harness doctor` shows as `channel_command`
-  `stable` and `channel_server` version `2.0.0`. A session on another command needs a relaunch.
+  `node <root>/node_modules/@andornaut/coordination-kit/dist/cli.js --root <root> claude channel`.
 - Roles have finished in-flight sends and closes.
 
-Steps:
+Steps, all in the window:
 
-1. Back up the state root, `var/work-protocol-fence.json` and `var/game-dev/messages`.
-2. Run `store cutover --dry-run` and match its counts against the message inventory; for a per-ID
+1. Pin 2.0 at the coordinator root (`npm ci`). From here 6.0 runners defer reviews and event
+   flushes; their outbox is retained and departures continue.
+2. Reconnect every Claude channel (`/mcp`) onto 2.0; `harness doctor` shows `channel_command`
+   `stable` where the shared config is used and `channel_server` version `2.0.0` for channels that
+   report their status.
+3. Back up the state root, `var/work-protocol-fence.json` and `var/game-dev/messages`.
+4. Run `store cutover --dry-run` and match its counts against the message inventory; for a per-ID
    diff, run `store import --from-legacy --dry-run`.
-3. Run `store cutover --apply` as `game-coordinator` and record its `cutoverAt`.
-4. Check `review show` after the next scheduled review, and `msg history --since <cutoverAt>`.
+5. Run `store cutover --apply` as `game-coordinator` and record its `cutoverAt`.
+6. Replace every runner with delivery-kit 6.1 while idle (all are idle after their own
+   departures); each imports its unsent 6.0 outbox at start.
+7. Check `review show` after the next scheduled review, and `msg history --since <cutoverAt>`.
 
 Native prompts, registry held flags, route state and delivery controls are not touched. A
 recipient whose question state is unknown gets no wake and pulls at its next boundary.
@@ -448,7 +455,8 @@ Messages are never sent natively, so rollback re-records what the store holds:
    mode and a 1.3 CLI resolves the protocol selection again.
 3. Before any 6.0 runner starts, ingest the remaining `events.jsonl` lines once with 2.0
    (`events ingest`), as delivery-kit's 6.1 to 6.0 rollback requires.
-4. Restore the 1.3 pins at the coordinator root (`npm ci`) and reconnect the channels. 1.3 has no
+4. Restore the 1.3 pins at the coordinator root (`npm ci`), replace runners with 6.0 if they were
+   moved to 6.1, and reconnect the channels. 1.3 has no
    store verbs and ignores `coordination.db`, which stays as the record.
 5. Re-record each exported message with `message send` under its original ID and dispatch it
    through the legacy guarded path; recipients re-close the exported closes.
