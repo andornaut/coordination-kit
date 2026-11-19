@@ -39,6 +39,10 @@
     "./build/shared": {
       "types": "./dist/shared.d.ts",
       "import": "./dist/shared.js"
+    },
+    "./build/store": {
+      "types": "./dist/store.d.ts",
+      "import": "./dist/store.js"
     }
   },
   "files": [
@@ -51,6 +55,7 @@
     "docs/registry.md",
     "docs/request-accounting.md",
     "docs/review.md",
+    "docs/store.md",
     "docs/upgrading.md",
     "docs/work-files.md",
     "docs/work-protocol.md",

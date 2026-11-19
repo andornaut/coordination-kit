@@ -1,6 +1,37 @@
 # Common messages
 
-Sending, reading, dispatching and reconciling common messages with the `message` commands, and the delivery guards they apply.
+Role messages in the coordination store (`msg` and `inbox`), and the legacy `message` commands,
+their delivery guards and reconciliation, which remain until the legacy store is retired.
+
+## Store messages
+
+Every send is stored before anything native happens, and recipients pull. The caller is
+identified by the [registry fence](store.md#writer-fence); `--native-id` and `--worker` apply to
+every writing verb.
+
+```bash
+coordination-kit msg send --to archies-dog-walks/tech --body-file note.md --link work=ck-0017
+coordination-kit inbox --include-body
+coordination-kit msg done 00000000-0000-4000-8000-000000000001 --work ck-0017
+coordination-kit msg retain 00000000-0000-4000-8000-000000000002 --reason "waits on art" \
+  --next-boundary "next scheduled review"
+```
+
+- States are `sent`, `delivered` (the recipient's own `inbox` read), then `handled`, `superseded`
+  or `retained`. A message closes with one write, by its recipient only.
+- `msg send` stores the original, marks the recipient wake-pending and attempts at most one
+  guarded wake, which carries no payload. A wake outcome never changes message state.
+- Native session messages and channel notifications are wakes only; `msg send` is the one payload
+  path between roles.
+- Output is one JSON object, identical for Claude and Codex callers. `msg status ID` and
+  `msg history` read without writing and never print a body.
+
+Schema, wakes, the import mapping and rollback are in [the coordination store](store.md).
+
+## Legacy messages
+
+The `message` commands below operate on the legacy per-record store. After the Phase 2 cutover
+it is frozen: reads still work and `store import --from-legacy` copies it into the store.
 
 The coordinator root resolves as in [configuration](configuration.md#coordinator-root). With
 `--root`, body-file paths remain relative to the caller's working directory.

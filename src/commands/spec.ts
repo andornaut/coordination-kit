@@ -29,6 +29,17 @@ import {
 } from "./protocol.ts";
 import { EVENTS_FLUSH_OPTIONS, REVIEW_DELIVER_OPTIONS } from "./runner.ts";
 import { STATUS_OPTIONS } from "./status.ts";
+import {
+  INBOX_OPTIONS,
+  MSG_DONE_OPTIONS,
+  MSG_HISTORY_OPTIONS,
+  MSG_RETAIN_OPTIONS,
+  MSG_SEND_OPTIONS,
+  MSG_STATUS_OPTIONS,
+  STORE_EXPORT_OPTIONS,
+  STORE_IMPORT_OPTIONS,
+  STORE_REBUILD_OPTIONS,
+} from "./store.ts";
 import { type CommandSpec, formSynopsis, usageText } from "./usage.ts";
 import { WORK_OPTIONS } from "./work.ts";
 export type { CommandSpec, Options } from "./usage.ts";
@@ -36,6 +47,7 @@ export const BINARY = "coordination-kit";
 /** The placeholder each string option shows in help. */
 const VALUES: Readonly<Record<string, string>> = {
   at: "ISO_TIMESTAMP",
+  body: "TEXT",
   "body-file": "FILE",
   conversation: "UUID",
   disposition: "handled|superseded|retained",
@@ -48,6 +60,9 @@ const VALUES: Readonly<Record<string, string>> = {
   id: "SAFE_ID",
   "input-file": "FILE",
   intent: "queue|unblock",
+  limit: "N",
+  link: "KIND=REF",
+  "native-id": "ID",
   "next-boundary": "TEXT",
   owner: "ROLE",
   "owner-role": "ROLE",
@@ -59,19 +74,26 @@ const VALUES: Readonly<Record<string, string>> = {
   recipient: "ROLE|UUID",
   "revision-scope": "ledger|records",
   role: "ROLE",
+  since: "ISO_TIMESTAMP",
   slot: "ISO_TIMESTAMP",
   snapshot: "UUID",
   "state-dir": "STATE/unblock",
+  "superseded-by": "ID",
+  to: "ROLE",
+  work: "WORK_ID",
+  worker: "NAME",
 };
 /** Help groups, in help order. */
 export const GROUPS = {
   harness: "harness (claude, codex)",
   inbox: "inbox (recipient)",
   ledger: "request accounting",
-  message: "durable role messages",
+  message: "legacy durable role messages",
+  msg: "store messages (caller identified by the registry fence)",
   protocol: "explicit filesystem work protocol",
   review: "runner seam (delivery-kit)",
   status: "cross-repository status",
+  store: "coordination store maintenance",
   work: "repository work files",
 } as const;
 export interface GroupedSpec extends CommandSpec {
@@ -139,6 +161,12 @@ export const SPECS = {
       harness: { type: "string" },
     },
     summary: "atomically select harness overrides for an explicit scope without activating roles",
+  },
+  inbox: {
+    forms: [["include-body?", "all?", "native-id?", "worker?"]],
+    group: "msg",
+    options: INBOX_OPTIONS,
+    summary: "list your undelivered and open store messages and record them delivered",
   },
   "inbox ack": {
     forms: [["game", "snapshot", "queue-id", "disposition", "reason?", "recipient?", "parent?"]],
@@ -253,6 +281,40 @@ export const SPECS = {
     options: MESSAGE_STATUS_OPTIONS,
     summary: "read local message metadata or the exact original body",
     values: { id: "UUID", recipient: "ROLE" },
+  },
+  "msg done": {
+    forms: [["ID", "work?", "superseded-by?", "evidence?", "native-id?", "worker?"]],
+    group: "msg",
+    options: MSG_DONE_OPTIONS,
+    summary: "close your own message as handled, or superseded with --superseded-by, in one write",
+  },
+  "msg history": {
+    forms: [["role?", "since?", "limit?"]],
+    group: "msg",
+    options: MSG_HISTORY_OPTIONS,
+    summary: "read message events in order, without bodies",
+  },
+  "msg retain": {
+    forms: [["ID", "reason", "next-boundary", "owner?", "native-id?", "worker?"]],
+    group: "msg",
+    options: MSG_RETAIN_OPTIONS,
+    summary: "retain your own open message with an owner, reason and next review boundary",
+  },
+  "msg send": {
+    forms: [
+      ["to", "body-file", "intent?", "id?", "link?", "native-id?", "worker?"],
+      ["to", "body", "intent?", "id?", "link?", "native-id?", "worker?"],
+    ],
+    group: "msg",
+    options: MSG_SEND_OPTIONS,
+    summary: "store a message, then attempt one guarded wake of the recipient",
+    values: { id: "UUID" },
+  },
+  "msg status": {
+    forms: [["ID"]],
+    group: "msg",
+    options: MSG_STATUS_OPTIONS,
+    summary: "read one store message's metadata",
   },
   "protocol activate": {
     forms: [["input-file", "state-root?"]],
@@ -458,6 +520,24 @@ export const SPECS = {
       state: "STATE",
       "verify-since": "ISO_TIMESTAMP",
     },
+  },
+  "store export": {
+    forms: [["since"]],
+    group: "store",
+    options: STORE_EXPORT_OPTIONS,
+    summary: "list sends, closes and retentions recorded after a time, for rollback re-recording",
+  },
+  "store import": {
+    forms: [["from-legacy", "dry-run?", "native-id?", "worker?"]],
+    group: "store",
+    options: STORE_IMPORT_OPTIONS,
+    summary: "import the legacy message stores with their original IDs; --dry-run writes nothing",
+  },
+  "store rebuild": {
+    forms: [[]],
+    group: "store",
+    options: STORE_REBUILD_OPTIONS,
+    summary: "verify the event hash chain and recreate every projection from the events",
   },
   "work check": {
     forms: [[]],

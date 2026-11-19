@@ -1,6 +1,32 @@
 # Upgrading
 
-Moving from coordination-kit 1.1 to 1.2, and from delivery-kit 4.7 to coordination-kit 1.0.
+Moving from coordination-kit 1.3 to 2.0, from 1.1 to 1.2, and from delivery-kit 4.7 to
+coordination-kit 1.0.
+
+## From 1.3
+
+2.0 adds the [coordination store](store.md), `coordination.db` beside the wake files, and its
+verbs. The legacy message store and the `message` commands are unchanged and still work; the
+cutover below freezes them.
+
+- New verbs: `msg send`, `inbox`, `msg done`, `msg retain`, `msg status`, `msg history`, and
+  `store import`, `store export` and `store rebuild`. `inbox` alone is the store read; `inbox
+snapshot` and `inbox ack` are unchanged.
+- Identity: writing verbs take no `--from`. The caller is the role whose effective registry
+  binding equals `--native-id`, `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`; no enrollment or
+  epoch is involved. Workers write under their parent with an unverified `--worker NAME`.
+- Delivery: `msg send` stores the message, then sends at most one wake per recipient: the Claude
+  wake file that `claude channel` already watches, or one guarded Codex queue add. Wakes carry no
+  payload; recipients run `coordination-kit inbox`. There is no `dispatch` or `reconcile`.
+- Closing: `msg done ID` or `msg retain ID --reason R --next-boundary B` replaces the receipt,
+  artifact and `message reconcile` sequence.
+- Library: `@andornaut/coordination-kit/build/store` is a new subpath; the others are unchanged.
+- Cutover, in one window after a review: roles finish in-flight sends and closes; back up; run
+  `store import --from-legacy --dry-run` and match its counts and IDs against the inventory; bump
+  the protocol generation so legacy writers fail closed; run `store import --from-legacy`, which
+  sends one guarded wake per recipient left with undelivered messages. Imported uncertain
+  deliveries are listed to their recipients as `unconfirmed` and never woken.
+- Rollback: [store rollback](store.md#rollback).
 
 ## From 1.1
 

@@ -10,12 +10,17 @@ export interface CommandSpec {
   readonly options: Options;
   /**
    * The accepted forms. Each lists the options it takes in help order; a trailing `?` marks one
-   * as optional. Every option appears in at least one form.
+   * as optional, and an upper-case token such as `ID` is a positional argument. Every option
+   * appears in at least one form.
    */
   readonly forms: readonly (readonly string[])[];
 }
 
 function flag(placeholders: Readonly<Record<string, string>>, spec: CommandSpec, token: string) {
+  // An upper-case token such as `ID` names a positional argument and prints as written.
+  if (/^[A-Z][A-Z_]*$/.test(token)) {
+    return token;
+  }
   const optional = token.endsWith("?");
   const name = optional ? token.slice(0, -1) : token;
   const option = spec.options[name];

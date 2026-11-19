@@ -204,7 +204,8 @@ one:
 
 `seq` increases by one per write; `count` is the number of new messages. `writeWakeFile` replaces
 the file atomically under a per-conversation lock and refuses a torn file, whose seq is unknown.
-Nothing writes wake files yet.
+`msg send` writes it for a Claude recipient, at most once per outstanding wake
+([store wakes](store.md#wakes)).
 
 `claude channel` polls its conversation's wake file after draining the legacy spools, so spool
 delivery never waits on it. Each seq increase emits one channel notification with the fixed text

@@ -79,7 +79,16 @@ export function inspectPackage(
   });
   if (version.status !== 0 || version.stdout.trim() !== manifest.version)
     throw new Error("package CLI version differs from package.json");
-  const modules = ["accounting", "events", "protocol", "registry", "review", "shared", "transport"];
+  const modules = [
+    "accounting",
+    "events",
+    "protocol",
+    "registry",
+    "review",
+    "shared",
+    "store",
+    "transport",
+  ];
   const expectedExports = ["./package.json", ...modules.map((name) => `./build/${name}`)].sort();
   if (JSON.stringify(Object.keys(manifest.exports).sort()) !== JSON.stringify(expectedExports))
     throw new Error("package must export only explicit build APIs and metadata");

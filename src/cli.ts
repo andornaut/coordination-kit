@@ -58,12 +58,32 @@ import { claudeReady, codexReady, harnessReady } from "./commands/ready.ts";
 import { eventsFlush, reviewDeliver } from "./commands/runner.ts";
 import { type Command, GROUPS, SPECS, synopsis } from "./commands/spec.ts";
 import { status } from "./commands/status.ts";
+import {
+  inbox,
+  msgDone,
+  msgHistory,
+  msgRetain,
+  msgSend,
+  msgStatus,
+  storeExportCommand,
+  storeImportCommand,
+  storeRebuildCommand,
+} from "./commands/store.ts";
 import { workCheck, workReport } from "./commands/work.ts";
 import { coordinatorRoot, EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "./io.ts";
 import { cliIdentity, VERSION } from "./version.ts";
 export { EXIT_INVALID, EXIT_OK, EXIT_REFUSED, EXIT_USAGE, type Handler, type Io } from "./io.ts";
 export { SOURCE_DIGEST, VERSION } from "./version.ts";
 export const COMMANDS = [
+  "msg send",
+  "inbox",
+  "msg done",
+  "msg retain",
+  "msg status",
+  "msg history",
+  "store import",
+  "store export",
+  "store rebuild",
   "inbox snapshot",
   "inbox ack",
   "claude ready",
@@ -123,6 +143,8 @@ export const COMMANDS = [
 ] as const satisfies readonly Command[];
 export type { Command };
 const GROUP_ORDER = [
+  "msg",
+  "store",
   "inbox",
   "message",
   "ledger",
@@ -168,6 +190,7 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "harness doctor": harnessDoctor,
   "harness ready": harnessReady,
   "harness select": harnessSelect,
+  inbox,
   "inbox ack": inboxAck,
   "inbox snapshot": inboxSnapshot,
   "ledger apply": ledgerApply,
@@ -183,6 +206,11 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "message retire-spool": messageRetireSpool,
   "message send": messageSend,
   "message status": messageStatus,
+  "msg done": msgDone,
+  "msg history": msgHistory,
+  "msg retain": msgRetain,
+  "msg send": msgSend,
+  "msg status": msgStatus,
   "protocol activate": protocolActivate,
   "protocol artifact-put": protocolArtifactPut,
   "protocol artifact-read": protocolArtifactRead,
@@ -215,6 +243,9 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "protocol work-submit": protocolWorkSubmit,
   "review deliver": reviewDeliver,
   status,
+  "store export": storeExportCommand,
+  "store import": storeImportCommand,
+  "store rebuild": storeRebuildCommand,
   "work check": workCheck,
   "work report": workReport,
 };

@@ -16,7 +16,8 @@ seam, its own bytes to hash them. Its child processes are `flock` and
 
 The on-disk formats are those of delivery-kit 4.7.0: the `var/` layout, the registry, the route,
 the message store, the Claude spool, receipts, ledger events, protocol journals and the artifact
-store. Moving from delivery-kit's verbs is in [docs/upgrading.md](docs/upgrading.md).
+store. The coordination store, `coordination.db`, is new in 2.0 ([docs/store.md](docs/store.md)).
+Moving from delivery-kit's verbs is in [docs/upgrading.md](docs/upgrading.md).
 
 ## Install and pin
 
@@ -40,19 +41,21 @@ Every command is a noun group and its verb, except `status`. Commands resolve ga
 `work` commands read `--root` as the repository to inspect (default: the working directory) and
 take the coordinator root only from `COORDINATION_KIT_ROOT` or `DELIVERY_KIT_ROOT`.
 
-| Group      | Verbs                                                                                    | Purpose                                                                                          |
-| ---------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `inbox`    | `snapshot`, `ack`                                                                        | Capture a recipient's inbox snapshot; acknowledge exact items from it.                           |
-| `message`  | `send`, `dispatch`, `status`, `reconcile`, `retire-spool`                                | Durable role messages: store, guarded delivery, status, reconciliation and Claude spool cleanup. |
-| `ledger`   | `intake`, `apply`, `show`, `report`, `history`, `coverage`, `reconcile`, `boundary`      | The request ledger.                                                                              |
-| `harness`  | `ready`, `select`, `doctor`                                                              | Readiness by effective harness, scoped harness selection and diagnosis.                          |
-| `claude`   | `ready`, `channel`                                                                       | The Claude readiness probe and the stdio MCP channel server.                                     |
-| `codex`    | `ready`                                                                                  | The Codex readiness probe.                                                                       |
-| `review`   | `deliver`                                                                                | The runner seam: one slot's scheduled review, as one typed JSON line.                            |
-| `events`   | `flush`                                                                                  | The runner seam: one event outbox flush, as one typed JSON line.                                 |
-| `protocol` | `status`, `enroll`, `boundary`, `work-publish`, `message-publish`, `inbox`, and the rest | The explicit filesystem work protocol.                                                           |
-| `status`   | (none)                                                                                   | Read-only status of every registered repository's work items, as JSON or a Markdown digest.      |
-| `work`     | `check`, `report`                                                                        | Validate a repository's work files; join their milestones with live protocol state.              |
+| Group      | Verbs                                                                                    | Purpose                                                                                         |
+| ---------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `msg`      | `send`, `done`, `retain`, `status`, `history`                                            | Store messages: send with one guarded wake, close or retain in one write, read.                 |
+| `inbox`    | (none), `snapshot`, `ack`                                                                | Read your store inbox; capture a recipient's legacy inbox snapshot; acknowledge items from it.  |
+| `store`    | `import`, `export`, `rebuild`                                                            | Import the legacy message stores, export for rollback, verify and rebuild the store.            |
+| `message`  | `send`, `dispatch`, `status`, `reconcile`, `retire-spool`                                | Legacy role messages: store, guarded delivery, status, reconciliation and Claude spool cleanup. |
+| `ledger`   | `intake`, `apply`, `show`, `report`, `history`, `coverage`, `reconcile`, `boundary`      | The request ledger.                                                                             |
+| `harness`  | `ready`, `select`, `doctor`                                                              | Readiness by effective harness, scoped harness selection and diagnosis.                         |
+| `claude`   | `ready`, `channel`                                                                       | The Claude readiness probe and the stdio MCP channel server.                                    |
+| `codex`    | `ready`                                                                                  | The Codex readiness probe.                                                                      |
+| `review`   | `deliver`                                                                                | The runner seam: one slot's scheduled review, as one typed JSON line.                           |
+| `events`   | `flush`                                                                                  | The runner seam: one event outbox flush, as one typed JSON line.                                |
+| `protocol` | `status`, `enroll`, `boundary`, `work-publish`, `message-publish`, `inbox`, and the rest | The explicit filesystem work protocol.                                                          |
+| `status`   | (none)                                                                                   | Read-only status of every registered repository's work items, as JSON or a Markdown digest.     |
+| `work`     | `check`, `report`                                                                        | Validate a repository's work files; join their milestones with live protocol state.             |
 
 `coordination-kit --help` lists every command form; it is generated from each command's parser
 options. Per-command semantics are in [docs/commands.md](docs/commands.md).
@@ -69,13 +72,14 @@ Errors go to stderr prefixed `coordination-kit:`. Commands with a JSON result ke
 | [docs/commands.md](docs/commands.md)                     | Per-command semantics and worker inbox reconciliation                                                              |
 | [docs/configuration.md](docs/configuration.md)           | The coordinator root, `config.json`, the `reports` fields of `delivery-kit.json` and the state layout              |
 | [docs/registry.md](docs/registry.md)                     | `var/registry.json`, scoped harness selection, send-time resolution, the readiness probe and the harness doctor    |
-| [docs/messages.md](docs/messages.md)                     | Common message send, status, dispatch, delivery guards and reconciliation                                          |
+| [docs/messages.md](docs/messages.md)                     | Store messages, and legacy message send, status, dispatch, delivery guards and reconciliation                      |
+| [docs/store.md](docs/store.md)                           | The SQLite coordination store: schema, library API, writer fence, wakes, legacy import and rollback                |
 | [docs/review.md](docs/review.md)                         | The review route, the runner seam, the Claude and Codex adapters, inbox snapshots, wake files and the event outbox |
 | [docs/request-accounting.md](docs/request-accounting.md) | Requested outcomes tracked separately from message delivery and handling                                           |
 | [docs/work-protocol.md](docs/work-protocol.md)           | Fenced role publications, message originals, recipient handling receipts and external `stateRoot` activation       |
 | [docs/work-files.md](docs/work-files.md)                 | `work check` and `work report`                                                                                     |
 | [docs/libraries.md](docs/libraries.md)                   | The public build API subpaths and their main symbols                                                               |
-| [docs/upgrading.md](docs/upgrading.md)                   | Moving from coordination-kit 1.1 to 1.2, and from delivery-kit 4.7 to coordination-kit 1.0                         |
+| [docs/upgrading.md](docs/upgrading.md)                   | Moving from coordination-kit 1.3 to 2.0 and 1.1 to 1.2, and from delivery-kit 4.7 to coordination-kit 1.0          |
 | [docs/design/](docs/design/README.md)                    | Design area summaries, each linking its topic docs and indexing its work items                                     |
 | [docs/work/][work-files]                                 | The work-file convention and one file per approved task (repository only, not packaged)                            |
 

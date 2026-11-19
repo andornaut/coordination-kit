@@ -10,7 +10,16 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { packagedDocs } from "./docs-check.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const LIBRARIES = ["accounting", "events", "protocol", "registry", "review", "shared", "transport"];
+const LIBRARIES = [
+  "accounting",
+  "events",
+  "protocol",
+  "registry",
+  "review",
+  "shared",
+  "store",
+  "transport",
+];
 const BUNDLES = ["dist/cli.js", ...LIBRARIES.map((name) => `dist/${name}.js`)];
 const METADATA = ["LICENSE", "SOURCE_COMMIT", "package.json", ...packagedDocs(root)];
 

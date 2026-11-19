@@ -16,6 +16,7 @@ const LIBRARIES = {
   registry: "src/registry/index.ts",
   review: "src/review.ts",
   shared: "src/shared.ts",
+  store: "src/store.ts",
   transport: "src/transport.ts",
 };
 const COMMON = {
