@@ -20,6 +20,7 @@ import {
 } from "../store/wake.ts";
 import type { ReviewResult } from "./deliver.ts";
 import { coordinationNotice } from "./emit.ts";
+import { type RecordedDecisions, recordedDecisions } from "./recordedDecisions.ts";
 import { type NativeCollect, type NativeSurvey, surveyNative } from "./storeNative.ts";
 
 export const BRIEF_MAX_LINES = 60;
@@ -40,8 +41,6 @@ export interface StoreReviewContext {
 
 interface RouteTarget {
   readonly recipient: string;
-  /** The recipient and the route's targets, the scope of the native question check. */
-  readonly members: readonly string[];
 }
 
 /** The route recipient and members for this game's slot, or the typed result that ends it. */
@@ -75,11 +74,10 @@ function routeFor(layout: Layout, game: GameLayout): RouteTarget | ReviewResult 
   }
   try {
     const registry = readRegistry(layout);
-    const role = resolveRole(registry, recipient);
-    return {
-      members: [role, ...targets.map((target) => resolveRole(registry, target))],
-      recipient: role,
-    };
+    for (const target of targets) {
+      resolveRole(registry, target);
+    }
+    return { recipient: resolveRole(registry, recipient) };
   } catch {
     return {
       detail: "the review recipient is not a registered role",
@@ -91,6 +89,7 @@ function routeFor(layout: Layout, game: GameLayout): RouteTarget | ReviewResult 
 
 export interface BriefException {
   readonly kind:
+    | "store-question-pending"
     | "question-pending"
     | "question-unknown"
     | "worker-failed"
@@ -120,6 +119,8 @@ export interface BriefRecord {
   /** Open (sent, delivered or retained) message IDs at this slot, for the next slot's ages. */
   readonly open: readonly string[];
   readonly result: ReviewResult;
+  /** Store-recorded questions and decisions, with no claim about native visibility. */
+  readonly decisions: RecordedDecisions;
   /** The native question and child health checks as this slot read them. */
   readonly native: NativeSurvey;
   /** Worker failures any brief of this game has reported, so each is reminded once. */
@@ -157,19 +158,22 @@ function nativeExceptions(
 ): { exceptions: BriefException[]; reported: string[]; counts: JsonObject } {
   const exceptions: BriefException[] = [];
   const reported = new Set(previous?.reportedWorkerFailures ?? []);
-  const questions = { clear: 0, pending: 0, unknown: 0 };
+  const questions = { clear: 0, historyComplete: 0, pending: 0, unknown: 0, visibilityUnknown: 0 };
   const workers = { failed: 0, ok: 0, unknown: 0 };
+  const nonActionable = new Set(["recipient_held", "native_harness_unsupported"]);
   for (const question of native.questions) {
     questions[question.status] += 1;
+    questions.visibilityUnknown += Number(question.visibility === "unknown");
+    questions.historyComplete += Number(question.history.status === "complete");
     for (const pending of question.pending) {
       exceptions.push({
-        detail: `turn ${pending.turn} item ${pending.item}; answer in its own conversation`,
+        detail: `turn ${pending.turn} item ${pending.item}, question ${pending.index}; confirm in its conversation`,
         kind: "question-pending",
         role: question.role,
         ...(pending.title === null ? {} : { title: pending.title }),
       });
     }
-    if (question.status === "unknown") {
+    if (question.status === "unknown" && !nonActionable.has(question.reason ?? "")) {
       exceptions.push({
         detail: question.reason ?? "unavailable",
         kind: "question-unknown",
@@ -191,7 +195,7 @@ function nativeExceptions(
         });
       }
     }
-    if (worker.status === "unknown") {
+    if (worker.status === "unknown" && !nonActionable.has(worker.reason ?? "")) {
       exceptions.push({
         detail: worker.reason ?? "unavailable",
         kind: "worker-unknown",
@@ -255,7 +259,15 @@ function survey(
   const byRole: Record<string, Record<string, number>> = {};
   const states: Record<string, number> = { delivered: 0, retained: 0, sent: 0 };
   const checked = nativeExceptions(native, previous);
-  const exceptions: BriefException[] = [...checked.exceptions];
+  const decisions = recordedDecisions(store);
+  const exceptions: BriefException[] = [
+    ...decisions.pending.map(({ id, role }): BriefException => ({
+      id,
+      kind: "store-question-pending",
+      role,
+    })),
+    ...checked.exceptions,
+  ];
   let unconfirmed = 0;
   for (const row of rows) {
     const role = row.to_role as string;
@@ -324,6 +336,10 @@ function survey(
     counts: {
       byRole: byRole as unknown as Json,
       completes: Number(runner.completes ?? 0),
+      decisions: {
+        pending: decisions.pending.length,
+        recorded: decisions.recorded.reduce((sum, decision) => sum + decision.count, 0),
+      },
       native: checked.counts,
       open: rows.length,
       runnerEvents: Number(runner.events ?? 0),
@@ -331,6 +347,7 @@ function survey(
       unconfirmed,
       wakes,
     },
+    decisions,
     exceptions,
     native,
     open: rows.map((row) => row.id as string),
@@ -347,6 +364,8 @@ function previousSeq(store: Store, previous: BriefRecord): number {
 
 function exceptionLine(exception: BriefException, titles: boolean): string {
   switch (exception.kind) {
+    case "store-question-pending":
+      return `- store-question-pending ${exception.role}: ${exception.id}; verify in its conversation`;
     case "question-pending":
       return (
         `- question-pending ${exception.role}: ` +
@@ -387,6 +406,7 @@ export function composeBrief(
   };
   const states = counts.states as Record<string, number>;
   const wakes = counts.wakes as Record<string, number>;
+  const decisions = counts.decisions as Record<string, number>;
   const byRole = counts.byRole as Record<string, Record<string, number>>;
   const show = `coordination-kit review show --game ${game.id} --slot ${new Date(slot * 1000).toISOString()}`;
   const head = [
@@ -400,13 +420,11 @@ export function composeBrief(
       `${wakes.guarded} guarded`,
     `Runner since the previous brief: ${String(counts.runnerEvents)} events, ` +
       `${String(counts.completes)} COMPLETE`,
-    `Codex questions: ${native.questions.pending} pending, ${native.questions.clear} clear, ` +
-      `${native.questions.unknown} unknown; worker parents: ${native.workers.ok} read, ` +
-      `${native.workers.unknown} unknown, ${native.workers.failed} failed children${
-        native.claudeRoles > 0
-          ? `; ${native.claudeRoles} Claude roles have no native check (unknown)`
-          : ""
-      }`,
+    `Store decisions: ${decisions.recorded} recorded, ${decisions.pending} pending questions`,
+    `Native prompt visibility: ${native.questions.visibilityUnknown} unknown; history: ` +
+      `${native.questions.historyComplete} complete, ${native.questions.pending} with pending attestations`,
+    `Worker parents: ${native.workers.ok} read, ${native.workers.unknown} unknown, ` +
+      `${native.workers.failed} failed children`,
     `Exceptions: ${record.exceptions.length}`,
   ];
   const tail = [
@@ -463,8 +481,6 @@ export async function storeReview(
         ...(context.collect === undefined ? {} : { collect: context.collect }),
         ...(context.ports?.connect === undefined ? {} : { connect: context.ports.connect }),
       },
-      game,
-      route.members,
       slot,
     );
     const outcome = store.transaction((): { result: ReviewResult; fresh: boolean } => {

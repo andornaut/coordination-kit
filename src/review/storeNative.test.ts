@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { expect, it, vi } from "vitest";
 
+import { decisionDirectory } from "../adapters/shared/decisions.ts";
 import { gameLayout, type Layout } from "../layout.ts";
 import { ART, GAME, storeFixture } from "../store/testStore.ts";
 import { writeFixtureJson } from "../testFixtures.ts";
@@ -51,6 +52,7 @@ it("surveys registered recipients and parents using each exact decision record",
   marker(layout, GAME, CHIBI_ART, "clear");
   marker(layout, CHIBI, CHIBI_ART, "pending");
   marker(layout, GAME, SHARED, "clear");
+  expect(decisionDirectory(layout, "missing-game/art")).toBeNull();
 
   const collect = vi.fn<NativeCollect>(() => {
     const wrongRecipient = {

@@ -195,6 +195,8 @@ export const reviewShow: Handler = (io, root, args) => {
           ["at", brief.at],
           ["result", brief.result],
           ["counts", brief.counts],
+          ["decisions", brief.decisions],
+          ["native", brief.native],
           ["exceptions", brief.exceptions],
           ["open", brief.open],
           ["body", brief.body],

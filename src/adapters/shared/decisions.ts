@@ -64,8 +64,10 @@ export function decisionClear(unblockDir: string, recipient: string): boolean {
 export function decisionDirectory(layout: Layout, role: string): string | null {
   try {
     const game = role.split("/")[0]!;
-    if (role.includes("/") && Object.hasOwn(layout.config.games, game)) {
-      return join(gameLayout(layout, game).busDir, "unblock");
+    if (role.includes("/")) {
+      return Object.hasOwn(layout.config.games, game)
+        ? join(gameLayout(layout, game).busDir, "unblock")
+        : null;
     }
     const route = readRoleRoute(layout);
     return route?.state === "active"

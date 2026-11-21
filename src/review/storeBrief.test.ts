@@ -12,7 +12,6 @@ import { messageStatus, retainMessage } from "../store/messages.ts";
 import { derivedId } from "../store/notices.ts";
 import { storeSend } from "../store/service.ts";
 import { ART, COORDINATOR, fakeCodex, GAME, storeFixture, TECH } from "../store/testStore.ts";
-import { projectConfig, writeFixtureJson } from "../testFixtures.ts";
 import { deliverReview, reviewResultsDir } from "./deliver.ts";
 import { coordinationEmit } from "./emit.ts";
 import { BRIEF_MAX_BYTES, BRIEF_MAX_LINES, STALE_WAKE_MS } from "./storeBrief.ts";
@@ -31,18 +30,12 @@ const ART_ROLE = `${GAME}/art`;
 
 async function storeModeFixture(
   targets: readonly string[] = [TECH_ROLE],
-  workerParents?: readonly string[],
 ): Promise<{ layout: Layout; root: string; base: string }> {
   const fixture = storeFixture();
   writeFileSync(
     fixture.layout.routeFile,
     JSON.stringify({ host: GAME, schema: 2, state: "active", targets }),
   );
-  if (workerParents !== undefined) {
-    const config = projectConfig("Archie") as { reports: Record<string, unknown> };
-    config.reports.workerParents = workerParents;
-    writeFixtureJson(gameLayout(fixture.layout, GAME).configFile, config);
-  }
   await Promise.resolve();
   return fixture;
 }
@@ -81,7 +74,7 @@ describe("stored review brief", () => {
     const result = await deliverReview(layout, game, SLOT, undefined, { env: {} });
     const id = derivedId("review-brief", GAME, SLOT);
     expect(result).toEqual({
-      detail: `brief ${id} stored for game-coordinator: 2 open, 0 exceptions`,
+      detail: `brief ${id} stored for game-coordinator: 2 open, 2 exceptions`,
       reason: null,
       status: "delivered",
     });
@@ -126,7 +119,7 @@ describe("stored review brief", () => {
     const next = stored.find((message) => message.id === derivedId("review-brief", GAME, NEXT))!;
     expect(next.body.split("\n").length).toBeLessThanOrEqual(BRIEF_MAX_LINES);
     expect(Buffer.byteLength(next.body, "utf8")).toBeLessThanOrEqual(BRIEF_MAX_BYTES);
-    expect(next.body).toContain("Exceptions: 100");
+    expect(next.body).toContain("Exceptions: 102");
     expect(next.body).toMatch(
       /- \d+ more: coordination-kit review show --game archies-dog-walks --slot 2026-11-18T16:30:00.000Z/,
     );
@@ -157,8 +150,15 @@ describe("stored review brief", () => {
       messageId: derivedId("review-brief", GAME, NEXT),
       recipient: "game-coordinator",
       slot: "2026-11-18T16:30:00.000Z",
+      decisions: { pending: [], recorded: [] },
+      native: {
+        questions: expect.arrayContaining([
+          expect.objectContaining({ role: ART_ROLE, visibility: "unknown" }),
+          expect.objectContaining({ role: "game-coordinator", visibility: "unknown" }),
+        ]),
+      },
     });
-    expect(shown.exceptions).toHaveLength(100);
+    expect(shown.exceptions).toHaveLength(102);
     expect(shown.body).toBe(next.body);
     out = "";
     expect(await main(io, ["--root", root, "review", "show"])).toBe(EXIT_OK);
@@ -292,20 +292,23 @@ function collectedFor(request: CollectRequest): Collected {
     turn_id: "turn-9",
   };
   const child = {
-    child_id: "child-1",
+    child_id: uuid(1001),
+    complete: true,
     error_code: "tool_failed",
     lineage_verified: true,
     parent_id: ART,
     requires_parent_action: true,
-    turn_id: "turn-c1",
+    turn_id: uuid(1002),
     turn_status: "failed",
   };
-  expect(request).toMatchObject({ parents: [ART], recipients: [ART], routeMembers: [ART] });
+  expect(request).toMatchObject({ parents: [ART], recipients: [ART] });
   return {
     collection_budget: { calls_used: 4, max_calls: 256, reason_code: null },
     history: {},
     question_state: { [ART]: { complete: true, questions: [question], status: "complete" } },
-    worker_health: { [ART]: { children: [child], complete: true, status: "complete" } },
+    worker_health: {
+      [ART]: { children: [child], complete: true, schema_status: "available", status: "complete" },
+    },
   };
 }
 
@@ -316,20 +319,21 @@ function brief(layout: Layout, slot: number): string {
 
 describe("native checks in the stored brief", () => {
   it("reports a pending Codex question every slot and a failed worker once", async () => {
-    const { layout } = await storeModeFixture([TECH_ROLE, ART_ROLE], [ART_ROLE]);
+    const { layout } = await storeModeFixture();
     const game = gameLayout(layout, GAME);
     const collect = vi.fn((request: CollectRequest) => Promise.resolve(collectedFor(request)));
     const options = { collect, env: {} };
     await deliverReview(layout, game, SLOT, undefined, options);
     const first = brief(layout, SLOT);
     expect(first).toContain(
-      "Codex questions: 1 pending, 0 clear, 0 unknown; worker parents: 1 read, 0 unknown, 1 failed children",
+      "Native prompt visibility: 4 unknown; history: 1 complete, 1 with pending attestations",
     );
+    expect(first).toContain("Worker parents: 1 read, 3 unknown, 1 failed children");
     expect(first).toContain(
       '- question-pending archies-dog-walks/art: "Ship the new map?", turn turn-9 item item-9',
     );
     expect(first).toContain(
-      "- worker-failed archies-dog-walks/art: child child-1 turn turn-c1 failed (tool_failed)",
+      `- worker-failed archies-dog-walks/art: child ${uuid(1001)} turn ${uuid(1002)} failed (tool_failed)`,
     );
     await deliverReview(layout, game, NEXT, undefined, options);
     const second = brief(layout, NEXT);
@@ -341,17 +345,17 @@ describe("native checks in the stored brief", () => {
   });
 
   it("reports unknown only when the native check is unavailable", async () => {
-    const { layout } = await storeModeFixture([TECH_ROLE, ART_ROLE], [ART_ROLE]);
+    const { layout } = await storeModeFixture();
     const game = gameLayout(layout, GAME);
     const connect = () => Promise.reject(new Error("no control socket"));
     await deliverReview(layout, game, SLOT, undefined, { env: {}, wakePorts: { connect } });
     const body = brief(layout, SLOT);
-    expect(body).toContain("Codex questions: 0 pending, 0 clear, 1 unknown");
+    expect(body).toContain("Native prompt visibility: 4 unknown; history: 0 complete");
     expect(body).toContain("- question-unknown archies-dog-walks/art: control_unavailable");
     expect(body).toContain("- worker-unknown archies-dog-walks/art: control_unavailable");
   });
 
-  it("reads question state through the legacy collectors and reports a clear role", async () => {
+  it("keeps current visibility unknown when the native question history is complete", async () => {
     const { layout } = await storeModeFixture([TECH_ROLE, ART_ROLE]);
     const game = gameLayout(layout, GAME);
     const codex = fakeCodex(ART);
@@ -362,7 +366,9 @@ describe("native checks in the stored brief", () => {
     expect(codex.calls.map((call) => call.method)).toContain("thread/items/list");
     expect(codex.adds()).toEqual([]);
     const body = brief(layout, SLOT);
-    expect(body).toContain("Codex questions: 0 pending, 1 clear, 0 unknown");
-    expect(body).not.toContain("question-unknown");
+    expect(body).toContain("Native prompt visibility: 4 unknown; history: 1 complete");
+    expect(body).toContain(
+      "- question-unknown archies-dog-walks/art: exact_unresolved_request_unavailable",
+    );
   });
 });
