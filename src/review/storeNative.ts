@@ -1,21 +1,22 @@
-// The native checks the stored brief keeps: each Codex route member's question state and each
-// Codex worker parent's child health, read through the legacy brief's own collectors
-// (`collectAll`: question state, then child health, under its shared 256-call budget and
-// deadline) over one control connection. Read-only. A capability that cannot be read is unknown,
-// never clear.
-import { join } from "node:path";
+// Read bounded, recipient-scoped native evidence for the scheduled review.
 import { performance } from "node:perf_hooks";
 
 import { collectAll, unavailableCollected } from "../adapters/codex/collect.ts";
 import { connectControl, type RpcClient } from "../adapters/codex/rpc.ts";
+import {
+  decisionDirectory,
+  type DecisionRecord,
+  decisionRecord,
+} from "../adapters/shared/decisions.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
+import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { isRecord } from "../adapters/shared/pyjson.ts";
 import type { Collected, CollectRequest } from "../adapters/types.ts";
-import { loadReportsConfig } from "../config.ts";
-import type { GameLayout, Layout } from "../layout.ts";
+import type { Layout } from "../layout.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
-import type { Registry } from "../registry/schema.ts";
+import type { Harness, RoleRecord } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
+import { secretShape } from "../store/secrets.ts";
 
 type Json = Record<string, unknown>;
 
@@ -27,34 +28,15 @@ function list(value: unknown): unknown[] {
   return Array.isArray(value) ? (value as unknown[]) : [];
 }
 
-/** Verified latest failed child turns as sorted [parent, child, turn, error_code] references. */
-function workerFailures(snapshot: Json): unknown[][] {
-  const references: unknown[] = [];
-  for (const [parent, health] of Object.entries(rec(snapshot.worker_health))) {
-    for (const value of list(rec(health).children)) {
-      const child = rec(value);
-      if (
-        child.parent_id === parent &&
-        child.lineage_verified === true &&
-        child.requires_parent_action === true &&
-        child.turn_status === "failed" &&
-        ["child_id", "turn_id", "error_code"].every(
-          (field) => typeof child[field] === "string" && child[field] !== "",
-        )
-      ) {
-        references.push([parent, child.child_id, child.turn_id, child.error_code]);
-      }
-    }
-  }
-  const unique = new Map(references.map((row) => [JSON.stringify(row), row as unknown[]]));
-  return [...unique.keys()].sort().map((key) => unique.get(key)!);
-}
-
 /** An owner-attested pending question on its owner's latest turn. */
 function pendingProven(owner: string, question: Json): boolean {
   const proofs = question.proof_refs;
   return (
     question.state === "pending" &&
+    identifier(question.turn_id) &&
+    identifier(question.item_id) &&
+    Number.isInteger(question.question_index) &&
+    Number(question.question_index) >= 0 &&
     question.proof_complete === true &&
     question.proof_scope === "latest_turn" &&
     Array.isArray(proofs) &&
@@ -79,10 +61,20 @@ export type QuestionStatus = "pending" | "clear" | "unknown";
 export interface NativeQuestion {
   readonly role: string;
   readonly status: QuestionStatus;
+  readonly visibility: "unknown";
+  readonly visibilityReason: string;
+  readonly decisionRecord: "clear" | "pending" | "unknown";
+  readonly history: {
+    readonly status: "complete" | "partial" | "unavailable";
+    readonly answered: number;
+    readonly unresolved: number;
+    readonly reason: string | null;
+  };
   /** Owner-attested pending questions on the owner's latest turn. */
   readonly pending: readonly {
     readonly turn: string;
     readonly item: string;
+    readonly index: number;
     readonly title: string | null;
   }[];
   readonly reason: string | null;
@@ -93,13 +85,15 @@ export interface NativeWorker {
   readonly status: "ok" | "unknown";
   /** Verified latest failed child turns: [child, turn, error code]. */
   readonly failures: readonly (readonly [string, string, string])[];
+  readonly unavailableChildren: readonly { readonly id: string; readonly reason: string }[];
   readonly reason: string | null;
 }
 
 export interface NativeSurvey {
+  readonly registryRevision: number;
   readonly questions: readonly NativeQuestion[];
   readonly workers: readonly NativeWorker[];
-  /** Claude route members and parents: no native question or child health check exists. */
+  /** Registered Claude roles have no native question or child health collector. */
   readonly claudeRoles: readonly string[];
 }
 
@@ -137,125 +131,224 @@ function defaultCollect(context: NativeContext): NativeCollect {
   };
 }
 
-function active(registry: Registry, role: string): boolean {
-  const record = registry.roles[role];
+function active(record: RoleRecord): boolean {
+  return record.ownership === "active" && record.phase !== "held" && record.phase !== "source-held";
+}
+
+function identifier(value: unknown): value is string {
+  return typeof value === "string" && value !== "";
+}
+
+function reasonOf(value: Json, excluded?: string): string {
+  const diagnostic = list(value.diagnostics).find((item) => identifier(item) && item !== excluded);
+  return String(diagnostic ?? value.reason_code ?? value.status ?? "unavailable");
+}
+
+function answeredProven(recipient: string, question: Json): boolean {
   return (
-    record !== undefined &&
-    record.ownership === "active" &&
-    record.phase !== "held" &&
-    record.phase !== "source-held"
+    question.state === "answered" &&
+    identifier(question.turn_id) &&
+    identifier(question.item_id) &&
+    list(question.proof_refs).some(
+      (proof) =>
+        isRecord(proof) &&
+        proof.recipient === recipient &&
+        proof.question_turn_id === question.turn_id &&
+        proof.question_item_id === question.item_id &&
+        identifier(proof.answer_turn_id) &&
+        identifier(proof.answer_item_id),
+    )
   );
 }
 
-function reasonOf(value: Record<string, unknown>): string {
-  const diagnostics = list(value.diagnostics).filter((item) => typeof item === "string");
-  return String(diagnostics[0] ?? value.reason_code ?? value.status ?? "unavailable");
-}
+const NO_PROMPT_VISIBILITY = "exact_unresolved_request_unavailable";
 
-function questionStatus(role: string, conversation: string, value: unknown): NativeQuestion {
+function questionStatus(
+  role: string,
+  conversation: string | null,
+  marker: DecisionRecord | null,
+  unavailable: string | null,
+  value: unknown,
+): NativeQuestion {
   const state = rec(value);
   const questions = list(state.questions).map(rec);
-  const pending = questions.filter((question) => pendingProven(conversation, question));
-  if (pending.length > 0) {
-    return {
-      pending: pending.map((question) => ({
-        item: String(question.item_id),
-        title:
-          typeof question.title === "string"
-            ? Array.from(question.title).slice(0, TITLE_CHARS).join("")
-            : null,
-        turn: String(question.turn_id),
-      })),
-      reason: null,
-      role,
-      status: "pending",
-    };
-  }
-  const clear =
-    state.status === "complete" &&
-    state.complete === true &&
-    questions.every((question) => question.state === "answered");
+  const pending =
+    conversation === null
+      ? []
+      : questions.filter((question) => pendingProven(conversation, question));
+  const answered =
+    conversation === null
+      ? 0
+      : questions.filter((question) => answeredProven(conversation, question)).length;
+  const status = pending.length === 0 ? "unknown" : "pending";
+  const history =
+    state.status === "complete" && state.complete === true
+      ? "complete"
+      : state.status === "partial"
+        ? "partial"
+        : "unavailable";
+  const visibilityReason =
+    unavailable ?? (history === "unavailable" ? reasonOf(state) : NO_PROMPT_VISIBILITY);
+  const decision = marker?.state;
   return {
-    pending: [],
-    reason: clear ? null : reasonOf(state),
+    decisionRecord: decision === "clear" || decision === "pending" ? decision : "unknown",
+    history: {
+      answered,
+      reason:
+        history === "complete" ? null : (unavailable ?? reasonOf(state, NO_PROMPT_VISIBILITY)),
+      status: history,
+      unresolved: questions.length - answered,
+    },
+    pending: pending.map((question) => ({
+      index: Number(question.question_index),
+      item: String(question.item_id),
+      title:
+        typeof question.title === "string" && secretShape(question.title) === null
+          ? Array.from(question.title).slice(0, TITLE_CHARS).join("")
+          : null,
+      turn: String(question.turn_id),
+    })),
+    reason: status === "pending" ? null : visibilityReason,
     role,
-    status: clear ? "clear" : "unknown",
+    status,
+    visibility: "unknown",
+    visibilityReason,
   };
 }
 
-function workerStatus(role: string, conversation: string, value: unknown): NativeWorker {
+function workerStatus(
+  role: string,
+  conversation: string | null,
+  unavailable: string | null,
+  value: unknown,
+): NativeWorker {
   const health = rec(value);
-  const failures = workerFailures({ worker_health: { [conversation]: health } }).map(
-    ([, child, turn, code]) => [String(child), String(turn), String(code)] as const,
-  );
+  const children = list(health.children).map(rec);
+  const verified =
+    conversation === null
+      ? []
+      : children.filter(
+          (child) => child.parent_id === conversation && child.lineage_verified === true,
+        );
+  const failures = new Map<string, readonly [string, string, string]>();
+  const unavailableChildren: { id: string; reason: string }[] = [];
+  for (const child of verified) {
+    if (!isCanonicalUuid(child.child_id)) {
+      continue;
+    }
+    if (child.complete !== true) {
+      unavailableChildren.push({ id: child.child_id, reason: reasonOf(child) });
+    }
+    if (
+      child.requires_parent_action === true &&
+      child.complete === true &&
+      child.turn_status === "failed" &&
+      isCanonicalUuid(child.turn_id) &&
+      identifier(child.error_code)
+    ) {
+      const failure = [child.child_id, child.turn_id, child.error_code] as const;
+      failures.set(JSON.stringify(failure), failure);
+    }
+  }
   const readable =
     health.status === "complete" &&
     health.complete === true &&
-    health.schema_status !== "unknown" &&
-    health.schema_status !== "unavailable";
+    health.schema_status === "available" &&
+    Array.isArray(health.children) &&
+    children.length === verified.length &&
+    verified.every((child) => isCanonicalUuid(child.child_id) && child.complete === true);
   return {
-    failures,
-    reason: readable ? null : reasonOf(health),
+    failures: [...failures.keys()].sort().map((key) => failures.get(key)!),
+    reason: readable
+      ? null
+      : (unavailable ??
+        (health.status === "complete" ? "worker_coverage_unverified" : reasonOf(health))),
     role,
     status: readable ? "ok" : "unknown",
+    unavailableChildren,
   };
 }
 
-/**
- * Survey the route's Codex members and the game's Codex worker parents for `slot`. Nothing is
- * contacted when neither exists. Must run outside any store transaction.
- */
-export async function surveyNative(
-  context: NativeContext,
-  game: GameLayout,
-  members: readonly string[],
-  slot: number,
-): Promise<NativeSurvey> {
-  const registry = readRegistry(context.layout);
-  let parentRoles: readonly string[];
-  try {
-    parentRoles = loadReportsConfig(game.configFile).reports.workerParents;
-  } catch {
-    parentRoles = [];
+function unavailableRecipient(
+  bindingCounts: ReadonlyMap<string, number>,
+  record: RoleRecord,
+  harness: Harness,
+  conversation: string | null,
+): string | null {
+  if (!active(record)) {
+    return "recipient_held";
   }
-  const claudeRoles = new Set<string>();
-  const codex = (roles: readonly string[]): Map<string, string> => {
-    const selected = new Map<string, string>();
-    for (const role of new Set(roles)) {
-      if (!active(registry, role)) {
-        continue;
-      }
-      const conversation = resolveConversation(registry, role);
-      if (resolveHarness(registry, role) !== "codex") {
-        claudeRoles.add(role);
-      } else if (conversation !== null) {
-        selected.set(role, conversation);
-      }
+  if (conversation === null) {
+    return "recipient_unbound";
+  }
+  if (harness !== "codex") {
+    return "native_harness_unsupported";
+  }
+  if (!isCanonicalUuid(conversation)) {
+    return "recipient_binding_invalid";
+  }
+  return bindingCounts.get(conversation) === 1 ? null : "recipient_binding_ambiguous";
+}
+
+/** Read every registered role and its exact native children outside the store transaction. */
+export async function surveyNative(context: NativeContext, slot: number): Promise<NativeSurvey> {
+  const { layout } = context;
+  const registry = readRegistry(layout);
+  const roles = Object.keys(registry.roles)
+    .sort()
+    .map((role) => ({
+      conversation: resolveConversation(registry, role),
+      harness: resolveHarness(registry, role),
+      record: registry.roles[role]!,
+      role,
+    }));
+  const bindingCounts = new Map<string, number>();
+  for (const { conversation, harness } of roles) {
+    if (harness === "codex" && conversation !== null) {
+      bindingCounts.set(conversation, (bindingCounts.get(conversation) ?? 0) + 1);
     }
-    return selected;
-  };
-  const memberIds = codex(members);
-  const parentIds = codex(parentRoles);
-  if (memberIds.size === 0 && parentIds.size === 0) {
-    return { claudeRoles: [...claudeRoles].sort(), questions: [], workers: [] };
   }
-  const recipients = [...new Set(memberIds.values())];
+  const targets = roles.map(({ conversation, harness, record, role }) => {
+    const reason = unavailableRecipient(bindingCounts, record, harness, conversation);
+    const recipient = reason === null ? conversation : null;
+    const directory = recipient === null ? null : decisionDirectory(layout, role);
+    const marker =
+      directory === null || recipient === null ? null : decisionRecord(directory, recipient);
+    return { marker, reason, recipient, role };
+  });
+
+  const recipients = targets.flatMap(({ recipient }) => (recipient === null ? [] : [recipient]));
   const request: CollectRequest = {
-    historyCursor: null,
-    parents: [...new Set(parentIds.values())],
-    recipients,
-    routeMembers: recipients,
-    slot,
-    unblockDir: join(game.busDir, "unblock"),
-  };
-  const collected = await (context.collect ?? defaultCollect(context))(request);
-  return {
-    claudeRoles: [...claudeRoles].sort(),
-    questions: [...memberIds].map(([role, id]) =>
-      questionStatus(role, id, collected.question_state[id]),
+    decisionRecords: Object.fromEntries(
+      targets.flatMap(({ marker, recipient }) => (recipient === null ? [] : [[recipient, marker]])),
     ),
-    workers: [...parentIds].map(([role, id]) =>
-      workerStatus(role, id, collected.worker_health[id]),
+    parents: recipients,
+    recipients,
+    slot,
+  };
+  const collected =
+    recipients.length === 0
+      ? unavailableCollected("recipient_unavailable", request)
+      : await (context.collect ?? defaultCollect(context))(request);
+  return {
+    claudeRoles: roles.filter(({ harness }) => harness === "claude").map(({ role }) => role),
+    questions: targets.map(({ marker, reason, recipient, role }) =>
+      questionStatus(
+        role,
+        recipient,
+        marker,
+        reason,
+        recipient === null ? undefined : collected.question_state[recipient],
+      ),
+    ),
+    registryRevision: registry.revision,
+    workers: targets.map(({ reason, recipient, role }) =>
+      workerStatus(
+        role,
+        recipient,
+        reason,
+        recipient === null ? undefined : collected.worker_health[recipient],
+      ),
     ),
   };
 }

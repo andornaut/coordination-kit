@@ -110,17 +110,11 @@ export type CollectorRecord = Readonly<Record<string, unknown>>;
 
 /** What a snapshot asks the harness collectors for. */
 export interface CollectRequest {
-  /** The bus unblock directory holding recipient decisions. */
-  readonly unblockDir: string;
+  /** Validated local decision markers keyed by the exact native recipient. */
+  readonly decisionRecords: Readonly<Record<string, CollectorRecord | null>>;
   readonly recipients: readonly string[];
   readonly parents: readonly string[];
   readonly slot: number | null;
-  readonly historyCursor: string | null;
-  /**
-   * The active review route's recipient and peers, or null when no active route declares
-   * them. Question and process collection never reaches outside it.
-   */
-  readonly routeMembers?: readonly string[] | null;
 }
 
 /** Snapshot capabilities, keyed by the snapshot record field names. */

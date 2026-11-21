@@ -16,10 +16,9 @@ import {
 } from "../adapters/codex/queue.ts";
 import { connectControl, type RpcClient } from "../adapters/codex/rpc.ts";
 import { selectTarget } from "../adapters/codex/steer.ts";
-import { decisionClear, decisionRecord } from "../adapters/shared/decisions.ts";
+import { decisionClear, decisionDirectory, decisionRecord } from "../adapters/shared/decisions.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
-import { readRoleRoute } from "../adapters/shared/route.ts";
-import { gameLayout, type Layout } from "../layout.ts";
+import type { Layout } from "../layout.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Harness } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
@@ -172,22 +171,6 @@ function codexOutcome(receipt: TransportReceipt): WakeOutcome {
   }
 }
 
-/** The bus `unblock` directory holding a role's local decision markers, or null. */
-function messageGuardDirectory(layout: Layout, role: string): string | null {
-  try {
-    const game = role.split("/")[0]!;
-    if (role.includes("/") && Object.hasOwn(layout.config.games, game)) {
-      return join(gameLayout(layout, game).busDir, "unblock");
-    }
-    const route = readRoleRoute(layout);
-    return route?.state === "active"
-      ? join(gameLayout(layout, route.host).busDir, "unblock")
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 async function codexWake(
   context: WakeContext,
   role: string,
@@ -198,7 +181,7 @@ async function codexWake(
   const { layout } = context;
   const recipient = target.conversation;
   const locallyClear = (): boolean => {
-    const directory = messageGuardDirectory(layout, role);
+    const directory = decisionDirectory(layout, role);
     return (
       directory !== null && sameTarget(layout, role, target) && decisionClear(directory, recipient)
     );
@@ -214,7 +197,7 @@ async function codexWake(
         )),
     guards: {
       beforeAdd: async (client): Promise<QueueClearance> => {
-        const directory = messageGuardDirectory(layout, role);
+        const directory = decisionDirectory(layout, role);
         if (directory === null || !locallyClear()) {
           return { status: "blocked" };
         }

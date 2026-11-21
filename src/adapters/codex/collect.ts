@@ -1,15 +1,11 @@
-// Snapshot collectors over one native connection. History
-// is read first; the question and worker collectors then share a 256-call budget and a
-// deadline reserved five seconds before the connection's own. Every failure is a diagnostic,
-// never clearance.
+// Review question and worker collectors share one native connection, a 256-call budget and
+// a deadline reserved five seconds before the connection's own.
 import { performance } from "node:perf_hooks";
 
-import { decisionRecord } from "../shared/decisions.ts";
 import { isRecord, unicodeDumps } from "../shared/pyjson.ts";
 import type { Collected, CollectRequest } from "../types.ts";
 import { workerHealth } from "./collectors/childHealth.ts";
 import { collectQuestionState } from "./collectors/questionState.ts";
-import { historyRefs } from "./inventory.ts";
 import { NativeTimeout, type RpcClient } from "./rpc.ts";
 
 type Json = Record<string, unknown>;
@@ -97,23 +93,9 @@ function boundQuestions(owner: string, value: Json): void {
 
 async function questionState(
   client: RpcClient,
-  unblockDir: string,
-  members: ReadonlySet<string> | null,
-  requested: readonly string[],
+  decisions: CollectRequest["decisionRecords"],
+  recipients: readonly string[],
 ): Promise<Json> {
-  const outside: Json = {};
-  for (const recipient of requested) {
-    if (members !== null && !members.has(recipient)) {
-      outside[recipient] = questionUnavailable("question_recipient_outside_active_route");
-    }
-  }
-  const recipients = requested.filter((recipient) => !Object.hasOwn(outside, recipient));
-  if (recipients.length === 0) {
-    return outside;
-  }
-  const decisions = Object.fromEntries(
-    recipients.map((recipient) => [recipient, decisionRecord(unblockDir, recipient)]),
-  );
   let collected: Json;
   try {
     collected = await collectQuestionState(client, decisions, recipients);
@@ -134,9 +116,7 @@ async function questionState(
     boundQuestions(recipient, chosen);
     result[recipient] = chosen;
   }
-  return Object.fromEntries(
-    requested.map((recipient) => [recipient, outside[recipient] ?? result[recipient]]),
-  );
+  return result;
 }
 
 /** Collect every snapshot capability over `client`, whose own deadline is `deadline`. */
@@ -146,16 +126,8 @@ export async function collectAll(
   request: CollectRequest,
 ): Promise<Collected> {
   const recipients = [...new Set(request.recipients)];
-  const history: Json = {};
-  for (const recipient of recipients) {
-    // History pages are read one recipient at a time on the one connection.
-    // eslint-disable-next-line no-await-in-loop
-    history[recipient] = await historyRefs(client, recipient, request.historyCursor);
-  }
   const shared = new BudgetClient(client, deadline - RESERVE_MS);
-  // An undeclared scope (undefined) is unrestricted; a declared invalid route (null) allows none.
-  const members = request.routeMembers === undefined ? null : new Set(request.routeMembers ?? []);
-  const questions = await questionState(shared, request.unblockDir, members, recipients);
+  const questions = await questionState(shared, request.decisionRecords, recipients);
   const workers = request.parents.length === 0 ? {} : await workerHealth(shared, request.parents);
   return {
     collection_budget: {
@@ -163,7 +135,7 @@ export async function collectAll(
       max_calls: MAX_COLLECTION_CALLS,
       reason_code: shared.reasonCode,
     },
-    history,
+    history: {},
     question_state: questions,
     worker_health: workers,
   };

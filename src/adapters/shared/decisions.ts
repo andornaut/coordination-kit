@@ -3,7 +3,9 @@
 import { join } from "node:path";
 
 import { readJsonIfExists } from "../../durable.ts";
+import { gameLayout, type Layout } from "../../layout.ts";
 import { CANONICAL_UUID } from "./ids.ts";
+import { readRoleRoute } from "./route.ts";
 
 const FIELDS = [
   "question_turn_id",
@@ -56,4 +58,20 @@ export function decisionRecord(unblockDir: string, recipient: string): DecisionR
 
 export function decisionClear(unblockDir: string, recipient: string): boolean {
   return decisionRecord(unblockDir, recipient)?.state === "clear";
+}
+
+/** The bus `unblock` directory holding a role's local decision markers, or null. */
+export function decisionDirectory(layout: Layout, role: string): string | null {
+  try {
+    const game = role.split("/")[0]!;
+    if (role.includes("/") && Object.hasOwn(layout.config.games, game)) {
+      return join(gameLayout(layout, game).busDir, "unblock");
+    }
+    const route = readRoleRoute(layout);
+    return route?.state === "active"
+      ? join(gameLayout(layout, route.host).busDir, "unblock")
+      : null;
+  } catch {
+    return null;
+  }
 }
