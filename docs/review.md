@@ -132,14 +132,21 @@ check and are counted as unknown. Exceptions, native ones first:
 - `worker-unknown`: a Codex worker parent whose child health could not be read, with its reason;
 - `stalled`: a message still `sent` or `delivered` that was open at the game's previous brief,
   that is, open across two distinct slots;
+- `retention-overdue`: a retained original open across two distinct slots whose declared next
+  boundary is due. The brief reports its recipient, recorded owner, reason and boundary so the
+  recipient can reconcile the original with its owner. Recognized deadlines are a timezone-qualified
+  ISO instant, `Next scheduled review, <instant>`, and `Next scheduled review`, which is due at the
+  first recorded slot after retention. Other text remains valid for dependency or hold boundaries
+  and does not establish a deadline. The recipient retains control of the original and any hold.
 - `unconfirmed`: an imported uncertain delivery the recipient has not closed;
 - `wake-failed` and `wake-ambiguous`: an outstanding wake with that outcome;
 - `wake-guarded`: a wake-pending recipient whose last wake a guard refused.
 
-The first brief of an episode with stalled messages also stores one `review-stuck` message. After
-the commit the review rearms each failed or ambiguous outstanding wake, then wakes the recipient
-and every wake-pending role, with no payload. A secret-shaped brief is stored without question
-titles.
+The first brief of an episode with stalled messages or a newly overdue retained original also stores
+one `review-stuck` message. Later briefs keep the exact overdue details and store a new notice only
+when another original or boundary becomes overdue. After the commit the review rearms each failed
+or ambiguous outstanding wake, then wakes the recipient and every wake-pending role, with no
+payload. A secret-shaped brief omits question titles and retention text.
 
 `coordination-kit --root R review show [--game G] [--slot S]` prints the recorded brief for the
 slot, or the latest one, as one JSON line: `kind` `review-show`, the game, slot, recipient,

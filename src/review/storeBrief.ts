@@ -9,8 +9,8 @@ import type { GameLayout, Layout } from "../layout.ts";
 import { resolveRole } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
-import { DELIVERY_KIT_ACTOR, derivedId, storeNotice } from "../store/notices.ts";
-import { type Json, type JsonObject, StoreError } from "../store/types.ts";
+import { clean, DELIVERY_KIT_ACTOR, derivedId, storeNotice } from "../store/notices.ts";
+import { type Json, type JsonObject, type Retention, StoreError } from "../store/types.ts";
 import {
   pendingWakeRoles,
   rearmWake,
@@ -96,6 +96,7 @@ export interface BriefException {
     | "worker-failed"
     | "worker-unknown"
     | "stalled"
+    | "retention-overdue"
     | "unconfirmed"
     | "wake-failed"
     | "wake-ambiguous"
@@ -104,6 +105,7 @@ export interface BriefException {
   readonly id?: string;
   readonly state?: string;
   readonly detail?: string;
+  readonly retention?: Retention;
   /** A pending question's title, at most 80 characters; left out of a secret-shaped fallback. */
   readonly title?: string;
 }
@@ -204,15 +206,48 @@ function nativeExceptions(
   };
 }
 
+const NEXT_REVIEW = /^next scheduled review$/i;
+const INSTANT =
+  /^(?:next scheduled review,\s*)?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2}))$/i;
+
+function retentionDeadline(retention: Retention): number | null {
+  const instant = INSTANT.exec(retention.nextBoundary.trim())?.[1];
+  if (instant === undefined) {
+    return null;
+  }
+  const parsed = Date.parse(instant);
+  const date = instant.slice(0, 10);
+  return Number.isFinite(parsed) &&
+    new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) === date
+    ? parsed
+    : null;
+}
+
+/** Unqualified text describes an owner action or dependency, so only a declared time can expire. */
+function retentionDue(slot: number, retention: Retention): boolean {
+  const slotMs = slot * 1000;
+  if (!(Date.parse(retention.at) < slotMs)) {
+    return false;
+  }
+  const deadline = retentionDeadline(retention);
+  return deadline === null ? NEXT_REVIEW.test(retention.nextBoundary.trim()) : deadline <= slotMs;
+}
+
+function retentionEpisode(exception: BriefException): string {
+  const retention = exception.retention!;
+  return JSON.stringify([exception.id, retentionDeadline(retention) ?? retention.at]);
+}
+
 /** Counts and exceptions from the store as it is now; the previous brief ages open messages. */
 function survey(
   store: Store,
   previous: BriefRecord | undefined,
   native: NativeSurvey,
+  slot: number,
 ): Omit<BriefRecord, "game" | "slot" | "recipient" | "messageId" | "result"> {
   const rows = store.db
     .prepare(
-      `SELECT id, to_role, state, unconfirmed FROM messages
+      `SELECT id, to_role, state, unconfirmed, retention FROM messages
        WHERE state IN ('sent', 'delivered', 'retained') ORDER BY to_role, sent_seq`,
     )
     .all() as Row[];
@@ -232,8 +267,15 @@ function survey(
     if (Number(row.unconfirmed) === 1) {
       unconfirmed += 1;
       exceptions.push({ id, kind: "unconfirmed", role, state });
-    } else if (state !== "retained" && before.has(id)) {
-      exceptions.push({ id, kind: "stalled", role, state });
+    } else if (before.has(id)) {
+      if (state !== "retained") {
+        exceptions.push({ id, kind: "stalled", role, state });
+      } else if (typeof row.retention === "string") {
+        const retention = JSON.parse(row.retention) as Retention;
+        if (retentionDue(slot, retention)) {
+          exceptions.push({ id, kind: "retention-overdue", retention, role, state });
+        }
+      }
     }
   }
   const wakes = { ambiguous: 0, failed: 0, guarded: 0, outstanding: 0 };
@@ -312,6 +354,16 @@ function exceptionLine(exception: BriefException, titles: boolean): string {
       );
     case "stalled":
       return `- stalled ${exception.id} to ${exception.role} (${exception.state}, open across two slots)`;
+    case "retention-overdue": {
+      const retention = exception.retention!;
+      const details = titles
+        ? `; ${clean(retention.reason)}; due ${clean(retention.nextBoundary)}`
+        : "";
+      return (
+        `- retention-overdue ${exception.id} to ${exception.role} (owner ${retention.owner})` +
+        `${details}; recipient reconciles the original with its owner`
+      );
+    }
     case "unconfirmed":
       return `- unconfirmed ${exception.id} to ${exception.role}: the recipient confirms or closes it`;
     default:
@@ -421,7 +473,7 @@ export async function storeReview(
         return { fresh: false, result: recorded.result };
       }
       const previous = previousBrief(store, game.id, slot);
-      const surveyed = survey(store, previous, native);
+      const surveyed = survey(store, previous, native, slot);
       const messageId = derivedId("review-brief", game.id, slot);
       storeNotice(store, {
         body: composeBrief(game, slot, surveyed),
@@ -429,18 +481,30 @@ export async function storeReview(
         id: messageId,
         to: recipient,
       });
-      const stalled = surveyed.exceptions.filter((item) => item.kind === "stalled").length;
-      const wasStalled = (previous?.exceptions ?? []).some((item) => item.kind === "stalled");
-      if (stalled > 0 && !wasStalled) {
+      const priorExceptions = previous?.exceptions ?? [];
+      const stalled = priorExceptions.some((item) => item.kind === "stalled")
+        ? 0
+        : surveyed.exceptions.filter((item) => item.kind === "stalled").length;
+      const priorRetentions = new Set(
+        priorExceptions.filter((item) => item.kind === "retention-overdue").map(retentionEpisode),
+      );
+      const overdue = surveyed.exceptions.filter(
+        (item) => item.kind === "retention-overdue" && !priorRetentions.has(retentionEpisode(item)),
+      ).length;
+      if (stalled > 0 || overdue > 0) {
+        const summary = [
+          ...(stalled > 0 ? [`${stalled} messages unhandled across two distinct slots`] : []),
+          ...(overdue > 0 ? [`${overdue} retained messages with a passed review boundary`] : []),
+        ].join(", ");
         storeNotice(
           store,
           coordinationNotice(recipient, game, game.name, {
             key: `${recipient}-${slot}`,
             kind: "review-stuck",
             message:
-              `Review needs owner reconciliation: ${stalled} messages unhandled across two ` +
-              `distinct slots; run coordination-kit review show --game ${game.id} --slot ` +
-              `${new Date(slot * 1000).toISOString()} and close or retain each.`,
+              `Review needs owner reconciliation: ${summary}; run coordination-kit review show ` +
+              `--game ${game.id} --slot ${new Date(slot * 1000).toISOString()} ` +
+              "and reconcile each original with its recipient.",
           }),
         );
       }

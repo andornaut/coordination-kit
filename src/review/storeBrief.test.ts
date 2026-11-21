@@ -8,6 +8,7 @@ import type { Collected, CollectRequest } from "../adapters/types.ts";
 import { EXIT_OK, main } from "../cli.ts";
 import { gameLayout, type Layout } from "../layout.ts";
 import { Store } from "../store/db.ts";
+import { messageStatus, retainMessage } from "../store/messages.ts";
 import { derivedId } from "../store/notices.ts";
 import { storeSend } from "../store/service.ts";
 import { ART, COORDINATOR, fakeCodex, GAME, storeFixture, TECH } from "../store/testStore.ts";
@@ -162,6 +163,83 @@ describe("stored review brief", () => {
     out = "";
     expect(await main(io, ["--root", root, "review", "show"])).toBe(EXIT_OK);
     expect(JSON.parse(out)).toMatchObject({ slot: "2026-11-18T17:30:00.000Z" });
+  });
+
+  it("reports a retained original once its declared boundary is due across two slots", async () => {
+    const { base, layout, root } = await storeModeFixture();
+    const game = gameLayout(layout, GAME);
+    await send(layout, 5);
+    const held = Store.forLayout(layout, { now: () => "2026-11-18T15:00:00.000Z" });
+    const actor = { nativeId: TECH, role: TECH_ROLE };
+    const owner = ART_ROLE;
+    const reason = "Waiting for the checked capture";
+    const nextBoundary = "Next scheduled review, 2026-11-18T11:30:00-05:00";
+    try {
+      retainMessage(held, actor, uuid(1), { nextBoundary, owner, reason });
+      retainMessage(held, actor, uuid(2), {
+        nextBoundary: "Until the user clears the hold",
+        owner,
+        reason,
+      });
+      retainMessage(held, actor, uuid(3), {
+        nextBoundary: "2026-11-18T18:30:00Z",
+        owner,
+        reason,
+      });
+      retainMessage(held, actor, uuid(4), { nextBoundary: "Next scheduled review", owner, reason });
+      retainMessage(held, actor, uuid(5), {
+        nextBoundary: "2026-09-31T16:30:00Z",
+        owner,
+        reason,
+      });
+    } finally {
+      held.close();
+    }
+    await deliverReview(layout, game, SLOT, undefined, { env: {} });
+    expect(brief(layout, SLOT)).not.toContain("retention-overdue");
+    await deliverReview(layout, game, NEXT, undefined, { env: {} });
+    await deliverReview(layout, game, LATER, undefined, { env: {} });
+
+    let out = "";
+    const io = { cwd: base, env: {}, err: () => {}, out: (text: string) => (out += text) };
+    expect(
+      await main(io, [
+        "--root",
+        root,
+        "review",
+        "show",
+        "--game",
+        GAME,
+        "--slot",
+        "2026-11-18T16:30:00Z",
+      ]),
+    ).toBe(EXIT_OK);
+    const shown = JSON.parse(out) as { exceptions: { kind: string }[] };
+    expect(shown.exceptions.filter((exception) => exception.kind === "retention-overdue")).toEqual([
+      {
+        id: uuid(1),
+        kind: "retention-overdue",
+        retention: { at: "2026-11-18T15:00:00.000Z", nextBoundary, owner, reason },
+        role: TECH_ROLE,
+        state: "retained",
+      },
+      expect.objectContaining({ id: uuid(4) }),
+    ]);
+    expect(brief(layout, NEXT)).toContain("recipient reconciles the original with its owner");
+    const notices = briefs(layout).filter((message) =>
+      message.body.includes("retained messages with a passed review boundary"),
+    );
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.body).toContain("2 retained messages with a passed review boundary");
+    const store = Store.forLayout(layout);
+    try {
+      expect(messageStatus(store, uuid(1))).toMatchObject({
+        retention: { nextBoundary, owner, reason },
+        state: "retained",
+      });
+    } finally {
+      store.close();
+    }
   });
 
   it("skips a game that does not host the route without storing anything", async () => {
