@@ -36,3 +36,4 @@ Reference: [review](../review.md#scheduled-review-seam), [libraries](../librarie
 | ck-0032 | Simplify the command and operator workflows             | [ck-0032.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0032.md) |
 | ck-0033 | Keep one outstanding notice per active recipient        | [ck-0033.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0033.md) |
 | ck-0034 | Accept the legacy reports project field as optional     | [ck-0034.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0034.md) |
+| ck-0035 | Plan and qualify filesystem history compaction         | [ck-0035.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0035.md) |
