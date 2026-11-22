@@ -207,7 +207,8 @@ export const SPECS = {
     forms: [[]],
     group: "store",
     options: STORE_COMPACTION_PLAN_OPTIONS,
-    summary: "report filesystem history windows, measured bytes and protected records without writing",
+    summary:
+      "report filesystem history windows, measured bytes and protected records without writing",
   },
   "store retire": {
     forms: [["dry-run"], ["apply", "native-id?", "worker?"]],
