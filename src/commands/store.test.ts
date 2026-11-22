@@ -4,10 +4,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
-import { COORDINATOR, storeFixture, TECH } from "../store/testStore.ts";
+import { ART, COORDINATOR, GAMEPLAY, storeFixture, TECH } from "../store/testStore.ts";
 
 const ID = "00000000-0000-4000-8000-000000000301";
 const TECH_ROLE = "archies-dog-walks/tech";
+const ART_ROLE = "archies-dog-walks/art";
 
 function cli(root: string, cwd: string, env: NodeJS.ProcessEnv) {
   return async (...argv: string[]) => {
@@ -162,6 +163,82 @@ describe("store message commands", () => {
     });
   });
 
+  it("reads an exact body only as its sender, recipient or coordinator without recording delivery", async () => {
+    const { base, root } = storeFixture();
+    const tech = cli(root, base, { CLAUDE_CODE_SESSION_ID: TECH });
+    const art = cli(root, base, { CODEX_THREAD_ID: ART });
+    const coordinator = cli(root, base, { CLAUDE_CODE_SESSION_ID: COORDINATOR });
+    const gameplay = cli(root, base, { CLAUDE_CODE_SESSION_ID: GAMEPLAY });
+    const reader = cli(root, base, {});
+    const original = "Exact body.\n\n";
+    expect((await tech("msg", "send", "--to", ART_ROLE, "--body", original, "--id", ID)).code).toBe(
+      EXIT_OK,
+    );
+    for (const run of [tech, art, coordinator]) {
+      // eslint-disable-next-line no-await-in-loop
+      expect(await run("msg", "status", ID, "--include-body")).toMatchObject({
+        code: EXIT_OK,
+        json: { message: { body: original, deliveredAt: null, id: ID, state: "sent" }, schema: 1 },
+      });
+    }
+    expect(await gameplay("msg", "status", ID, "--include-body")).toMatchObject({
+      code: EXIT_INVALID,
+      err: "coordination-kit: message-not-visible\n",
+      json: null,
+    });
+    expect(await reader("msg", "status", ID, "--include-body")).toMatchObject({
+      code: EXIT_INVALID,
+      err: "coordination-kit: caller-unidentified\n",
+      json: null,
+    });
+    expect(await reader("msg", "status", ID, "--include-body", "--native-id", TECH)).toMatchObject({
+      code: EXIT_OK,
+      json: { message: { body: original } },
+    });
+    expect(await art("msg", "status", ID.slice(0, -1), "--include-body")).toMatchObject({
+      code: EXIT_INVALID,
+      err: "coordination-kit: missing\n",
+      json: null,
+    });
+    expect((await reader("msg", "status", ID)).json?.message).not.toHaveProperty("body");
+    expect((await reader("msg", "history")).json?.events).toEqual([
+      expect.objectContaining({ kind: "msg.sent" }),
+    ]);
+  });
+
+  it("retains a message with one explicit timed, scheduled, or dependency boundary", async () => {
+    const { base, root } = storeFixture();
+    const coordinator = cli(root, base, { CLAUDE_CODE_SESSION_ID: COORDINATOR });
+    const tech = cli(root, base, { CLAUDE_CODE_SESSION_ID: TECH });
+    await coordinator("msg", "send", "--to", TECH_ROLE, "--body", "Original.", "--id", ID);
+    const retain = (...options: string[]) =>
+      tech("msg", "retain", ID, "--reason", "Waiting", ...options);
+    expect(await retain("--until", "2026-11-22T13:15-05:00")).toMatchObject({
+      code: EXIT_OK,
+      json: { message: { retention: { nextBoundary: "2026-11-22T18:15:00.000Z" } } },
+    });
+    expect(await retain("--until", "2026-11-22T18:15Z")).toMatchObject({
+      code: EXIT_OK,
+      json: { duplicate: true },
+    });
+    expect(await retain("--next-review")).toMatchObject({
+      code: EXIT_OK,
+      json: { message: { retention: { nextBoundary: "Next scheduled review" } } },
+    });
+    expect(await retain("--next-boundary", "  After the checked capture  ")).toMatchObject({
+      code: EXIT_OK,
+      json: { message: { retention: { nextBoundary: "  After the checked capture  " } } },
+    });
+    expect(await retain("--until", "2026-11-22T18:15")).toMatchObject({ code: EXIT_USAGE });
+    expect(await retain("--until", "2026-09-31T18:15Z")).toMatchObject({ code: EXIT_USAGE });
+    expect(await retain("--next-review", "--next-boundary", "Waiting")).toMatchObject({
+      code: EXIT_USAGE,
+    });
+    expect(await retain("--next-review", "--until", "2026-11-22T18:15Z")).toMatchObject({
+      code: EXIT_USAGE,
+    });
+  });
+
   it("rejects malformed options as usage errors", async () => {
     const { base, root } = storeFixture();
     const run = cli(root, base, { CLAUDE_CODE_SESSION_ID: COORDINATOR });
@@ -175,6 +252,7 @@ describe("store message commands", () => {
       ["msg", "done"],
       ["msg", "done", ID, ID],
       ["msg", "retain", ID, "--reason", "r"],
+      ["msg", "status", ID, "--native-id", COORDINATOR],
       ["msg", "history", "--since", "yesterday"],
       ["msg", "history", "--limit", "0"],
       ["store", "import", "--dry-run"],
@@ -193,6 +271,9 @@ describe("store message commands", () => {
       "msg done ID [--work WORK_ID] [--superseded-by ID] [--evidence REF ...]",
     );
     expect(help.out).toContain("msg retain ID --reason TEXT --next-boundary TEXT [--owner ROLE]");
+    expect(help.out).toContain("msg retain ID --reason TEXT --until ISO_TIMESTAMP [--owner ROLE]");
+    expect(help.out).toContain("msg retain ID --reason TEXT --next-review [--owner ROLE]");
+    expect(help.out).toContain("msg status ID --include-body");
     expect(help.out).toContain(
       "msg send --to ROLE --body-file FILE [--intent queue|unblock] [--id UUID] [--link KIND=REF ...]",
     );

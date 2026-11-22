@@ -10,6 +10,7 @@ import { resolveRole } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
 import { clean, DELIVERY_KIT_ACTOR, derivedId, storeNotice } from "../store/notices.ts";
+import { NEXT_REVIEW_BOUNDARY, retentionInstant } from "../store/retention.ts";
 import { type Json, type JsonObject, type Retention, StoreError } from "../store/types.ts";
 import {
   pendingWakeRoles,
@@ -105,6 +106,9 @@ export interface BriefException {
   readonly state?: string;
   readonly detail?: string;
   readonly retention?: Retention;
+  readonly newlyStalled?: true;
+  /** Automatic review messages remain visible without triggering new review health messages. */
+  readonly reviewGenerated?: true;
   /** A pending question's title, at most 80 characters; left out of a secret-shaped fallback. */
   readonly title?: string;
 }
@@ -210,21 +214,8 @@ function nativeExceptions(
   };
 }
 
-const NEXT_REVIEW = /^next scheduled review$/i;
-const INSTANT =
-  /^(?:next scheduled review,\s*)?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2}))$/i;
-
 function retentionDeadline(retention: Retention): number | null {
-  const instant = INSTANT.exec(retention.nextBoundary.trim())?.[1];
-  if (instant === undefined) {
-    return null;
-  }
-  const parsed = Date.parse(instant);
-  const date = instant.slice(0, 10);
-  return Number.isFinite(parsed) &&
-    new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) === date
-    ? parsed
-    : null;
+  return retentionInstant(retention.nextBoundary.trim().replace(/^next scheduled review,\s*/i, ""));
 }
 
 /** Unqualified text describes an owner action or dependency, so only a declared time can expire. */
@@ -234,7 +225,9 @@ function retentionDue(slot: number, retention: Retention): boolean {
     return false;
   }
   const deadline = retentionDeadline(retention);
-  return deadline === null ? NEXT_REVIEW.test(retention.nextBoundary.trim()) : deadline <= slotMs;
+  return deadline === null
+    ? retention.nextBoundary.trim().toLowerCase() === NEXT_REVIEW_BOUNDARY.toLowerCase()
+    : deadline <= slotMs;
 }
 
 function retentionEpisode(exception: BriefException): string {
@@ -251,16 +244,26 @@ function survey(
 ): Omit<BriefRecord, "game" | "slot" | "recipient" | "messageId" | "result"> {
   const rows = store.db
     .prepare(
-      `SELECT id, to_role, state, unconfirmed, retention FROM messages
-       WHERE state IN ('sent', 'delivered', 'retained') ORDER BY to_role, sent_seq`,
+      `SELECT id, to_role, state, unconfirmed, retention,
+         from_role = 'delivery-kit' AND (
+           id IN (SELECT message_id FROM review_briefs) OR EXISTS (
+             SELECT 1 FROM json_each(links) AS link
+             WHERE json_extract(link.value, '$.kind') = 'event-kind'
+               AND json_extract(link.value, '$.ref') = 'review-stuck'
+           )
+         ) AS review_generated
+       FROM messages WHERE state IN ('sent', 'delivered', 'retained') ORDER BY to_role, sent_seq`,
     )
     .all() as Row[];
   const before = new Set(previous?.open ?? []);
+  const stalledBefore = new Set(
+    previous?.exceptions.filter((exception) => exception.kind === "stalled").map(({ id }) => id),
+  );
   const byRole: Record<string, Record<string, number>> = {};
   const states: Record<string, number> = { delivered: 0, retained: 0, sent: 0 };
   const checked = nativeExceptions(native, previous);
   const decisions = recordedDecisions(store);
-  const exceptions: BriefException[] = [
+  const nativeAndDecisionExceptions: BriefException[] = [
     ...decisions.pending.map(({ id, role }): BriefException => ({
       id,
       kind: "store-question-pending",
@@ -268,6 +271,8 @@ function survey(
     })),
     ...checked.exceptions,
   ];
+  const newStalls: BriefException[] = [];
+  const exceptions: BriefException[] = [];
   let unconfirmed = 0;
   for (const row of rows) {
     const role = row.to_role as string;
@@ -280,12 +285,22 @@ function survey(
       unconfirmed += 1;
       exceptions.push({ id, kind: "unconfirmed", role, state });
     } else if (before.has(id)) {
+      const info = {
+        id,
+        role,
+        state,
+        ...(Number(row.review_generated) === 1 ? { reviewGenerated: true as const } : {}),
+      };
       if (state !== "retained") {
-        exceptions.push({ id, kind: "stalled", role, state });
+        if (stalledBefore.has(id)) {
+          exceptions.push({ ...info, kind: "stalled" });
+        } else {
+          newStalls.push({ ...info, kind: "stalled", newlyStalled: true });
+        }
       } else if (typeof row.retention === "string") {
         const retention = JSON.parse(row.retention) as Retention;
         if (retentionDue(slot, retention)) {
-          exceptions.push({ id, kind: "retention-overdue", retention, role, state });
+          exceptions.push({ ...info, kind: "retention-overdue", retention });
         }
       }
     }
@@ -348,7 +363,7 @@ function survey(
       wakes,
     },
     decisions,
-    exceptions,
+    exceptions: [...nativeAndDecisionExceptions, ...newStalls, ...exceptions],
     native,
     open: rows.map((row) => row.id as string),
     reportedWorkerFailures: checked.reported,
@@ -372,7 +387,10 @@ function exceptionLine(exception: BriefException, titles: boolean): string {
         `${titles && exception.title !== undefined ? `"${exception.title}", ` : ""}${exception.detail}`
       );
     case "stalled":
-      return `- stalled ${exception.id} to ${exception.role} (${exception.state}, open across two slots)`;
+      return (
+        `- stalled ${exception.id} to ${exception.role} (${exception.state}, ` +
+        `${exception.newlyStalled === true ? "newly stalled" : "continuing"}, open across two slots)`
+      );
     case "retention-overdue": {
       const retention = exception.retention!;
       const details = titles
@@ -498,18 +516,25 @@ export async function storeReview(
         to: recipient,
       });
       const priorExceptions = previous?.exceptions ?? [];
-      const stalled = priorExceptions.some((item) => item.kind === "stalled")
-        ? 0
-        : surveyed.exceptions.filter((item) => item.kind === "stalled").length;
+      const stalled = surveyed.exceptions.filter(
+        (item) => item.newlyStalled === true && item.reviewGenerated !== true,
+      ).length;
       const priorRetentions = new Set(
         priorExceptions.filter((item) => item.kind === "retention-overdue").map(retentionEpisode),
       );
       const overdue = surveyed.exceptions.filter(
-        (item) => item.kind === "retention-overdue" && !priorRetentions.has(retentionEpisode(item)),
+        (item) =>
+          item.kind === "retention-overdue" &&
+          item.reviewGenerated !== true &&
+          !priorRetentions.has(retentionEpisode(item)),
       ).length;
       if (stalled > 0 || overdue > 0) {
         const summary = [
-          ...(stalled > 0 ? [`${stalled} messages unhandled across two distinct slots`] : []),
+          ...(stalled > 0
+            ? [
+                `${stalled} ${stalled === 1 ? "message" : "messages"} unhandled across two distinct slots`,
+              ]
+            : []),
           ...(overdue > 0 ? [`${overdue} retained messages with a passed review boundary`] : []),
         ].join(", ");
         storeNotice(

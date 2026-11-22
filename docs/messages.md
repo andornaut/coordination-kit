@@ -12,10 +12,13 @@ every writing verb.
 
 ```bash
 coordination-kit msg send --to archies-dog-walks/tech --body-file note.md --link work=ck-0017
+coordination-kit msg status 00000000-0000-4000-8000-000000000001 --include-body
 coordination-kit inbox --include-body
 coordination-kit msg done 00000000-0000-4000-8000-000000000001 --work ck-0017
 coordination-kit msg retain 00000000-0000-4000-8000-000000000002 --reason "waits on art" \
-  --next-boundary "next scheduled review"
+  --next-review
+coordination-kit msg retain 00000000-0000-4000-8000-000000000003 --reason "check after integration" \
+  --until 2026-11-22T18:30:00Z
 ```
 
 - States are `sent`, `delivered` (the recipient's own `inbox` read), then `handled`, `superseded`
@@ -25,8 +28,12 @@ coordination-kit msg retain 00000000-0000-4000-8000-000000000002 --reason "waits
 - Native session messages and channel notifications are wakes only; `msg send` is the one payload
   path between roles.
 - Output is one JSON object, identical for Claude and Codex callers. `msg status ID` and
-  `msg history` read without writing and print no body. `msg history --include-body` identifies
-  the caller through the registry fence and prints the bodies of messages it sent or received, or
-  every body to `game-coordinator`; other messages stay metadata.
+  `msg history` show metadata by default. `msg status ID --include-body` reads one exact original
+  without recording delivery. The registry fence permits its sender, recipient and
+  `game-coordinator` to see the body. `msg history --include-body` applies the same visibility
+  rule to each body's events.
+- `msg retain` takes exactly one boundary. Use `--until` with a timezone-qualified ISO instant,
+  `--next-review` for the first scheduled review after retention, or `--next-boundary TEXT` to
+  keep a dependency or hold description. Existing boundary text remains valid.
 
 Schema, wakes and the writer fence are in [the coordination store](store.md).

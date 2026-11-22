@@ -11,6 +11,7 @@ import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.
 import { loadLayout } from "../layout.ts";
 import { systemGit } from "../status/git.ts";
 import type { CallerOptions } from "../store/identity.ts";
+import { NEXT_REVIEW_BOUNDARY, retentionInstant } from "../store/retention.ts";
 import { storeRetire } from "../store/retire.ts";
 import {
   storeDone,
@@ -52,11 +53,16 @@ export const MSG_DONE_OPTIONS = {
 export const MSG_RETAIN_OPTIONS = {
   ...CALLER,
   "next-boundary": { type: "string" },
+  "next-review": { type: "boolean" },
   owner: { type: "string" },
   reason: { type: "string" },
+  until: { type: "string" },
 } as const;
 
-export const MSG_STATUS_OPTIONS = {} as const;
+export const MSG_STATUS_OPTIONS = {
+  ...CALLER,
+  "include-body": { type: "boolean" },
+} as const;
 
 export const MSG_HISTORY_OPTIONS = {
   ...CALLER,
@@ -282,8 +288,19 @@ export const msgRetain: Handler = (io, root, args) =>
     args,
     (context, values, [id]) => {
       const owner = text(values, "owner");
+      const boundary = text(values, "next-boundary");
+      const until = text(values, "until");
+      const nextReview = values["next-review"] === true;
+      if ([boundary !== undefined, until !== undefined, nextReview].filter(Boolean).length !== 1) {
+        throw new Usage();
+      }
+      const deadline = until === undefined ? null : retentionInstant(until);
+      if (until !== undefined && deadline === null) {
+        throw new Usage();
+      }
       return storeRetain(context, callerOf(values), id!, {
-        nextBoundary: required(values, "next-boundary"),
+        nextBoundary:
+          boundary ?? (deadline === null ? NEXT_REVIEW_BOUNDARY : new Date(deadline).toISOString()),
         reason: required(values, "reason"),
         ...(owner === undefined ? {} : { owner }),
       });
@@ -298,7 +315,13 @@ export const msgStatus: Handler = (io, root, args) =>
     root,
     "msg status",
     args,
-    (context, _values, [id]) => storeStatus(context, id!),
+    (context, values, [id]) => {
+      const includeBody = values["include-body"] === true;
+      if (!includeBody && (values["native-id"] !== undefined || values.worker !== undefined)) {
+        throw new Usage();
+      }
+      return storeStatus(context, id!, includeBody ? callerOf(values) : undefined);
+    },
     MSG_STATUS_OPTIONS,
     1,
   );

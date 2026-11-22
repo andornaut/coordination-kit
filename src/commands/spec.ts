@@ -255,10 +255,15 @@ export const SPECS = {
       "read message events in order; bodies only with --include-body, to their sender, recipient or game-coordinator",
   },
   "msg retain": {
-    forms: [["ID", "reason", "next-boundary", "owner?", "native-id?", "worker?"]],
+    forms: [
+      ["ID", "reason", "next-boundary", "owner?", "native-id?", "worker?"],
+      ["ID", "reason", "until", "owner?", "native-id?", "worker?"],
+      ["ID", "reason", "next-review", "owner?", "native-id?", "worker?"],
+    ],
     group: "msg",
     options: MSG_RETAIN_OPTIONS,
     summary: "retain your own open message with an owner, reason and next review boundary",
+    values: { until: "ISO_TIMESTAMP" },
   },
   "msg send": {
     forms: [
@@ -271,10 +276,11 @@ export const SPECS = {
     values: { id: "UUID" },
   },
   "msg status": {
-    forms: [["ID"]],
+    forms: [["ID"], ["ID", "include-body", "native-id?", "worker?"]],
     group: "msg",
     options: MSG_STATUS_OPTIONS,
-    summary: "read one store message's metadata",
+    summary:
+      "read exact message metadata, or its body as the sender, recipient or game-coordinator",
   },
   "question answer": {
     forms: [["id", "work", "text", "by?", "supersedes?", "native-id?", "worker?"]],

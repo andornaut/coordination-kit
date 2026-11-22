@@ -68,7 +68,7 @@ function rowView(row: Row, includeBody: boolean): MessageView {
   };
 }
 
-function messageRow(store: Store, id: string): Row | undefined {
+function messageRow(store: Pick<Store, "db">, id: string): Row | undefined {
   return store.db.prepare("SELECT * FROM messages WHERE id = ?").get(id) as Row | undefined;
 }
 
@@ -312,11 +312,24 @@ export function retainMessage(
 }
 
 /** One message's metadata, without its body unless asked. */
-export function messageStatus(store: Store, id: string, includeBody = false): MessageView {
+export function messageStatus(
+  store: Pick<Store, "db">,
+  id: string,
+  includeBody = false,
+): MessageView {
   ensure(MESSAGE_ID.test(id), "invalid-id");
   const row = messageRow(store, id);
   ensure(row !== undefined, "missing");
   return rowView(row, includeBody);
+}
+
+/** Read one exact original only when the caller's role may see its body. */
+export function messageWithBody(store: Pick<Store, "db">, viewer: string, id: string): MessageView {
+  ensure(MESSAGE_ID.test(id), "invalid-id");
+  const row = messageRow(store, id);
+  ensure(row !== undefined, "missing");
+  ensure(bodyVisibleTo(viewer, row.from_role, row.to_role), "message-not-visible");
+  return rowView(row, true);
 }
 
 /** Messages in one recipient's inbox in the given states, oldest first. A review seam read. */
@@ -354,6 +367,10 @@ export interface HistoryEntry {
 /** The role that may read every message body in history, beside each sender and recipient. */
 const BODY_READER = "game-coordinator";
 
+function bodyVisibleTo(viewer: string | null, from: unknown, to: unknown): boolean {
+  return viewer !== null && (viewer === BODY_READER || viewer === from || viewer === to);
+}
+
 /**
  * Senders and recipients appear by role. A body appears only to a `viewer` that is the message's
  * sender, its recipient or `game-coordinator`; everyone else, and every read without a viewer,
@@ -365,10 +382,7 @@ function historyDetail(
 ): JsonObject {
   const { payload } = event;
   if (event.kind === "msg.sent" || event.kind === "msg.imported") {
-    if (
-      viewer !== null &&
-      (viewer === BODY_READER || viewer === payload.from || viewer === payload.to)
-    ) {
+    if (bodyVisibleTo(viewer, payload.from, payload.to)) {
       return payload;
     }
     const rest: Record<string, Json> = { ...payload };

@@ -242,6 +242,29 @@ describe("stored review brief", () => {
     }
   });
 
+  it("reports a newly stalled ID while an earlier original remains stalled", async () => {
+    const { layout } = await storeModeFixture();
+    const game = gameLayout(layout, GAME);
+    await send(layout, 1);
+    await deliverReview(layout, game, SLOT, undefined, { env: {} });
+    await send(layout, 2);
+    await deliverReview(layout, game, NEXT, undefined, { env: {} });
+    await deliverReview(layout, game, LATER, undefined, { env: {} });
+
+    const last = brief(layout, LATER);
+    expect(last).toContain(`- stalled ${uuid(1)} to ${TECH_ROLE} (sent, continuing,`);
+    expect(last).toContain(`- stalled ${uuid(2)} to ${TECH_ROLE} (sent, newly stalled,`);
+    expect(last.indexOf(uuid(2))).toBeLessThan(last.indexOf(uuid(1)));
+    const notices = briefs(layout).filter((message) =>
+      message.body.includes("unhandled across two distinct slots"),
+    );
+    expect(notices).toHaveLength(2);
+    expect(notices.map(({ body }) => body)).toEqual([
+      expect.stringContaining("1 message unhandled"),
+      expect.stringContaining("1 message unhandled"),
+    ]);
+  });
+
   it("skips a game that does not host the route without storing anything", async () => {
     const { layout } = await storeModeFixture();
     const other = gameLayout(layout, "chibis-way-home");

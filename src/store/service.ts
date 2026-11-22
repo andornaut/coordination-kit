@@ -3,6 +3,7 @@
 // var/registry.json; nothing is cached across calls.
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 
 import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import type { Layout } from "../layout.ts";
@@ -17,8 +18,10 @@ import {
   type ExportResult,
   exportSince,
   type HistoryEntry,
+  MESSAGE_ID,
   messageHistory,
   messageStatus,
+  messageWithBody,
   readInbox,
   retainMessage,
   sendMessage,
@@ -201,8 +204,24 @@ export async function storeRetain(
 export async function storeStatus(
   context: StoreServiceContext,
   id: string,
+  bodyCaller?: CallerOptions,
 ): Promise<{ readonly schema: 1; readonly message: MessageView }> {
-  return withStore(context, (store) => ({ message: messageStatus(store, id), schema: 1 as const }));
+  const viewer = bodyCaller === undefined ? undefined : caller(context, bodyCaller).role;
+  if (!MESSAGE_ID.test(id)) {
+    throw new StoreError("invalid-id");
+  }
+  const path = storePath(context.layout);
+  if (!existsSync(path)) {
+    throw new StoreError("missing");
+  }
+  const db = new DatabaseSync(path, { readOnly: true, timeout: 5000 });
+  try {
+    const message =
+      viewer === undefined ? messageStatus({ db }, id) : messageWithBody({ db }, viewer, id);
+    return { message, schema: 1 };
+  } finally {
+    db.close();
+  }
 }
 
 /**

@@ -137,20 +137,22 @@ details.
   game;
 - `worker-unknown`: a Codex worker parent whose child health could not be read, with its reason;
 - `stalled`: a message still `sent` or `delivered` that was open at the game's previous brief,
-  that is, open across two distinct slots;
+  that is, open across two distinct slots. Each exact ID is compared with the previous brief's
+  stalled IDs. New stalls appear first with `newlyStalled: true` in the detailed record.
 - `retention-overdue`: a retained original open across two distinct slots whose declared next
   boundary is due. The brief reports its recipient, recorded owner, reason and boundary so the
   recipient can reconcile the original with its owner. Recognized deadlines are a timezone-qualified
   ISO instant, `Next scheduled review, <instant>`, and `Next scheduled review`, which is due at the
-  first recorded slot after retention. Other text remains valid for dependency or hold boundaries
-  and does not establish a deadline. The recipient retains control of the original and any hold.
+  first recorded slot after retention. `msg retain --until ISO_TIMESTAMP` and
+  `msg retain --next-review` record these boundaries explicitly. Other text remains valid for
+  dependencies and holds. The recipient retains control of the original and any hold.
 - `unconfirmed`: an imported uncertain delivery the recipient has not closed;
 - `wake-failed` and `wake-ambiguous`: an outstanding wake with that outcome;
 - `wake-guarded`: a wake-pending recipient whose last wake a guard refused.
 
-The first brief of an episode with stalled messages or a newly overdue retained original also stores
-one `review-stuck` message. Later briefs keep the exact overdue details and store a new notice only
-when another original or boundary becomes overdue. After the commit the review rearms each failed
+The brief stores one `review-stuck` message for newly stalled IDs or newly overdue retention
+boundaries. Continuing cases stay visible, and the scheduled brief and its own health messages
+cannot generate another health message. After the commit the review rearms each failed
 or ambiguous outstanding wake, then wakes the recipient and every wake-pending role, with no
 payload. A secret-shaped brief omits question titles and retention text.
 
