@@ -161,7 +161,7 @@ function answeredProven(recipient: string, question: Json): boolean {
   );
 }
 
-const NO_PROMPT_VISIBILITY = "exact_unresolved_request_unavailable";
+export const NO_PROMPT_VISIBILITY = "exact_unresolved_request_unavailable";
 
 function questionStatus(
   role: string,

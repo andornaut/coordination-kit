@@ -106,6 +106,8 @@ host, a held route, an invalid route and an unregistered recipient give the same
 A slot already recorded returns its result at once. Otherwise, before any store write, the review
 surveys every registered role under one registry revision. It uses one read-only Codex control
 connection (`CODEX_CONTROL_SOCKET`, else the managed socket) and a 256-call budget and deadline.
+When there are worker parents, the question phase leaves at least 96 calls and eight seconds
+of the collection budget for worker evidence. A question timeout ends the question phase.
 For each eligible role it checks the exact bound recipient's question history and verifies
 worker lineage under that role's native parent. Held, unsupported, unbound and unreadable roles
 retain an explicit coverage reason. Decision-marker lookup uses the recipient's game bus, or the
@@ -114,7 +116,13 @@ review host bus for shared roles, through the same lookup as the wake guard.
 The review records store decisions and pending store questions separately from local decision
 markers, native history and current prompt visibility. The native collector can verify an exact
 historical question or answer reference. Current prompt visibility remains unknown without an
-exact live capability. The wake guard continues to require its own current clearance.
+exact live capability. The brief counts the shared visibility limitation once; the exact
+per-role reasons and history remain in `review show`. The wake guard continues to require
+its own current clearance.
+
+The review reads ready handoffs from existing store work records. Each ready item identifies its
+recorded owner and exact linked parent, including a parent whose work record is still unavailable.
+Blocked and finished work do not appear as ready handoffs.
 
 The review composes the brief and stores it as one message from `delivery-kit` to the route
 recipient, in one transaction with a `review.brief` record of the slot. The message ID
@@ -125,7 +133,7 @@ count and the exception count.
 The brief is at most one page, 60 lines and 4096 bytes: open message counts by state and by
 recipient, unconfirmed messages, outstanding, failed, ambiguous and guarded wakes, runner events
 and COMPLETE records since the game's previous brief, store decisions, native prompt and history
-coverage, and worker coverage. Exceptions fit in the remaining space. `review show` has the full
+coverage, worker coverage and ready work handoffs. Exceptions fit in the remaining space. `review show` has the full
 details.
 
 - `store-question-pending`: a question still pending in the store, with its exact ID and owner;
@@ -133,6 +141,7 @@ details.
   with its title (at most 80 characters), turn, item and question index;
 - `question-unknown`: an unresolved native question or prompt-visibility check, with its reason
   code. Routine held and unsupported roles appear in the detailed coverage;
+- `work-ready`: a ready store work item with its owner and linked parent, when recorded;
 - `worker-failed`: a verified failed latest child turn of a Codex worker parent, reported once per
   game;
 - `worker-unknown`: a Codex worker parent whose child health could not be read, with its reason;

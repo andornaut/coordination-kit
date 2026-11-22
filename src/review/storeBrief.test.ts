@@ -12,15 +12,17 @@ import { messageStatus, retainMessage } from "../store/messages.ts";
 import { derivedId } from "../store/notices.ts";
 import { storeSend } from "../store/service.ts";
 import { ART, COORDINATOR, fakeCodex, GAME, storeFixture, TECH } from "../store/testStore.ts";
+import { blockWork, finishWork, readyWork, startWork } from "../store/work.ts";
 import { deliverReview, reviewResultsDir } from "./deliver.ts";
 import { coordinationEmit } from "./emit.ts";
-import { BRIEF_MAX_BYTES, BRIEF_MAX_LINES, STALE_WAKE_MS } from "./storeBrief.ts";
+import { BRIEF_MAX_BYTES, BRIEF_MAX_LINES, showBrief, STALE_WAKE_MS } from "./storeBrief.ts";
 
 const TECH_ROLE = `${GAME}/tech`;
 const SLOT = Date.parse("2026-11-18T15:30:00Z") / 1000;
 const NEXT = SLOT + 3600;
 const LATER = NEXT + 3600;
 const SENDER = { CLAUDE_CODE_SESSION_ID: COORDINATOR };
+const ACTOR = { nativeId: null, role: "game-coordinator" };
 
 function uuid(n: number): string {
   return `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -390,8 +392,73 @@ describe("native checks in the stored brief", () => {
     expect(codex.adds()).toEqual([]);
     const body = brief(layout, SLOT);
     expect(body).toContain("Native prompt visibility: 4 unknown; history: 1 complete");
-    expect(body).toContain(
-      "- question-unknown archies-dog-walks/art: exact_unresolved_request_unavailable",
+    expect(body).toContain("Exact native prompt inspection unavailable for 1 role.");
+    expect(body).not.toContain("- question-unknown archies-dog-walks/art");
+    const row = showBrief(layout, { slot: SLOT });
+    expect(row.native.questions).toContainEqual(
+      expect.objectContaining({
+        role: ART_ROLE,
+        visibility: "unknown",
+        visibilityReason: "exact_unresolved_request_unavailable",
+      }),
     );
   });
+});
+
+it("shows ready work under its exact recorded parent without reopening finished or blocked work", async () => {
+  const { base, layout, root } = await storeModeFixture();
+  const store = Store.forLayout(layout);
+  const parent = { id: "work-0101", repository: GAME };
+  const ready = { id: "work-0102", repository: "art-kit" };
+  const unknownParent = { id: "work-0103", repository: "art-kit" };
+  const unrecordedParent = { id: "work-0104", repository: GAME };
+  const started = { id: "work-0105", repository: "art-kit" };
+  const finished = { id: "work-0106", repository: "art-kit" };
+  const blocked = { id: "work-0107", repository: "art-kit" };
+  const owner = "art-kit";
+  try {
+    startWork(store, ACTOR, { owner: TECH_ROLE, parent: null, ref: parent });
+    for (const ref of [ready, finished, blocked]) {
+      startWork(store, ACTOR, { owner, parent, ref });
+      readyWork(store, ACTOR, { ref });
+    }
+    startWork(store, ACTOR, { owner, parent: unrecordedParent, ref: unknownParent });
+    readyWork(store, ACTOR, { ref: unknownParent });
+    startWork(store, ACTOR, { owner, parent: null, ref: started });
+    finishWork(store, ACTOR, { owner, ref: finished });
+    blockWork(store, ACTOR, { owner, reason: "Awaiting dependency", ref: blocked });
+  } finally {
+    store.close();
+  }
+
+  await deliverReview(layout, gameLayout(layout, GAME), SLOT, undefined, {
+    collect: () =>
+      Promise.resolve({
+        collection_budget: {},
+        history: {},
+        question_state: {},
+        worker_health: {},
+      }),
+    env: {},
+  });
+  const record = showBrief(layout, { slot: SLOT });
+  expect(record.counts.readyHandoffs).toBe(2);
+  expect(record.readyHandoffs).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ ...ready, owner, parent: { ...parent, owner: TECH_ROLE } }),
+      expect.objectContaining({
+        ...unknownParent,
+        owner,
+        parent: { ...unrecordedParent, owner: null },
+      }),
+    ]),
+  );
+  expect(record.body).toContain("Ready work handoffs: 2");
+  expect(record.body).toContain(
+    `- work-ready art-kit:work-0102 from art-kit: parent ${GAME}:work-0101, owner ${TECH_ROLE}`,
+  );
+  let out = "";
+  const io = { cwd: base, env: {}, err: () => {}, out: (value: string) => (out += value) };
+  expect(await main(io, ["--root", root, "review", "show"])).toBe(EXIT_OK);
+  expect(JSON.parse(out)).toMatchObject({ readyHandoffs: record.readyHandoffs });
 });

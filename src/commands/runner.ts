@@ -197,6 +197,7 @@ export const reviewShow: Handler = (io, root, args) => {
           ["counts", brief.counts],
           ["decisions", brief.decisions],
           ["native", brief.native],
+          ["readyHandoffs", brief.readyHandoffs],
           ["exceptions", brief.exceptions],
           ["open", brief.open],
           ["body", brief.body],

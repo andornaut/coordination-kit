@@ -1,5 +1,5 @@
-// Review question and worker collectors share one native connection, a 256-call budget and
-// a deadline reserved five seconds before the connection's own.
+// Review collectors share one connection, with reserved worker capacity inside the overall
+// call and time limits.
 import { performance } from "node:perf_hooks";
 
 import { isRecord, unicodeDumps } from "../shared/pyjson.ts";
@@ -11,35 +11,39 @@ import { NativeTimeout, type RpcClient } from "./rpc.ts";
 type Json = Record<string, unknown>;
 
 const MAX_COLLECTION_CALLS = 256;
-const RESERVE_MS = 5000;
+const CONNECTION_RESERVE_MS = 5000;
+const WORKER_RESERVE_MS = 8000;
+const WORKER_RESERVE_CALLS = 96;
 const QUESTION_BOUND = 32768;
 
-/** CollectionClient: one shared deadline and call budget across the collectors. */
-export class BudgetClient implements RpcClient {
+/** The bounded RPC client for one collection phase. */
+class BudgetClient implements RpcClient {
   private readonly client: RpcClient;
+  private readonly maxCalls: number;
   /** Read by collectors that stop early. */
   readonly deadline: number;
   callsUsed = 0;
   reasonCode: string | null = null;
 
-  constructor(client: RpcClient, deadline: number) {
+  constructor(client: RpcClient, deadline: number, maxCalls: number) {
     this.client = client;
     this.deadline = deadline;
+    this.maxCalls = maxCalls;
   }
 
   async call(method: string, params: unknown): Promise<unknown> {
     if (performance.now() >= this.deadline) {
       this.reasonCode = "collection_deadline_exhausted";
     }
-    if (this.callsUsed >= MAX_COLLECTION_CALLS) {
+    if (this.callsUsed >= this.maxCalls) {
       this.reasonCode = "collection_call_budget_exhausted";
     }
     if (this.reasonCode !== null) {
-      throw new NativeTimeout("shared collection budget");
+      throw new NativeTimeout("collection phase budget");
     }
     this.callsUsed += 1;
     try {
-      return await this.client.call(method, params);
+      return await this.client.call(method, params, this.deadline);
     } catch (error) {
       if (error instanceof NativeTimeout) {
         this.reasonCode = "collection_timeout";
@@ -126,14 +130,25 @@ export async function collectAll(
   request: CollectRequest,
 ): Promise<Collected> {
   const recipients = [...new Set(request.recipients)];
-  const shared = new BudgetClient(client, deadline - RESERVE_MS);
-  const questions = await questionState(shared, request.decisionRecords, recipients);
-  const workers = request.parents.length === 0 ? {} : await workerHealth(shared, request.parents);
+  const collectionDeadline = deadline - CONNECTION_RESERVE_MS;
+  const hasParents = request.parents.length > 0;
+  const questionsBudget = new BudgetClient(
+    client,
+    collectionDeadline - (hasParents ? WORKER_RESERVE_MS : 0),
+    MAX_COLLECTION_CALLS - (hasParents ? WORKER_RESERVE_CALLS : 0),
+  );
+  const questions = await questionState(questionsBudget, request.decisionRecords, recipients);
+  const workerBudget = new BudgetClient(
+    client,
+    collectionDeadline,
+    MAX_COLLECTION_CALLS - questionsBudget.callsUsed,
+  );
+  const workers = hasParents ? await workerHealth(workerBudget, request.parents) : {};
   return {
     collection_budget: {
-      calls_used: shared.callsUsed,
+      calls_used: questionsBudget.callsUsed + workerBudget.callsUsed,
       max_calls: MAX_COLLECTION_CALLS,
-      reason_code: shared.reasonCode,
+      reason_code: questionsBudget.reasonCode ?? workerBudget.reasonCode,
     },
     history: {},
     question_state: questions,

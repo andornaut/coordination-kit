@@ -21,8 +21,14 @@ import {
 } from "../store/wake.ts";
 import type { ReviewResult } from "./deliver.ts";
 import { coordinationNotice } from "./emit.ts";
+import { readReadyHandoffs, type ReadyHandoff } from "./ready.ts";
 import { type RecordedDecisions, recordedDecisions } from "./recordedDecisions.ts";
-import { type NativeCollect, type NativeSurvey, surveyNative } from "./storeNative.ts";
+import {
+  type NativeCollect,
+  type NativeSurvey,
+  NO_PROMPT_VISIBILITY,
+  surveyNative,
+} from "./storeNative.ts";
 
 export const BRIEF_MAX_LINES = 60;
 export const BRIEF_MAX_BYTES = 4096;
@@ -95,6 +101,7 @@ export interface BriefException {
     | "question-unknown"
     | "worker-failed"
     | "worker-unknown"
+    | "work-ready"
     | "stalled"
     | "retention-overdue"
     | "unconfirmed"
@@ -127,6 +134,8 @@ export interface BriefRecord {
   readonly decisions: RecordedDecisions;
   /** The native question and child health checks as this slot read them. */
   readonly native: NativeSurvey;
+  /** Store work handoffs, absent from briefs recorded before work coverage. */
+  readonly readyHandoffs?: readonly ReadyHandoff[];
   /** Worker failures any brief of this game has reported, so each is reminded once. */
   readonly reportedWorkerFailures: readonly string[];
 }
@@ -162,12 +171,20 @@ function nativeExceptions(
 ): { exceptions: BriefException[]; reported: string[]; counts: JsonObject } {
   const exceptions: BriefException[] = [];
   const reported = new Set(previous?.reportedWorkerFailures ?? []);
-  const questions = { clear: 0, historyComplete: 0, pending: 0, unknown: 0, visibilityUnknown: 0 };
+  const questions = {
+    clear: 0,
+    historyComplete: 0,
+    pending: 0,
+    unavailableCapability: 0,
+    unknown: 0,
+    visibilityUnknown: 0,
+  };
   const workers = { failed: 0, ok: 0, unknown: 0 };
   const nonActionable = new Set(["recipient_held", "native_harness_unsupported"]);
   for (const question of native.questions) {
     questions[question.status] += 1;
     questions.visibilityUnknown += Number(question.visibility === "unknown");
+    questions.unavailableCapability += Number(question.visibilityReason === NO_PROMPT_VISIBILITY);
     questions.historyComplete += Number(question.history.status === "complete");
     for (const pending of question.pending) {
       exceptions.push({
@@ -177,7 +194,11 @@ function nativeExceptions(
         ...(pending.title === null ? {} : { title: pending.title }),
       });
     }
-    if (question.status === "unknown" && !nonActionable.has(question.reason ?? "")) {
+    if (
+      question.status === "unknown" &&
+      question.reason !== NO_PROMPT_VISIBILITY &&
+      !nonActionable.has(question.reason ?? "")
+    ) {
       exceptions.push({
         detail: question.reason ?? "unavailable",
         kind: "question-unknown",
@@ -263,11 +284,21 @@ function survey(
   const states: Record<string, number> = { delivered: 0, retained: 0, sent: 0 };
   const checked = nativeExceptions(native, previous);
   const decisions = recordedDecisions(store);
+  const readyHandoffs = readReadyHandoffs(store);
   const nativeAndDecisionExceptions: BriefException[] = [
     ...decisions.pending.map(({ id, role }): BriefException => ({
       id,
       kind: "store-question-pending",
       role,
+    })),
+    ...readyHandoffs.map(({ id, owner, parent, repository }): BriefException => ({
+      detail:
+        parent === null
+          ? "no parent work linked"
+          : `parent ${parent.repository}:${parent.id}, owner ${parent.owner ?? "unknown"}`,
+      id: `${repository}:${id}`,
+      kind: "work-ready",
+      role: owner ?? "unknown",
     })),
     ...checked.exceptions,
   ];
@@ -357,6 +388,7 @@ function survey(
       },
       native: checked.counts,
       open: rows.length,
+      readyHandoffs: readyHandoffs.length,
       runnerEvents: Number(runner.events ?? 0),
       states,
       unconfirmed,
@@ -366,6 +398,7 @@ function survey(
     exceptions: [...nativeAndDecisionExceptions, ...newStalls, ...exceptions],
     native,
     open: rows.map((row) => row.id as string),
+    readyHandoffs,
     reportedWorkerFailures: checked.reported,
   };
 }
@@ -386,6 +419,8 @@ function exceptionLine(exception: BriefException, titles: boolean): string {
         `- question-pending ${exception.role}: ` +
         `${titles && exception.title !== undefined ? `"${exception.title}", ` : ""}${exception.detail}`
       );
+    case "work-ready":
+      return `- work-ready ${exception.id} from ${exception.role}: ${exception.detail}`;
     case "stalled":
       return (
         `- stalled ${exception.id} to ${exception.role} (${exception.state}, ` +
@@ -426,6 +461,8 @@ export function composeBrief(
   const wakes = counts.wakes as Record<string, number>;
   const decisions = counts.decisions as Record<string, number>;
   const byRole = counts.byRole as Record<string, Record<string, number>>;
+  const unavailableCapability = native.questions.unavailableCapability ?? 0;
+  const visibilityRoles = unavailableCapability === 1 ? "role" : "roles";
   const show = `coordination-kit review show --game ${game.id} --slot ${new Date(slot * 1000).toISOString()}`;
   const head = [
     `Scheduled review, ${game.name}, slot ${new Date(slot * 1000).toISOString()} (stored brief)`,
@@ -441,6 +478,14 @@ export function composeBrief(
     `Store decisions: ${decisions.recorded} recorded, ${decisions.pending} pending questions`,
     `Native prompt visibility: ${native.questions.visibilityUnknown} unknown; history: ` +
       `${native.questions.historyComplete} complete, ${native.questions.pending} with pending attestations`,
+    ...(unavailableCapability > 0
+      ? [
+          `Exact native prompt inspection unavailable for ${unavailableCapability} ${visibilityRoles}.`,
+        ]
+      : []),
+    ...(Number(counts.readyHandoffs) > 0
+      ? [`Ready work handoffs: ${String(counts.readyHandoffs)}`]
+      : []),
     `Worker parents: ${native.workers.ok} read, ${native.workers.unknown} unknown, ` +
       `${native.workers.failed} failed children`,
     `Exceptions: ${record.exceptions.length}`,

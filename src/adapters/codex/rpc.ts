@@ -176,8 +176,8 @@ export class MessageAssembler {
 }
 
 export interface RpcClient {
-  /** Send one request and wait for its response within the client deadline. */
-  call(method: string, params: unknown): Promise<unknown>;
+  /** Send one request within the client deadline or an earlier request deadline. */
+  call(method: string, params: unknown, deadline?: number): Promise<unknown>;
   close(): void;
 }
 
@@ -290,8 +290,8 @@ class Connection implements RpcClient {
     this.socket.write(encodeFrame(true, opcode, payload));
   }
 
-  private remaining(what: string): number {
-    const remaining = this.deadline - performance.now();
+  private remaining(what: string, deadline = this.deadline): number {
+    const remaining = Math.min(this.deadline, deadline) - performance.now();
     if (remaining <= 0) {
       throw new NativeTimeout(what);
     }
@@ -306,8 +306,8 @@ class Connection implements RpcClient {
     this.sendFrame(OPCODE.text, Buffer.from(JSON.stringify(message), "utf8"));
   }
 
-  private async next(): Promise<string> {
-    const waitMs = this.remaining("response");
+  private async next(deadline?: number): Promise<string> {
+    const waitMs = this.remaining("response", deadline);
     const queued = this.messages.shift();
     if (queued !== undefined) {
       return queued;
@@ -325,17 +325,18 @@ class Connection implements RpcClient {
     if (!woken) {
       throw new NativeTimeout("response");
     }
-    return this.next();
+    return this.next(deadline);
   }
 
-  async call(method: string, params: unknown): Promise<unknown> {
+  async call(method: string, params: unknown, deadline?: number): Promise<unknown> {
+    this.remaining("request", deadline);
     this.sequence += 1;
     const id = this.sequence;
     this.send({ id, method, params });
     for (;;) {
       // Responses arrive one at a time on one connection.
       // eslint-disable-next-line no-await-in-loop
-      const message = JSON.parse(await this.next()) as unknown;
+      const message = JSON.parse(await this.next(deadline)) as unknown;
       if (typeof message !== "object" || message === null) {
         continue;
       }
