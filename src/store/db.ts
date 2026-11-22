@@ -8,6 +8,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import type { Layout } from "../layout.ts";
 import { stateRoot } from "../stateRoot.ts";
+import type { FileProjection } from "./fileProjection.ts";
 import { type Projection, PROJECTIONS } from "./projections.ts";
 import {
   type Actor,
@@ -183,12 +184,19 @@ export class Store {
   readonly db: DatabaseSync;
   readonly path: string;
   readonly #now: () => string;
+  readonly #files: FileProjection | undefined;
   #depth = 0;
 
-  private constructor(path: string, db: DatabaseSync, options: OpenOptions) {
+  private constructor(
+    path: string,
+    db: DatabaseSync,
+    options: OpenOptions,
+    files?: FileProjection,
+  ) {
     this.path = path;
     this.db = db;
     this.#now = options.now ?? (() => new Date().toISOString());
+    this.#files = files;
   }
 
   /** Open or create the store at `path` with WAL, synchronous=FULL and foreign keys. */
@@ -236,8 +244,36 @@ export class Store {
     return new Store(path, db, options);
   }
 
-  static forLayout(layout: Layout, options: OpenOptions = {}): Store {
-    return Store.open(storePath(layout), options);
+  static forLayout(
+    layout: Layout,
+    options: OpenOptions & { readonly createMissing?: boolean } = {},
+  ): Store {
+    const path = storePath(layout);
+    return Store.open(
+      options.createMissing === false && !existsSync(path) ? MEMORY : path,
+      options,
+    );
+  }
+
+  /** Open an existing authority for queries without creating or repairing its disk state. */
+  static readLayout(layout: Layout): Store | null {
+    const path = storePath(layout);
+    return existsSync(path)
+      ? new Store(path, new DatabaseSync(path, { readOnly: true, timeout: BUSY_TIMEOUT_MS }), {})
+      : null;
+  }
+
+  /** Rebuild the compatibility query index from the authoritative committed file events. */
+  static openFileProjection(path: string, files: FileProjection, options: OpenOptions = {}): Store {
+    const index = Store.open(MEMORY);
+    const store = new Store(path, index.db, options, files);
+    try {
+      store.#replay(files.journal.events());
+      return store;
+    } catch (error) {
+      store.close();
+      throw error;
+    }
   }
 
   close(): void {
@@ -253,6 +289,28 @@ export class Store {
     if (this.#depth > 0) {
       return body();
     }
+    const files = this.#files;
+    if (files === undefined) {
+      return this.#transaction(body);
+    }
+    return files.journal.withWriter((writer) => {
+      this.#replay(writer.events(this.head().seq));
+      const before = this.head().seq;
+      return this.#transaction(() => {
+        const result = body();
+        if (result instanceof Promise) {
+          throw new StoreError("async-store-transaction");
+        }
+        const events = this.events({ afterSeq: before });
+        if (events.length > 0) {
+          writer.commit(events, files.records(events));
+        }
+        return result;
+      });
+    });
+  }
+
+  #transaction<T>(body: () => T): T {
     this.db.exec("BEGIN IMMEDIATE");
     this.#depth++;
     try {
@@ -267,6 +325,24 @@ export class Store {
     } finally {
       this.#depth--;
     }
+  }
+
+  #replay(events: readonly StoredEvent[]): void {
+    if (events.length === 0) {
+      return;
+    }
+    this.#transaction(() => {
+      let { seq, hash: prevHash } = this.head();
+      for (const event of events) {
+        const { hash, ...draft } = event;
+        if (event.seq !== seq + 1 || event.prevHash !== prevHash || eventHash(draft) !== hash) {
+          throw new StoreError("chain-broken", `at seq ${event.seq}`);
+        }
+        this.#insert(event);
+        seq = event.seq;
+        prevHash = hash;
+      }
+    });
   }
 
   head(): { readonly seq: number; readonly hash: string } {
@@ -312,26 +388,30 @@ export class Store {
         seq: head.seq + 1,
       };
       const event: StoredEvent = { ...draft, hash: eventHash(draft) };
-      this.db
-        .prepare(
-          `INSERT INTO events (seq, key, kind, actor_role, actor_native_id, actor_worker, at,
-             payload, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          event.seq,
-          event.key,
-          event.kind,
-          actor.role,
-          actor.nativeId,
-          actor.worker ?? null,
-          event.at,
-          canonicalJson(payload),
-          event.prevHash,
-          event.hash,
-        );
-      this.project(event);
+      this.#insert(event);
       return { duplicate: false, event };
     });
+  }
+
+  #insert(event: StoredEvent): void {
+    this.db
+      .prepare(
+        `INSERT INTO events (seq, key, kind, actor_role, actor_native_id, actor_worker, at,
+           payload, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        event.seq,
+        event.key,
+        event.kind,
+        event.actor.role,
+        event.actor.nativeId,
+        event.actor.worker ?? null,
+        event.at,
+        canonicalJson(event.payload),
+        event.prevHash,
+        event.hash,
+      );
+    this.project(event);
   }
 
   private project(event: StoredEvent): void {
@@ -376,10 +456,10 @@ export class Store {
     return { events: seq, head: { hash: prev, seq } };
   }
 
-  /** Verify the chain, then drop and recreate every projection from the events in one transaction. */
+  /** Verify the chain, then drop and recreate every projection from the same transaction. */
   rebuild(): VerifyResult {
-    const verified = this.verify();
-    this.transaction(() => {
+    return this.transaction(() => {
+      const verified = this.verify();
       for (const projection of PROJECTIONS) {
         for (const table of projection.tables) {
           this.db.exec(`DROP TABLE IF EXISTS ${table}`);
@@ -389,8 +469,8 @@ export class Store {
       for (const row of this.db.prepare("SELECT * FROM events ORDER BY seq").all() as Row[]) {
         this.project(rowEvent(row));
       }
+      return verified;
     });
-    return verified;
   }
 }
 
