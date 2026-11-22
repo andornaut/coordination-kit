@@ -1,6 +1,6 @@
 # Coordination store
 
-The SQLite store behind the `msg`, `inbox`, `work`, `graph`, `question`, `hold`, `decision`,
+The coordination store behind the `msg`, `inbox`, `work`, `graph`, `question`, `hold`, `decision`,
 `session` and `handoff` commands: its schema, the library API, the writer fence, wakes, questions, holds and decisions,
 runner event ingest, work records, the decision graph, the approval-ledger import, imported
 requests and the Phase 4 retirement. The design is in
@@ -10,13 +10,21 @@ requests and the Phase 4 retirement. The design is in
 
 ## Location and settings
 
-The store is one file, `coordination.db`, in the state root that `var/work-protocol.json` names
-(`<stateRoot>/coordination.db`; see [state](configuration.md#state)). Without that file it is
-`var/coordination.db` under the coordinator root. Every command uses the store: 3.0 has no legacy
-mode, and the 2.0 cutover fence is no longer read. Wake files sit beside it
-under `wake/`, as in [review](review.md#wake-files).
+Before activation, the store is `coordination.db` in the state root named by
+`var/work-protocol.json`, or `var/coordination.db` when that pointer is absent. The
+[filesystem migration](upgrading.md#filesystem-authority-migration) selects one authority at
+a time. Active file state belongs in the ignored `var/coordination/` of the explicit primary
+coordinator checkout. The immutable batch journal and committed records are authoritative.
+The query index is rebuilt from the journal in memory. Wake endpoints still use the existing
+state root. Runner state, routing and registry files retain their existing paths.
 
-It opens through `node:sqlite` (`DatabaseSync`, built into Node 24.21 with no flag) with
+The journal stores committed batches under `journal/batches/`. A batch manifest commits the
+event range and exact companion digests. `roles/` holds role and verified worker records,
+`coordinator/` holds policy and handoff records, and `legacy/` preserves unverified ownership.
+The lock is bounded. A prepared batch is recovered without publishing records from incomplete
+transactions. A disposition never overwrites the sender's original.
+
+Before activation the SQLite source opens through `node:sqlite` (`DatabaseSync`, built into Node 24.21 with no flag) with
 `journal_mode=WAL`, `synchronous=FULL`, `busy_timeout=5000` and `foreign_keys=ON`. A new file is
 created with mode 0600 in a 0700 directory. `PRAGMA user_version` holds the schema version, 1; a
 newer version is refused with `store-schema-newer`. Every write is one `BEGIN IMMEDIATE`

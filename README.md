@@ -13,10 +13,9 @@ from disk after startup except configuration, state and, for `--version --json` 
 seam, its own bytes to hash them. Its child processes are `flock`, `git`,
 `claude agents --json` and, for `store retire`, `tar`.
 
-The coordination state is the store, `coordination.db` ([docs/store.md](docs/store.md)), under
-the state root that `var/work-protocol.json` names. 3.0 removed the request ledger, the
-filesystem work protocol and the legacy message store; `store retire` archives their state.
-Moving from delivery-kit's verbs is in [docs/upgrading.md](docs/upgrading.md).
+The [coordination store](docs/store.md) uses the configured SQLite source until the coordinator
+qualifies and activates the primary checkout's ignored file store. The
+[upgrade guide](docs/upgrading.md) covers backup, restore, activation and legacy retirement.
 
 ## Install and pin
 
@@ -25,7 +24,7 @@ commit the lockfile integrity:
 
 ```json
 "devDependencies": {
-  "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v3.1.0/coordination-kit-3.1.0.tgz"
+  "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v3.2.0/coordination-kit-3.2.0.tgz"
 }
 ```
 
@@ -41,25 +40,25 @@ Every command is a noun group and its verb, except `status` and `graph`. Command
 `work` commands read `--root` as the repository to inspect (default: the working directory) and
 take the coordinator root only from `COORDINATION_KIT_ROOT` or `DELIVERY_KIT_ROOT`.
 
-| Group      | Verbs                                                                                            | Purpose                                                                                                  |
-| ---------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `msg`      | `send`, `done`, `retain`, `status`, `history`                                                    | Store messages: send with one guarded wake, close or retain in one write, read.                          |
-| `inbox`    | (none)                                                                                           | Read your store inbox and record it delivered.                                                           |
-| `store`    | `import`, `export`, `rebuild`, `retire`                                                          | Import the approval ledger, export for rollback, verify and rebuild, the 3.0 retirement.                 |
-| `request`  | `close`                                                                                          | Close an imported ledger request you own.                                                                |
-| `question` | `open`, `answer`, `project`, `cancel`, `list`                                                    | Pending prompts, durable answers and recoverable work-file writeback.                                    |
-| `hold`     | `set`, `release`, `list`                                                                         | Holds owned by the role that set them; only that role releases them.                                     |
-| `session`  | `start`                                                                                          | Record a role's startup or resume and print its binding, checkpoint and open counts.                     |
-| `handoff`  | `open`, `ready`, `state`, `active`, `show`                                                       | The store record of a harness handoff; see [sessions and handoffs](docs/store.md#sessions-and-handoffs). |
-| `decision` | `list`                                                                                           | Read the decision records.                                                                               |
-| `harness`  | `ready`, `select`, `doctor`                                                                      | Readiness by effective harness, scoped harness selection and diagnosis.                                  |
-| `claude`   | `ready`, `channel`                                                                               | The Claude readiness probe and the stdio MCP channel server.                                             |
-| `codex`    | `ready`                                                                                          | The Codex readiness probe.                                                                               |
-| `review`   | `deliver`, `show`                                                                                | The runner seam: one slot's scheduled review, as one typed JSON line; show a stored brief.               |
-| `events`   | `ingest`                                                                                         | The runner seam: one event log ingest, as one typed JSON line.                                           |
-| `status`   | (none)                                                                                           | Read-only status of every registered repository's work items, as JSON or a Markdown digest.              |
-| `work`     | `check`, `report`, `start`, `evidence`, `block`, `unblock`, `ready`, `finish`, `show`, `history` | Validate a repository's work files and report them; record each item's live progress in the store.       |
-| `graph`    | (none), `why`, `index`                                                                           | The decision graph over work files and the store; a decision's supersedes chain; the derived index.      |
+| Group      | Verbs                                                                                                  | Purpose                                                                                                  |
+| ---------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `msg`      | `send`, `done`, `retain`, `status`, `history`                                                          | Store messages: send with one guarded wake, close or retain in one write, read.                          |
+| `inbox`    | (none)                                                                                                 | Read your store inbox and record it delivered.                                                           |
+| `store`    | `import`, `export`, `rebuild`, `retire`, `migration-status`, `migration-prepare`, `migration-activate` | Import, export, rebuild, retire, and qualify or activate filesystem authority.                           |
+| `request`  | `close`                                                                                                | Close an imported ledger request you own.                                                                |
+| `question` | `open`, `answer`, `project`, `cancel`, `list`                                                          | Pending prompts, durable answers and recoverable work-file writeback.                                    |
+| `hold`     | `set`, `release`, `list`                                                                               | Holds owned by the role that set them; only that role releases them.                                     |
+| `session`  | `start`                                                                                                | Record a role's startup or resume and print its binding, checkpoint and open counts.                     |
+| `handoff`  | `open`, `ready`, `state`, `active`, `show`                                                             | The store record of a harness handoff; see [sessions and handoffs](docs/store.md#sessions-and-handoffs). |
+| `decision` | `list`                                                                                                 | Read the decision records.                                                                               |
+| `harness`  | `ready`, `select`, `doctor`                                                                            | Readiness by effective harness, scoped harness selection and diagnosis.                                  |
+| `claude`   | `ready`, `channel`                                                                                     | The Claude readiness probe and the stdio MCP channel server.                                             |
+| `codex`    | `ready`                                                                                                | The Codex readiness probe.                                                                               |
+| `review`   | `deliver`, `show`                                                                                      | The runner seam: one slot's scheduled review, as one typed JSON line; show a stored brief.               |
+| `events`   | `ingest`                                                                                               | The runner seam: one event log ingest, as one typed JSON line.                                           |
+| `status`   | (none)                                                                                                 | Read-only status of every registered repository's work items, as JSON or a Markdown digest.              |
+| `work`     | `check`, `report`, `start`, `evidence`, `block`, `unblock`, `ready`, `finish`, `show`, `history`       | Validate a repository's work files and report them; record each item's live progress in the store.       |
+| `graph`    | (none), `why`, `index`                                                                                 | The decision graph over work files and the store; a decision's supersedes chain; the derived index.      |
 
 `coordination-kit --help` lists every command form; it is generated from each command's parser
 options. Per-command semantics are in [docs/commands.md](docs/commands.md).

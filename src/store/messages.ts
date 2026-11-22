@@ -4,7 +4,8 @@
 import { createHash } from "node:crypto";
 import type { SQLInputValue } from "node:sqlite";
 
-import { canonicalJson, type Store } from "./db.ts";
+import type { Store } from "./db.ts";
+import { canonicalJson } from "./eventCodec.ts";
 import { secretShape } from "./secrets.ts";
 import {
   type Actor,

@@ -1,14 +1,16 @@
 // The coordination store: one SQLite file with an append-only, hash-chained `events` table and
 // projections updated in the same transaction. Every write is one short `BEGIN IMMEDIATE`
 // transaction; projections can be dropped and rebuilt from the events at any time.
-import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import type { Layout } from "../layout.ts";
 import { stateRoot } from "../stateRoot.ts";
+import { canonicalJson, eventHash, rowEvent } from "./eventCodec.ts";
 import type { FileProjection } from "./fileProjection.ts";
+import { fileAuthority } from "./files/authority.ts";
+import { fileLayoutProjection } from "./files/runtime.ts";
 import { type Projection, PROJECTIONS } from "./projections.ts";
 import {
   type Actor,
@@ -38,48 +40,6 @@ export function storePath(layout: Layout): string {
   return join(storeRoot(layout), STORE_FILE);
 }
 
-/** JSON with object keys sorted at every depth and no whitespace; the hash input form. */
-export function canonicalJson(value: unknown): string {
-  if (value === null || typeof value === "boolean" || typeof value === "string") {
-    return JSON.stringify(value);
-  }
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) {
-      throw new StoreError("invalid-payload");
-    }
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
-  }
-  if (typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .filter(([, item]) => item !== undefined)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
-  }
-  throw new StoreError("invalid-payload");
-}
-
-function sha256(text: string): string {
-  return createHash("sha256").update(text, "utf8").digest("hex");
-}
-
-/** sha256 over the previous hash and the canonical event, so any edit breaks every later link. */
-export function eventHash(event: Omit<StoredEvent, "hash">): string {
-  return sha256(
-    `${event.prevHash}\n${canonicalJson({
-      actor: { nativeId: event.actor.nativeId, role: event.actor.role, worker: event.actor.worker },
-      at: event.at,
-      key: event.key,
-      kind: event.kind,
-      payload: event.payload,
-      schema: STORE_SCHEMA,
-      seq: event.seq,
-    })}`,
-  );
-}
-
 const EVENTS_DDL = `
 CREATE TABLE IF NOT EXISTS events (
   seq INTEGER PRIMARY KEY,
@@ -101,24 +61,6 @@ CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events
 `;
 
 type Row = Record<string, SQLInputValue>;
-
-function rowEvent(row: Row): StoredEvent {
-  const worker = row.actor_worker;
-  return {
-    actor: {
-      nativeId: (row.actor_native_id as string | null) ?? null,
-      role: (row.actor_role as string | null) ?? null,
-      ...(typeof worker === "string" ? { worker } : {}),
-    },
-    at: row.at as string,
-    hash: row.hash as string,
-    key: row.key as string,
-    kind: row.kind as string,
-    payload: JSON.parse(row.payload as string) as JsonObject,
-    prevHash: row.prev_hash as string,
-    seq: Number(row.seq),
-  };
-}
 
 function tableExists(db: DatabaseSync, table: string): boolean {
   return (
@@ -248,7 +190,11 @@ export class Store {
     layout: Layout,
     options: OpenOptions & { readonly createMissing?: boolean } = {},
   ): Store {
-    const path = storePath(layout);
+    const selected = fileAuthority(layout, storePath(layout));
+    if (selected.kind === "files") {
+      return Store.#openSelectedFiles(layout, selected, options);
+    }
+    const path = selected.path;
     return Store.open(
       options.createMissing === false && !existsSync(path) ? MEMORY : path,
       options,
@@ -257,10 +203,38 @@ export class Store {
 
   /** Open an existing authority for queries without creating or repairing its disk state. */
   static readLayout(layout: Layout): Store | null {
-    const path = storePath(layout);
+    const selected = fileAuthority(layout, storePath(layout));
+    const path = selected.path;
+    if (selected.kind === "files") {
+      const store = Store.#openSelectedFiles(layout, selected);
+      store.db.exec("PRAGMA query_only = ON");
+      return store;
+    }
     return existsSync(path)
       ? new Store(path, new DatabaseSync(path, { readOnly: true, timeout: BUSY_TIMEOUT_MS }), {})
       : null;
+  }
+
+  static #openSelectedFiles(
+    layout: Layout,
+    selected: Extract<ReturnType<typeof fileAuthority>, { kind: "files" }>,
+    options: OpenOptions = {},
+  ): Store {
+    const { path, receipt } = selected;
+    const store = Store.openFileProjection(path, fileLayoutProjection(layout, path), options);
+    const { hash, seq } = receipt.head;
+    try {
+      if (
+        seq !== 0 &&
+        store.db.prepare("SELECT hash FROM events WHERE seq = ?").get(seq)?.hash !== hash
+      ) {
+        throw new StoreError("migration-file-origin-mismatch");
+      }
+      return store;
+    } catch (error) {
+      store.close();
+      throw error;
+    }
   }
 
   /** Rebuild the compatibility query index from the authoritative committed file events. */
@@ -336,7 +310,7 @@ export class Store {
       return;
     }
     this.#transaction(() => {
-      let { seq, hash: prevHash } = this.head();
+      let { hash: prevHash, seq } = this.head();
       for (const event of events) {
         const { hash, ...draft } = event;
         if (event.seq !== seq + 1 || event.prevHash !== prevHash || eventHash(draft) !== hash) {
@@ -478,4 +452,5 @@ export class Store {
   }
 }
 
+export { canonicalJson, eventHash } from "./eventCodec.ts";
 export type { Json };

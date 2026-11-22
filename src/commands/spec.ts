@@ -3,6 +3,11 @@
 import { DOCTOR_OPTIONS } from "./doctor.ts";
 import { GRAPH_INDEX_OPTIONS, GRAPH_OPTIONS, GRAPH_WHY_OPTIONS } from "./graph.ts";
 import {
+  MIGRATION_ACTIVATE_OPTIONS,
+  MIGRATION_PREPARE_OPTIONS,
+  MIGRATION_STATUS_OPTIONS,
+} from "./migration.ts";
+import {
   DECISION_LIST_OPTIONS,
   HOLD_LIST_OPTIONS,
   HOLD_RELEASE_OPTIONS,
@@ -380,6 +385,26 @@ export const SPECS = {
     options: STORE_IMPORT_OPTIONS,
     summary: "map the approval ledger to work records; --dry-run writes nothing",
     values: { "approval-ledger": "FILE" },
+  },
+  "store migration-activate": {
+    forms: [["id", "native-id?"]],
+    group: "store",
+    options: MIGRATION_ACTIVATE_OPTIONS,
+    summary: "freeze the legacy source and select the exact verified file candidate",
+    values: { id: "RECEIPT_ID" },
+  },
+  "store migration-prepare": {
+    forms: [["backup", "restore", "native-id?"]],
+    group: "store",
+    options: MIGRATION_PREPARE_OPTIONS,
+    summary: "compare the candidate against an independently restored SQLite backup",
+    values: { backup: "ABSOLUTE_FILE", restore: "ABSOLUTE_FILE" },
+  },
+  "store migration-status": {
+    forms: [[]],
+    group: "store",
+    options: MIGRATION_STATUS_OPTIONS,
+    summary: "read the current authority and any prepared or pending cutover receipt",
   },
   "store rebuild": {
     forms: [[]],

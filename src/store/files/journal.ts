@@ -17,7 +17,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { isRecord } from "../../adapters/shared/pyjson.ts";
 import { fsyncDirectory, tempPrefix, writeDurable } from "../../durable.ts";
 import { holdLock, LockBusy } from "../../lock.ts";
-import { canonicalJson, eventHash } from "../db.ts";
+import { canonicalJson, eventHash } from "../eventCodec.ts";
 import { GENESIS, type Json, type StoredEvent, StoreError } from "../types.ts";
 
 export interface FileRecord {
@@ -32,6 +32,7 @@ export interface JournalWriter {
 
 export interface FileJournal {
   events(afterSeq?: number): StoredEvent[];
+  snapshot(): { readonly events: readonly StoredEvent[]; readonly records: readonly Companion[] };
   withWriter<T>(run: (writer: JournalWriter) => T): T;
 }
 
@@ -523,23 +524,32 @@ function locked<T>(paths: Paths, shared: boolean, run: () => T): T {
 /** Open an append-only journal. Only a committed manifest makes its companion paths authoritative. */
 export function openFileJournal(root: string): FileJournal {
   const journal = paths(resolve(root));
+  function read<T>(inspect: (files: readonly string[]) => T): T {
+    if (!scopedDirectory(journal.root, journal.journal)) {
+      return inspect([]);
+    }
+    if (!isFile(journal.lock)) {
+      const hasState = batchFiles(journal).length > 0 || isFile(journal.prepare);
+      // Initialization may have started between the first lock inspection and this read.
+      if (!isFile(journal.lock)) {
+        ensure(!hasState, "journal-corrupt");
+        return inspect([]);
+      }
+    }
+    return locked(journal, true, () => {
+      preparedBatch(journal);
+      return inspect(batchFiles(journal));
+    });
+  }
   return {
     events(afterSeq = 0) {
-      if (!scopedDirectory(journal.root, journal.journal)) {
-        return readEvents(journal, [], afterSeq);
-      }
-      if (!isFile(journal.lock)) {
-        const hasState = batchFiles(journal).length > 0 || isFile(journal.prepare);
-        // Initialization may have started between the first lock inspection and this read.
-        if (!isFile(journal.lock)) {
-          ensure(!hasState, "journal-corrupt");
-          return readEvents(journal, [], afterSeq);
-        }
-      }
-      return locked(journal, true, () => {
-        preparedBatch(journal);
-        return readEvents(journal, batchFiles(journal), afterSeq);
-      });
+      return read((files) => readEvents(journal, files, afterSeq));
+    },
+    snapshot() {
+      return read((files) => ({
+        events: readEvents(journal, files, 0),
+        records: files.flatMap((filename) => readBatch(journal, filename).records),
+      }));
     },
     withWriter<T>(run: (writer: JournalWriter) => T): T {
       ensureDirectory(journal.root);

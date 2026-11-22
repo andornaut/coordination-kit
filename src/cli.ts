@@ -5,6 +5,7 @@ import { channel } from "./commands/channel.ts";
 import { harnessDoctor } from "./commands/doctor.ts";
 import { graph, graphIndex, graphWhy } from "./commands/graph.ts";
 import { harnessSelect } from "./commands/harness.ts";
+import { migrationActivate, migrationPrepare, migrationStatus } from "./commands/migration.ts";
 import {
   decisionList,
   holdList,
@@ -70,6 +71,9 @@ export const COMMANDS = [
   "store export",
   "store rebuild",
   "store retire",
+  "store migration-status",
+  "store migration-prepare",
+  "store migration-activate",
   "question open",
   "question answer",
   "question project",
@@ -190,6 +194,9 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   status,
   "store export": storeExportCommand,
   "store import": storeImportCommand,
+  "store migration-activate": migrationActivate,
+  "store migration-prepare": migrationPrepare,
+  "store migration-status": migrationStatus,
   "store rebuild": storeRebuildCommand,
   "store retire": storeRetireCommand,
   "work block": workBlock,

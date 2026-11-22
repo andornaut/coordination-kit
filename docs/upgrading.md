@@ -3,6 +3,39 @@
 Moving from coordination-kit 2.1 to 3.0, from 2.0 to 2.1, from 1.3 to 2.0, from 1.1 to 1.2, and from delivery-kit
 4.7 to coordination-kit 1.0.
 
+## Filesystem authority migration
+
+The coordinator-installed CLI supports the existing SQLite source during preparation. Its
+normal runner seam remains schema 1 and is compatible with Delivery Kit's coordinator CLI range
+`>=2.0.1 <4.0.0`. Use the absolute primary coordinator root for commands from every working
+directory. The target is the ignored `var/coordination/` under that root.
+
+1. Install the exact immutable Coordination Kit archive with the verified lockfile integrity.
+   Confirm the installed CLI digest and the existing runner's actual CLI observations. Let in-flight
+   runner batches and reporters drain at an existing idle boundary. Use the normal cadence to verify
+   the compatible reader and writer.
+2. Run `store migration-prepare --backup ABSOLUTE_FILE --restore ABSOLUTE_FILE` under the active
+   game-coordinator binding. Both files must be fresh paths outside the coordinator checkout.
+   The command copies a consistent SQLite snapshot, restores it independently and checks the event
+   chain, every durable projection and the committed files for role records. It returns a prepared
+   receipt. SQLite remains the authority at this point.
+3. Confirm the prepared receipt against `store migration-status`. Use
+   `store migration-activate --id RECEIPT_ID` under the same binding at the coordinated idle
+   boundary. It verifies the source head, backup, restored copy, candidate and unchanged runtime
+   inventory, freezes SQLite event inserts, and then selects the file authority. If the legacy head
+   advanced, prepare a fresh snapshot and use the new receipt. If the command is interrupted after
+   the freeze, retry activation with the original receipt. The pending transition rejects ordinary
+   access until it is completed.
+4. Verify `store migration-status` reports the exact active receipt. Exercise normal role reads and
+   inspect the actual next scheduled review and runner ingest. Their evidence must cover the same
+   installed digest, continued cursor progression and preserved holds and questions. Retain the
+   independent backup and restored copy outside the checkout.
+
+The runtime uses the journal as authority and rebuilds its query index from committed events.
+Role files and immutable message dispositions are included in the commit manifests. The frozen
+SQLite source remains readable for migration evidence. Runner controls, event logs, cursor,
+notification endpoints and registry stay at their existing locations.
+
 ## From 3.0.0
 
 - A handoff hold no longer withholds wakes once `harness select` binds the role on the handoff's

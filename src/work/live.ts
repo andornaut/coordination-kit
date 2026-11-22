@@ -10,6 +10,7 @@ import { StateRootError } from "../stateRoot.ts";
 import { repositories, type Repository } from "../status/collect.ts";
 import { type GitRunner, repositoryRoot } from "../status/git.ts";
 import { MEMORY, Store } from "../store/db.ts";
+import { fileWorkerCaller } from "../store/files/workerAccess.ts";
 import { type CallerOptions, resolveCaller } from "../store/identity.ts";
 import { listDecisions, storeHolds } from "../store/questions.ts";
 import { type Actor, StoreError } from "../store/types.ts";
@@ -179,8 +180,30 @@ function target(context: LiveContext, worktree: string, id: string): Target {
 }
 
 /** The fenced caller, who must be the item's owner. */
-function ownerActor(context: LiveContext, at: Target, options: CallerOptions): Actor {
-  const actor = resolveCaller(at.coordinator.registry, context.env, options);
+function ownerActor(
+  context: LiveContext,
+  at: Target,
+  options: CallerOptions,
+  worker: "start" | "started" | "none" = "none",
+): Actor {
+  const { layout, registry } = at.coordinator;
+  const workerProof =
+    worker === "none"
+      ? undefined
+      : fileWorkerCaller(
+          layout,
+          registry,
+          context.now ?? (() => new Date().toISOString()),
+          (index, nativeId) =>
+            worker === "start" ||
+            index
+              .prepare(
+                `SELECT 1 FROM events WHERE kind = 'work.started' AND actor_native_id = ?
+           AND json_extract(payload, '$.repository') = ? AND json_extract(payload, '$.id') = ?`,
+              )
+              .get(nativeId, at.ref.repository, at.ref.id) !== undefined,
+        );
+  const actor = resolveCaller(registry, context.env, options, workerProof);
   if (actor.role !== at.owner) {
     throw new StoreError("not-owner");
   }
@@ -254,7 +277,7 @@ export function workStart(
   input: { readonly worktree: string; readonly id: string; readonly parent?: string },
 ): WorkOutput {
   const at = target(context, input.worktree, input.id);
-  const actor = ownerActor(context, at, options);
+  const actor = ownerActor(context, at, options, input.parent === undefined ? "none" : "start");
   requireStatus(at, ["approved"], "work-not-approved");
   let parent: WorkRef | null = null;
   if (input.parent !== undefined) {
@@ -287,7 +310,12 @@ export function workEvidence(
   },
 ): WorkOutput {
   const at = target(context, input.worktree, input.id);
-  const actor = ownerActor(context, at, options);
+  const actor = ownerActor(
+    context,
+    at,
+    options,
+    input.stage === "implemented" ? "started" : "none",
+  );
   requireStatus(at, ["approved", "done"], "work-not-approved");
   return withStore(context, at.coordinator.layout, (store) =>
     output(
@@ -343,7 +371,7 @@ export function workReady(
   input: { readonly worktree: string; readonly id: string },
 ): WorkOutput {
   const at = target(context, input.worktree, input.id);
-  const actor = ownerActor(context, at, options);
+  const actor = ownerActor(context, at, options, "started");
   return withStore(context, at.coordinator.layout, (store) =>
     output(at, readyWork(store, actor, { ref: at.ref })),
   );
