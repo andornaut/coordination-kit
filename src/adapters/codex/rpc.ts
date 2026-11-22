@@ -176,6 +176,8 @@ export class MessageAssembler {
 }
 
 export interface RpcClient {
+  /** Exact release parsed from the app-server initialize user agent, when available. */
+  readonly serverVersion?: string;
   /** Send one request within the client deadline or an earlier request deadline. */
   call(method: string, params: unknown, deadline?: number): Promise<unknown>;
   close(): void;
@@ -188,6 +190,7 @@ interface Handshake {
 }
 
 class Connection implements RpcClient {
+  serverVersion?: string;
   private readonly socket: Socket;
   private readonly deadline: number;
   private readonly assembler: MessageAssembler;
@@ -369,10 +372,16 @@ export async function connectControl(deadline: number, socketPath: string): Prom
         timer = setTimeout(() => reject(new NativeTimeout("connect")), timeout);
       }),
     ]).finally(() => clearTimeout(timer));
-    await connection.call("initialize", {
+    const initialized = await connection.call("initialize", {
       capabilities: { experimentalApi: true },
       clientInfo: { name: "hourly-unblock", version: "1" },
     });
+    if (isRecord(initialized) && typeof initialized.userAgent === "string") {
+      const version = /^[^/()\r\n]{1,80}\/(\d+\.\d+\.\d+) \(/.exec(initialized.userAgent)?.[1];
+      if (version !== undefined) {
+        connection.serverVersion = version;
+      }
+    }
     connection.send({ method: "initialized" });
   } catch (error) {
     connection.close();
