@@ -2,15 +2,13 @@
 // store at the layout's root, apply one write, then attempt at most one wake. Every send reads
 // var/registry.json; nothing is cached across calls.
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
 
 import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import type { Layout } from "../layout.ts";
 import { resolveRole } from "../registry/resolve.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
-import { MEMORY, Store, storePath } from "./db.ts";
+import { MEMORY, Store } from "./db.ts";
 import { type CallerOptions, resolveCaller } from "./identity.ts";
 import {
   type CloseInput,
@@ -48,11 +46,10 @@ export async function withStore<T>(
   body: (store: Store) => T | Promise<T>,
   options: { readonly createMissing?: boolean } = {},
 ): Promise<T> {
-  const path = storePath(context.layout);
-  const store = Store.open(
-    options.createMissing === false && !existsSync(path) ? MEMORY : path,
-    context.now === undefined ? {} : { now: context.now },
-  );
+  const store =
+    options.createMissing === false
+      ? (Store.readLayout(context.layout) ?? Store.open(MEMORY))
+      : Store.forLayout(context.layout, context.now === undefined ? {} : { now: context.now });
   try {
     return await body(store);
   } finally {
@@ -210,17 +207,16 @@ export async function storeStatus(
   if (!MESSAGE_ID.test(id)) {
     throw new StoreError("invalid-id");
   }
-  const path = storePath(context.layout);
-  if (!existsSync(path)) {
+  const store = Store.readLayout(context.layout);
+  if (store === null) {
     throw new StoreError("missing");
   }
-  const db = new DatabaseSync(path, { readOnly: true, timeout: 5000 });
   try {
     const message =
-      viewer === undefined ? messageStatus({ db }, id) : messageWithBody({ db }, viewer, id);
+      viewer === undefined ? messageStatus(store, id) : messageWithBody(store, viewer, id);
     return { message, schema: 1 };
   } finally {
-    db.close();
+    store.close();
   }
 }
 
@@ -240,22 +236,28 @@ export async function storeHistory(
 ): Promise<{ readonly schema: 1; readonly events: readonly HistoryEntry[] }> {
   const viewer =
     selection.includeBody === true ? caller(context, selection.caller ?? {}).role : undefined;
-  return withStore(context, (store) => ({
-    events: messageHistory(store, {
-      ...(selection.limit === undefined ? {} : { limit: selection.limit }),
-      ...(selection.role === undefined ? {} : { role: selection.role }),
-      ...(selection.since === undefined ? {} : { since: selection.since }),
-      ...(viewer === undefined ? {} : { viewer }),
+  return withStore(
+    context,
+    (store) => ({
+      events: messageHistory(store, {
+        ...(selection.limit === undefined ? {} : { limit: selection.limit }),
+        ...(selection.role === undefined ? {} : { role: selection.role }),
+        ...(selection.since === undefined ? {} : { since: selection.since }),
+        ...(viewer === undefined ? {} : { viewer }),
+      }),
+      schema: 1 as const,
     }),
-    schema: 1 as const,
-  }));
+    { createMissing: false },
+  );
 }
 
 export async function storeExport(
   context: StoreServiceContext,
   since: string,
 ): Promise<{ readonly schema: 1 } & ExportResult> {
-  return withStore(context, (store) => ({ ...exportSince(store, since), schema: 1 as const }));
+  return withStore(context, (store) => ({ ...exportSince(store, since), schema: 1 as const }), {
+    createMissing: false,
+  });
 }
 
 export async function storeRebuild(context: StoreServiceContext): Promise<{

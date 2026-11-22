@@ -1,12 +1,11 @@
 // `graph`, `graph why` and `graph index` over the coordinator's registered repositories and the
 // store. Each prints one JSON object (or DOT for `graph --format dot`); a refusal prints
 // `coordination-kit: CODE` and exits 1, a usage error exits 2.
-import { existsSync } from "node:fs";
 import { parseArgs } from "node:util";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { type GitRunner, systemGit } from "../status/git.ts";
-import { Store, storePath } from "../store/db.ts";
+import { Store } from "../store/db.ts";
 import { StoreError } from "../store/types.ts";
 import {
   buildGraph,
@@ -32,24 +31,13 @@ export const GRAPH_INDEX_OPTIONS = {} as const;
 
 class Usage extends Error {}
 
-/** The store when its file exists, else null; nothing is created. */
-function openStore(coordinator: Coordinator): Store | null {
-  let path: string;
-  try {
-    path = storePath(coordinator.layout);
-  } catch {
-    return null;
-  }
-  return existsSync(path) ? Store.open(path) : null;
-}
-
 interface Loaded {
   readonly graph: Graph;
   readonly index: { readonly status: "stored" | "live"; readonly at: string | null };
 }
 
 function load(git: GitRunner, coordinator: Coordinator): Loaded {
-  const store = openStore(coordinator);
+  const store = Store.readLayout(coordinator.layout);
   try {
     const stored = store === null ? null : readIndex(store);
     if (stored !== null) {

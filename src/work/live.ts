@@ -1,14 +1,15 @@
 // The work verbs as the CLI runs them: resolve the repository from --root and the registry, read
 // the work file from the repository's local `main`, resolve the item's owner, check the caller
 // through the registry fence, then apply one store write. Only the owner may write.
-import { existsSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 
 import { type Layout, loadLayout } from "../layout.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
+import { StateRootError } from "../stateRoot.ts";
 import { repositories, type Repository } from "../status/collect.ts";
 import { type GitRunner, repositoryRoot } from "../status/git.ts";
-import { MEMORY, Store, storePath } from "../store/db.ts";
+import { MEMORY, Store } from "../store/db.ts";
 import { type CallerOptions, resolveCaller } from "../store/identity.ts";
 import { listDecisions, storeHolds } from "../store/questions.ts";
 import { type Actor, StoreError } from "../store/types.ts";
@@ -192,19 +193,17 @@ function withStore<T>(
   body: (store: Store) => T,
   createMissing = true,
 ): T {
-  let path: string;
+  let store: Store;
   try {
-    path = storePath(layout);
-  } catch {
-    if (createMissing) {
+    store = createMissing
+      ? Store.forLayout(layout, context.now === undefined ? {} : { now: context.now })
+      : (Store.readLayout(layout) ?? Store.open(MEMORY));
+  } catch (error) {
+    if (error instanceof StateRootError) {
       throw new StoreError("store-unavailable");
     }
-    path = MEMORY;
+    throw error;
   }
-  const store = Store.open(
-    !createMissing && !existsSync(path) ? MEMORY : path,
-    context.now === undefined ? {} : { now: context.now },
-  );
   try {
     return body(store);
   } finally {

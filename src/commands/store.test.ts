@@ -1,9 +1,11 @@
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
+import { loadLayout } from "../layout.ts";
+import { storePath } from "../store/db.ts";
 import { ART, COORDINATOR, GAMEPLAY, storeFixture, TECH } from "../store/testStore.ts";
 
 const ID = "00000000-0000-4000-8000-000000000301";
@@ -29,6 +31,24 @@ function cli(root: string, cwd: string, env: NodeJS.ProcessEnv) {
 }
 
 describe("store message commands", () => {
+  it("reports empty history and export without creating a store", async () => {
+    const { base, root } = storeFixture();
+    const run = cli(root, base, {});
+    expect(await run("msg", "status", ID)).toMatchObject({
+      code: EXIT_INVALID,
+      err: "coordination-kit: missing\n",
+    });
+    expect(await run("msg", "history")).toMatchObject({
+      code: EXIT_OK,
+      json: { events: [], schema: 1 },
+    });
+    expect(await run("store", "export", "--since", "2000-01-01T00:00:00Z")).toMatchObject({
+      code: EXIT_OK,
+      json: { closes: [], messages: [], schema: 1 },
+    });
+    expect(existsSync(storePath(loadLayout(root)))).toBe(false);
+  });
+
   it("runs send, inbox, done, status, history, export and rebuild with JSON output", async () => {
     const { base, root } = storeFixture();
     writeFileSync(join(base, "body.txt"), "Exact body.\n\n");

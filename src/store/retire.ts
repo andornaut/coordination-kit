@@ -13,14 +13,13 @@ import {
   renameSync,
 } from "node:fs";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 
 import { isRecord } from "../adapters/shared/pyjson.ts";
 import { writeJsonDurable } from "../durable.ts";
 import type { Layout } from "../layout.ts";
 import { stateRoot } from "../stateRoot.ts";
-import { Store, storePath } from "./db.ts";
+import { Store } from "./db.ts";
 import { type CallerOptions, resolveCaller } from "./identity.ts";
 import { importRequest, type RequestImport } from "./requests.ts";
 import { registry, type StoreServiceContext } from "./service.ts";
@@ -268,25 +267,10 @@ export async function storeRetire(
   const archiveDir = join(root, "archive");
   const archivePath = join(archiveDir, `phase4-${date}.tar.gz`);
   const manifestPath = join(archiveDir, `phase4-${date}.json`);
-  const path = storePath(context.layout);
-  // A dry run reads the store, when one exists, through a read-only connection; an apply opens it
-  // for writing, creating it when missing.
   const store = options.apply
-    ? Store.open(path, context.now === undefined ? {} : { now: context.now })
-    : undefined;
-  const reader =
-    store?.db ??
-    (lstatSync(path, { throwIfNoEntry: false }) === undefined
-      ? undefined
-      : new DatabaseSync(path, { readOnly: true, timeout: 5000 }));
-  const payloadOf = (key: string): JsonObject | undefined => {
-    if (reader === undefined) {
-      return undefined;
-    }
-    const row = reader.prepare("SELECT payload FROM events WHERE key = ?").get(key) as
-      { payload: string } | undefined;
-    return row === undefined ? undefined : (JSON.parse(row.payload) as JsonObject);
-  };
+    ? Store.forLayout(context.layout, context.now === undefined ? {} : { now: context.now })
+    : Store.readLayout(context.layout);
+  const payloadOf = (key: string): JsonObject | undefined => store?.eventByKey(key)?.payload;
   try {
     const recorded = payloadOf(RETIRED_KEY);
     if (recorded !== undefined) {
@@ -333,7 +317,7 @@ export async function storeRetire(
       schema: 1,
       stateRoot: root,
     };
-    if (store === undefined) {
+    if (!options.apply || store === null) {
       return output;
     }
     mkdirSync(archiveDir, { mode: 0o700, recursive: true });
@@ -375,6 +359,6 @@ export async function storeRetire(
     });
     return applied;
   } finally {
-    reader?.close();
+    store?.close();
   }
 }

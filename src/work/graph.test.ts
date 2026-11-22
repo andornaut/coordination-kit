@@ -1,3 +1,7 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
@@ -5,6 +9,7 @@ import { EXIT_INVALID, EXIT_OK } from "../io.ts";
 import { loadLayout } from "../layout.ts";
 import { Store } from "../store/db.ts";
 import { answerQuestion, openQuestion } from "../store/questions.ts";
+import { type Graph, readIndex, writeIndex } from "./graph.ts";
 import { workEvidence, workStart } from "./live.ts";
 import { GAME, IDS, KIT, live, liveFixture, liveIo, ROLES, workFile } from "./testLive.ts";
 
@@ -166,5 +171,41 @@ describe("graph", () => {
     const rebuilt = await run(made, "graph");
     expect(rebuilt.json.index.status).toBe("live");
     expect(rebuilt.json.edges).toEqual(live.json.edges);
+  });
+
+  it("stores a rebuildable graph cache alongside the files authority", () => {
+    const directory = mkdtempSync(join(tmpdir(), "coordination-graph-"));
+    const open = () =>
+      Store.openFileProjection(directory, {
+        journal: {
+          events: () => [],
+          withWriter: () => {
+            throw new Error("cache entered authoritative write transaction");
+          },
+        },
+        records: () => [],
+      });
+    const node = { attrs: {}, id: KIT, key: `role:${KIT}`, type: "role" } as const;
+    const graph: Graph = {
+      edges: [],
+      nodes: new Map([[node.key, node]]),
+      repositories: [KIT],
+      unavailable: [],
+    };
+    const writer = open();
+    try {
+      writeIndex(writer, graph);
+      expect(writer.head().seq).toBe(0);
+    } finally {
+      writer.close();
+    }
+    const reader = open();
+    try {
+      expect(readIndex(reader)).toEqual({ ...graph, at: expect.any(String) });
+      writeFileSync(join(directory, "graph-index.json"), '{"schema":1,"nodes":[null]}');
+      expect(readIndex(reader)).toBeNull();
+    } finally {
+      reader.close();
+    }
   });
 });

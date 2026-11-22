@@ -1,10 +1,13 @@
 // The decision graph: work items, decisions, questions, roles and commits, joined by typed edges.
 // Git is the durable copy (work files on each registered repository's `main`, with their front
 // matter and Decisions lines); the store adds work records (parent links, stage commits) and its
-// decision and question records. `graph index` writes the derived `edges` and `graph_nodes` tables;
-// deleting them loses nothing, and every query falls back to a live build without them.
+// decision and question records. `graph index` writes a derived cache beside the selected
+// authority. Every query falls back to a live build without the cache.
+import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
+import { isRecord } from "../adapters/shared/pyjson.ts";
+import { readJsonIfExists, writeJsonDurable } from "../durable.ts";
 import type { Repository } from "../status/collect.ts";
 import { type GitRunner, readMainFiles } from "../status/git.ts";
 import type { Store } from "../store/db.ts";
@@ -331,8 +334,73 @@ CREATE TABLE IF NOT EXISTS graph_index (
 );
 `;
 
-/** Replace the derived index with `graph` in one transaction. Events are untouched. */
+const INDEX_FILE = "graph-index.json";
+
+interface FileIndex extends GraphJson {
+  readonly schema: 1;
+  readonly at: string;
+  readonly repositories: readonly string[];
+  readonly unavailable: readonly string[];
+}
+
+function readFileIndex(path: string): (Graph & { readonly at: string }) | null {
+  try {
+    const value: unknown = readJsonIfExists(join(path, INDEX_FILE));
+    if (
+      !isRecord(value) ||
+      value.schema !== 1 ||
+      typeof value.at !== "string" ||
+      !Array.isArray(value.repositories) ||
+      !value.repositories.every((item) => typeof item === "string") ||
+      !Array.isArray(value.unavailable) ||
+      !value.unavailable.every((item) => typeof item === "string") ||
+      !Array.isArray(value.nodes) ||
+      !value.nodes.every(
+        (item: unknown) =>
+          isRecord(item) &&
+          typeof item.key === "string" &&
+          typeof item.id === "string" &&
+          typeof item.type === "string" &&
+          isRecord(item.attrs),
+      ) ||
+      !Array.isArray(value.edges) ||
+      !value.edges.every(
+        (item: unknown) =>
+          isRecord(item) &&
+          typeof item.kind === "string" &&
+          typeof item.from === "string" &&
+          typeof item.to === "string" &&
+          typeof item.source === "string" &&
+          (item.detail === null || typeof item.detail === "string"),
+      )
+    ) {
+      return null;
+    }
+    const { at, edges, nodes, repositories, unavailable } = value as unknown as FileIndex;
+    return {
+      at,
+      edges,
+      nodes: new Map(nodes.map((node) => [node.key, node])),
+      repositories,
+      unavailable,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Replace the derived index with `graph`. Events are untouched. */
 export function writeIndex(store: Store, graph: Graph): void {
+  if (store.fileBacked) {
+    writeJsonDurable(join(store.path, INDEX_FILE), {
+      ...graphJson(graph),
+      at: store.now(),
+      repositories: graph.repositories,
+      schema: 1,
+      unavailable: graph.unavailable,
+    } satisfies FileIndex);
+    return;
+  }
   store.transaction(() => {
     store.db.exec(INDEX_DDL);
     store.db.exec("DELETE FROM edges; DELETE FROM graph_nodes; DELETE FROM graph_index;");
@@ -354,8 +422,11 @@ export function writeIndex(store: Store, graph: Graph): void {
   });
 }
 
-/** The stored index, or null when `graph index` has not run (or its tables were deleted). */
-export function readIndex(store: Pick<Store, "db">): (Graph & { readonly at: string }) | null {
+/** The stored index, or null when the derived cache is missing. */
+export function readIndex(store: Store): (Graph & { readonly at: string }) | null {
+  if (store.fileBacked) {
+    return readFileIndex(store.path);
+  }
   if (!["edges", "graph_nodes", "graph_index"].every((table) => tableExists(store.db, table))) {
     return null;
   }

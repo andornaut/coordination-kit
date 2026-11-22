@@ -1,9 +1,9 @@
 // Read the coordinator's status projections in one consistent, read-only snapshot.
-import { existsSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 
 import type { Layout } from "../layout.ts";
-import { storePath } from "../store/db.ts";
+import { StateRootError } from "../stateRoot.ts";
+import { Store } from "../store/db.ts";
 import { type HoldView, listHolds, listQuestions, type QuestionView } from "../store/questions.ts";
 import { readRequests, type RequestRecord } from "../store/requests.ts";
 import { readWorkRecords, type WorkRecord } from "../store/work.ts";
@@ -60,21 +60,13 @@ function readDeployments(db: DatabaseSync): ReadonlyMap<string, readonly DeployP
  * No store file is `absent`; a store without the work tables has no records.
  */
 export function readStoreWork(layout: Layout): StoreWorkSnapshot {
-  let path: string;
+  let store: Store | null = null;
   try {
-    path = storePath(layout);
-  } catch (error) {
-    return empty({
-      reason: error instanceof Error ? error.message : "store-path-unavailable",
-      status: "unavailable",
-    });
-  }
-  if (!existsSync(path)) {
-    return empty({ status: "absent" });
-  }
-  let db: DatabaseSync | undefined;
-  try {
-    db = new DatabaseSync(path, { readOnly: true, timeout: 5000 });
+    store = Store.readLayout(layout);
+    if (store === null) {
+      return empty({ status: "absent" });
+    }
+    const { db } = store;
     db.exec("BEGIN");
     const present = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all() as {
       name: string;
@@ -92,9 +84,12 @@ export function readStoreWork(layout: Layout): StoreWorkSnapshot {
     };
     db.exec("COMMIT");
     return snapshot;
-  } catch {
-    return empty({ reason: "store-unreadable", status: "unavailable" });
+  } catch (error) {
+    return empty({
+      reason: error instanceof StateRootError ? error.message : "store-unreadable",
+      status: "unavailable",
+    });
   } finally {
-    db?.close();
+    store?.close();
   }
 }

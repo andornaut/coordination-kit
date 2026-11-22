@@ -4,11 +4,12 @@
 // `hold.imported` events owned by their original owner. Import never creates a work file and never
 // releases a hold; entries without a work file are listed for their owners to stub.
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 
+import { StateRootError } from "../stateRoot.ts";
 import type { Repository } from "../status/collect.ts";
 import { type GitRunner, readMainFiles } from "../status/git.ts";
-import { MEMORY, Store, storePath } from "../store/db.ts";
+import { MEMORY, Store } from "../store/db.ts";
 import { type CallerOptions, resolveCaller } from "../store/identity.ts";
 import { type Actor, type Json, StoreError } from "../store/types.ts";
 import {
@@ -498,19 +499,17 @@ export function importApprovalLedger(
   const tally = (bucket: Counts, exists: boolean) => {
     bucket[exists ? "unchanged" : "insert"] += 1;
   };
-  let path: string;
+  let store: Store;
   try {
-    path = storePath(coordinator.layout);
-  } catch {
-    if (!selection.dryRun) {
+    store = selection.dryRun
+      ? (Store.readLayout(coordinator.layout) ?? Store.open(MEMORY))
+      : Store.forLayout(coordinator.layout, context.now === undefined ? {} : { now: context.now });
+  } catch (error) {
+    if (error instanceof StateRootError) {
       throw new StoreError("store-unavailable");
     }
-    path = MEMORY;
+    throw error;
   }
-  const store = Store.open(
-    selection.dryRun && !existsSync(path) ? MEMORY : path,
-    context.now === undefined ? {} : { now: context.now },
-  );
   try {
     const apply = () => {
       const planned = new Set<string>();
