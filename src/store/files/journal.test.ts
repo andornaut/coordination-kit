@@ -133,7 +133,8 @@ it("leaves old writers fenced across interruption and resumes the same checkpoin
     head: { hash: first.hash, seq: first.seq },
     id: "00000000-0000-4000-8000-000000000211",
   };
-  const verifySource = (events: readonly StoredEvent[]) => expect(events).toEqual([first]);
+  const verifySource = (snapshot: { readonly events: readonly StoredEvent[] }) =>
+    expect(snapshot.events).toEqual([first]);
 
   expect(() =>
     fenceFileJournal(root, { ...fence, head: { ...fence.head, seq: 2 } }, verifySource, () => 1),

@@ -547,11 +547,27 @@ interface CheckpointFence {
   readonly id: string;
 }
 
+function fenceBytes(fence: CheckpointFence): Buffer {
+  return Buffer.from(json({ ...fence, schema: 2 }));
+}
+
+/** An active checkpoint is valid only with this exact old-writer fence. */
+export function assertFileJournalFence(root: string, fence: CheckpointFence): void {
+  ensure(readFileJournalFence(root)?.equals(fenceBytes(fence)), "checkpoint-fence-mismatch");
+}
+
+export function readFileJournalFence(root: string): Buffer | undefined {
+  const journal = paths(resolve(root), EMPTY_BASELINE);
+  return scopedDirectory(journal.root, journal.batches)
+    ? readFile(join(journal.batches, CHECKPOINT_FENCE))
+    : undefined;
+}
+
 /** Fence the old journal, including preopened writers, while selecting an exact verified candidate. */
 export function fenceFileJournal<T>(
   root: string,
   fence: CheckpointFence,
-  verifySource: (events: readonly StoredEvent[]) => void,
+  verifySource: (snapshot: ReturnType<FileJournal["snapshot"]>) => void,
   select: () => T,
 ): T {
   const journal = paths(resolve(root), EMPTY_BASELINE);
@@ -571,18 +587,17 @@ export function fenceFileJournal<T>(
     recover(journal);
     const file = join(journal.batches, CHECKPOINT_FENCE);
     const original = readFile(file);
-    const expected = json({ ...fence, schema: 2 });
-    ensure(
-      original === undefined || original.equals(Buffer.from(expected)),
-      "checkpoint-fence-mismatch",
-    );
-    const events = readEvents(journal, batchFiles(journal, original !== undefined), 0);
+    const expected = fenceBytes(fence);
+    ensure(original === undefined || original.equals(expected), "checkpoint-fence-mismatch");
+    const files = batchFiles(journal, original !== undefined);
+    const events = readEvents(journal, files, 0);
     const head = events.at(-1);
     ensure(
       head?.seq === fence.head.seq && head.hash === fence.head.hash,
       "checkpoint-source-head-changed",
     );
-    const verified: unknown = verifySource(events);
+    const records = files.flatMap((filename) => readBatch(journal, filename).records);
+    const verified: unknown = verifySource({ events, records });
     ensure(!(verified instanceof Promise), "checkpoint-verification-async");
     if (original === undefined) {
       const intent = join(journal.journal, CHECKPOINT_FENCE);

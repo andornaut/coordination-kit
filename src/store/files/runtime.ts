@@ -4,6 +4,7 @@ import type { Layout } from "../../layout.ts";
 import { readRegistry } from "../../registry/store.ts";
 import { latestStoreReview } from "../eventCodec.ts";
 import type { FileProjection } from "../fileProjection.ts";
+import { selectedFileCheckpoint } from "./compactionGeneration.ts";
 import { openFileJournal } from "./journal.ts";
 import { fileRecords } from "./records.ts";
 import { verifiedWorkerForEvent } from "./workerProof.ts";
@@ -18,7 +19,7 @@ function ownerLookup(index: DatabaseSync, query: string, throughSeq: number) {
 
 export function fileLayoutProjection(layout: Layout, target: string): FileProjection {
   return {
-    journal: openFileJournal(target),
+    ...(selectedFileCheckpoint(target) ?? { journal: openFileJournal(target) }),
     records(index, throughSeq, events) {
       const registry = readRegistry(layout);
       const message = index.prepare(
