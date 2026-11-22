@@ -332,9 +332,12 @@ offset equals its size and the size exceeds 1 MiB. Ingest is the only reader:
   quarantined.
 - Each valid line is committed once as a `bus.event` event with the unique key
   `bus.event:<id>`, unique per (game, type, key). Blocked events stay apart per type.
-- Every non-quiet event is also stored as a message from `delivery-kit` to `reports.recipient`
-  with an ID derived from the event ID. The quiet progress types (`ci_pending`, `ci_running`,
-  `deploy_pending`, `deploy_retry`, `gate_passed` and `gate_skipped`) are stored as events only.
+- The initial `attempt` and its `attempt-captured` event share the attempt key. The capture
+  carries the exact full `sha` for the verified gate snapshot or docs-only pinned push.
+- Routine slot status, attempts, captures, progress and passing stage outcomes stay in the event
+  history. A successful departure sends one COMPLETE. Failed, blocked and timed-out outcomes,
+  runner startup and pin mismatch notices are sent separately from `delivery-kit` to
+  `reports.recipient`, with message IDs derived from the event IDs.
 - The events, their messages and any COMPLETE are one transaction. Then the recipient is woken,
   quarantined lines are appended, the cursor is written atomically, and only then are rotated
   files the cursor has passed deleted.

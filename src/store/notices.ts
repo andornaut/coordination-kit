@@ -11,16 +11,36 @@ import { sendMessage } from "./messages.ts";
 import { secretShape } from "./secrets.ts";
 import type { Actor, MessageLink } from "./types.ts";
 
-/** The runner's role in the registry, the sender of every message this module stores. */
-/** Runner progress types stored as events only, with no message. */
-export const QUIET_KINDS: ReadonlySet<string> = new Set([
+/** Intermediate CI and deploy events never count as successful outcomes. */
+export const INTERMEDIATE_TYPES: ReadonlySet<string> = new Set([
   "ci_pending",
   "ci_running",
   "deploy_pending",
   "deploy_retry",
+]);
+
+const ROUTINE_TYPES: ReadonlySet<string> = new Set([
+  ...INTERMEDIATE_TYPES,
+  "attempt",
+  "attempt-captured",
+  "attempt_started",
+  "ci_success",
+  "deploy_disabled",
+  "deploy_skipped",
+  "deploy_success",
   "gate_passed",
   "gate_skipped",
+  "push",
+  "pushed",
+  "scheduled-status",
 ]);
+
+/** Store routine progress and success in the event history and notify faults immediately. */
+export function shouldNotifyRunnerEvent(type: string, status: string | null): boolean {
+  return (
+    status === "blocked" || status === "failed" || status === "timeout" || !ROUTINE_TYPES.has(type)
+  );
+}
 
 const CLEAN_LIMIT = 1800;
 
@@ -32,6 +52,7 @@ export function clean(value: string): string {
     .join("");
 }
 
+/** The runner's role in the registry, the sender of every message this module stores. */
 export const DELIVERY_KIT_ROLE = "delivery-kit";
 export const DELIVERY_KIT_ACTOR: Actor = { nativeId: null, role: DELIVERY_KIT_ROLE };
 

@@ -27,9 +27,10 @@ import {
   clean,
   DELIVERY_KIT_ACTOR,
   derivedId,
+  INTERMEDIATE_TYPES,
   type Notice,
-  QUIET_KINDS,
   reportsRecipient,
+  shouldNotifyRunnerEvent,
   storeNotice,
 } from "./notices.ts";
 import type { Json, JsonObject, MessageLink } from "./types.ts";
@@ -58,8 +59,6 @@ export const EVENT_STATUSES: ReadonlySet<string> = new Set([
 ]);
 /** The imported legacy `complete` line: that commit's COMPLETE. */
 const LEGACY_COMPLETE = "complete";
-/** Quiet gate types that still prove the gate passed for COMPLETE. */
-const GATE_PASSES: ReadonlySet<string> = new Set(["gate_passed", "gate_skipped"]);
 
 /** One runner event line, as the contract defines it. */
 export interface BusLine {
@@ -423,7 +422,7 @@ function deriveComplete(
           row.kind === kind &&
           row.status !== null &&
           statuses.includes(row.status) &&
-          (!QUIET_KINDS.has(row.type) || GATE_PASSES.has(row.type)),
+          !INTERMEDIATE_TYPES.has(row.type),
       )
       .at(-1);
   const gate = passed("gate", ["ok", "skipped"]);
@@ -630,8 +629,8 @@ export async function ingestEvents(
           if (line.sha !== null) {
             touched.add(line.sha);
           }
-          // Quiet progress types and the legacy complete line (its COMPLETE follows) send nothing.
-          if (!QUIET_KINDS.has(line.type) && line.type !== LEGACY_COMPLETE) {
+          // The legacy complete line contributes its own COMPLETE, never a separate notice.
+          if (line.type !== LEGACY_COMPLETE && shouldNotifyRunnerEvent(line.type, line.status)) {
             notified = storeNotice(store, eventNotice(game.name, to, line)) || notified;
           }
         }

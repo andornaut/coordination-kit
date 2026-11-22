@@ -68,7 +68,7 @@ function text(...lines: Line[]): string {
 function shipped(sha: string, deploy: Line): Line[] {
   return [
     line("gate_passed", sha, "gate", "ok", { sha }),
-    line("pushed", sha, "push", "ok", { sha }),
+    line("push", sha, "push", "ok", { sha }),
     line("ci_success", sha, "ci", "ok", { sha }),
     deploy,
   ];
@@ -135,7 +135,7 @@ function completes(layout: Layout): StoredMessage[] {
 describe("events ingest", () => {
   it("commits each line once, then writes the cursor, and a repeated ingest is a no-op", async () => {
     const test = setup();
-    const first = line("attempt_started", "a1", "attempt", "ok");
+    const first = line("runner.started", "start1", "runner", null);
     const second = line("blocked-gate", "a1", "gate", "blocked", { detail: "lint failed" });
     writeFileSync(test.log, text(first, second));
     const result = await ingestEvents(test.context, test.game);
@@ -160,10 +160,10 @@ describe("events ingest", () => {
       offset: stat.size,
       schema: 1,
     });
-    expect(busEvents(test.layout)).toEqual(["attempt_started", "blocked-gate"]);
+    expect(busEvents(test.layout)).toEqual(["runner.started", "blocked-gate"]);
     expect(messages(test.layout)).toEqual([
       expect.objectContaining({
-        body: "Archie bus: attempt_started ok",
+        body: "Archie bus: runner.started",
         from_role: "delivery-kit",
         id: derivedId("bus-event", first.id as string),
         to_role: "game-coordinator",
@@ -181,7 +181,7 @@ describe("events ingest", () => {
 
   it("writes no cursor when the commit fails; re-ingest after a lost cursor stores nothing twice", async () => {
     const test = setup();
-    writeFileSync(test.log, text(line("attempt_started", "a1", "attempt", "ok")));
+    writeFileSync(test.log, text(line("pin-mismatch", "a1", "runner", null)));
     const spy = vi.spyOn(Store.prototype, "transaction").mockImplementationOnce(() => {
       throw new Error("disk full");
     });
@@ -435,7 +435,7 @@ describe("events ingest", () => {
         line("pushed", SHA, "push", "ok", { detail: "imported at 6.1 start", sha: SHA }),
         line("ci_pending", SHA, "ci", "ok", { sha: SHA }),
         line("ci_success", SHA, "ci", "ok", { sha: SHA }),
-        line("deploy_retry", SHA, "deploy", "failed", { sha: SHA }),
+        line("deploy_retry", SHA, "deploy", null, { sha: SHA }),
         line("deploy_success", SHA, "deploy", "ok", { sha: SHA, work: [] }),
       ),
     );
@@ -453,11 +453,81 @@ describe("events ingest", () => {
     ]);
     const bodies = messages(test.layout).map((message) => message.body);
     expect(bodies).toEqual([
-      `Archie bus: pushed ok ${SHA.slice(0, 12)}: imported at 6.1 start`,
-      `Archie bus: ci_success ok ${SHA.slice(0, 12)}`,
-      `Archie bus: deploy_success ok ${SHA.slice(0, 12)}`,
       `Archie bus: COMPLETE ${SHA}: gate skipped, push ok, ci ok, deploy deploy_success (ok); work: none`,
     ]);
+  });
+
+  it.each([
+    ["gate snapshot", "gate_passed", "ok", "deploy_success", "ok"],
+    ["docs-only pinned push", "gate_skipped", "skipped", "deploy_skipped", "skipped"],
+  ])(
+    "records the %s capture and sends one COMPLETE after the passing outcomes",
+    async (captureSource, gateType, gateStatus, deployType, deployStatus) => {
+      const test = setup();
+      const key = "1795014000";
+      const scheduled = line("scheduled-status", key, "runner", null);
+      const attempt = line("attempt", key, "attempt", null);
+      const capture = line("attempt-captured", key, "attempt", null, {
+        detail: `captured ${captureSource}`,
+        sha: SHA,
+      });
+      const gate = line(gateType, SHA, "gate", gateStatus, { sha: SHA });
+      const push = line("push", SHA, "push", "ok", { sha: SHA });
+      writeFileSync(test.log, text(scheduled, attempt, capture, gate, push));
+      expect(await ingestEvents(test.context, test.game)).toMatchObject({
+        completed: 0,
+        delivered: 5,
+        quarantined: 0,
+      });
+      expect(messages(test.layout)).toEqual([]);
+      const ci = line("ci_success", SHA, "ci", "ok", { sha: SHA });
+      const deploy = line(deployType, SHA, "deploy", deployStatus, { sha: SHA, work: [] });
+      appendFileSync(test.log, text(ci, deploy));
+      expect(await ingestEvents(test.context, test.game)).toMatchObject({
+        completed: 1,
+        delivered: 2,
+      });
+      expect(messages(test.layout).map((message) => message.id)).toEqual([
+        derivedId("complete", GAME, SHA),
+      ]);
+      expect(
+        withStore(test.layout, (store) =>
+          store.events({ kinds: ["bus.event"] }).map((event) => event.payload),
+        ),
+      ).toEqual([scheduled, attempt, capture, gate, push, ci, deploy]);
+      expect((await ingestEvents(test.context, test.game)).completed).toBe(0);
+      expect(messages(test.layout)).toHaveLength(1);
+    },
+  );
+
+  it("stores actionable failures immediately without waiting for a COMPLETE", async () => {
+    const test = setup();
+    const blocked = line("blocked-load", "1795014000", "attempt", "blocked");
+    const failed = line("blocked-full-gate", "1795017600", "gate", "failed");
+    const ci = line("ci_timeout", SHA, "ci", "timeout", { sha: SHA });
+    const deploy = line("deploy_failure", SHA, "deploy", "failed", { sha: SHA });
+    writeFileSync(
+      test.log,
+      text(
+        blocked,
+        failed,
+        line("gate_passed", SHA, "gate", "ok", { sha: SHA }),
+        line("push", SHA, "push", "ok", { sha: SHA }),
+      ),
+    );
+    expect(await ingestEvents(test.context, test.game)).toMatchObject({
+      completed: 0,
+      delivered: 4,
+    });
+    expect(messages(test.layout)).toHaveLength(2);
+    appendFileSync(test.log, text(ci, deploy));
+    expect(await ingestEvents(test.context, test.game)).toMatchObject({
+      completed: 0,
+      delivered: 2,
+    });
+    expect(messages(test.layout).map((message) => message.id)).toEqual(
+      [blocked, failed, ci, deploy].map((event) => derivedId("bus-event", event.id as string)),
+    );
   });
 
   it("keeps blocked events apart per type", async () => {
