@@ -10,7 +10,12 @@ import { stateRoot } from "../stateRoot.ts";
 import { canonicalJson, eventHash, rowEvent } from "./eventCodec.ts";
 import type { FileProjection } from "./fileProjection.ts";
 import { fileAuthority } from "./files/authority.ts";
+import {
+  type CompactionCheckpoint,
+  verifyCompactionCheckpoint,
+} from "./files/compactionCheckpoint.ts";
 import { fileLayoutProjection } from "./files/runtime.ts";
+import { sha256 } from "./messages.ts";
 import { type Projection, PROJECTIONS } from "./projections.ts";
 import {
   type Actor,
@@ -127,6 +132,8 @@ export class Store {
   readonly path: string;
   readonly #now: () => string;
   readonly #files: FileProjection | undefined;
+  readonly #checkpointHead: CompactionCheckpoint["head"] | undefined;
+  readonly #reducedDigests = new Map<number, string>();
   #depth = 0;
 
   private constructor(
@@ -134,11 +141,18 @@ export class Store {
     db: DatabaseSync,
     options: OpenOptions,
     files?: FileProjection,
+    checkpoint?: CompactionCheckpoint,
   ) {
     this.path = path;
     this.db = db;
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#files = files;
+    this.#checkpointHead = checkpoint?.head;
+    for (const { event, reducedDigest } of checkpoint?.entries ?? []) {
+      if (reducedDigest !== undefined) {
+        this.#reducedDigests.set(event.seq, reducedDigest);
+      }
+    }
   }
 
   /** Open or create the store at `path` with WAL, synchronous=FULL and foreign keys. */
@@ -239,10 +253,19 @@ export class Store {
 
   /** Rebuild the compatibility query index from the authoritative committed file events. */
   static openFileProjection(path: string, files: FileProjection, options: OpenOptions = {}): Store {
+    const proof = files.checkpoint;
+    const checkpoint = proof && verifyCompactionCheckpoint(proof.value, proof.receipt);
     const index = Store.open(MEMORY);
-    const store = new Store(path, index.db, options, files);
+    const store = new Store(path, index.db, options, files, checkpoint);
     try {
-      store.#replay(files.journal.events());
+      if (checkpoint !== undefined) {
+        store.#replay(
+          checkpoint.entries.map(({ event }) => event),
+          true,
+        );
+        store.#verifyCheckpointHead();
+      }
+      store.#replay(files.journal.events(checkpoint?.head.seq));
       return store;
     } catch (error) {
       store.close();
@@ -305,20 +328,42 @@ export class Store {
     }
   }
 
-  #replay(events: readonly StoredEvent[]): void {
+  #verifyCheckpointHead(): void {
+    const head = this.#checkpointHead;
+    if (
+      head !== undefined &&
+      head.seq > 0 &&
+      this.db.prepare("SELECT hash FROM events WHERE seq = ?").get(head.seq)?.hash !== head.hash
+    ) {
+      throw new StoreError("checkpoint-proof-mismatch");
+    }
+  }
+
+  #authentic(event: StoredEvent, allowReduced: boolean): boolean {
+    const reducedDigest = allowReduced ? this.#reducedDigests.get(event.seq) : undefined;
+    if (reducedDigest !== undefined) {
+      return sha256(canonicalJson(event)) === reducedDigest;
+    }
+    return eventHash(event) === event.hash;
+  }
+
+  #replay(events: readonly StoredEvent[], allowReduced = false): void {
     if (events.length === 0) {
       return;
     }
     this.#transaction(() => {
       let { hash: prevHash, seq } = this.head();
       for (const event of events) {
-        const { hash, ...draft } = event;
-        if (event.seq !== seq + 1 || event.prevHash !== prevHash || eventHash(draft) !== hash) {
+        if (
+          event.seq !== seq + 1 ||
+          event.prevHash !== prevHash ||
+          !this.#authentic(event, allowReduced)
+        ) {
           throw new StoreError("chain-broken", `at seq ${event.seq}`);
         }
         this.#insert(event);
         seq = event.seq;
-        prevHash = hash;
+        prevHash = event.hash;
       }
     });
   }
@@ -393,8 +438,19 @@ export class Store {
   }
 
   private project(event: StoredEvent): void {
+    let projected = event;
+    if (this.#reducedDigests.has(event.seq)) {
+      if (event.kind === "session.started") {
+        // The qualified window preserves subsequent starts for the same role.
+        return;
+      }
+      if (event.kind === "msg.sent" || event.kind === "msg.imported") {
+        // The query index requires text. Exact body reads inspect the original event payload.
+        projected = { ...event, payload: { ...event.payload, body: "" } };
+      }
+    }
     for (const projection of PROJECTIONS) {
-      projection.apply[event.kind]?.(this.db, event);
+      projection.apply[projected.kind]?.(this.db, projected);
     }
   }
 
@@ -413,22 +469,22 @@ export class Store {
 
   /** Recompute every link of the chain; throws `chain-broken` at the first mismatch. */
   verify(): VerifyResult {
+    this.#verifyCheckpointHead();
     let prev = GENESIS;
     let seq = 0;
     for (const row of this.db
       .prepare("SELECT * FROM events ORDER BY seq")
       .iterate() as Iterable<Row>) {
       const event = rowEvent(row);
-      const { hash, ...rest } = event;
       if (
         event.seq !== seq + 1 ||
         event.prevHash !== prev ||
-        eventHash(rest) !== hash ||
+        !this.#authentic(event, true) ||
         canonicalJson(event.payload) !== row.payload
       ) {
         throw new StoreError("chain-broken", `at seq ${event.seq}`);
       }
-      prev = hash;
+      prev = event.hash;
       seq = event.seq;
     }
     return { events: seq, head: { hash: prev, seq } };

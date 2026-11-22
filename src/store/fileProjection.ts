@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
+import type { CheckpointReceipt } from "./files/compactionCheckpoint.ts";
 import type { Json, StoredEvent } from "./types.ts";
 
 export interface FileRecord {
@@ -21,6 +22,8 @@ export interface FileJournalPort extends FileJournalReader {
 }
 
 export interface FileProjection {
+  /** Optional replay prefix and its independently qualified receipt. The journal supplies the tail. */
+  readonly checkpoint?: { readonly value: unknown; readonly receipt: CheckpointReceipt };
   readonly journal: FileJournalPort;
   readonly records: (
     index: DatabaseSync,

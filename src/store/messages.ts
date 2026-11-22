@@ -45,7 +45,20 @@ function parse<T>(value: SQLInputValue | undefined): T {
   return JSON.parse((value as string | undefined) ?? "null") as T;
 }
 
-function rowView(row: Row, includeBody: boolean): MessageView {
+function bodyView(store: Pick<Store, "db">, row: Row): Pick<MessageView, "body" | "bodyExpired"> {
+  const body = row.body as string;
+  if (body === "") {
+    const original = store.db
+      .prepare("SELECT json_type(payload, '$.body') AS type FROM events WHERE seq = ?")
+      .get(row.sent_seq!);
+    if (original?.type === null) {
+      return { bodyExpired: true };
+    }
+  }
+  return { body };
+}
+
+function rowView(store: Pick<Store, "db">, row: Row, includeBody: boolean): MessageView {
   const nullable = (key: string) => (row[key] as string | null) ?? null;
   return {
     bodySha256: row.body_sha256 as string,
@@ -65,7 +78,7 @@ function rowView(row: Row, includeBody: boolean): MessageView {
     unconfirmed: Number(row.unconfirmed) === 1,
     work: nullable("work"),
     worker: nullable("worker"),
-    ...(includeBody ? { body: row.body as string } : {}),
+    ...(includeBody ? bodyView(store, row) : {}),
   };
 }
 
@@ -125,7 +138,7 @@ export function sendMessage(store: Store, actor: Actor, input: SendInput): SendR
           canonicalJson(parse(existing.links)) === canonicalJson(links),
         "id-conflict",
       );
-      return { duplicate: true, message: rowView(existing, false) };
+      return { duplicate: true, message: rowView(store, existing, false) };
     }
     const at = store.now();
     store.append({
@@ -145,7 +158,7 @@ export function sendMessage(store: Store, actor: Actor, input: SendInput): SendR
         worker: actor.worker ?? null,
       },
     });
-    return { duplicate: false, message: rowView(messageRow(store, input.id)!, false) };
+    return { duplicate: false, message: rowView(store, messageRow(store, input.id)!, false) };
   });
 }
 
@@ -193,6 +206,7 @@ export function readInbox(
     }
     const messages = rows.map((row) =>
       rowView(
+        store,
         row.state === "sent" && at !== null
           ? { ...row, delivered_at: at, state: "delivered" }
           : row,
@@ -256,7 +270,7 @@ export function closeMessage(
           canonicalJson(parse(row.evidence ?? "[]")) === canonicalJson(evidence),
         "already-closed",
       );
-      return { duplicate: true, message: rowView(row, false) };
+      return { duplicate: true, message: rowView(store, row, false) };
     }
     if (input.supersededBy !== undefined) {
       ensure(
@@ -265,7 +279,7 @@ export function closeMessage(
       );
     }
     store.append({ actor, key: `msg.closed:${id}`, kind: "msg.closed", payload });
-    return { duplicate: false, message: rowView(messageRow(store, id)!, false) };
+    return { duplicate: false, message: rowView(store, messageRow(store, id)!, false) };
   });
 }
 
@@ -300,7 +314,7 @@ export function retainMessage(
       current.reason === input.reason &&
       current.nextBoundary === input.nextBoundary
     ) {
-      return { duplicate: true, message: rowView(row, false) };
+      return { duplicate: true, message: rowView(store, row, false) };
     }
     store.append({
       actor,
@@ -308,7 +322,7 @@ export function retainMessage(
       kind: "msg.retained",
       payload: { id, nextBoundary: input.nextBoundary, owner: input.owner, reason: input.reason },
     });
-    return { duplicate: false, message: rowView(messageRow(store, id)!, false) };
+    return { duplicate: false, message: rowView(store, messageRow(store, id)!, false) };
   });
 }
 
@@ -321,7 +335,7 @@ export function messageStatus(
   ensure(MESSAGE_ID.test(id), "invalid-id");
   const row = messageRow(store, id);
   ensure(row !== undefined, "missing");
-  return rowView(row, includeBody);
+  return rowView(store, row, includeBody);
 }
 
 /** Read one exact original only when the caller's role may see its body. */
@@ -330,7 +344,7 @@ export function messageWithBody(store: Pick<Store, "db">, viewer: string, id: st
   const row = messageRow(store, id);
   ensure(row !== undefined, "missing");
   ensure(bodyVisibleTo(viewer, row.from_role, row.to_role), "message-not-visible");
-  return rowView(row, true);
+  return rowView(store, row, true);
 }
 
 /** Messages in one recipient's inbox in the given states, oldest first. A review seam read. */
@@ -346,7 +360,7 @@ export function recipientMessages(
          ORDER BY sent_seq`,
       )
       .all(role, ...states) as Row[]
-  ).map((row) => rowView(row, false));
+  ).map((row) => rowView(store, row, false));
 }
 
 export const MESSAGE_KINDS = [
@@ -384,7 +398,7 @@ function historyDetail(
   const { payload } = event;
   if (event.kind === "msg.sent" || event.kind === "msg.imported") {
     if (bodyVisibleTo(viewer, payload.from, payload.to)) {
-      return payload;
+      return payload.body === undefined ? { ...payload, bodyExpired: true } : payload;
     }
     const rest: Record<string, Json> = { ...payload };
     delete rest.body;
@@ -455,6 +469,8 @@ export interface ExportResult {
   readonly since: string;
   /** Messages sent after `since`, with bodies, for re-recording under their original IDs. */
   readonly messages: readonly JsonObject[];
+  /** Metadata for expired originals whose bodies cannot be re-recorded. */
+  readonly expiredMessages?: readonly JsonObject[];
   /** Closes and retentions recorded after `since`, for the recipients to re-record. */
   readonly closes: readonly JsonObject[];
 }
@@ -468,11 +484,17 @@ export function exportSince(store: Store, since: string): ExportResult {
     )
     .all(since) as Row[];
   const messages: JsonObject[] = [];
+  const expiredMessages: JsonObject[] = [];
   const closes: JsonObject[] = [];
   for (const row of rows) {
     const payload = parse<JsonObject>(row.payload);
     if (row.kind === "msg.sent") {
-      messages.push({ ...payload, at: row.at as string, seq: Number(row.seq) });
+      const entry = { ...payload, at: row.at as string, seq: Number(row.seq) };
+      if (payload.body === undefined) {
+        expiredMessages.push({ ...entry, bodyExpired: true });
+      } else {
+        messages.push(entry);
+      }
     } else {
       closes.push({
         ...payload,
@@ -483,5 +505,5 @@ export function exportSince(store: Store, since: string): ExportResult {
       });
     }
   }
-  return { closes, messages, since };
+  return { closes, ...(expiredMessages.length > 0 ? { expiredMessages } : {}), messages, since };
 }

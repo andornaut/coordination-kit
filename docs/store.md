@@ -95,6 +95,16 @@ UTF-8. `payloadBytes` includes its JSON encoding and other payload fields.
 The report supplies `diskSavingsBytes: null`. Batch separators, companion copies,
 filesystem allocation and future checkpoint data determine physical savings.
 
+A qualified replay prefix binds its reduced entries to an independently verified
+receipt. The query index checks each reduced entry against that receipt and checks
+ordinary events against their original hashes. Rebuild repeats these checks.
+The first tail event must extend the original checkpoint head by one sequence.
+Projected closed messages keep their identity, links, dates and disposition.
+An authorized body lookup or history entry reports `bodyExpired: true` when its
+body was removed. A legacy empty string remains a present body. Export keeps
+replayable sends in `messages` and puts expired send metadata in `expiredMessages`
+when present. Close evidence stays in `closes`.
+
 The current manifest commits event hashes and companion digests. Expiration needs a
 separately qualified generation that preserves live projections, key and disposition
 resolution, rollback evidence and the chain anchor while removing retired payloads from

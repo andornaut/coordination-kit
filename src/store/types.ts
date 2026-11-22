@@ -99,6 +99,8 @@ export interface MessageView {
   readonly retention: Retention | null;
   readonly legacy: LegacyOrigin | null;
   readonly body?: string;
+  /** A requested body was expired under an independently qualified checkpoint. */
+  readonly bodyExpired?: true;
 }
 
 export type WakeOutcome = "accepted" | "guarded" | "failed" | "ambiguous";
