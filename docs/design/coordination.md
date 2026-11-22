@@ -25,15 +25,16 @@ Reference: [review](../review.md#scheduled-review-seam), [libraries](../librarie
 
 ## Work items
 
-| ID      | Title                                                   | Link                                                                                       |
-| ------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| ck-0001 | Extract the coordination kit from delivery-kit          | [ck-0001.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0001.md) |
-| ck-0010 | Validate only the configuration sections this kit reads | [ck-0010.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0010.md) |
-| ck-0028 | Document workspace layout and coordinator setup         | [ck-0028.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0028.md) |
-| ck-0029 | Recover Codex questions and surface guarded messages    | [ck-0029.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0029.md) |
-| ck-0030 | Apply the container memory ceiling to kit launchers     | [ck-0030.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0030.md) |
-| ck-0031 | Escalate blocked inbox delivery to the coordinator      | [ck-0031.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0031.md) |
-| ck-0032 | Simplify the command and operator workflows             | [ck-0032.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0032.md) |
-| ck-0033 | Keep one outstanding notice per active recipient        | [ck-0033.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0033.md) |
-| ck-0034 | Accept the legacy reports project field as optional     | [ck-0034.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0034.md) |
-| ck-0035 | Plan and qualify filesystem history compaction          | [ck-0035.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0035.md) |
+| ID      | Title                                                    | Link                                                                                       |
+| ------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| ck-0001 | Extract the coordination kit from delivery-kit           | [ck-0001.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0001.md) |
+| ck-0010 | Validate only the configuration sections this kit reads  | [ck-0010.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0010.md) |
+| ck-0028 | Document workspace layout and coordinator setup          | [ck-0028.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0028.md) |
+| ck-0029 | Recover Codex questions and surface guarded messages     | [ck-0029.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0029.md) |
+| ck-0030 | Apply the container memory ceiling to kit launchers      | [ck-0030.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0030.md) |
+| ck-0031 | Escalate blocked inbox delivery to the coordinator       | [ck-0031.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0031.md) |
+| ck-0032 | Simplify the command and operator workflows              | [ck-0032.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0032.md) |
+| ck-0033 | Keep one outstanding notice per active recipient         | [ck-0033.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0033.md) |
+| ck-0034 | Accept the legacy reports project field as optional      | [ck-0034.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0034.md) |
+| ck-0035 | Plan and qualify filesystem history compaction           | [ck-0035.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0035.md) |
+| ck-0036 | Release collected accepted notices beyond native history | [ck-0036.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0036.md) |
