@@ -107,7 +107,7 @@ export interface SendOutput {
 }
 
 /**
- * Route a confirmed unblock wake failure to the coordinator once. The original is already
+ * Route a confirmed work-message wake failure to the coordinator once. The original is already
  * committed. An attention write or wake failure must not turn that committed send into a retry.
  */
 async function notifyCoordinator(
@@ -130,7 +130,7 @@ async function notifyCoordinator(
       }
       return sendMessage(store, actor, {
         body:
-          `Unblock original ${current.id} remains unread after a ${outcome} wake to ${current.to}. ` +
+          `Work original ${current.id} remains unread after a ${outcome} wake to ${current.to}. ` +
           "Review safe inbox collection for the exact original.",
         id,
         intent: "queue",
@@ -184,7 +184,8 @@ export async function storeSend(
     const attempt = sent.duplicate ? undefined : await wakeRecipient(ports, to);
     const attention =
       !sent.duplicate &&
-      sent.message.intent === "unblock" &&
+      (sent.message.intent === "unblock" ||
+        sent.message.links.some(({ kind }) => kind === "work")) &&
       actor.role !== COORDINATOR &&
       to !== COORDINATOR &&
       Object.hasOwn(roles.roles, COORDINATOR) &&

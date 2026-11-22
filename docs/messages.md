@@ -27,8 +27,9 @@ coordination-kit msg retain 00000000-0000-4000-8000-000000000003 --reason "check
 - `msg send` stores the original, marks the recipient wake-pending and attempts at most one
   guarded wake, which carries no payload. Repeating the same original returns its recorded
   evidence without another native attempt. A wake outcome never changes message state.
-- A new `--intent unblock` from another role with a confirmed guarded or failed wake and an
-  exact unread original creates one coordinator attention notice. It carries the original ID
+- A new `--intent unblock` or message with a `work` link from another role creates one
+  coordinator attention notice if the original is unread after a confirmed guarded or failed
+  wake. The notice carries the original ID
   and wake category. The coordinator wake uses the regular guard. The optional `attention`
   receipt reports whether the notice was recorded. Ambiguous or coalesced outcomes remain
   visible for reconciliation and do not create another native input.

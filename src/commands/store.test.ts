@@ -31,7 +31,10 @@ function cli(root: string, cwd: string, env: NodeJS.ProcessEnv) {
 }
 
 describe("store message commands", () => {
-  it("puts a confirmed unread unblock in the coordinator inbox once", async () => {
+  it.each([
+    ["an explicit unblock", ["--intent", "unblock"]],
+    ["a work-linked queue message", ["--link", "work=ck-0031"]],
+  ] as const)("alerts the coordinator once for %s with a guarded wake", async (_case, metadata) => {
     const { base, root } = storeFixture();
     const tech = cli(root, base, { CLAUDE_CODE_SESSION_ID: TECH });
     const coordinator = cli(root, base, { CLAUDE_CODE_SESSION_ID: COORDINATOR });
@@ -42,8 +45,7 @@ describe("store message commands", () => {
       ART_ROLE,
       "--body",
       "Private transfer details.",
-      "--intent",
-      "unblock",
+      ...metadata,
       "--id",
       ID,
     ];
@@ -66,6 +68,22 @@ describe("store message commands", () => {
     expect(inbox.out).not.toContain("Private transfer details");
     expect(await tech("msg", "status", ID)).toMatchObject({
       json: { message: { deliveredAt: null, state: "sent" } },
+    });
+  });
+
+  it("keeps a guarded routine message visible through the normal review", async () => {
+    const { base, root } = storeFixture();
+    const tech = cli(root, base, { CLAUDE_CODE_SESSION_ID: TECH });
+    const coordinator = cli(root, base, { CLAUDE_CODE_SESSION_ID: COORDINATOR });
+    const original = await tech("msg", "send", "--to", ART_ROLE, "--body", "Routine update.");
+    expect(original).toMatchObject({
+      code: EXIT_OK,
+      json: { message: { deliveredAt: null, state: "sent" }, wake: { status: "guarded" } },
+    });
+    expect(original.json).not.toHaveProperty("attention");
+    expect(await coordinator("inbox", "--peek")).toMatchObject({
+      code: EXIT_OK,
+      json: { count: 0 },
     });
   });
 
