@@ -130,6 +130,20 @@ describe("validateProjectConfig", () => {
 });
 
 describe("validateReportsConfig", () => {
+  it.each([validateProjectConfig, validateReportsConfig])(
+    "accepts an absent legacy project and validates it when present (%p)",
+    (validate) => {
+      expect(issuesFor((config) => delete section(config, "reports").project, validate)).toEqual(
+        [],
+      );
+      expect(issuesFor(() => {}, validate)).toEqual([]);
+      for (const project of ["", 123, undefined]) {
+        const issues = issuesFor((config) => (section(config, "reports").project = project), validate);
+        expect(issues.some((issue) => issue.startsWith("/reports/project:"))).toBe(true);
+      }
+    },
+  );
+
   it("passes every delivery section through unread", () => {
     expect(
       issuesFor((config) => {

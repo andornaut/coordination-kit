@@ -51,7 +51,8 @@ rules that delivery-kit loads its configuration with ([libraries](libraries.md))
 
 This kit uses only `reports`:
 
-- `project`: the game's display name, matching its `name` in `config.json`.
+- `project`: an optional legacy display name. Both readers still validate a supplied value.
+  Coordination reports take the display name from `games.<id>.name` in coordinator `config.json`.
 - `scheduledTicks`: whether the game's runner reports scheduled departure slots.
 - `recipient`: a registered role key. It receives the game's events and, when the game hosts the
   route, its scheduled reviews. `claude channel` defaults to it.

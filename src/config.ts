@@ -53,8 +53,8 @@ export interface ProjectConfig {
   };
   readonly deploy: { readonly mode: DeployMode; readonly skipPattern?: string };
   readonly reports: {
-    /** The game's display name, matching config.json. */
-    readonly project: string;
+    /** Legacy display name. Reports use the coordinator's configured game name. */
+    readonly project?: string;
     readonly scheduledTicks: boolean;
     /** A registered role key, for example "game-coordinator". */
     readonly recipient: string;
@@ -203,11 +203,16 @@ function checkDeploy(issues: Issues, value: unknown): void {
 }
 
 function checkReports(issues: Issues, value: unknown): void {
-  const shape = { required: ["project", "scheduledTicks", "recipient", "workerParents"] };
+  const shape = {
+    optional: ["project"],
+    required: ["scheduledTicks", "recipient", "workerParents"],
+  };
   if (!checkObject(issues, "/reports", shape, value)) {
     return;
   }
-  checkName(issues, "/reports/project", PROJECT_PATTERN, value.project);
+  if (Object.hasOwn(value, "project")) {
+    checkName(issues, "/reports/project", PROJECT_PATTERN, value.project);
+  }
   checkBoolean(issues, "/reports/scheduledTicks", value.scheduledTicks);
   checkName(issues, "/reports/recipient", ROLE_NAME_PATTERN, value.recipient);
   if (checkArray(issues, "/reports/workerParents", { unique: true }, value.workerParents)) {
