@@ -36,7 +36,7 @@ export async function storeReminderList(context: StoreServiceContext) {
     (store) => ({
       candidates: listReminders(store, { layout: context.layout, registry: registry(context) }),
       inFlight: pendingReminders(store),
-      schema: 1 as const,
+      schema: 2 as const,
     }),
     { createMissing: false },
   );

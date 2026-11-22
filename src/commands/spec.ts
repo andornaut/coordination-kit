@@ -2,7 +2,7 @@
 // command accepts always appears in `coordination-kit --help`.
 import { COMPACTION_ACTIVATE_OPTIONS, COMPACTION_PREPARE_OPTIONS } from "./compaction.ts";
 import { DOCTOR_OPTIONS } from "./doctor.ts";
-import { GRAPH_INDEX_OPTIONS, GRAPH_OPTIONS, GRAPH_WHY_OPTIONS } from "./graph.ts";
+import { GRAPH_OPTIONS, GRAPH_WHY_OPTIONS } from "./graph.ts";
 import {
   MIGRATION_ACTIVATE_OPTIONS,
   MIGRATION_PREPARE_OPTIONS,
@@ -572,12 +572,6 @@ export const SPECS = {
     options: GRAPH_WHY_OPTIONS,
     summary: "print a decision's supersedes chain with each item's approval reference",
     values: { decision: "[REPOSITORY:]WORK_ID/Dn" },
-  },
-  "graph index": {
-    forms: [[]],
-    group: "graph",
-    options: GRAPH_INDEX_OPTIONS,
-    summary: "print the live graph summary for compatibility",
   },
 } as const satisfies Readonly<Record<string, GroupedSpec>>;
 /* eslint-enable sort-keys */

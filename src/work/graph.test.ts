@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
-import { EXIT_INVALID, EXIT_OK } from "../io.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../io.ts";
 import { loadLayout } from "../layout.ts";
 import { Store } from "../store/db.ts";
 import { activateMigration, prepareMigration } from "../store/files/migration.ts";
@@ -105,7 +105,8 @@ describe("graph", () => {
         `supersedes decision:${KIT}:sk-0002/D2 decision:${KIT}:sk-0002/D1`,
       ]),
     );
-    expect(result.json.index).toEqual({ at: null, status: "live" });
+    expect(result.json.schema).toBe(2);
+    expect(result.json).not.toHaveProperty("index");
     expect(edges.some((edge) => edge.includes("Prose"))).toBe(false);
   });
 
@@ -214,18 +215,9 @@ describe("graph", () => {
     const why = await run(made, "graph", "why", "--decision", "sk-0002/D2");
     expect(why.exit, why.err).toBe(EXIT_OK);
     expect(why.json.current).toBe(`${KIT}:sk-0003/D1`);
-    expect(why.json.index).toEqual({ at: null, status: "live" });
-
-    const summary = await run(made, "graph", "index");
-    expect(summary.exit, summary.err).toBe(EXIT_OK);
-    expect(summary.json).toEqual({
-      edges: graph.json.edges.length,
-      kind: "graph-index",
-      nodes: graph.json.nodes.length,
-      repositories: 3,
-      schema: 1,
-      unavailable: [],
-    });
+    expect(why.json.schema).toBe(2);
+    expect(why.json).not.toHaveProperty("index");
+    expect((await run(made, "graph", "index")).exit).toBe(EXIT_USAGE);
 
     expect(head()).toEqual(written);
     expect(readFileSync(cache, "utf8")).toBe(bytes);

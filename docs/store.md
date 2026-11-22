@@ -342,7 +342,7 @@ one guarded wake for it, which goes out only if no other guard remains.
 
 ## Coordinator reminders
 
-`reminder list` plans exact unread originals with a guarded or failed wake tied to the live
+`reminder list` returns schema 2 and plans exact unread originals with a guarded or failed wake tied to the live
 recipient binding. It checks the current local decision marker, durable question and role or
 game holds. Each candidate has a `role`, the first 50 eligible IDs in `originals` and the remaining
 IDs in `deferredOriginals`, both in original send order. Missing, ambiguous, coalesced and
@@ -777,12 +777,9 @@ one repository that holds it.
 - `graph why --decision [REPOSITORY:]WORK_ID/Dn` prints the decision, the older decisions it
   supersedes and the newer ones that supersede it (nearest first), each with its work item's
   approval reference, and `current`, the newest of the chain.
-- `graph index` prints the live graph's node, edge and repository counts for compatibility
-  with existing scripts.
 
-These commands read Git and the selected store on every invocation. `unavailable` lists
-repositories whose work files could not be read. Schema 1 JSON keeps
-`"index":{"at":null,"status":"live"}` for compatibility.
+Both commands return schema 2 JSON and read Git and the selected store on every invocation.
+`unavailable` lists repositories whose work files could not be read.
 
 ## Approval-ledger import
 

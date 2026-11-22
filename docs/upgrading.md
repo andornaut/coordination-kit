@@ -1,23 +1,26 @@
 # Upgrading
 
-Moving from coordination-kit 2.1 to 3.0, from 2.0 to 2.1, from 1.3 to 2.0, from 1.1 to 1.2, and from delivery-kit
-4.7 to coordination-kit 1.0.
+## Coordination Kit 4.0
 
-## Live decision graph
+1. Verify that the existing Delivery Kit runners accept Coordination Kit 4.x. Upgrade the
+   runners on the existing drained adoption path before changing the coordinator pin. Runner
+   review and ingest still use schema 1 replies.
+2. Upgrade the coordinator's inbox reminder executor and Coordination Kit pin together.
+   `reminder list` returns schema 2, with ordered ID arrays in `candidates[].originals` and
+   `candidates[].deferredOriginals`. Claim the offered prefix and submit the exact claim
+   `notice` after the existing native and frontend checks.
+3. Run `graph` and `graph why` directly. Both return schema 2 and read current Git and store
+   records each time. Remove calls to `graph index` and references to the old JSON `index` key.
+   Old cache files and SQLite cache tables can remain on disk during the cutover.
 
-Run `graph` or `graph why` directly. The derived cache from
-[ck-0018/D3](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0018.md#decisions)
-could outlive a new Git commit or store event. Both commands now read the current sources on
-each invocation. Schema 1 JSON keeps the `index` field with `status: "live"` and `at: null`.
-`graph index` remains available as a read-only summary. Scripts can omit pre-query calls to it.
-Existing `graph-index.json` files and SQLite cache tables remain in place for older installations
-and recovery.
+Filesystem compaction is a separate coordinator operation with its own restore, approval and
+idle boundary. Follow the [compaction runbook](store.md#filesystem-compaction) before activation.
 
 ## Filesystem authority migration
 
 The coordinator-installed CLI supports the existing SQLite source during preparation. Its
-normal runner seam remains schema 1 and is compatible with Delivery Kit's coordinator CLI range
-`>=3.0.0 <4.0.0`. Use the absolute primary coordinator root for commands from every working
+normal runner seam remains schema 1. Use an exact Delivery Kit pin whose coordinator CLI range
+accepts the installed Coordination Kit version. Use the absolute primary coordinator root for commands from every working
 directory. The target is the ignored `var/coordination/` under that root.
 
 1. Install the exact immutable Coordination Kit archive with the verified lockfile integrity.

@@ -25,11 +25,8 @@ export const GRAPH_OPTIONS = {
   work: { type: "string" },
 } as const;
 export const GRAPH_WHY_OPTIONS = { decision: { type: "string" } } as const;
-export const GRAPH_INDEX_OPTIONS = {} as const;
 
 class Usage extends Error {}
-
-const LIVE_INDEX = { at: null, status: "live" } as const;
 
 function load(git: GitRunner, coordinator: Coordinator): Graph {
   const store = Store.readLayout(coordinator.layout);
@@ -95,9 +92,8 @@ export const graph: Handler = (io, root, args) =>
       return graphDot(selected);
     }
     return `${JSON.stringify({
-      index: LIVE_INDEX,
       kind: "graph",
-      schema: 1,
+      schema: 2,
       unavailable: current.unavailable,
       ...graphJson(selected),
     })}\n`;
@@ -112,25 +108,9 @@ export const graphWhy: Handler = (io, root, args) =>
     const git = systemGit(io.env);
     const current = load(git, openCoordinator(git, root));
     return `${JSON.stringify({
-      index: LIVE_INDEX,
       kind: "graph-why",
-      schema: 1,
+      schema: 2,
       unavailable: current.unavailable,
       ...why(current, findDecision(current, decision)),
-    })}\n`;
-  });
-
-export const graphIndex: Handler = (io, root, args) =>
-  run(io, "graph index", args, GRAPH_INDEX_OPTIONS, () => {
-    const git = systemGit(io.env);
-    const coordinator = openCoordinator(git, root);
-    const current = load(git, coordinator);
-    return `${JSON.stringify({
-      edges: current.edges.length,
-      kind: "graph-index",
-      nodes: current.nodes.size,
-      repositories: coordinator.repositories.length,
-      schema: 1,
-      unavailable: current.unavailable,
     })}\n`;
   });

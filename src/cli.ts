@@ -4,7 +4,7 @@
 import { channel } from "./commands/channel.ts";
 import { compactionActivate, compactionPrepare } from "./commands/compaction.ts";
 import { harnessDoctor } from "./commands/doctor.ts";
-import { graph, graphIndex, graphWhy } from "./commands/graph.ts";
+import { graph, graphWhy } from "./commands/graph.ts";
 import { harnessSelect } from "./commands/harness.ts";
 import { migrationActivate, migrationPrepare, migrationStatus } from "./commands/migration.ts";
 import {
@@ -105,7 +105,6 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "decision list": decisionList,
   "events ingest": eventsIngest,
   graph,
-  "graph index": graphIndex,
   "graph why": graphWhy,
   "handoff active": handoffActive,
   "handoff open": handoffOpen,
