@@ -30,7 +30,13 @@ function fixture() {
         actor: ACTOR,
         key: `session-${index}`,
         kind: "session.started",
-        payload: { cwd: `/fixture/${index}`, harness: "codex", nativeId: NATIVE_ID, role: ROLE },
+        payload: {
+          cwd: `/fixture/${index}`,
+          harness: "codex",
+          nativeId: NATIVE_ID,
+          role: ROLE,
+          version: "3.4.4",
+        },
       });
     }
   });
