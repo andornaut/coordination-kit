@@ -117,6 +117,8 @@ export function fakeCodex(
               { item: { id: "item-1", questions: null, type: "agentMessage" }, turnId: "turn-1" },
             ],
           });
+        case "thread/queue/list":
+          return Promise.resolve({ data: [] });
         case "thread/queue/add":
           return Promise.resolve().then(() => add(params));
         default:

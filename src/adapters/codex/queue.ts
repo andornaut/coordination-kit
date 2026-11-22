@@ -83,7 +83,7 @@ function exact(value: unknown, message: NativeMessage): value is QueueEntry {
   );
 }
 
-async function rootRecipient(client: RpcClient, recipient: string): Promise<boolean> {
+export async function rootRecipient(client: RpcClient, recipient: string): Promise<boolean> {
   const read = await client.call("thread/read", { includeTurns: false, threadId: recipient });
   const thread = isRecord(read) ? read.thread : null;
   if (!isRecord(thread) || thread.id !== recipient || thread.parentThreadId != null) {

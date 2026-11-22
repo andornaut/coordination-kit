@@ -14,7 +14,13 @@ export interface QueueEntry {
 }
 
 function queuePage(page: unknown, entries: Map<string, QueueEntry>): unknown {
-  if (!isRecord(page) || !Array.isArray(page.data) || page.truncated || page.hasMore) {
+  if (
+    !isRecord(page) ||
+    !Array.isArray(page.data) ||
+    page.data.length > 100 ||
+    page.truncated ||
+    page.hasMore
+  ) {
     throw new Error("queue inventory incomplete");
   }
   for (const entry of page.data as unknown[]) {
@@ -38,11 +44,15 @@ function queuePage(page: unknown, entries: Map<string, QueueEntry>): unknown {
 }
 
 /** Every queued submission for `recipient`, failing on any incomplete or inconsistent page. */
-export async function queueEntries(client: RpcClient, recipient: string): Promise<QueueEntry[]> {
+export async function queueEntries(
+  client: RpcClient,
+  recipient: string,
+  maxPages = Infinity,
+): Promise<QueueEntry[]> {
   const entries = new Map<string, QueueEntry>();
   const cursors = new Set<string>();
   let cursor: string | null = null;
-  for (;;) {
+  for (let page = 0; page < maxPages; page += 1) {
     const params: Record<string, unknown> = { limit: 100, threadId: recipient };
     if (cursor !== null) {
       params.cursor = cursor;
@@ -59,6 +69,7 @@ export async function queueEntries(client: RpcClient, recipient: string): Promis
     cursors.add(next);
     cursor = next;
   }
+  throw new Error("queue inventory bound exceeded");
 }
 
 /**

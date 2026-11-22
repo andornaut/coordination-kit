@@ -90,11 +90,24 @@ describe("Claude wakes", () => {
 });
 
 describe("Codex wakes", () => {
-  it("adds one fixed-text queue entry through the guarded path and coalesces later sends", async () => {
+  it("keeps a queued notice across an inbox pull and rearms only after its exact native consumption", async () => {
     const codex = fakeCodex(ART);
+    let queued: Record<string, unknown>[] = [];
+    let history: Record<string, unknown>[] = [];
+    const call = codex.client.call.bind(codex.client);
+    codex.client.call = (method, params) => {
+      if (method === "thread/queue/list") {
+        return Promise.resolve({ data: queued });
+      }
+      if (method === "thread/items/list" && !Object.hasOwn(params as object, "turnId")) {
+        return Promise.resolve({ data: history });
+      }
+      return call(method, params);
+    };
     const { layout, send, store, wakes } = setup({ connect: () => Promise.resolve(codex.client) });
     clearDecision(layout, ART);
-    expect(await send(ART_ROLE)).toMatchObject({ status: "accepted" });
+    const first = await send(ART_ROLE);
+    expect(first).toMatchObject({ status: "accepted" });
     expect(codex.adds()).toEqual([
       {
         clientUserMessageId: expect.any(String),
@@ -108,19 +121,34 @@ describe("Codex wakes", () => {
         threadId: ART,
       },
     ]);
+    const input = codex.adds()[0]?.input;
+    queued = [{ clientUserMessageId: first.wake, id: `queue-${first.wake}`, input }];
     expect(JSON.stringify(codex.calls)).not.toContain("Private body");
-    expect(await send(ART_ROLE)).toMatchObject({ status: "coalesced" });
-    expect(codex.adds()).toHaveLength(1);
     readInbox(store, { nativeId: ART, role: ART_ROLE });
+    store.rebuild();
+    expect(await send(ART_ROLE)).toMatchObject({ status: "coalesced", wake: first.wake });
+
+    const item = { clientId: first.wake, content: input, id: "consumed-item", type: "userMessage" };
+    history = [{ item, turnId: "consumed-turn" }];
+    expect(await send(ART_ROLE)).toMatchObject({ status: "coalesced", wake: first.wake });
+
+    queued = [];
+    item.clientId = uuid(100);
+    expect(await send(ART_ROLE)).toMatchObject({ status: "coalesced", wake: first.wake });
+
+    item.clientId = first.wake;
     expect(await send(ART_ROLE)).toMatchObject({ status: "accepted" });
     expect(codex.adds()).toHaveLength(2);
+    expect(
+      store.db.prepare("SELECT kind FROM events WHERE kind = 'notice.consumed'").all(),
+    ).toEqual([{ kind: "notice.consumed" }]);
     expect(wakes()).toEqual([
       { count: 1, detail: null, harness: "codex", outcome: "accepted", role: ART_ROLE },
-      { count: 1, detail: null, harness: "codex", outcome: "accepted", role: ART_ROLE },
+      { count: 4, detail: null, harness: "codex", outcome: "accepted", role: ART_ROLE },
     ]);
   });
 
-  it("logs an ambiguous wake without changing message state and never retries it before a pull", async () => {
+  it("keeps an ambiguous wake reserved across inbox pulls and review without native proof", async () => {
     const codex = fakeCodex(ART, () => {
       throw new Error("connection dropped");
     });
@@ -151,10 +179,29 @@ describe("Codex wakes", () => {
     ).toMatchObject({
       status: "coalesced",
     });
+    readInbox(store, { nativeId: ART, role: ART_ROLE });
+    expect(await send(ART_ROLE)).toMatchObject({ status: "coalesced" });
     expect(codex.adds()).toHaveLength(1);
     expect(
       store.db.prepare("SELECT count(*) AS n FROM messages WHERE state = 'sent'").get(),
-    ).toEqual({ n: 3 });
+    ).toEqual({ n: 1 });
+  });
+
+  it("withholds a native wake when queue inventory cannot be verified", async () => {
+    const codex = fakeCodex(ART);
+    const call = codex.client.call.bind(codex.client);
+    codex.client.call = (method, params) =>
+      method === "thread/queue/list"
+        ? Promise.resolve({ data: [], truncated: true })
+        : call(method, params);
+    const { layout, send, store } = setup({ connect: () => Promise.resolve(codex.client) });
+    clearDecision(layout, ART);
+    expect(await send(ART_ROLE)).toMatchObject({ status: "guarded" });
+    expect(store.db.prepare("SELECT detail FROM wakes").get()).toEqual({
+      detail: "native-notice-queue-unverified",
+    });
+    expect(codex.adds()).toHaveLength(0);
+    expect(store.db.prepare("SELECT state FROM messages").all()).toEqual([{ state: "sent" }]);
   });
 
   it("logs a native refusal as failed and keeps it outstanding", async () => {

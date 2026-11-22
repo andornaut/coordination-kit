@@ -22,6 +22,7 @@ import {
   TECH,
 } from "./testStore.ts";
 import type { WakeOutcome } from "./types.ts";
+import { wakeRecipient } from "./wake.ts";
 
 const ROLE = `${GAME}/art`;
 const ACTOR = { nativeId: COORDINATOR, role: "game-coordinator" };
@@ -79,8 +80,6 @@ describe("coordinator reminder ledger", () => {
     try {
       expect(listReminders(store, scope)).toEqual([]);
       wake(store, "wrong-conversation", "failed", ORIGINAL, TECH);
-      expect(listReminders(store, scope)).toEqual([]);
-      wake(store, "ambiguous", "ambiguous");
       expect(listReminders(store, scope)).toEqual([]);
       wake(store, "refusal");
       sendMessage(store, ACTOR, { body: "Another.", id: COALESCED, intent: "queue", to: ROLE });
@@ -221,9 +220,7 @@ describe("coordinator reminder ledger", () => {
         settleReminder(reopened, scope, ACTOR, { ...settlement, outcome: "submitted" }),
       ).toThrow("reminder-settlement-conflict");
       expect(pendingReminders(reopened)).toEqual([]);
-      expect(listReminders(reopened, scope)).toMatchObject([
-        { originals: [{ id: COALESCED }], role: ROLE },
-      ]);
+      expect(listReminders(reopened, scope)).toEqual([]);
     } finally {
       reopened.close();
     }
@@ -263,6 +260,107 @@ describe("coordinator reminder ledger", () => {
       wake(store, "later-again");
       review(3);
       expect(listReminders(store, scope)).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("blocks fallback while a native dispatch has reserved the same role and thread", async () => {
+    const { scope, store } = setup();
+    try {
+      wake(store, "first-refused", "guarded", ORIGINAL, ART, "compaction-unproven");
+      const codex = fakeCodex(ART);
+      const entered = Promise.withResolvers<void>();
+      const connecting = Promise.withResolvers<typeof codex.client>();
+      const dispatch = wakeRecipient(
+        {
+          env: {},
+          layout: scope.layout,
+          ports: {
+            connect: () => {
+              entered.resolve();
+              return connecting.promise;
+            },
+          },
+          store,
+        },
+        ROLE,
+      );
+      await entered.promise;
+      const secondStore = Store.forLayout(scope.layout);
+      try {
+        expect(listReminders(secondStore, scope)).toEqual([]);
+        expect(() =>
+          claimReminder(secondStore, scope, ACTOR, { originals: [ORIGINAL], role: ROLE }),
+        ).toThrow("reminder-notice-outstanding");
+      } finally {
+        secondStore.close();
+        connecting.resolve(codex.client);
+        await dispatch;
+      }
+      expect(codex.adds()).toHaveLength(1);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("blocks native dispatch behind a claimed fallback and clears only on correlated history", async () => {
+    const { context, scope, store } = setup();
+    try {
+      wake(store, "first");
+      const { notice, receipt } = await storeReminderClaim(
+        context,
+        {},
+        { originals: [ORIGINAL], role: ROLE },
+      );
+      expect(notice).toBe(`1 new messages for ${ROLE}: run coordination-kit inbox [${receipt.id}]`);
+      readInbox(store, RECIPIENT);
+      sendMessage(store, ACTOR, {
+        body: "Later original.",
+        id: COALESCED,
+        intent: "queue",
+        to: ROLE,
+      });
+      const codex = fakeCodex(ART);
+      const call = codex.client.call.bind(codex.client);
+      let text = `1 new messages for ${ROLE}: run coordination-kit inbox`;
+      codex.client.call = (method, params) =>
+        method === "thread/items/list" && !Object.hasOwn(params as object, "turnId")
+          ? Promise.resolve({
+              data: [
+                {
+                  item: {
+                    content: [{ text, type: "text" }],
+                    id: "fallback-item",
+                    type: "userMessage",
+                  },
+                  turnId: "fallback-turn",
+                },
+              ],
+            })
+          : call(method, params);
+      const attempt = () =>
+        wakeRecipient(
+          {
+            env: {},
+            layout: scope.layout,
+            ports: { connect: () => Promise.resolve(codex.client) },
+            store,
+          },
+          ROLE,
+        );
+      expect(await attempt()).toMatchObject({ status: "coalesced", wake: receipt.id });
+      expect(codex.calls).toHaveLength(0);
+      settleReminder(store, scope, ACTOR, {
+        id: receipt.id,
+        outcome: "submitted",
+        reason: "pane-submitted",
+      });
+      expect(await attempt()).toMatchObject({ status: "coalesced", wake: receipt.id });
+      expect(codex.adds()).toHaveLength(0);
+      text = notice;
+      expect(await attempt()).toMatchObject({ status: "accepted" });
+      expect(codex.adds()).toHaveLength(1);
     } finally {
       store.close();
     }

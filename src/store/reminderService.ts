@@ -7,6 +7,8 @@ import { decisionDirectory } from "../adapters/shared/decisions.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
 import { isRecord } from "../adapters/shared/pyjson.ts";
 import { type CallerOptions, resolveCaller } from "./identity.ts";
+import { noticeQueueClear } from "./noticeEvidence.ts";
+import { noticeText } from "./noticesInFlight.ts";
 import {
   checkReminder,
   claimReminder,
@@ -50,7 +52,11 @@ export async function storeReminderClaim(
     store.transaction(() => {
       const { actor, scope } = coordinator(context, caller);
       const receipt = claimReminder(store, scope, actor, selection);
-      return { receipt, schema: 1 as const };
+      return {
+        notice: noticeText(receipt.originals.length, receipt.role, receipt.id),
+        receipt,
+        schema: 1 as const,
+      };
     }),
   );
 }
@@ -153,6 +159,9 @@ async function nativeIdle(context: CheckContext, receipt: ReminderReceipt): Prom
       } else if (target?.method !== "turn/start") {
         throw new StoreError("reminder-native-guarded");
       }
+    }
+    if (!(await noticeQueueClear(client, { conversation: receipt.nativeId, role: receipt.role }))) {
+      throw new StoreError("reminder-native-queue-unverified");
     }
     await requireIdleRoot(client, receipt.nativeId);
     const unchanged =

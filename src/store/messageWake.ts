@@ -126,17 +126,22 @@ function hasProjection(store: Reader): boolean {
 }
 
 /** Later arrivals were outside the outstanding attempt, even when older membership is unknown. */
-export function coalescedMessages(store: Reader, role: string, wake: string): string[] {
+export function coalescedMessages(
+  store: Reader,
+  role: string,
+  wake: string,
+  afterSeq: number,
+): string[] {
   return (
     store.db
       .prepare(
-        `SELECT m.id FROM messages m JOIN wakes w ON w.id = ? AND w.role = m.to_role
-       WHERE m.to_role = ? AND m.state = 'sent' AND m.sent_seq > w.seq AND NOT EXISTS (
-         SELECT 1 FROM message_wakes WHERE message_id = m.id AND wake_id = w.id
+        `SELECT m.id FROM messages m
+       WHERE m.to_role = ? AND m.state = 'sent' AND m.sent_seq > ? AND NOT EXISTS (
+         SELECT 1 FROM message_wakes WHERE message_id = m.id AND wake_id = ?
        )
        ORDER BY m.sent_seq`,
       )
-      .all(wake, role) as { id: string }[]
+      .all(role, afterSeq, wake) as { id: string }[]
   ).map(({ id }) => id);
 }
 

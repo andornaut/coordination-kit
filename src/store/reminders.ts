@@ -15,6 +15,7 @@ import type { Registry } from "../registry/schema.ts";
 import type { Store } from "./db.ts";
 import { MESSAGE_ID } from "./messages.ts";
 import { safeWakeReason, unreadMessages } from "./messageWake.ts";
+import { pendingNotices } from "./noticesInFlight.ts";
 import type { Projection } from "./projections.ts";
 import { questionHoldGuard } from "./questions.ts";
 import { type Actor, type JsonObject, StoreError, type UnreadMessage } from "./types.ts";
@@ -147,7 +148,12 @@ export function reminderClearance(
   return marker?.state === "clear" ? marker : undefined;
 }
 
-function binding(store: Store, scope: ReminderScope, role: string): BindingCheck {
+function binding(
+  store: Store,
+  scope: ReminderScope,
+  role: string,
+  ownNotice?: string,
+): BindingCheck {
   const entry = scope.registry.roles[role];
   if (
     role === COORDINATOR ||
@@ -165,6 +171,9 @@ function binding(store: Store, scope: ReminderScope, role: string): BindingCheck
   }
   if (directory === null || reminderClearance(directory, nativeId) === undefined) {
     return { refusal: "reminder-owner-clearance-required" };
+  }
+  if (pendingNotices(store, { conversation: nativeId, role }).some(({ id }) => id !== ownNotice)) {
+    return { refusal: "reminder-notice-outstanding" };
   }
   return { harness: "codex", nativeId, revision: scope.registry.revision };
 }
@@ -358,7 +367,7 @@ export function checkReminder(
   const row = readClaim(store, id);
   require(row.outcome === null, "reminder-settled");
   const role = row.role as string;
-  const target = binding(store, scope, role);
+  const target = binding(store, scope, role, id);
   if ("refusal" in target) {
     throw new StoreError(target.refusal);
   }

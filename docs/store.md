@@ -223,17 +223,25 @@ where `N` counts the recipient's `sent` messages.
 - Codex: one control-socket `thread/queue/add` through the existing guarded queue path, with a
   receipt at `wake/codex/<wake-id>.json` beside the store.
 
-At most one wake is outstanding per recipient. A wake is attempted only when the recipient is
-wake-pending, has `sent` messages and has no outstanding wake. Before claiming it, the store
+A wake is attempted only when the recipient is wake-pending, has `sent` messages and has no
+outstanding wake or notice for its current binding. Before claiming it, the store
 checks the registry: an unregistered, unbound or held recipient (`ownership` not `active`, or
 `phase` `held` or `source-held`) gets no wake. For Codex the guarded queue path also requires the
 recipient-bound decision marker and runs the native question check on the same connection.
 A guard refusal is logged as `guarded` and leaves nothing outstanding. A new original or the
 existing review can check the guard again. An identical send returns the original's recorded
-evidence without a native attempt. An accepted wake stays outstanding until recipient collection.
-The review can rearm a Claude wake unpulled for 30 minutes and recover failed notifications at its
-existing slot. A confirmed failed Codex wake remains eligible at that slot. A Codex wake with
-uncertain acceptance or an unfinished claim keeps its outstanding reference until collection.
+evidence without a native attempt. Claude collection clears the wake file reservation. The review
+can rearm a Claude wake unpulled for 30 minutes and recover confirmed failures at its existing slot.
+
+Codex queue dispatch and coordinator fallback share one outstanding reservation for the exact role
+and current native conversation. Pulling the durable inbox leaves that reservation in place. A
+confirmed pre-submission refusal releases it. An accepted, uncertain or interrupted queue claim
+requires a matching native history user item with the exact client request ID and wake text, plus
+complete queue inventory showing the exact item is no longer queued. A submitted or uncertain
+fallback requires a native history user item with the exact correlated fallback text. The store
+records positive proof in `notice.consumed`. Missing inventory, incomplete history and older
+fallbacks without a correlation marker retain the reservation. An unsettled fallback stays
+reserved while the coordinator may still submit it. No queue item is removed by this check.
 
 Wake claims and refusals record the exact unread original IDs. An original arriving behind an
 outstanding wake records `wake.coalesced` with its own ID and the prior wake reference.
@@ -261,10 +269,12 @@ status.
 
 The live coordinator alone can claim up to 50 explicitly named originals for an active Codex
 recipient. The claim records the original IDs, wake references, recipient conversation and
-registry revision in one transaction before any fallback can run. An immediate `reminder check`
-verifies the unsettled claim, original state, guards and exact idle native recipient using
-read-only operations. An independent caller must also verify the attached frontend's empty
-composer and safe prompt state before submitting a wake-only reminder.
+registry revision in one transaction before any fallback can run. Its reply includes the
+top-level `notice` text with the claim ID in brackets. Submit that exact text to make the native
+history item attributable to this claim. An immediate `reminder check` verifies the unsettled
+claim, original state, guards, exact idle native recipient and absence of an earlier queued
+notice using read-only operations. An independent caller must also verify the attached
+frontend's empty composer and safe prompt state before submitting a wake-only reminder.
 
 A past compaction refusal establishes only that the former wake did not submit. Current
 eligibility requires fresh native question clearance. For an absent marker or a current

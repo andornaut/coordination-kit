@@ -1,8 +1,5 @@
-// Wakes: after a send commits, the recipient is wake-pending and at most one wake is outstanding
-// per recipient. A wake carries no payload, only the fixed text `N new messages for ROLE: run
-// coordination-kit inbox`. Claude gets its per-conversation wake file; Codex gets one guarded
-// control-socket queue add. Outcomes are logged in `wakes` and never change message state. A
-// failed or ambiguous wake stays outstanding until the recipient's next pull or a review rearms it.
+// A durable send may wake its recipient using only the inbox command. Codex queue and fallback
+// reservations follow the exact native conversation across inbox pulls.
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -29,6 +26,8 @@ import {
   safeWakeBlocker,
   safeWakeReason,
 } from "./messageWake.ts";
+import { consumedNotices, type NoticeProof, noticeQueueClear } from "./noticeEvidence.ts";
+import { pendingNotices } from "./noticesInFlight.ts";
 import { questionHoldGuard } from "./questions.ts";
 import { type Actor, StoreError, type WakeBlocker, type WakeOutcome } from "./types.ts";
 
@@ -73,6 +72,11 @@ export interface WakeResult {
 interface Target {
   readonly harness: Harness;
   readonly conversation: string;
+}
+
+interface WakeClaim {
+  readonly count: number;
+  readonly target: Target;
 }
 
 /** The recipient's current binding, or the registry reason no wake may go to it. */
@@ -190,6 +194,57 @@ function codexOutcome(receipt: TransportReceipt): WakeOutcome {
   }
 }
 
+function wakeConnection(context: WakeContext): Promise<RpcClient> {
+  return (
+    context.ports?.connect?.() ??
+    connectControl(performance.now() + 15_000, resolveCodexControlSocket({ env: context.env }).path)
+  );
+}
+
+async function reconcileNotices(
+  context: WakeContext,
+  role: string,
+  target: Target,
+): Promise<NoticeProof[]> {
+  const binding = { conversation: target.conversation, role };
+  const notices = pendingNotices(context.store, binding).filter((notice) => notice.readyForProof);
+  if (notices.length === 0) {
+    return [];
+  }
+  try {
+    const client = await wakeConnection(context);
+    try {
+      return await consumedNotices(client, storeRoot(context.layout), binding, notices);
+    } finally {
+      client.close();
+    }
+  } catch {
+    return [];
+  }
+}
+
+function outstandingWake(store: Store, role: string, target: Target | null) {
+  if (target?.harness === "codex") {
+    const notice = pendingNotices(store, { conversation: target.conversation, role })[0];
+    if (notice !== undefined) {
+      return notice;
+    }
+  }
+  const id = wakeState(store, role).outstanding;
+  if (id === null) {
+    return null;
+  }
+  const current = store.db
+    .prepare("SELECT id, seq, conversation, harness FROM wakes WHERE id = ? AND role = ?")
+    .get(id, role) as
+    { id: string; seq: number; conversation: string; harness: Harness } | undefined;
+  return current !== undefined &&
+    (target === null ||
+      (current.harness === target.harness && current.conversation === target.conversation))
+    ? current
+    : null;
+}
+
 async function codexWake(
   context: WakeContext,
   role: string,
@@ -228,13 +283,7 @@ async function codexWake(
   };
   const transport = codexQueueTransport({
     canConnect: locallyClear,
-    connect:
-      context.ports?.connect ??
-      (() =>
-        connectControl(
-          performance.now() + 15_000,
-          resolveCodexControlSocket({ env: context.env }).path,
-        )),
+    connect: () => wakeConnection(context),
     guards: {
       beforeAdd: async (client): Promise<QueueClearance> => {
         const directory = decisionDirectory(layout, role);
@@ -243,10 +292,16 @@ async function codexWake(
         }
         const marker = decisionRecord(directory, recipient);
         const [selected, , diagnostic] = await selectTarget(client, directory, recipient);
+        if (selected === null) {
+          return { ...(diagnostic === undefined ? {} : { diagnostic }), status: "blocked" };
+        }
+        if (!(await noticeQueueClear(client, { conversation: recipient, role }))) {
+          refused = { reason: "native-notice-queue-unverified", status: "blocked" };
+          return { status: "blocked" };
+        }
         return {
-          ...(diagnostic === undefined ? {} : { diagnostic }),
           status:
-            selected !== null && clearanceUnchanged(directory, recipient, marker) && locallyClear()
+            clearanceUnchanged(directory, recipient, marker) && locallyClear()
               ? "clear"
               : "blocked",
         };
@@ -283,33 +338,62 @@ async function codexWake(
 
 /**
  * Attempt at most one wake for `role`, after the caller's send has committed. Nothing is sent
- * when the recipient is not wake-pending, has nothing undelivered or already has an outstanding
- * wake. A guard refusal is logged as `guarded` and leaves nothing outstanding.
+ * when no messages need a wake, when a prior notice remains outstanding, or when a guard refuses
+ * the operation.
  */
 export async function wakeRecipient(context: WakeContext, role: string): Promise<WakeResult> {
   const { store } = context;
-  const target = wakeTarget(context.layout, role);
+  const initialTarget = wakeTarget(context.layout, role);
+  const proofs =
+    "conversation" in initialTarget &&
+    initialTarget.harness === "codex" &&
+    wakeState(store, role).pending &&
+    undeliveredIds(store, role).length > 0 &&
+    checkStoreGuard(context, role, "codex").status === "clear"
+      ? await reconcileNotices(context, role, initialTarget)
+      : [];
   const wake = randomUUID();
-  const claim = store.transaction((): WakeResult | { readonly count: number } => {
+  const claim = store.transaction<WakeResult | WakeClaim>(() => {
+    const target = wakeTarget(context.layout, role);
     const state = wakeState(store, role);
     const messages = undeliveredIds(store, role);
     const count = messages.length;
     if (!state.pending || count === 0) {
       return { status: "none" };
     }
-    if (state.outstanding !== null) {
-      const outstanding = state.outstanding;
-      const later = coalescedMessages(store, role, outstanding);
+    if (
+      proofs.length > 0 &&
+      "conversation" in initialTarget &&
+      "conversation" in target &&
+      target.harness === "codex" &&
+      target.conversation === initialTarget.conversation
+    ) {
+      const binding = { conversation: target.conversation, role };
+      const pending = new Set(pendingNotices(store, binding).map(({ id }) => id));
+      for (const { item, notice, turn } of proofs) {
+        if (pending.has(notice.id)) {
+          store.append({
+            actor: SYSTEM,
+            key: `notice.consumed:${notice.id}`,
+            kind: "notice.consumed",
+            payload: { ...binding, id: notice.id, item, turn },
+          });
+        }
+      }
+    }
+    const outstanding = outstandingWake(store, role, "conversation" in target ? target : null);
+    if (outstanding !== null) {
+      const later = coalescedMessages(store, role, outstanding.id, outstanding.seq);
       const last = later.at(-1);
       if (last !== undefined) {
         store.append({
           actor: SYSTEM,
-          key: `wake.coalesced:${outstanding}:${last}`,
+          key: `wake.coalesced:${outstanding.id}:${last}`,
           kind: "wake.coalesced",
-          payload: { messages: later, role, wake: outstanding },
+          payload: { messages: later, role, wake: outstanding.id },
         });
       }
-      return { status: "coalesced", wake: state.outstanding };
+      return { status: "coalesced", wake: outstanding.id };
     }
     const guard: WakeGuard =
       "reason" in target
@@ -350,11 +434,12 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
         wake,
       },
     });
-    return { count };
+    return { count, target };
   });
-  if ("status" in claim || "reason" in target) {
-    return claim as WakeResult;
+  if ("status" in claim) {
+    return claim;
   }
+  const { target } = claim;
   const text = wakeText({ count: claim.count, role, seq: 1 });
   let outcome: WakeOutcome;
   let detail: string | null = null;
