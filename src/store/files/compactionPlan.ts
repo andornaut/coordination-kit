@@ -196,7 +196,7 @@ function unresolvedDelivery(events: readonly StoredEvent[]): ReadonlySet<string>
       addIds(payload.messages);
     }
   }
-  for (const { event, outcome, consumed } of reminders.values()) {
+  for (const { consumed, event, outcome } of reminders.values()) {
     if (!consumed && outcome !== "refused") {
       addIds(event.payload.originals, true);
     }

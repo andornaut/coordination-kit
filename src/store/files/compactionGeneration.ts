@@ -161,14 +161,14 @@ export function selectFileCheckpoint(
       verifyCompactionSource(checkpoint, receipt, source.events, readScope(), anchor);
       const previous = readRegular(checkpointPath);
       if (previous === undefined) {
-        writeDurable(checkpointPath, canonicalJson(checkpoint) + "\n");
+        writeDurable(checkpointPath, `${canonicalJson(checkpoint)}\n`);
       } else {
         verifyCompactionCheckpoint(previous, receipt);
       }
     },
     () => {
       if (readRegular(activePath) === undefined) {
-        writeDurable(activePath, canonicalJson(selection) + "\n");
+        writeDurable(activePath, `${canonicalJson(selection)}\n`);
       }
     },
   );
