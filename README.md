@@ -1,6 +1,6 @@
 # coordination-kit
 
-Shared coordination for the game and kit roles: the role registry, the SQLite coordination store
+Shared coordination for the game and kit roles: the role registry, the coordination store
 with its message lifecycle, Claude and Codex wakes, work records, questions, holds and decisions,
 the scheduled review brief, plus checks for a repository's work files. The kit owns the mechanisms; `game-coordinator` owns `config.json`, the registry and
 mutable state. delivery-kit's resident runner decides when a scheduled review is due and calls
@@ -13,9 +13,11 @@ from disk after startup except configuration, state and, for `--version --json` 
 seam, its own bytes to hash them. Its child processes are `flock`, `git`,
 `claude agents --json` and, for `store retire`, `tar`.
 
-The [coordination store](docs/store.md) uses the configured SQLite source until the coordinator
-qualifies and activates the primary checkout's ignored file store. The
-[upgrade guide](docs/upgrading.md) covers backup, restore, activation and legacy retirement.
+[Start a fresh coordinator](docs/configuration.md#start-a-fresh-coordinator) with SQLite and
+use the [upgrade guide](docs/upgrading.md#filesystem-authority-migration) to qualify and activate
+the file store. The [filesystem layout](docs/store.md#filesystem-layout) describes journal and
+role records. [Git boundaries](docs/configuration.md#state) cover tracked
+configuration and ignored runtime state.
 
 ## Install and pin
 
@@ -76,7 +78,7 @@ Errors go to stderr prefixed `coordination-kit:`. Commands with a JSON result ke
 | [docs/configuration.md](docs/configuration.md) | The coordinator root, `config.json`, the `reports` fields of `delivery-kit.json` and the state layout           |
 | [docs/registry.md](docs/registry.md)           | `var/registry.json`, scoped harness selection, send-time resolution, the readiness probe and the harness doctor |
 | [docs/messages.md](docs/messages.md)           | Store messages: send, pull, close and retain                                                                    |
-| [docs/store.md](docs/store.md)                 | The SQLite coordination store: schema, API, fence, wakes, event ingest, work records, requests and retirement   |
+| [docs/store.md](docs/store.md)                 | Store layout, schema, API, writer fence, wakes, event ingest, work records, requests and retirement             |
 | [docs/review.md](docs/review.md)               | The review route, the runner seam, the stored brief, wake files and the Claude channel                          |
 | [docs/work-files.md](docs/work-files.md)       | `work check`, `work report` and the decision line format                                                        |
 | [docs/libraries.md](docs/libraries.md)         | The public build API subpaths and their main symbols                                                            |

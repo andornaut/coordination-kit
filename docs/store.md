@@ -18,18 +18,57 @@ coordinator checkout. The immutable batch journal and committed records are auth
 The query index is rebuilt from the journal in memory. Wake endpoints still use the existing
 state root. Runner state, routing and registry files retain their existing paths.
 
-The journal stores committed batches under `journal/batches/`. A batch manifest commits the
-event range and exact companion digests. `roles/` holds role and verified worker records,
-`coordinator/` holds policy and handoff records, and `legacy/` preserves unverified ownership.
-The lock is bounded. A prepared batch is recovered without publishing records from incomplete
-transactions. A disposition never overwrites the sender's original.
-
 Before activation the SQLite source opens through `node:sqlite` (`DatabaseSync`, built into Node 24.21 with no flag) with
 `journal_mode=WAL`, `synchronous=FULL`, `busy_timeout=5000` and `foreign_keys=ON`. A new file is
 created with mode 0600 in a 0700 directory. `PRAGMA user_version` holds the schema version, 1; a
 newer version is refused with `store-schema-newer`. Every write is one `BEGIN IMMEDIATE`
 transaction holding the event and its projection updates. No native call runs inside a
 transaction.
+
+## Filesystem layout
+
+The following example shows an activated store with records for Archie. Sequence numbers and
+record IDs are illustrative. Subdirectories appear as records are written.
+
+```text
+var/coordination/
+├── qualification.json
+├── source-fence.json
+├── .migration.lock
+├── journal/
+│   ├── writer.lock
+│   ├── batches/0000000000000001.json
+│   └── keys/<event-key-sha256>.json
+├── roles/
+│   ├── archies-dog-walks%2Fart/
+│   │   └── messages/originals/<message-id>.json
+│   └── archies-dog-walks%2Ftech/
+│       ├── messages/dispositions/<message-id>/42.json
+│       ├── questions/<question-id>/43.json
+│       ├── holds/<hold-id>/44.json
+│       └── workers/<verified-worker-id>/work/archies-dog-walks/<work-id>/45.json
+├── coordinator/
+│   ├── holds/<policy-hold-id>/46.json
+│   ├── handoffs/<handoff-id>/47.json
+│   ├── delivery/48.json
+│   └── reviews/49.json
+└── legacy/quarantine/50.json
+```
+
+| Path                                                         | Meaning                                                                                                                                                                        |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `qualification.json`, `source-fence.json`, `.migration.lock` | Migration proof, durable source-fence witness and migration lock. The authority receipt is the sibling `var/coordination-authority.json`.                                      |
+| `journal/batches/<first-seq>.json`                           | Immutable commit manifest with the event range, hash chain and exact companion path digests. The filename is the first sequence padded to 16 decimal digits.                   |
+| `journal/keys/`, `journal/writer.lock`                       | Per-event idempotency index and bounded journal writer lock. A pending transaction may leave prepare or staging files in `journal/` for recovery.                              |
+| `roles/<encoded-role>/messages/`                             | Sender-owned originals and separate recipient-owned dispositions by exact message ID and event sequence. `%2F` encodes a slash in a game role key.                             |
+| `roles/<encoded-role>/`                                      | Per-role inbox reads and wakes, sessions, work, requests, questions, decisions and holds. Verified worker work records can use a child namespace under the actual parent role. |
+| `coordinator/`                                               | Policy holds, handoff records, runner ingest and scheduled review evidence.                                                                                                    |
+| `legacy/quarantine/`                                         | Events or event parts whose ownership or scope could not be verified. They stay available as evidence with their reason.                                                       |
+
+A companion path carries authority only when a committed batch names its exact digest. The next
+writer recovers uncommitted preparation. Use the CLI to read and change coordination state.
+Keep the journal, companion records and authority metadata out of Git, and retain independent
+backups outside the checkout. See [configuration and Git boundaries](configuration.md#state).
 
 ## Schema
 

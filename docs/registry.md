@@ -25,6 +25,17 @@ own: `transfers` carries the hold, acceptance and activation markers.
   supported resident-adoption recording. The harness-selection CLI changes only selected roles' `harness` overrides and
   registry revision metadata; it preserves all other fields, including `operations`.
 
+## Create and extend a registry
+
+The [registry library](libraries.md#registry-library) provides `createRegistry` for a new
+`var/registry.json` and `updateRegistry` for revision-checked changes to an existing registry.
+Creation sets revision 1 and refuses an existing file. Supply the actual coordinator project and
+native conversation IDs from the workspace owner. A null conversation marks an unbound harness.
+
+For a new game, first add its role keys to [the coordinator configuration](configuration.md#add-a-game).
+The coordinator then adds those roles and their worktree paths to the registry using the current
+revision. The CLI's `harness select` only changes existing role overrides.
+
 ## Scoped harness selection
 
 `roles.<role>.harness`, when present, is `claude` or `codex`. An absent override falls back to the
