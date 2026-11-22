@@ -16,7 +16,12 @@ import { expect, it } from "vitest";
 
 import { eventHash } from "../db.ts";
 import { GENESIS, type StoredEvent } from "../types.ts";
-import { type FileRecord, type JournalWriter, openFileJournal } from "./journal.ts";
+import {
+  fenceFileJournal,
+  type FileRecord,
+  type JournalWriter,
+  openFileJournal,
+} from "./journal.ts";
 
 const exec = promisify(execFile);
 const journalModule = new URL("./journal.ts", import.meta.url).href;
@@ -95,6 +100,59 @@ const WRITE = `
     writer.commit([{...draft, hash: eventHash(draft)}], input.records ?? []);
   });
 `;
+
+it("anchors a journal tail to its verified checkpoint and preserves retired keys", () => {
+  const root = scratch();
+  const prefix = event("compact-original");
+  const tail = event("new-original", prefix);
+  const baseline = { head: prefix, keys: new Set([prefix.key]) };
+  const journal = openFileJournal(root, baseline);
+  expect(journal.events()).toEqual([]);
+
+  journal.withWriter((writer) => {
+    expect(() => writer.commit([event(prefix.key, prefix)])).toThrow("journal-key-conflict");
+    writer.commit([tail]);
+    writer.commit([event("next", tail)]);
+  });
+
+  expect(journal.events().map(({ key }) => key)).toEqual(["new-original", "next"]);
+  expect(journal.events(tail.seq).map(({ key }) => key)).toEqual(["next"]);
+  expect(() => openFileJournal(root).events()).toThrow("journal-chain-broken");
+  expect(() => openFileJournal(root, { ...baseline, head: tail }).events()).toThrow(
+    "journal-chain-broken",
+  );
+});
+
+it("leaves old writers fenced across interruption and resumes the same checkpoint", () => {
+  const root = scratch();
+  const journal = openFileJournal(root);
+  const first = event("preserved");
+  journal.withWriter((writer) => writer.commit([first]));
+  const fence = {
+    digest: "a".repeat(64),
+    head: { hash: first.hash, seq: first.seq },
+    id: "00000000-0000-4000-8000-000000000211",
+  };
+  const verifySource = (events: readonly StoredEvent[]) => expect(events).toEqual([first]);
+
+  expect(() =>
+    fenceFileJournal(root, { ...fence, head: { ...fence.head, seq: 2 } }, verifySource, () => 1),
+  ).toThrow("checkpoint-source-head-changed");
+  expect(journal.events()).toEqual([first]);
+  expect(() =>
+    fenceFileJournal(root, fence, verifySource, () => {
+      throw new Error("selection interrupted");
+    }),
+  ).toThrow("selection interrupted");
+  expect(() => journal.withWriter((writer) => writer.commit([event("obsolete", first)]))).toThrow(
+    "journal-corrupt",
+  );
+  expect(() =>
+    fenceFileJournal(root, { ...fence, digest: "b".repeat(64) }, verifySource, () => 1),
+  ).toThrow("checkpoint-fence-mismatch");
+  expect(fenceFileJournal(root, fence, verifySource, () => 2)).toBe(2);
+  expect(() => journal.events()).toThrow("journal-corrupt");
+});
 
 it("leaves a missing journal untouched and replays exact committed batches without overwriting", () => {
   const root = scratch();

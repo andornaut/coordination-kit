@@ -14,6 +14,7 @@ import {
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
+import { isCanonicalUuid } from "../../adapters/shared/ids.ts";
 import { isRecord } from "../../adapters/shared/pyjson.ts";
 import { fsyncDirectory, tempPrefix, writeDurable } from "../../durable.ts";
 import { holdLock, LockBusy } from "../../lock.ts";
@@ -55,6 +56,7 @@ interface Paths {
   readonly lock: string;
   readonly prepare: string;
   readonly stage: string;
+  readonly baseline: JournalBaseline;
 }
 
 interface Head {
@@ -62,10 +64,17 @@ interface Head {
   readonly seq: number;
 }
 
+interface JournalBaseline {
+  readonly head: Head;
+  readonly keys: ReadonlySet<string>;
+}
+
 const ROOTS = new Set(["roles", "coordinator", "legacy"]);
 const SAFE_SEGMENT = /^(?:[A-Za-z0-9_~.-]|%[0-9A-F]{2})+$/;
 const BATCH_FILE = /^\d{16}\.json$/;
 const HEX = /^[a-f0-9]{64}$/;
+const CHECKPOINT_FENCE = "checkpoint-fence.json";
+const EMPTY_BASELINE: JournalBaseline = { head: { hash: GENESIS, seq: 0 }, keys: new Set() };
 const WRITE_TIMEOUT_SECONDS = 5;
 
 function ensure(condition: unknown, code: string): asserts condition {
@@ -109,9 +118,10 @@ function keyBytes(first: number, event: StoredEvent): string {
   return json({ batch: first, hash: event.hash, seq: event.seq });
 }
 
-function paths(root: string): Paths {
+function paths(root: string, baseline: JournalBaseline): Paths {
   const journal = join(root, "journal");
   return {
+    baseline,
     batches: join(journal, "batches"),
     journal,
     keys: join(journal, "keys"),
@@ -273,15 +283,15 @@ function parseBatch(bytes: Buffer, filename?: string): Batch {
   return { events, records, schema: 1 };
 }
 
-function batchHead(batch?: Batch): Head {
-  return batch?.events.at(-1) ?? { hash: GENESIS, seq: 0 };
+function batchHead(paths: Paths, batch?: Batch): Head {
+  return batch?.events.at(-1) ?? paths.baseline.head;
 }
 
-function batchFiles(paths: Paths): string[] {
+function batchFiles(paths: Paths, fenced = false): string[] {
   if (!scopedDirectory(paths.root, paths.batches)) {
     return [];
   }
-  const names = readdirSync(paths.batches);
+  const names = readdirSync(paths.batches).filter((name) => !fenced || name !== CHECKPOINT_FENCE);
   ensure(
     names.every((name) => BATCH_FILE.test(name)),
     "journal-corrupt",
@@ -306,6 +316,10 @@ function batchCompanions(batch: Batch): Companion[] {
 }
 
 function verifyCompanions(paths: Paths, batch: Batch): void {
+  ensure(
+    batch.events.every((event) => !paths.baseline.keys.has(event.key)),
+    "journal-key-conflict",
+  );
   for (const record of batchCompanions(batch)) {
     const bytes = readRecord(paths, record.path);
     ensure(bytes !== undefined && digest(bytes) === record.sha256, "journal-record-mismatch");
@@ -326,7 +340,7 @@ function readEvents(paths: Paths, files: readonly string[], afterSeq: number): S
     return [];
   }
   const start = firstFor(files, afterSeq);
-  let head = batchHead(start === 0 ? undefined : readBatch(paths, files[start - 1]!));
+  let head = batchHead(paths, start === 0 ? undefined : readBatch(paths, files[start - 1]!));
   const events: StoredEvent[] = [];
   for (const filename of files.slice(start)) {
     const batch = readBatch(paths, filename);
@@ -338,7 +352,7 @@ function readEvents(paths: Paths, files: readonly string[], afterSeq: number): S
         events.push(event);
       }
     }
-    head = batchHead(batch);
+    head = batchHead(paths, batch);
   }
   return events;
 }
@@ -462,18 +476,24 @@ function commitBatch(
   const last = previous === undefined ? undefined : readBatch(paths, previous);
   if (last !== undefined) {
     const predecessor = files.at(-2);
-    const anchor = batchHead(predecessor === undefined ? undefined : readBatch(paths, predecessor));
+    const anchor = batchHead(
+      paths,
+      predecessor === undefined ? undefined : readBatch(paths, predecessor),
+    );
     const start = last.events[0]!;
     ensure(start.seq === anchor.seq + 1 && start.prevHash === anchor.hash, "journal-chain-broken");
     verifyCompanions(paths, last);
   }
-  verifyEvents(events, batchHead(last));
+  verifyEvents(events, batchHead(paths, last));
   for (const path of companions.keys()) {
     ensure(readRecord(paths, path) === undefined, "journal-record-conflict");
   }
   for (const event of events) {
     const path = keyPath(event);
-    ensure(readRecord(paths, path) === undefined, "journal-key-conflict");
+    ensure(
+      !paths.baseline.keys.has(event.key) && readRecord(paths, path) === undefined,
+      "journal-key-conflict",
+    );
     companions.set(path, keyBytes(first.seq, event));
   }
   try {
@@ -521,9 +541,72 @@ function locked<T>(paths: Paths, shared: boolean, run: () => T): T {
   }
 }
 
+interface CheckpointFence {
+  readonly digest: string;
+  readonly head: Head;
+  readonly id: string;
+}
+
+/** Fence the old journal, including preopened writers, while selecting an exact verified candidate. */
+export function fenceFileJournal<T>(
+  root: string,
+  fence: CheckpointFence,
+  verifySource: (events: readonly StoredEvent[]) => void,
+  select: () => T,
+): T {
+  const journal = paths(resolve(root), EMPTY_BASELINE);
+  ensure(
+    isCanonicalUuid(fence.id) &&
+      HEX.test(fence.digest) &&
+      HEX.test(fence.head.hash) &&
+      Number.isSafeInteger(fence.head.seq) &&
+      fence.head.seq > 0,
+    "checkpoint-fence-invalid",
+  );
+  ensure(
+    scopedDirectory(journal.root, journal.batches) && isFile(journal.lock),
+    "checkpoint-source-unavailable",
+  );
+  return locked(journal, false, () => {
+    recover(journal);
+    const file = join(journal.batches, CHECKPOINT_FENCE);
+    const original = readFile(file);
+    const expected = json({ ...fence, schema: 2 });
+    ensure(
+      original === undefined || original.equals(Buffer.from(expected)),
+      "checkpoint-fence-mismatch",
+    );
+    const events = readEvents(journal, batchFiles(journal, original !== undefined), 0);
+    const head = events.at(-1);
+    ensure(
+      head?.seq === fence.head.seq && head.hash === fence.head.hash,
+      "checkpoint-source-head-changed",
+    );
+    const verified: unknown = verifySource(events);
+    ensure(!(verified instanceof Promise), "checkpoint-verification-async");
+    if (original === undefined) {
+      const intent = join(journal.journal, CHECKPOINT_FENCE);
+      writeDurable(intent, expected);
+      linkSync(intent, file);
+    }
+    fsyncDirectory(journal.batches);
+    const result = select();
+    ensure(!(result instanceof Promise), "checkpoint-selection-async");
+    return result;
+  });
+}
+
 /** Open an append-only journal. Only a committed manifest makes its companion paths authoritative. */
-export function openFileJournal(root: string): FileJournal {
-  const journal = paths(resolve(root));
+export function openFileJournal(
+  root: string,
+  baseline: JournalBaseline = EMPTY_BASELINE,
+): FileJournal {
+  const { hash, seq } = baseline.head;
+  ensure(
+    Number.isSafeInteger(seq) && seq >= 0 && HEX.test(hash) && (seq === 0) === (hash === GENESIS),
+    "journal-baseline-invalid",
+  );
+  const journal = paths(resolve(root), { head: { hash, seq }, keys: new Set(baseline.keys) });
   function read<T>(inspect: (files: readonly string[]) => T): T {
     if (!scopedDirectory(journal.root, journal.journal)) {
       return inspect([]);
