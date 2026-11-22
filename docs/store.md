@@ -342,19 +342,21 @@ one guarded wake for it, which goes out only if no other guard remains.
 
 ## Coordinator reminders
 
-`reminder list` reads exact unread originals with a guarded or failed wake tied to the live
+`reminder list` plans exact unread originals with a guarded or failed wake tied to the live
 recipient binding. It checks the current local decision marker, durable question and role or
-game holds. Missing, ambiguous, coalesced and unconfirmed evidence stays in ordinary unread
-status.
+game holds. Each candidate has a `role`, the first 50 eligible IDs in `originals` and the remaining
+IDs in `deferredOriginals`, both in original send order. Missing, ambiguous, coalesced and
+unconfirmed evidence stays in ordinary unread status.
 
-The live coordinator alone can claim up to 50 explicitly named originals for an active Codex
-recipient. The claim records the original IDs, wake references, recipient conversation and
-registry revision in one transaction before any fallback can run. Its reply includes the
-top-level `notice` text with the claim ID in brackets. Submit that exact text to make the native
-history item attributable to this claim. An immediate `reminder check` verifies the unsettled
-claim, original state, guards, exact idle native recipient and absence of an earlier queued
-notice using read-only operations. An independent caller must also verify the attached
-frontend's empty composer and safe prompt state before submitting a wake-only reminder.
+The live coordinator alone can claim an ordered prefix of the current batch for an active Codex
+recipient. A later eligible arrival can extend the batch while the earlier prefix stays
+claimable. The claim records the exact IDs in their planned order, wake references, recipient
+conversation and registry revision in one transaction before any fallback can run. Its reply
+includes the top-level `notice` text with the claim ID in brackets. Submit that exact text to
+make the native history item attributable to this claim. An immediate `reminder check` verifies
+the unsettled claim, original state, guards, exact idle native recipient and absence of an
+earlier queued notice using read-only operations. An independent caller must also verify the
+attached frontend's empty composer and safe prompt state before submitting a wake-only reminder.
 
 A past compaction refusal establishes only that the former wake did not submit. Current
 eligibility requires fresh native question clearance. For an absent marker or a current

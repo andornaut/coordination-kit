@@ -24,7 +24,7 @@ type Row = Record<string, SQLInputValue>;
 const COORDINATOR = "game-coordinator";
 export const REMINDER_OUTCOMES = ["submitted", "refused", "uncertain"] as const;
 export type ReminderOutcome = (typeof REMINDER_OUTCOMES)[number];
-export const MAX_REMINDER_ORIGINALS = 50;
+const MAX_REMINDER_ORIGINALS = 50;
 
 export interface ReminderReceipt {
   readonly id: string;
@@ -37,7 +37,18 @@ export interface ReminderReceipt {
 
 export interface ReminderCandidate {
   readonly role: string;
-  readonly originals: readonly UnreadMessage[];
+  readonly originals: readonly string[];
+  readonly deferredOriginals: readonly string[];
+}
+
+type OriginalRef = { readonly id: string; readonly wake: string };
+
+type EligibleOriginal = { readonly original: UnreadMessage; readonly wake: string };
+
+interface ReminderBatch {
+  readonly role: string;
+  readonly originals: readonly EligibleOriginal[];
+  readonly deferredOriginals: readonly EligibleOriginal[];
 }
 
 interface Binding {
@@ -227,12 +238,11 @@ function roleHasClaim(store: Store, role: string): boolean {
   );
 }
 
-function claimOriginals(store: Store, id: string) {
-  return store.db
-    .prepare(
-      "SELECT original_id, wake_id FROM reminder_originals WHERE claim_id = ? ORDER BY original_id",
-    )
-    .all(id) as { original_id: string; wake_id: string }[];
+function claimOriginals(store: Store, id: string): readonly OriginalRef[] {
+  // The event preserves the exact claim order. The deduplication index is unordered.
+  const originals = store.eventByKey(`reminder.claimed:${id}`)?.payload.originals;
+  require(Array.isArray(originals) && originals.length > 0, "reminder-original-stale");
+  return originals as readonly OriginalRef[];
 }
 
 /** Identify interrupted claims for reconciliation. The caller never resumes their attempt. */
@@ -247,7 +257,7 @@ export function pendingReminders(
     .all() as { id: string; role: string }[];
   return pending.map(({ id, role }) => ({
     id,
-    originals: claimOriginals(store, id).map(({ original_id }) => original_id),
+    originals: claimOriginals(store, id).map((original) => original.id),
     role,
   }));
 }
@@ -278,17 +288,13 @@ function canClaim(
   );
 }
 
-export function listReminders(
-  store: Store,
-  scope: ReminderScope,
-  role: string | null = null,
-): ReminderCandidate[] {
+function planReminders(store: Store, scope: ReminderScope, role: string | null): ReminderBatch[] {
   const ledger = hasLedger(store);
   const latestReview = Number(
     store.db.prepare("SELECT max(seq) AS seq FROM review_briefs").get()?.seq ?? 0,
   );
   const bindings = new Map<string, BindingCheck>();
-  const candidates = new Map<string, UnreadMessage[]>();
+  const candidates = new Map<string, EligibleOriginal[]>();
   for (const original of unreadMessages(store, role)) {
     if (!bindings.has(original.to)) {
       bindings.set(
@@ -303,13 +309,25 @@ export function listReminders(
       target === undefined || "refusal" in target ? null : exactWake(store, target, original);
     if (wake !== null && canClaim(store, ledger, latestReview, original.id, wake)) {
       const list = candidates.get(original.to) ?? [];
-      list.push(original);
+      list.push({ original, wake: wake.id });
       candidates.set(original.to, list);
     }
   }
   return [...candidates.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([role, originals]) => ({ originals, role }));
+    .map(([role, eligible]) => ({
+      deferredOriginals: eligible.slice(MAX_REMINDER_ORIGINALS),
+      originals: eligible.slice(0, MAX_REMINDER_ORIGINALS),
+      role,
+    }));
+}
+
+export function listReminders(store: Store, scope: ReminderScope): ReminderCandidate[] {
+  return planReminders(store, scope, null).map(({ deferredOriginals, originals, role }) => ({
+    deferredOriginals: deferredOriginals.map(({ original }) => original.id),
+    originals: originals.map(({ original }) => original.id),
+    role,
+  }));
 }
 
 export function claimReminder(
@@ -321,7 +339,6 @@ export function claimReminder(
   requireReminderCoordinator(scope.registry, actor);
   const { originals, role } = selection;
   require(originals.length > 0 &&
-    originals.length <= MAX_REMINDER_ORIGINALS &&
     new Set(originals).size === originals.length &&
     originals.every((id) => MESSAGE_ID.test(id)), "reminder-invalid-originals");
   return store.transaction(() => {
@@ -330,13 +347,15 @@ export function claimReminder(
     if ("refusal" in target) {
       throw new StoreError(target.refusal);
     }
-    const candidates = listReminders(store, scope, role)[0]?.originals ?? [];
-    const evidence = new Map(candidates.map((candidate) => [candidate.id, candidate.wake.wake]));
-    const refs = [...originals].sort().map((id) => {
-      const wake = evidence.get(id);
-      require(wake != null, "reminder-original-ineligible");
-      return { id, wake };
-    });
+    const offered = planReminders(store, scope, role)[0]?.originals ?? [];
+    require(originals.every(
+      (id, index) => offered[index]?.original.id === id,
+    ), "reminder-original-ineligible");
+    // Later arrivals can extend a plan without changing the already observed prefix.
+    const refs = offered.slice(0, originals.length).map(({ original, wake }) => ({
+      id: original.id,
+      wake,
+    }));
     const id = randomUUID();
     store.append({
       actor,
@@ -377,12 +396,11 @@ export function checkReminder(
   const receipts = claimOriginals(store, id);
   const unread = new Map(unreadMessages(store, role).map((original) => [original.id, original]));
   for (const receipt of receipts) {
-    const original = unread.get(receipt.original_id);
+    const original = unread.get(receipt.id);
     require(original !== undefined &&
-      exactWake(store, target, original)?.id === receipt.wake_id, "reminder-original-stale");
+      exactWake(store, target, original)?.id === receipt.wake, "reminder-original-stale");
   }
-  require(receipts.length > 0, "reminder-original-stale");
-  return { ...target, id, originals: receipts.map((receipt) => receipt.original_id), role };
+  return { ...target, id, originals: receipts.map((receipt) => receipt.id), role };
 }
 
 export function settleReminder(

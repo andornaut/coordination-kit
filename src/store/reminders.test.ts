@@ -10,7 +10,13 @@ import { Store } from "./db.ts";
 import { readInbox, sendMessage } from "./messages.ts";
 import { releasePolicyHold, setPolicyHold } from "./policyHolds.ts";
 import { openQuestion, setHold } from "./questions.ts";
-import { claimReminder, listReminders, pendingReminders, settleReminder } from "./reminders.ts";
+import {
+  checkReminder,
+  claimReminder,
+  listReminders,
+  pendingReminders,
+  settleReminder,
+} from "./reminders.ts";
 import { storeReminderCheck, storeReminderClaim, storeReminderSettle } from "./reminderService.ts";
 import {
   ART,
@@ -75,6 +81,87 @@ function wake(
 }
 
 describe("coordinator reminder ledger", () => {
+  it("plans 50 originals in send order, defers the tail and validates claims against the plan", () => {
+    const { scope, store } = setup();
+    try {
+      wake(store, "first");
+      const sent = [ORIGINAL];
+      for (let index = 0; index < 51; index += 1) {
+        const id = `00000000-0000-4000-8000-${(100 - index).toString(16).padStart(12, "0")}`;
+        sendMessage(store, ACTOR, { body: "Queued.", id, intent: "queue", to: ROLE });
+        wake(store, `wake-${index}`, "failed", id);
+        sent.push(id);
+      }
+      const [plan] = listReminders(store, scope);
+      const batch = sent.slice(0, 50);
+      const tail = sent.slice(50);
+      expect(plan).toEqual({ deferredOriginals: tail, originals: batch, role: ROLE });
+
+      const claim = (originals: readonly string[]) =>
+        claimReminder(store, scope, ACTOR, { originals, role: ROLE });
+      expect(() => claim([batch[0]!, batch[0]!])).toThrow("reminder-invalid-originals");
+      expect(() => claim(tail)).toThrow("reminder-original-ineligible");
+      expect(() => claim(batch.slice(1))).toThrow("reminder-original-ineligible");
+      expect(() => claim([...batch].reverse())).toThrow("reminder-original-ineligible");
+      expect(() => claim(sent)).toThrow("reminder-original-ineligible");
+
+      const receipt = claim(plan!.originals);
+      expect(receipt.originals).toEqual(batch);
+      store.rebuild();
+      expect(checkReminder(store, scope, ACTOR, receipt.id)).toEqual(receipt);
+      expect(pendingReminders(store)).toEqual([{ id: receipt.id, originals: batch, role: ROLE }]);
+      settleReminder(store, scope, ACTOR, {
+        id: receipt.id,
+        outcome: "submitted",
+        reason: "pane-submitted",
+      });
+      expect(listReminders(store, scope)).toEqual([]);
+      expect(() => claim(tail)).toThrow("reminder-notice-outstanding");
+      store.append({
+        actor: { nativeId: null, role: null },
+        key: `notice.consumed:${receipt.id}`,
+        kind: "notice.consumed",
+        payload: {
+          conversation: ART,
+          id: receipt.id,
+          item: "notice-item",
+          role: ROLE,
+          turn: "notice-turn",
+        },
+      });
+      expect(listReminders(store, scope)).toEqual([
+        { deferredOriginals: [], originals: tail, role: ROLE },
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("keeps a previously planned prefix claimable when another original arrives", () => {
+    const { scope, store } = setup();
+    try {
+      wake(store, "first");
+      const [plan] = listReminders(store, scope);
+      sendMessage(store, ACTOR, {
+        body: "Later.",
+        id: COALESCED,
+        intent: "queue",
+        to: ROLE,
+      });
+      wake(store, "later", "failed", COALESCED);
+      expect(listReminders(store, scope)).toEqual([
+        { deferredOriginals: [], originals: [ORIGINAL, COALESCED], role: ROLE },
+      ]);
+      const claim = claimReminder(store, scope, ACTOR, plan!);
+      expect(claim.originals).toEqual([ORIGINAL]);
+      expect(pendingReminders(store)).toEqual([
+        { id: claim.id, originals: [ORIGINAL], role: ROLE },
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+
   it("offers only confirmed unread evidence for the exact live recipient", () => {
     const { scope, store } = setup();
     try {
@@ -90,7 +177,7 @@ describe("coordinator reminder ledger", () => {
         payload: { messages: [COALESCED], role: ROLE, wake: "refusal" },
       });
       expect(listReminders(store, scope)).toMatchObject([
-        { originals: [{ id: ORIGINAL, wake: { outcome: "failed", wake: "refusal" } }], role: ROLE },
+        { deferredOriginals: [], originals: [ORIGINAL], role: ROLE },
       ]);
       expect(() =>
         claimReminder(store, scope, RECIPIENT, { originals: [ORIGINAL], role: ROLE }),
@@ -112,7 +199,7 @@ describe("coordinator reminder ledger", () => {
       try {
         wake(store, "decision-clearance", "guarded", ORIGINAL, ART, "decision-clearance");
         expect(listReminders(store, scope)).toMatchObject([
-          { originals: [{ id: ORIGINAL }], role: ROLE },
+          { deferredOriginals: [], originals: [ORIGINAL], role: ROLE },
         ]);
         const { receipt } = await storeReminderClaim(
           context,
@@ -249,7 +336,7 @@ describe("coordinator reminder ledger", () => {
       expect(listReminders(store, scope)).toEqual([]);
       review(2);
       expect(listReminders(store, scope)).toMatchObject([
-        { originals: [{ id: ORIGINAL }], role: ROLE },
+        { deferredOriginals: [], originals: [ORIGINAL], role: ROLE },
       ]);
       const next = claimReminder(store, scope, ACTOR, { originals: [ORIGINAL], role: ROLE });
       settleReminder(store, scope, ACTOR, {
@@ -435,7 +522,10 @@ describe("coordinator reminder ledger", () => {
     const candidates = await run({}, "reminder", "list");
     expect(candidates).toMatchObject({
       code: EXIT_OK,
-      value: { candidates: [{ role: ROLE }], schema: 1 },
+      value: {
+        candidates: [{ deferredOriginals: [], originals: [ORIGINAL], role: ROLE }],
+        schema: 1,
+      },
     });
     const denied = await run(
       { CODEX_THREAD_ID: ART },
