@@ -8,6 +8,7 @@ import { nativeQuestionsClear } from "./guard.ts";
 import type { RpcClient } from "./rpc.ts";
 
 const RECIPIENT = "00000000-0000-4000-8000-000000000003";
+const REPLY_CLIENT_ID = "00112233-4455-4677-8899-aabbccddeeff";
 const directories: string[] = [];
 type Json = Record<string, unknown>;
 
@@ -383,17 +384,17 @@ describe("observed native UI reply admission", () => {
         )
       )[0],
     ).toBe(false);
-    expect(
-      (
-        await nativeQuestionsClear(
-          currentNative([asyncQuestion, { ...uiReply(), clientId: "external-request" }]),
-          clearance(),
-          RECIPIENT,
-          "current",
-        )
-      )[0],
-    ).toBe(false);
   });
+
+  it.each(["external-request", REPLY_CLIENT_ID.toUpperCase()])(
+    "rejects a noncanonical reply client ID %s",
+    async (clientId) => {
+      const native = currentNative([asyncQuestion, { ...uiReply(), clientId }]);
+      expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "current"))[0]).toBe(
+        false,
+      );
+    },
+  );
 
   const multiTitles = ["Choose", "Scope", "Timing", "Confirmation"];
   const multiQuestion = {
@@ -407,8 +408,13 @@ describe("observed native UI reply admission", () => {
     answer: "A",
   }));
 
-  it("recognizes a single native envelope with exactly all four question indices and titles", async () => {
-    const reply = { ...uiEnvelope(multiReplies), completedAtMs: 1794716830669 };
+  it("recognizes one native envelope with its client UUID and all four question indices", async () => {
+    const reply = {
+      ...uiEnvelope(multiReplies),
+      clientId: REPLY_CLIENT_ID,
+      completedAtMs: 1794716830670,
+      startedAtMs: 1794716830669,
+    };
     const native = currentNative([multiQuestion, reply]);
     expect(await nativeQuestionsClear(native, clearance(), RECIPIENT, "current")).toEqual([
       true,

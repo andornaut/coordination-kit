@@ -1,6 +1,7 @@
 // Recipient decision guard: a recipient-bound clearance record, verified against native question
 // history by exact turn and item IDs. Unknown or incomplete history defers.
 import { decisionClear, type DecisionRecord, decisionRecord } from "../shared/decisions.ts";
+import { isCanonicalUuid } from "../shared/ids.ts";
 import { isRecord, sameJson } from "../shared/pyjson.ts";
 import { type NativeQuestionRef, safeNativeQuestionRef } from "../types.ts";
 import type { RpcClient } from "./rpc.ts";
@@ -337,7 +338,7 @@ interface NativeReplyBinding {
 function nativeReplyBinding(item: NativeItem): NativeReplyBinding | null {
   if (
     item.type !== "userMessage" ||
-    item.clientId !== null ||
+    (item.clientId !== null && !isCanonicalUuid(item.clientId)) ||
     Object.keys(item)
       .filter((key) => !ITEM_TIMESTAMPS.includes(key))
       .sort()
@@ -461,8 +462,9 @@ function nativeAnsweredQuestion(items: Map<string, NativeItem>, question: Native
 
 /**
  * Exact owner-record or observed native UI envelope proof. The UI text envelope is trusted
- * within native history and the owner's clear-record boundary, not authenticated UI origin.
- * A byte-identical manually authored native user message cannot be distinguished from it.
+ * within native history and the owner's clear-record boundary. The optional client UUID is
+ * metadata, not origin authentication. A byte-identical manually authored native user message
+ * cannot be distinguished from it.
  */
 export async function nativeQuestionsClear(
   client: RpcClient,
