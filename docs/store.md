@@ -343,7 +343,9 @@ with scope `role`; it is logged `guarded` with `recipient-question-pending` or
 `recipient-hold-active`. User policy holds for the exact role or its game withhold wakes with
 `recipient-policy-hold-active`. Work-scoped holds and role-owned game holds apply at work start.
 The guard is checked when claiming a wake and again before native delivery. For Codex the native
-question check still runs after it. A wake carries no payload, so it never answers or clears a prompt or
+question check still runs after it. One asynchronous reply can prove a completed multi-question
+prompt when it covers every exact rendered index and title once. Partial or mismatched replies
+keep the native guard closed. A wake carries no payload, so it never answers or clears a prompt or
 hold. When the owner answers or cancels its question or releases its hold, that command attempts
 one guarded wake for it, which goes out only if no other guard remains.
 
