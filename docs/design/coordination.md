@@ -33,3 +33,4 @@ Reference: [review](../review.md#scheduled-review-seam), [libraries](../librarie
 | ck-0029 | Recover Codex questions and surface guarded messages    | [ck-0029.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0029.md) |
 | ck-0030 | Apply the container memory ceiling to kit launchers     | [ck-0030.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0030.md) |
 | ck-0031 | Escalate blocked inbox delivery to the coordinator      | [ck-0031.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0031.md) |
+| ck-0032 | Simplify the command and operator workflows             | [ck-0032.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0032.md) |

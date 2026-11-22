@@ -69,88 +69,14 @@ import { coordinatorRoot, EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type 
 import { cliIdentity, VERSION } from "./version.ts";
 export { EXIT_INVALID, EXIT_OK, EXIT_REFUSED, EXIT_USAGE, type Handler, type Io } from "./io.ts";
 export { SOURCE_DIGEST, VERSION } from "./version.ts";
-export const COMMANDS = [
-  "msg send",
-  "inbox",
-  "msg done",
-  "msg retain",
-  "msg status",
-  "msg history",
-  "store import",
-  "store export",
-  "store rebuild",
-  "store retire",
-  "store migration-status",
-  "store migration-prepare",
-  "store migration-activate",
-  "question open",
-  "question attach",
-  "question reconcile",
-  "question reask",
-  "question answer",
-  "question project",
-  "question cancel",
-  "question list",
-  "hold set",
-  "hold policy-set",
-  "hold policy-release",
-  "hold release",
-  "hold list",
-  "decision list",
-  "session start",
-  "handoff open",
-  "handoff ready",
-  "handoff state",
-  "handoff active",
-  "handoff show",
-  "reminder check",
-  "reminder claim",
-  "reminder list",
-  "reminder settle",
-  "request close",
-  "claude ready",
-  "codex ready",
-  "harness doctor",
-  "harness ready",
-  "harness select",
-  "claude channel",
-  "review deliver",
-  "review show",
-  "events ingest",
-  "status",
-  "work check",
-  "work report",
-  "work start",
-  "work evidence",
-  "work block",
-  "work unblock",
-  "work ready",
-  "work finish",
-  "work show",
-  "work history",
-  "graph",
-  "graph why",
-  "graph index",
-] as const satisfies readonly Command[];
+export const COMMANDS: readonly Command[] = Object.keys(SPECS) as Command[];
 export type { Command };
-const GROUP_ORDER = [
-  "msg",
-  "store",
-  "decisions",
-  "session",
-  "request",
-  "harness",
-  "review",
-  "status",
-  "work",
-  "graph",
-] as const;
 /** Help text, generated from each command's parser options and grouped by audience. */
 export const USAGE = [
   "usage: coordination-kit COMMAND [options] [--root DIR]",
-  ...GROUP_ORDER.flatMap((group) => [
+  ...Object.entries(GROUPS).flatMap(([group, heading]) => [
     "",
-    `${GROUPS[group][0]?.toUpperCase() ?? ""}${GROUPS[group].slice(1)}:`,
+    `${heading[0]?.toUpperCase() ?? ""}${heading.slice(1)}:`,
     ...COMMANDS.filter((command) => SPECS[command].group === group).flatMap((command) => [
       ...synopsis(command).map((line) => `  ${line}`),
       `      ${SPECS[command].summary}`,
@@ -261,10 +187,10 @@ function commandOf(args: readonly string[]):
   | undefined {
   const [first = "", second = ""] = args;
   const pair = `${first} ${second}`;
-  if ((COMMANDS as readonly string[]).includes(pair)) {
+  if (Object.hasOwn(SPECS, pair)) {
     return { command: pair as Command, rest: args.slice(2) };
   }
-  if ((COMMANDS as readonly string[]).includes(first) && !first.includes(" ")) {
+  if (Object.hasOwn(SPECS, first) && !first.includes(" ")) {
     return { command: first as Command, rest: args.slice(1) };
   }
   return undefined;
