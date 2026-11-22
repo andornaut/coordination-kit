@@ -70,6 +70,39 @@ writer recovers uncommitted preparation. Use the CLI to read and change coordina
 Keep the journal, companion records and authority metadata out of Git, and retain independent
 backups outside the checkout. See [configuration and Git boundaries](configuration.md#state).
 
+## Compaction planning
+
+The read-only filesystem plan counts up to 100 recent closed originals per recipient by
+verified close sequence. Each recognized routine source stream has its own 100-event
+window by committed sequence. Initial routine streams cover session starts per role and
+scheduled ticks per game with no stage status, work list or commit SHA. The report keeps
+other event kinds protected, including runner outcomes, wake and reminder evidence,
+questions, decisions, approvals, holds and handoffs.
+
+Only handled or superseded originals outside the window enter the replacement check.
+Open or retained originals, unknown ownership or close order, unresolved delivery and
+dependencies of open or unresolved messages stay protected. Aged originals require evidence that their
+owner verified a durable replacement and reconciled live references. Aged routine events
+require a verified checkpoint covering state, evidence, runner identity, cursors and keys.
+Both proofs bind to the exact journal head and registry revision. Without proof the plan
+reports aged items and their protection reasons. Dates and references remain in the
+existing authoritative records.
+
+Each stream counts originals or events once. `bodyBytes` measures raw message text in
+UTF-8. `payloadBytes` includes its JSON encoding and other payload fields.
+`journalBytes` is the canonical UTF-8 event size, including the event envelope.
+`metadataBytes` is the difference between `journalBytes` and `payloadBytes`.
+The report supplies `diskSavingsBytes: null`. Batch separators, companion copies,
+filesystem allocation and future checkpoint data determine physical savings.
+
+The current manifest commits event hashes and companion digests. Expiration needs a
+separately qualified generation that preserves live projections, key and disposition
+resolution, rollback evidence and the chain anchor while removing retired payloads from
+active replay. Qualification rehearses concurrent writes, interruption, retry, rebuild
+and independent restore. At an approved idle review boundary, recheck the exact head and
+registry binding before selecting a prepared generation under the writer lock. Keep loose
+copies and backups through the review. Pruning after that review requires a separate decision.
+
 ## Schema
 
 `events` is append-only; triggers abort any `UPDATE` or `DELETE`.
