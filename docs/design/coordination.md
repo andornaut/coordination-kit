@@ -29,3 +29,4 @@ Reference: [review](../review.md#scheduled-review-seam), [libraries](../librarie
 | ------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | ck-0001 | Extract the coordination kit from delivery-kit          | [ck-0001.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0001.md) |
 | ck-0010 | Validate only the configuration sections this kit reads | [ck-0010.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0010.md) |
+| ck-0028 | Document workspace layout and coordinator setup         | [ck-0028.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0028.md) |
