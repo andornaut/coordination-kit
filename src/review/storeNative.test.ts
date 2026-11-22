@@ -14,6 +14,8 @@ const CHIBI_ART = "00000000-0000-4000-8000-000000000001";
 const SHARED = "00000000-0000-4000-8000-000000000002";
 const CHILD = "00000000-0000-4000-8000-000000000003";
 const TURN = "00000000-0000-4000-8000-000000000004";
+const HEALTHY_CHILD = "00000000-0000-4000-8000-000000000005";
+const UNREADABLE_CHILD = "00000000-0000-4000-8000-000000000006";
 
 function marker(layout: Layout, game: string, recipient: string, state: "clear" | "pending"): void {
   const directory = join(gameLayout(layout, game).busDir, "unblock", "decisions");
@@ -79,13 +81,24 @@ it("surveys registered recipients and parents using each exact decision record",
       error_code: "serverOverloaded",
       lineage_verified: true,
       parent_id: CHIBI_ART,
+      provenance: "native_protocol",
       requires_parent_action: true,
+      status: "complete",
       turn_id: TURN,
       turn_status: "failed",
     };
     const health = {
-      children: [child],
+      children: [
+        child,
+        {
+          ...child,
+          child_id: HEALTHY_CHILD,
+          requires_parent_action: false,
+          turn_status: "completed",
+        },
+      ],
       complete: true,
+      provenance: "native_protocol",
       schema_status: "available",
       status: "complete",
     };
@@ -97,7 +110,24 @@ it("surveys registered recipients and parents using each exact decision record",
         [CHIBI_ART]: { complete: true, questions: [wrongRecipient], status: "complete" },
         [SHARED]: { complete: true, questions: [], status: "complete" },
       },
-      worker_health: { [ART]: health, [CHIBI_ART]: health },
+      worker_health: {
+        [ART]: health,
+        [CHIBI_ART]: health,
+        [SHARED]: {
+          ...health,
+          children: [
+            {
+              ...child,
+              child_id: UNREADABLE_CHILD,
+              complete: false,
+              parent_id: SHARED,
+              status: "unavailable",
+            },
+          ],
+          complete: false,
+          status: "partial",
+        },
+      },
     });
   });
 
@@ -142,16 +172,24 @@ it("surveys registered recipients and parents using each exact decision record",
     expect.arrayContaining([
       expect.objectContaining({
         failures: [],
+        lineage: { parentNativeId: ART, workerNativeIds: [] },
         reason: "worker_coverage_unverified",
         role: `${GAME}/art`,
         status: "unknown",
       }),
       expect.objectContaining({
         failures: [[CHILD, TURN, "serverOverloaded"]],
+        lineage: { parentNativeId: CHIBI_ART, workerNativeIds: [CHILD, HEALTHY_CHILD] },
         role: `${CHIBI}/art`,
         status: "ok",
       }),
-      expect.objectContaining({ role: "art-kit", status: "unknown" }),
+      expect.objectContaining({
+        lineage: { parentNativeId: SHARED, workerNativeIds: [] },
+        role: "art-kit",
+        status: "unknown",
+        unavailableChildren: [{ id: UNREADABLE_CHILD, reason: "unavailable" }],
+      }),
+      expect.objectContaining({ lineage: null, role: "game-coordinator" }),
     ]),
   );
 });

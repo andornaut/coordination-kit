@@ -109,9 +109,13 @@ connection (`CODEX_CONTROL_SOCKET`, else the managed socket) and a 256-call budg
 When there are worker parents, the question phase leaves at least 96 calls and eight seconds
 of the collection budget for worker evidence. A question timeout ends the question phase.
 For each eligible role it checks the exact bound recipient's question history and verifies
-worker lineage under that role's native parent. Held, unsupported, unbound and unreadable roles
-retain an explicit coverage reason. Decision-marker lookup uses the recipient's game bus, or the
-review host bus for shared roles, through the same lookup as the wake guard.
+worker lineage under that role's native parent. The structured record includes exact validated
+Codex parent and child IDs under the observed registry revision. An unreadable child gets no
+lineage proof. A review proves lineage for its slot. A caller still needs that child's exact native
+binding, and a caller-supplied worker label cannot provide it. Held, unsupported, unbound and
+unreadable roles retain an explicit coverage reason. Decision-marker lookup uses the
+recipient's game bus, or the review host bus for shared roles, through the same lookup as the
+wake guard.
 
 The review records store decisions and pending store questions separately from local decision
 markers, native history and current prompt visibility. The native collector can verify an exact

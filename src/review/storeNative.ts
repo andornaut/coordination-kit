@@ -86,6 +86,11 @@ export interface NativeWorker {
   /** Verified latest failed child turns: [child, turn, error code]. */
   readonly failures: readonly (readonly [string, string, string])[];
   readonly unavailableChildren: readonly { readonly id: string; readonly reason: string }[];
+  /** Exact lineage observed by the native collector. Caller binding requires separate proof. */
+  readonly lineage: {
+    readonly parentNativeId: string;
+    readonly workerNativeIds: readonly string[];
+  } | null;
   readonly reason: string | null;
 }
 
@@ -257,8 +262,29 @@ function workerStatus(
     Array.isArray(health.children) &&
     children.length === verified.length &&
     verified.every((child) => isCanonicalUuid(child.child_id) && child.complete === true);
+  const lineage =
+    unavailable === null && isCanonicalUuid(conversation) && health.provenance === "native_protocol"
+      ? {
+          parentNativeId: conversation,
+          workerNativeIds: [
+            ...new Set(
+              verified
+                .filter(
+                  (child) =>
+                    child.provenance === "native_protocol" &&
+                    child.status === "complete" &&
+                    child.complete === true &&
+                    isCanonicalUuid(child.child_id) &&
+                    child.child_id !== conversation,
+                )
+                .map((child) => child.child_id as string),
+            ),
+          ].sort(),
+        }
+      : null;
   return {
     failures: [...failures.keys()].sort().map((key) => failures.get(key)!),
+    lineage,
     reason: readable
       ? null
       : (unavailable ??
