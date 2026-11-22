@@ -18,5 +18,5 @@ Reference: [review](../review.md), [commands](../commands.md#command-semantics).
 | ------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | ck-0006 | Track Claude worker lineage                           | [ck-0006.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0006.md) |
 | ck-0021 | Correct scheduled review decision and worker coverage | [ck-0021.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0021.md) |
-| ck-0025 | Reserve review capacity for worker evidence | [ck-0025.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0025.md) |
-| ck-0026 | Consolidate routine departure notices | [ck-0026.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0026.md) |
+| ck-0025 | Reserve review capacity for worker evidence           | [ck-0025.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0025.md) |
+| ck-0026 | Consolidate routine departure notices                 | [ck-0026.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0026.md) |
