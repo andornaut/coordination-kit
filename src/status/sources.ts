@@ -1,12 +1,13 @@
-// The coordinator's live state for `status`: the store's work records and imported requests,
-// read once through a read-only connection.
+// Read the coordinator's status projections in one consistent, read-only snapshot.
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
 import type { Layout } from "../layout.ts";
 import { storePath } from "../store/db.ts";
+import { type HoldView, listHolds, listQuestions, type QuestionView } from "../store/questions.ts";
 import { readRequests, type RequestRecord } from "../store/requests.ts";
 import { readWorkRecords, type WorkRecord } from "../store/work.ts";
+import { type DeployPoint, storedDeployPoint } from "./delivery.ts";
 
 export type StoreSourceState =
   | { readonly status: "available" }
@@ -19,6 +20,39 @@ export interface StoreWorkSnapshot {
   readonly records: ReadonlyMap<string, WorkRecord>;
   /** Requests imported from the retired request ledger, by ID. */
   readonly requests: ReadonlyMap<string, RequestRecord>;
+  readonly questions: readonly QuestionView[];
+  readonly holds: readonly HoldView[];
+  readonly deployments: ReadonlyMap<string, readonly DeployPoint[]>;
+}
+
+function empty(state: StoreSourceState): StoreWorkSnapshot {
+  return {
+    deployments: new Map(),
+    holds: [],
+    questions: [],
+    records: new Map(),
+    requests: new Map(),
+    state,
+  };
+}
+
+/** Successful runner deployments and historical COMPLETE events, grouped by game. */
+function readDeployments(db: DatabaseSync): ReadonlyMap<string, readonly DeployPoint[]> {
+  const rows = db
+    .prepare(
+      `SELECT game, at, sha, type, work FROM bus_events
+     WHERE sha IS NOT NULL AND status = 'ok'
+       AND ((kind = 'deploy' AND type = 'deploy_success') OR (kind = 'runner' AND type = 'complete'))
+     ORDER BY seq`,
+    )
+    .all() as unknown as (Parameters<typeof storedDeployPoint>[0] & { game: string })[];
+  const byGame = new Map<string, DeployPoint[]>();
+  for (const row of rows) {
+    const points = byGame.get(row.game) ?? [];
+    points.push(storedDeployPoint(row));
+    byGame.set(row.game, points);
+  }
+  return byGame;
 }
 
 /**
@@ -30,38 +64,36 @@ export function readStoreWork(layout: Layout): StoreWorkSnapshot {
   try {
     path = storePath(layout);
   } catch (error) {
-    return {
-      records: new Map(),
-      requests: new Map(),
-      state: {
-        reason: error instanceof Error ? error.message : "store-path-unavailable",
-        status: "unavailable",
-      },
-    };
+    return empty({
+      reason: error instanceof Error ? error.message : "store-path-unavailable",
+      status: "unavailable",
+    });
   }
   if (!existsSync(path)) {
-    return { records: new Map(), requests: new Map(), state: { status: "absent" } };
+    return empty({ status: "absent" });
   }
   let db: DatabaseSync | undefined;
   try {
     db = new DatabaseSync(path, { readOnly: true, timeout: 5000 });
-    const present = db
-      .prepare(
-        `SELECT count(*) AS n FROM sqlite_master
-         WHERE type = 'table' AND name IN ('work', 'work_evidence', 'work_retained')`,
-      )
-      .get() as { n: number };
-    return {
-      records: Number(present.n) === 3 ? readWorkRecords(db) : new Map(),
+    db.exec("BEGIN");
+    const present = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all() as {
+      name: string;
+    }[];
+    const tables = new Set(present.map(({ name }) => name));
+    const snapshot: StoreWorkSnapshot = {
+      deployments: tables.has("bus_events") ? readDeployments(db) : new Map(),
+      holds: tables.has("holds") ? listHolds({ db }, { states: ["active"] }) : [],
+      questions: tables.has("questions") ? listQuestions({ db }) : [],
+      records: ["work", "work_evidence", "work_retained"].every((name) => tables.has(name))
+        ? readWorkRecords(db)
+        : new Map(),
       requests: new Map(readRequests(db).map((request) => [request.id, request])),
       state: { status: "available" },
     };
+    db.exec("COMMIT");
+    return snapshot;
   } catch {
-    return {
-      records: new Map(),
-      requests: new Map(),
-      state: { reason: "store-unreadable", status: "unavailable" },
-    };
+    return empty({ reason: "store-unreadable", status: "unavailable" });
   } finally {
     db?.close();
   }

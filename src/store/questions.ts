@@ -887,7 +887,7 @@ export function releaseHold(store: Store, actor: Actor, id: string): HoldResult 
 
 /** Holds in setting order, optionally of one owner and in the given states. */
 export function listHolds(
-  store: Store,
+  store: Pick<Store, "db">,
   filter: { readonly role?: string; readonly states?: readonly HoldState[] } = {},
 ): HoldView[] {
   const states = filter.states ?? HOLD_STATES;

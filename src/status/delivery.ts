@@ -126,10 +126,10 @@ export interface DeployPoint {
   readonly sha: string;
   /** Null for a `last-deploy.sha` whose `last-deploy` time is missing or unreadable. */
   readonly at: string | null;
-  /** A runner COMPLETE event, the runner's `last-deploy.sha`, or a release tag. */
-  readonly via: "complete" | "last-deploy" | "release";
+  /** A runner deployment or legacy COMPLETE event, the last deploy marker, or a release tag. */
+  readonly via: "complete" | "deploy-event" | "last-deploy" | "release";
   readonly tag: string | null;
-  /** Work IDs a COMPLETE event lists in its optional `work` array; empty otherwise. */
+  /** Work IDs listed by a deployment event or legacy COMPLETE event; empty otherwise. */
   readonly work: readonly string[];
   /** Chronological order key: nanoseconds for bus points, milliseconds for release tags. */
   readonly order: bigint;
@@ -137,6 +137,27 @@ export interface DeployPoint {
 
 /** Orders a point with no time after every timed one. */
 const UNTIMED = 2n ** 80n;
+
+interface StoredDeploy {
+  readonly at: string;
+  readonly sha: string;
+  readonly type: "complete" | "deploy_success";
+  readonly work: string | null;
+}
+
+/** Convert one stored runner success event, with its exact time and optional work list. */
+export function storedDeployPoint(row: StoredDeploy): DeployPoint {
+  const at = Date.parse(row.at);
+  const work: unknown = row.work === null ? null : JSON.parse(row.work);
+  return {
+    at: new Date(at).toISOString(),
+    order: BigInt(at) * 1_000_000n,
+    sha: row.sha,
+    tag: null,
+    via: row.type === "complete" ? "complete" : "deploy-event",
+    work: Array.isArray(work) ? work.filter((id): id is string => typeof id === "string") : [],
+  };
+}
 
 /**
  * The first deployment containing each commit. Points are taken in chronological order; each marks
@@ -266,7 +287,7 @@ export function readBusDeployments(busDir: string): BusRead {
   return { points, status: names === null && last === null ? "absent" : "available", unreadable };
 }
 
-/** The first COMPLETE event listing each work ID in its optional `work` array. */
+/** The first deployment point listing each work ID in its optional `work` array. */
 export function workListings(points: readonly DeployPoint[]): Map<string, DeployPoint> {
   const listed = new Map<string, DeployPoint>();
   const ordered = [...points].sort((left, right) =>

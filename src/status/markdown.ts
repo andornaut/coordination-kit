@@ -34,13 +34,18 @@ function short(sha: string): string {
   return sha.slice(0, 12);
 }
 
+function inline(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 function line(item: StatusItem): string {
   const details: string[] = [item.status];
   if (item.replacement !== null) {
     details.push(`replaced by ${item.replacement}`);
   }
   if (item.delivery.landing !== null) {
-    details.push(`landed ${short(item.delivery.landing.sha)}`);
+    const { rule, sha } = item.delivery.landing;
+    details.push(rule === "done-flip" ? `landed ${short(sha)}` : `${rule} citation ${short(sha)}`);
   }
   if (item.delivery.deployed !== null) {
     const { deployed } = item.delivery;
@@ -49,10 +54,16 @@ function line(item: StatusItem): string {
   } else if (item.deliveryEvidence === "assumed") {
     details.push("delivery assumed");
   }
+  if (item.delivery.heuristicDeployment !== null) {
+    details.push(`deployment includes citation ${short(item.delivery.heuristicDeployment.sha)}`);
+  }
   if (item.blocked) {
     details.push(`blocked${item.owner === null ? "" : ` on ${item.owner}`}`);
   }
-  const title = (item.title ?? "").replace(/\s+/g, " ").trim();
+  if (item.workFile === null && item.store !== null) {
+    details.push("work file unavailable");
+  }
+  const title = inline(item.title ?? "");
   const marker = item.deliveryVerified === false ? " (unverified)" : "";
   return `- ${item.id}${title === "" ? "" : `: ${title}`}${marker} (${details.join("; ")})`;
 }
@@ -62,6 +73,10 @@ function sourceLine(name: string, state: { status: string; reason?: string }): s
     return null;
   }
   return `- ${name}: ${state.status}${state.reason === undefined ? "" : ` (${state.reason})`}`;
+}
+
+function section(out: string[], heading: string, lines: readonly string[]): void {
+  out.push(`## ${heading}`, "", ...(lines.length === 0 ? ["None."] : lines), "");
 }
 
 /** The digest of `report`, grouped per repository under the five headings. */
@@ -83,11 +98,48 @@ export function renderMarkdown(report: StatusReport): string {
   if (sources.length > 0) {
     out.push("Sources not fully read:", "", ...sources, "");
   }
+  const fromStore = (lines: readonly string[]) =>
+    report.coordinator.store.status === "unavailable" ? ["Unavailable."] : lines;
+  section(
+    out,
+    "Recorded pending questions",
+    fromStore(
+      report.pendingQuestions.map(
+        ({ id, role, title, work }) =>
+          `- ${id} (${role}${work === null ? "" : `, ${work}`}) ${inline(title)}`,
+      ),
+    ),
+  );
+  section(
+    out,
+    "Active holds",
+    fromStore(
+      report.activeHolds.map(
+        ({ id, reason, role, scope }) =>
+          `- ${id} (${role ?? "owner unknown"}, ${scope}) ${inline(reason)}`,
+      ),
+    ),
+  );
+  section(
+    out,
+    "Unmatched legacy requests",
+    fromStore(
+      report.unmatchedRequests.map(
+        ({ id, owner, state, summary, work }) =>
+          `- ${id} (${owner}, ${state}) ${inline(summary)}${work.length === 0 ? "" : ` [${work.join(", ")}]`}`,
+      ),
+    ),
+  );
+  if (filters.since !== null) {
+    const timed = ({ at, id, repository }: StatusReport["recentActivity"][number]) =>
+      `- ${repository}/${id} ${at}`;
+    section(out, "Recent activity", report.recentActivity.map(timed));
+    section(out, "Recent completions", report.recentCompletions.map(timed));
+  }
   for (const repo of report.repositories) {
     out.push(`## ${repo.name}`, "");
     if (repo.status === "unavailable") {
       out.push(`Unavailable: ${repo.reason ?? "unknown"}.`, "");
-      continue;
     }
     if (repo.deployment.status === "unavailable" || repo.deployment.unreadable > 0) {
       out.push(
@@ -100,6 +152,15 @@ export function renderMarkdown(report: StatusReport): string {
       const under = items.filter((item) => digestHeading(item) === heading);
       out.push(`### ${heading}`, "", ...(under.length === 0 ? ["None."] : under.map(line)), "");
     }
+  }
+  const reported = new Set(report.repositories.map(({ name }) => name));
+  const unregistered = report.items.filter(({ repository }) => !reported.has(repository));
+  if (unregistered.length > 0) {
+    section(
+      out,
+      "Work in unregistered repositories",
+      unregistered.map((item) => line({ ...item, id: `${item.repository}/${item.id}` })),
+    );
   }
   return `${out.join("\n").trimEnd()}\n`;
 }

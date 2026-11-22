@@ -184,6 +184,8 @@ export interface CommitRef {
 
 export interface MainFiles {
   readonly files: ReadonlyMap<string, MainFile>;
+  /** The latest first-parent status transition for each current path. */
+  readonly statusAt: ReadonlyMap<string, CommitRef>;
   /**
    * The oldest first-parent commit on `main` whose change sets each file's front-matter `status`
    * to `done`: added as `done`, or changed from another status.
@@ -233,6 +235,7 @@ export function readMainFiles(git: GitRunner, repository: string, directory: str
     `${directory}/`,
   ]);
   const files = new Map<string, MainFile>();
+  const statusAt = new Map<string, CommitRef>();
   const doneAt = new Map<string, CommitRef>();
   /** Paths whose current state is known: deleted, or text taken from their newest content diff. */
   const settled = new Set<string>();
@@ -278,6 +281,9 @@ export function readMainFiles(git: GitRunner, repository: string, directory: str
       const created = source === "--- /dev/null";
       const was = created ? null : frontMatterStatus(before.map((line) => line.slice(1)));
       const now = frontMatterStatus(after.map((line) => line.slice(1)));
+      if (now !== was && !statusAt.has(path)) {
+        statusAt.set(path, { at, sha: commit });
+      }
       if (now === "done" && was !== "done") {
         // Newest first: the last assignment is the oldest such commit.
         doneAt.set(path, { at, sha: commit });
@@ -292,5 +298,5 @@ export function readMainFiles(git: GitRunner, repository: string, directory: str
       }
     }
   }
-  return { doneAt, files };
+  return { doneAt, files, statusAt };
 }

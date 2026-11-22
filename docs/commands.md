@@ -95,8 +95,9 @@ every form and flag.
 
 ## status
 
-`status` reads every distinct Git repository behind the registry's roles and reports one derived
-status per work item. It writes nothing and uses no network: repositories are read through local
+`status` reads every distinct Git repository behind the registry's roles and reports current work,
+recorded pending questions, active holds, unmatched legacy requests and recent work activity.
+It writes nothing and uses no network: repositories are read through local
 refs only (`main` and, when present, `origin/main`), with no fetch or checkout, and the
 coordinator state is read once. `--root` names the coordinator, as for the other non-work
 commands.
@@ -114,18 +115,25 @@ commands.
   `supersedes`), joined with the [imported requests](store.md#requests) whose ID is the item's ID
   or whose `work` (or close `--work`) names it. An open imported request that no work file names
   appears as a `requested` item of its owner's repository (else the coordinator's).
-- **Store:** the [work records](store.md#work-records) and imported requests of
+  `unmatchedRequests` also identifies those imports explicitly, including recent closed entries
+  without a matching work file. Their repository is null when the owner has no registered repository.
+  Store work records with missing work files are shown with `workFile: null`.
+- **Store:** the [work records](store.md#work-records), pending questions, active holds and imported requests of
   `<stateRoot>/coordination.db`, read once
   through a read-only connection; nothing is created or migrated. A missing store file is
   `absent`. Each item carries its record as `store` (null without one).
+  `pendingQuestions` reports recorded question state. Native prompt visibility is outside this read.
 - **Scope:** `all` (the default); a game or kit ID selects its repository; a registry role key
   selects its repository and keeps the items that role owns as a request or in the store, or
   whose `design` area is the role's name (a game's `art`, `gameplay` or `tech`).
 - **Filters:** `--state` is repeatable and keeps items with any named status; `--state unverified`
-  keeps done items whose delivery is unverified. `--since` keeps items
-  whose latest evidence time is at or after it: the newest work-file commit (for a closed item, the
-  commit that closed it), the landing, the deployment and linked request updates. A `last-deploy`
-  time counts only for the commit it names, since it also covers every older commit. `--audit` keeps user-originated items: a work file whose `approved` reference starts
+  keeps done items whose delivery is unverified. `--since` time-filters `recentActivity`,
+  `recentCompletions` and closed items. Open items, pending questions and active holds remain
+  visible regardless of age. Activity uses the work-file update (or completion time for a closed
+  item), verified landing and deployment, and linked store activity. A `last-deploy` time counts
+  only for the commit it names, since it also covers every older commit. Completion records the
+  transition to a closed state, including the replacement of superseded work or a store finish.
+  `--audit` keeps user-originated items: a work file whose `approved` reference starts
   with `user`, or a linked request whose source reference starts with `user` or whose origin is
   `native-user`.
 
@@ -138,17 +146,20 @@ commands.
   whose message names the ID as a whole token (`id`) or whose subject equals the item's title
   (`title`). Bookkeeping is a commit that changes only `docs/work/` and `docs/design/`, or that
   adds the item's work file (its proposal or approval, reported as `workFile.addedIn`).
-  `delivery.landing.rule` names the rule that matched.
+  `delivery.landing.rule` names the rule that matched. The `id` and `title` rules preserve
+  heuristic lineage. Only a `done-flip` or explicit store stage evidence establishes a landing.
 - **On origin:** whether `origin/main` contains the landing commit; null without a landing or
   without a local `origin/main`.
 - **Deployment:** the earliest deployment point that contains the landing commit.
-  - A game has two kinds of point. A runner COMPLETE event (`var/games/<g>/bus/events/*.json` with
-    kind `complete`, key the pushed SHA) is timed by its `created` stamp. The runner's last deployed
-    SHA (`var/games/<g>/bus/last-deploy.sha`) is timed by the epoch seconds in `last-deploy`, or has
-    a null time when that file is missing.
-  - A COMPLETE event may carry an optional `work` array of work IDs. A listed ID counts as deployed
-    by the first such event even without a landing match (`deployed.matched` is `work-list`,
-    otherwise `landing`). Events without the field are read as before.
+  - A game's successful runner deploy event is read from the store using its exact SHA and event
+    time. A skipped deployment remains a distinct runner outcome. Historical COMPLETE events are
+    read from the store or legacy outbox. The runner's last deployed SHA
+    (`var/games/<g>/bus/last-deploy.sha`) is timed by the epoch seconds in `last-deploy`, or has a
+    null time when that file is missing.
+  - A successful deploy or legacy COMPLETE event can list work IDs. A listed ID has deployment
+    evidence even without a landing match (`deployed.matched` is `work-list`, otherwise `landing`).
+  - A deployment containing an ID or title citation is shown in
+    `delivery.heuristicDeployment`. An ID or title citation does not establish that the item shipped.
   - A kit's points are its release tags (`vMAJOR.MINOR.PATCH`), each timed by its commit's
     committer date.
   - A SHA outside the history of `main` and `origin/main` counts for nothing.
@@ -183,7 +194,8 @@ A work-file item takes the first that applies:
 A request item is `requested`. An open item is `blocked` when a linked request is `blocked` or
 `waiting` (`blocker` is its reason, `owner` its required owner); an open store block takes precedence (its reason and the role
 that can clear it). Otherwise `blocker` and `owner` are null. `waitingOnUser` is
-true for `proposed` items and for items with a linked request whose question is `pending`.
+true for `proposed` items and for items with a linked recorded question or imported request whose
+question is `pending`.
 
 ### Output
 
@@ -199,9 +211,14 @@ repositories  [{name, kind, path, roles, status, reason, main, originMain,
                 deployment: {channel: bus | release-tag | none,
                              status: available | absent | unavailable | not-applicable,
                              unreadable}}]
+pendingQuestions  [{id, role, title, work, options, state, openedAt, closedAt, decision, reason}]
+activeHolds       [{id, role, scope, source, reason, state, setAt, releasedAt}]
+unmatchedRequests [{id, repository, owner, state, summary, work, closedAt, ...request fields}]
+recentActivity    [{repository, id, at}]
+recentCompletions [{repository, id, at}]
 items         [{repository, id, title, status, replacement, blocked, blocker, owner,
                 waitingOnUser, userOriginated, deliveryVerified: true | false | null,
-                deliveryEvidence: deployed | assumed | null, latestEvidenceAt,
+                deliveryEvidence: deployed | assumed | null, latestEvidenceAt, completedAt,
                 workFile: {path, status, approved, design, supersedes: [ID], addedIn, commit,
                            committedAt} | null,
                 requests: [{id, kind, state, owner, question, requiredOwner, reason,
@@ -210,13 +227,15 @@ items         [{repository, id, title, status, replacement, blocked, blocker, ow
                         finishedAt, block, evidence, retained, updatedAt} | null,
                 deliverySource: {landing: store | git | null, deployment: store | git | null},
                 delivery: {landing: {sha, at, rule: done-flip | id | title} | null,
-                           onOrigin, deployed: {sha, at, via: complete | last-deploy | release,
+                           onOrigin, deployed and heuristicDeployment:
+                                               {sha, at, via: complete | deploy-event | last-deploy | release,
                                                 tag, matched: landing | work-list} | null}}]
 ```
 
 Items are ordered by repository name, then ID.
 
-`--format markdown` prints a digest: per repository, the headings Done (`done`, `deployed`,
+`--format markdown` prints pending questions, active holds and unmatched imports. With `--since`
+it prints the recent activity and completions. Per repository, the headings are Done (`done`, `deployed`,
 `declined`, `cancelled`, `superseded`), In progress (`in-progress`, `landed`), New (`requested`),
 Outstanding (`approved`) and Waiting on the user (proposed items and pending questions, which take
 precedence), each item once. An unverified done item carries the marker `(unverified)` after its

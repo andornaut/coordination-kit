@@ -19,6 +19,7 @@ import { EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
 import { loadLayout } from "../layout.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
 import { Store } from "../store/db.ts";
+import { openQuestion, setHold } from "../store/questions.ts";
 import { importRequest, type RequestImport } from "../store/requests.ts";
 import { CLAUDE_COORDINATOR, CLAUDE_TECH, CODEX_TECH, stateRootFixture } from "../testFixtures.ts";
 import {
@@ -299,6 +300,11 @@ async function buildFixture(): Promise<Fixture> {
     }),
   );
   importRequest(store, importer, request("request-closed", TECH_ROLE));
+  importRequest(
+    store,
+    importer,
+    request("legacy-unmatched", "retired-role", { work: ["missing-0001"] }),
+  );
   store.transaction(() =>
     store.append({
       actor: { nativeId: CLAUDE_TECH, role: TECH_ROLE },
@@ -307,8 +313,26 @@ async function buildFixture(): Promise<Fixture> {
       payload: { id: "request-closed", reason: "Carried by sg-0001", work: "sg-0001" },
     }),
   );
-  // Without WAL files, the read-only status read leaves the state root byte for byte.
-  store.db.exec("PRAGMA journal_mode = DELETE");
+  openQuestion(
+    store,
+    { nativeId: CLAUDE_TECH, role: TECH_ROLE },
+    {
+      id: "exact-question",
+      title: "Choose a revision",
+      work: "sg-0001",
+    },
+  );
+  setHold(
+    store,
+    { nativeId: CLAUDE_TECH, role: TECH_ROLE },
+    {
+      id: "exact-hold",
+      reason: "Waiting for a check",
+      scope: "role",
+    },
+  );
+  // The read-only command must also read questions in a store predating answer projection.
+  store.db.exec("DROP TABLE IF EXISTS question_answers; PRAGMA journal_mode = DELETE");
   store.close();
   return { base, game, root, sha, stateRoot };
 }
@@ -407,25 +431,26 @@ describe("status", () => {
     const statuses = Object.fromEntries(report.items.map((entry) => [entry.id, entry.status]));
     expect(statuses).toEqual({
       "request-new": "requested",
+      "legacy-unmatched": "requested",
       "sg-0001": "approved",
       "sg-0002": "proposed",
       "sg-0003": "declined",
       "sg-0004": "cancelled",
       "sg-0005": "superseded",
       "sg-0006": "approved",
-      "sg-0007": "landed",
+      "sg-0007": "approved",
       "sg-0008": "done",
-      "sg-0009": "deployed",
-      "sg-0010": "landed",
+      "sg-0009": "approved",
+      "sg-0010": "approved",
       "sg-0011": "approved",
       "sg-0012": "in-progress",
       "sg-0013": "done",
       "sg-0014": "done",
-      "sg-0015": "deployed",
+      "sg-0015": "approved",
       "sg-0016": "deployed",
       "sk-0001": "done",
-      "sk-0002": "landed",
-      "sk-0003": "deployed",
+      "sk-0002": "approved",
+      "sk-0003": "approved",
     });
     expect(item(report, "sg-0005").replacement).toBe("sg-0006");
     expect(item(report, "request-new")).toMatchObject({
@@ -435,10 +460,11 @@ describe("status", () => {
     });
   });
 
-  it("lands an item where its work file is set to done, else by ID or title citations", () => {
+  it("keeps ID and title citations as heuristic lineage", () => {
     expect(item(report, "sg-0001").delivery.landing).toBeNull();
     expect(item(report, "sg-0007").delivery).toEqual({
       deployed: null,
+      heuristicDeployment: null,
       landing: { at: expect.any(String), rule: "id", sha: fixture.sha.sg7 },
       onOrigin: true,
     });
@@ -464,19 +490,25 @@ describe("status", () => {
     expect(item(report, "sg-0011").workFile?.addedIn).toBe(fixture.sha.number);
   });
 
-  it("dates deployment by the first COMPLETE event, last deploy or release tag", () => {
-    expect(item(report, "sg-0009").delivery.deployed).toEqual({
+  it("dates exact deployments and separately exposes deployment of heuristic citations", () => {
+    expect(item(report, "sg-0009").delivery.heuristicDeployment).toEqual({
       at: completedAt(fixture),
       matched: "landing",
       sha: fixture.sha.sg9,
       tag: null,
       via: "complete",
     });
-    expect(item(report, "sg-0015").delivery.deployed).toMatchObject({
+    expect(item(report, "sg-0015").delivery.heuristicDeployment).toMatchObject({
       at: expect.any(String),
       matched: "landing",
       sha: fixture.sha.sg15,
       via: "last-deploy",
+    });
+    expect(item(report, "sg-0015")).toMatchObject({
+      delivery: { deployed: null },
+      deliverySource: { deployment: null, landing: null },
+      deliveryVerified: null,
+      status: "approved",
     });
     expect(item(report, "sg-0016")).toMatchObject({
       delivery: {
@@ -550,6 +582,14 @@ describe("status", () => {
       status: "requested",
     });
     expect(item(report, "sg-0002").waitingOnUser).toBe(true);
+    expect(item(report, "sg-0001").waitingOnUser).toBe(true);
+    expect(report.unmatchedRequests).toContainEqual(
+      expect.objectContaining({
+        id: "legacy-unmatched",
+        repository: null,
+        work: ["missing-0001"],
+      }),
+    );
   });
 
   it("lists only user-originated items under --audit, each with its evidence", () => {
@@ -580,12 +620,21 @@ describe("status", () => {
       "sg-0012",
     ]);
     expect(run(fixture, { states: ["landed", "deployed"] }).items.map((entry) => entry.id)).toEqual(
-      ["sg-0007", "sg-0009", "sg-0010", "sg-0015", "sg-0016", "sk-0002", "sk-0003"],
+      ["sg-0016"],
     );
     const since = item(report, "sg-0014").delivery.landing!.at;
-    expect(run(fixture, { since, scope: GAME }).items.map((entry) => entry.id)).toEqual([
-      "sg-0014",
-    ]);
+    const recent = run(fixture, { since, scope: GAME });
+    expect(recent.items.map((entry) => entry.id)).toContain("sg-0015");
+    expect(recent.items.map((entry) => entry.id)).not.toContain("sg-0013");
+    expect(recent.recentCompletions.map((entry) => entry.id)).toEqual(["sg-0014"]);
+    expect(recent.recentActivity.map((entry) => entry.id)).not.toContain("sg-0015");
+    const future = run(fixture, { scope: TECH_ROLE, since: "2100-01-01" });
+    expect(future.pendingQuestions).toMatchObject([{ id: "exact-question", work: "sg-0001" }]);
+    expect(future.activeHolds).toMatchObject([{ id: "exact-hold", scope: "role" }]);
+    expect(future.recentActivity).toEqual([]);
+    expect(future.recentCompletions).toEqual([]);
+    expect(run(fixture, { scope: KIT }).pendingQuestions).toEqual([]);
+    expect(run(fixture, { scope: KIT }).activeHolds).toEqual([]);
     expect(() => run(fixture, { scope: "nowhere" })).toThrow(/--scope/);
   });
 
@@ -607,15 +656,19 @@ describe("status", () => {
       "- sg-0004:",
       "- sg-0005:",
       "- sg-0008:",
-      "- sg-0009:",
       "- sg-0013:",
       "- sg-0014:",
-      "- sg-0015:",
       "- sg-0016:",
     ]);
-    expect(under("In progress")).toEqual(["- sg-0007:", "- sg-0010:", "- sg-0012:"]);
+    expect(under("In progress")).toEqual(["- sg-0012:"]);
     expect(under("New")).toEqual(["- request-new:"]);
-    expect(under("Outstanding")).toEqual(["- sg-0001:", "- sg-0011:"]);
+    expect(under("Outstanding")).toEqual([
+      "- sg-0007:",
+      "- sg-0009:",
+      "- sg-0010:",
+      "- sg-0011:",
+      "- sg-0015:",
+    ]);
     expect(digest.out).not.toContain("(unverified)");
     const verifySince = item(report, "sg-0014").delivery.landing!.at;
     const strict = await cli(fixture, "--format", "markdown", "--verify-since", verifySince);
@@ -623,7 +676,10 @@ describe("status", () => {
       expect.stringMatching(/^- sg-0014: Done after the cutoff \(unverified\) \(done; landed /),
     ]);
     expect((await cli(fixture, "--verify-since", "soon")).code).toBe(EXIT_USAGE);
-    expect(under("Waiting on the user")).toEqual(["- sg-0002:", "- sg-0006:"]);
+    expect(under("Waiting on the user")).toEqual(["- sg-0001:", "- sg-0002:", "- sg-0006:"]);
+    expect(digest.out).toContain("## Recorded pending questions");
+    expect(digest.out).toContain("## Active holds");
+    expect(digest.out).toContain("## Unmatched legacy requests");
     expect((await cli(fixture, "--state", "shipped")).code).toBe(EXIT_USAGE);
     expect((await cli(fixture, "--since", "yesterday")).code).toBe(EXIT_USAGE);
     expect((await cli(fixture, "--scope", "nowhere")).code).toBe(EXIT_USAGE);
@@ -659,8 +715,8 @@ describe("status", () => {
     expect(second.calls.map((call) => call.command)).toEqual(
       first.calls.map((call) => call.command),
     );
-    const bulk = run(fixture, { scope: GAME, states: ["landed"] }).items.filter((entry) =>
-      entry.id.startsWith("sg-01"),
+    const bulk = run(fixture, { scope: GAME }).items.filter(
+      (entry) => entry.id.startsWith("sg-01") && entry.delivery.landing?.rule === "id",
     );
     expect(bulk).toHaveLength(10);
   });
@@ -673,13 +729,13 @@ describe("status", () => {
     writeFileSync(join(bus, "last-deploy.sha"), `${later}\n`);
     writeFileSync(join(bus, "last-deploy"), `${deployedAt}\n`);
     const moved = run(fixture, { scope: GAME });
-    expect(item(moved, "sg-0015").delivery.deployed).toMatchObject({
+    expect(item(moved, "sg-0014").delivery.deployed).toMatchObject({
       sha: later,
       via: "last-deploy",
     });
     const since = new Date(deployedAt * 1000).toISOString();
-    expect(run(fixture, { scope: GAME, since }).items.map((entry) => entry.id)).not.toContain(
-      "sg-0015",
-    );
+    expect(
+      run(fixture, { scope: GAME, since }).recentActivity.map((entry) => entry.id),
+    ).not.toContain("sg-0014");
   });
 });
