@@ -21,6 +21,12 @@ import {
   QUESTION_OPEN_OPTIONS,
   QUESTION_PROJECT_OPTIONS,
 } from "./questions.ts";
+import {
+  REMINDER_CHECK_OPTIONS,
+  REMINDER_CLAIM_OPTIONS,
+  REMINDER_LIST_OPTIONS,
+  REMINDER_SETTLE_OPTIONS,
+} from "./reminders.ts";
 import { REQUEST_CLOSE_OPTIONS } from "./requests.ts";
 import { EVENTS_INGEST_OPTIONS, REVIEW_DELIVER_OPTIONS, REVIEW_SHOW_OPTIONS } from "./runner.ts";
 import {
@@ -97,6 +103,7 @@ export const GROUPS = {
   graph: "decision graph",
   harness: "harness (claude, codex)",
   msg: "store messages (caller identified by the registry fence)",
+  reminder: "coordination reminder ledger",
   request: "imported requests (owner closes, fenced by the registry)",
   review: "runner seam (delivery-kit)",
   session: "sessions and harness handoffs (writes fenced by the registry)",
@@ -362,6 +369,32 @@ export const SPECS = {
     group: "decisions",
     options: QUESTION_PROJECT_OPTIONS,
     summary: "read exact Codex question evidence and native form capability",
+  },
+  "reminder check": {
+    forms: [["id", "native-id?"]],
+    group: "reminder",
+    options: REMINDER_CHECK_OPTIONS,
+    summary: "verify an unsettled claim and its exact idle Codex recipient",
+  },
+  "reminder claim": {
+    forms: [["role", "original", "native-id?"]],
+    group: "reminder",
+    options: REMINDER_CLAIM_OPTIONS,
+    summary: "claim exact unread originals for one coordinator reminder",
+    values: { original: "ID" },
+  },
+  "reminder list": {
+    forms: [[]],
+    group: "reminder",
+    options: REMINDER_LIST_OPTIONS,
+    summary: "list unread originals with eligible exact wake evidence",
+  },
+  "reminder settle": {
+    forms: [["id", "outcome", "reason", "native-id?"]],
+    group: "reminder",
+    options: REMINDER_SETTLE_OPTIONS,
+    summary: "record a submitted, refused or uncertain reminder disposition",
+    values: { outcome: "submitted|refused|uncertain", reason: "CODE" },
   },
   "request close": {
     forms: [["id", "reason", "work?", "native-id?", "worker?"]],

@@ -23,6 +23,12 @@ import {
   questionReconcile,
 } from "./commands/questions.ts";
 import { claudeReady, codexReady, harnessReady } from "./commands/ready.ts";
+import {
+  reminderCheck,
+  reminderClaim,
+  reminderList,
+  reminderSettle,
+} from "./commands/reminders.ts";
 import { requestClose } from "./commands/requests.ts";
 import { eventsIngest, reviewDeliver, reviewShow } from "./commands/runner.ts";
 import {
@@ -97,6 +103,10 @@ export const COMMANDS = [
   "handoff state",
   "handoff active",
   "handoff show",
+  "reminder check",
+  "reminder claim",
+  "reminder list",
+  "reminder settle",
   "request close",
   "claude ready",
   "codex ready",
@@ -196,6 +206,10 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "question project": questionProject,
   "question reask": questionReask,
   "question reconcile": questionReconcile,
+  "reminder check": reminderCheck,
+  "reminder claim": reminderClaim,
+  "reminder list": reminderList,
+  "reminder settle": reminderSettle,
   "request close": requestClose,
   "review deliver": reviewDeliver,
   "review show": reviewShow,

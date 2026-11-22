@@ -252,6 +252,39 @@ question check still runs after it. A wake carries no payload, so it never answe
 hold. When the owner answers or cancels its question or releases its hold, that command attempts
 one guarded wake for it, which goes out only if no other guard remains.
 
+## Coordinator reminders
+
+`reminder list` reads exact unread originals with a guarded or failed wake tied to the live
+recipient binding. It checks the current local decision marker, durable question and role or
+game holds. Missing, ambiguous, coalesced and unconfirmed evidence stays in ordinary unread
+status.
+
+The live coordinator alone can claim up to 50 explicitly named originals for an active Codex
+recipient. The claim records the original IDs, wake references, recipient conversation and
+registry revision in one transaction before any fallback can run. An immediate `reminder check`
+verifies the unsettled claim, original state, guards and exact idle native recipient using
+read-only operations. An independent caller must also verify the attached frontend's empty
+composer and safe prompt state before submitting a wake-only reminder.
+
+A past compaction refusal establishes only that the former wake did not submit. Current
+eligibility requires fresh native question clearance. For an absent marker or a current
+compaction proof gap, the qualified Codex 0.171.0 path checks the running server's version,
+exact root thread, idle status and completed current head before and after bounded current
+item inspection. Current question items refuse this path. Historical prompt disposition
+remains unknown. `reminder-owner-clearance-required` routes invalid or pending markers back
+to their owner. `reminder-native-clearance-unverified` reports unavailable current evidence.
+
+Record `submitted`, `refused` or `uncertain` with `reminder settle` and a bounded reason code.
+`refused` means a definite refusal before submission. It permits another claim only after new
+exact wake evidence and a later recorded review. Submitted, uncertain and interrupted claims
+stay excluded from subsequent claims. Only one unsettled receipt can exist per role, including
+after an interruption. The `inFlight` list is for coordinator reconciliation and never resumes
+a claim. Recipient collection and handling remain separate from these receipts.
+
+`reminder.claimed` and `reminder.settled` append to the existing event stream. Their additive
+indexes are rebuilt from that stream for either authority. File-backed stores keep claim and
+settlement records under `coordinator/reminders/`.
+
 ## Message history
 
 `msg history` prints message events in seq order without bodies. With `--include-body` the caller

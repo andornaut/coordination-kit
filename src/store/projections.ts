@@ -9,6 +9,7 @@ import { HANDOFFS_PROJECTION } from "./handoffs.ts";
 import { MESSAGE_WAKE_PROJECTION } from "./messageWake.ts";
 import { POLICY_HOLDS_PROJECTION } from "./policyHolds.ts";
 import { QUESTION_ANSWERS_PROJECTION, QUESTIONS_PROJECTION } from "./questions.ts";
+import { REMINDER_PROJECTION } from "./reminders.ts";
 import { REQUESTS_PROJECTION } from "./requests.ts";
 import type { JsonObject, StoredEvent } from "./types.ts";
 import { WORK_PROJECTION } from "./work.ts";
@@ -384,4 +385,5 @@ export const PROJECTIONS: readonly Projection[] = [
   WORK_PROJECTION,
   HANDOFFS_PROJECTION,
   REQUESTS_PROJECTION,
+  REMINDER_PROJECTION,
 ];

@@ -447,6 +447,11 @@ function eventRecords(
       return event.actor.role === COORDINATOR && payload.issuer === COORDINATOR
         ? [coordinatorRecord(event, `holds/${pathId}`)]
         : [quarantine(event, "policy-issuer-unverified")];
+    case "reminder.claimed":
+    case "reminder.settled":
+      return event.actor.role === COORDINATOR
+        ? [coordinatorRecord(event, `reminders/${pathId}`)]
+        : [quarantine(event, "coordinator-actor-unverified")];
     case "handoff.opened":
     case "handoff.state":
       return event.actor.role === COORDINATOR
