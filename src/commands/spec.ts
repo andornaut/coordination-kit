@@ -44,6 +44,7 @@ import {
   MSG_RETAIN_OPTIONS,
   MSG_SEND_OPTIONS,
   MSG_STATUS_OPTIONS,
+  STORE_COMPACTION_PLAN_OPTIONS,
   STORE_EXPORT_OPTIONS,
   STORE_IMPORT_OPTIONS,
   STORE_REBUILD_OPTIONS,
@@ -201,6 +202,12 @@ export const SPECS = {
     group: "store",
     options: STORE_REBUILD_OPTIONS,
     summary: "verify the event hash chain and recreate every projection from the events",
+  },
+  "store compaction-plan": {
+    forms: [[]],
+    group: "store",
+    options: STORE_COMPACTION_PLAN_OPTIONS,
+    summary: "report filesystem history windows, measured bytes and protected records without writing",
   },
   "store retire": {
     forms: [["dry-run"], ["apply", "native-id?", "worker?"]],

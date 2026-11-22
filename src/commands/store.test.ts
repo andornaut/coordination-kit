@@ -1,11 +1,15 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
 import { loadLayout } from "../layout.ts";
-import { storePath } from "../store/db.ts";
+import { Store, storePath } from "../store/db.ts";
+import { openFileJournal } from "../store/files/journal.ts";
+import { activateMigration, prepareMigration } from "../store/files/migration.ts";
+import { sendMessage } from "../store/messages.ts";
 import { ART, COORDINATOR, GAMEPLAY, storeFixture, TECH } from "../store/testStore.ts";
 
 const ID = "00000000-0000-4000-8000-000000000301";
@@ -29,6 +33,61 @@ function cli(root: string, cwd: string, env: NodeJS.ProcessEnv) {
     return { code, err, json, out };
   };
 }
+
+describe("store compaction-plan", () => {
+  it("requires active filesystem authority and refuses apply arguments", async () => {
+    const { base, layout, root } = storeFixture();
+    const run = cli(root, base, {});
+    expect(await run("store", "compaction-plan")).toMatchObject({
+      code: EXIT_INVALID,
+      err: "coordination-kit: compaction-file-authority-required\n",
+    });
+    expect(await run("store", "compaction-plan", "--apply")).toMatchObject({
+      code: EXIT_USAGE,
+    });
+    expect(existsSync(storePath(layout))).toBe(false);
+  });
+
+  it("reports the selected journal head without writing files or exposing a body", async () => {
+    const { base, layout, root } = storeFixture();
+    execFileSync("git", ["-C", root, "init", "-q", "--initial-branch=main"]);
+    writeFileSync(join(root, ".gitignore"), "/var/\n");
+    writeFileSync(
+      join(layout.varDir, "work-protocol.json"),
+      JSON.stringify({ schema: 2, stateRoot: join(base, "external-state") }),
+    );
+    const store = Store.forLayout(layout);
+    try {
+      sendMessage(
+        store,
+        { nativeId: COORDINATOR, role: "game-coordinator" },
+        { body: "Private fixture original", id: ID, intent: "queue", to: TECH_ROLE },
+      );
+    } finally {
+      store.close();
+    }
+    const { receipt } = prepareMigration(layout, join(base, "backup.db"), join(base, "restore.db"));
+    activateMigration(layout, receipt.id);
+    const target = join(layout.varDir, "coordination");
+    const journal = openFileJournal(target);
+    const before = journal.snapshot();
+    const paths = readdirSync(target, { recursive: true }).sort();
+    const result = await cli(root, base, {})("store", "compaction-plan");
+    expect(result).toMatchObject({
+      code: EXIT_OK,
+      json: {
+        diskSavingsBytes: null,
+        head: receipt.head,
+        kind: "file-compaction-plan",
+        schema: 1,
+        window: 100,
+      },
+    });
+    expect(result.out).not.toContain("Private fixture original");
+    expect(journal.snapshot()).toEqual(before);
+    expect(readdirSync(target, { recursive: true }).sort()).toEqual(paths);
+  });
+});
 
 describe("store message commands", () => {
   it.each([

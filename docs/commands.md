@@ -55,6 +55,10 @@ independent copies outside the checkout and prepares the ignored filesystem targ
 activation require the current active game-coordinator binding. See the
 [migration runbook](upgrading.md#filesystem-authority-migration).
 
+`store compaction-plan` reads the selected filesystem journal and reports the history windows,
+measured bytes, and protected reasons at its exact head. It writes nothing. See the
+[store guide](store.md) for record protection and disk savings.
+
 ## Command semantics
 
 - `claude channel`: by default it serves the conversation of the `reports.recipient` that every

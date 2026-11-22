@@ -1,5 +1,5 @@
 // The store verbs: `msg send|done|retain|status|history`, `inbox` and
-// `store import|export|rebuild|retire`, and the parsing helpers the question verbs share.
+// `store import|export|rebuild|retire|compaction-plan`, and the parsing helpers the question verbs share.
 // Each prints one JSON object on stdout. A refusal prints `coordination-kit: CODE` on stderr and
 // exits 1; a usage error exits 2.
 import { isUtf8 } from "node:buffer";
@@ -10,10 +10,13 @@ import { parseArgs } from "node:util";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { loadLayout } from "../layout.ts";
 import { systemGit } from "../status/git.ts";
+import { Store } from "../store/db.ts";
+import { planFileCompaction } from "../store/files/compactionPlan.ts";
 import type { CallerOptions } from "../store/identity.ts";
 import { NEXT_REVIEW_BOUNDARY, retentionInstant } from "../store/retention.ts";
 import { storeRetire } from "../store/retire.ts";
 import {
+  registry,
   storeDone,
   storeExport,
   storeHistory,
@@ -89,6 +92,7 @@ export const STORE_IMPORT_OPTIONS = {
 export const STORE_EXPORT_OPTIONS = { since: { type: "string" } } as const;
 
 export const STORE_REBUILD_OPTIONS = {} as const;
+export const STORE_COMPACTION_PLAN_OPTIONS = {} as const;
 
 export const STORE_RETIRE_OPTIONS = {
   ...CALLER,
@@ -405,6 +409,31 @@ export const storeExportCommand: Handler = (io, root, args) =>
 
 export const storeRebuildCommand: Handler = (io, root, args) =>
   run(io, root, "store rebuild", args, (context) => storeRebuild(context), STORE_REBUILD_OPTIONS);
+
+export const storeCompactionPlanCommand: Handler = (io, root, args) =>
+  run(
+    io,
+    root,
+    "store compaction-plan",
+    args,
+    (context) => {
+      const store = Store.readLayout(context.layout);
+      try {
+        if (!store?.fileBacked) {
+          throw new StoreError("compaction-file-authority-required");
+        }
+        const { revision, roles } = registry(context);
+        return planFileCompaction(store.events(), {
+          registeredGames: new Set(Object.keys(context.layout.config.games)),
+          registeredRoles: new Set(Object.keys(roles)),
+          registryRevision: revision,
+        });
+      } finally {
+        store?.close();
+      }
+    },
+    STORE_COMPACTION_PLAN_OPTIONS,
+  );
 
 export const storeRetireCommand: Handler = (io, root, args) =>
   run(
