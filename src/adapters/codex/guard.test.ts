@@ -84,26 +84,32 @@ class Native implements RpcClient {
 
 const asyncQuestion = { ...question, delivery: "async" };
 
-function uiReply(payload: Json = {}): Json {
+function uiEnvelope(replies: readonly Json[]): Json {
   return {
     clientId: null,
     content: [
       {
         type: "text",
-        text: `<send_user_message_question_reply>\n${JSON.stringify([
-          {
-            questionItemId: JSON.stringify(["request_user_input_async", "question", 0]),
-            question: "Choose",
-            answer: "A",
-            ...payload,
-          },
-        ])}\n</send_user_message_question_reply>`,
+        text: `<send_user_message_question_reply>
+${JSON.stringify(replies)}
+</send_user_message_question_reply>`,
         text_elements: [],
       },
     ],
     id: "ui-reply",
     type: "userMessage",
   };
+}
+
+function uiReply(payload: Json = {}): Json {
+  return uiEnvelope([
+    {
+      questionItemId: JSON.stringify(["request_user_input_async", "question", 0]),
+      question: "Choose",
+      answer: "A",
+      ...payload,
+    },
+  ]);
 }
 
 function currentNative(items: Json[]): Native {
@@ -389,49 +395,64 @@ describe("observed native UI reply admission", () => {
     ).toBe(false);
   });
 
-  it("rejects multiple rendered questions, multiple responses and duplicate replies", async () => {
-    const multiple = {
-      ...asyncQuestion,
-      questions: [...question.questions, { title: "Unanswered" }],
-    };
-    expect(
-      (
-        await nativeQuestionsClear(
-          currentNative([multiple, uiReply()]),
-          clearance(),
-          RECIPIENT,
-          "current",
-        )
-      )[0],
-    ).toBe(false);
-    const reply = uiReply();
-    const content = (reply.content as Json[])[0]!;
-    const text = String(content.text);
-    const data = JSON.parse(
-      text.slice(text.indexOf("\n") + 1, text.lastIndexOf("\n")),
-    ) as unknown[];
-    const multipleReplies = JSON.stringify([...data, ...data]);
-    content.text = `<send_user_message_question_reply>\n${multipleReplies}\n</send_user_message_question_reply>`;
-    expect(
-      (
-        await nativeQuestionsClear(
-          currentNative([asyncQuestion, reply]),
-          clearance(),
-          RECIPIENT,
-          "current",
-        )
-      )[0],
-    ).toBe(false);
-    expect(
-      (
-        await nativeQuestionsClear(
-          currentNative([asyncQuestion, uiReply(), { ...uiReply(), id: "duplicate" }]),
-          clearance(),
-          RECIPIENT,
-          "current",
-        )
-      )[0],
-    ).toBe(false);
+  const multiTitles = ["Choose", "Scope", "Timing", "Confirmation"];
+  const multiQuestion = {
+    ...asyncQuestion,
+    completedAtMs: 1794716830668,
+    questions: multiTitles.map((title) => ({ title, options: ["A", "B"] })),
+  };
+  const multiReplies = multiTitles.map((title, index) => ({
+    questionItemId: JSON.stringify(["request_user_input_async", "question", index]),
+    question: title,
+    answer: "A",
+  }));
+
+  it("recognizes a single native envelope with exactly all four question indices and titles", async () => {
+    const reply = { ...uiEnvelope(multiReplies), completedAtMs: 1794716830669 };
+    const native = currentNative([multiQuestion, reply]);
+    expect(await nativeQuestionsClear(native, clearance(), RECIPIENT, "current")).toEqual([
+      true,
+      null,
+    ]);
+    expect(native.calls.filter(({ method }) => method === "thread/turns/list")).toHaveLength(2);
+    expect(native.calls.filter(({ method }) => method === "thread/items/list")).toHaveLength(2);
+  });
+
+  it.each([
+    ["partial", multiReplies.slice(0, -1)],
+    ["duplicate index", [...multiReplies.slice(0, -1), multiReplies[0]!]],
+    [
+      "wrong index",
+      [
+        ...multiReplies.slice(0, -1),
+        {
+          ...multiReplies[3]!,
+          questionItemId: JSON.stringify(["request_user_input_async", "question", 4]),
+        },
+      ],
+    ],
+    ["wrong title", [...multiReplies.slice(0, -1), { ...multiReplies[3]!, question: "Choose" }]],
+    [
+      "mixed references",
+      [
+        ...multiReplies.slice(0, -1),
+        {
+          ...multiReplies[3]!,
+          questionItemId: JSON.stringify(["request_user_input_async", "other", 3]),
+        },
+      ],
+    ],
+    ["blank answer", [...multiReplies.slice(0, -1), { ...multiReplies[3]!, answer: " " }]],
+  ] as const)("rejects a multi-question envelope with %s", async (_name, replies) => {
+    const native = currentNative([multiQuestion, uiEnvelope(replies)]);
+    expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "current"))[0]).toBe(false);
+  });
+
+  it("rejects multiple native envelopes for a single rendered prompt", async () => {
+    const complete = uiEnvelope(multiReplies);
+    const partial = uiEnvelope(multiReplies.slice(0, -1));
+    const native = currentNative([multiQuestion, complete, { ...partial, id: "duplicate" }]);
+    expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "current"))[0]).toBe(false);
   });
 
   it("does not reorder a reply or clear a different newer question", async () => {

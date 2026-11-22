@@ -330,7 +330,7 @@ async function resolvedQuestions(
 
 interface NativeReplyBinding {
   readonly questionId: string;
-  readonly title: string;
+  readonly titles: ReadonlyMap<number, string>;
 }
 
 /** Only the observed native UI envelope, never arbitrary prose or a substring match. */
@@ -364,33 +364,42 @@ function nativeReplyBinding(item: NativeItem): NativeReplyBinding | null {
   try {
     const raw = content.text.slice(REPLY_OPEN.length, -REPLY_CLOSE.length);
     const replies: unknown = JSON.parse(raw);
-    if (!Array.isArray(replies) || replies.length !== 1 || JSON.stringify(replies) !== raw) {
+    if (!Array.isArray(replies) || replies.length === 0 || JSON.stringify(replies) !== raw) {
       return null;
     }
-    const reply: unknown = replies[0];
-    if (
-      !isRecord(reply) ||
-      Object.keys(reply).sort().join(",") !== "answer,question,questionItemId" ||
-      typeof reply.questionItemId !== "string" ||
-      typeof reply.question !== "string" ||
-      typeof reply.answer !== "string" ||
-      reply.answer.trim() === ""
-    ) {
-      return null;
+    let questionId: string | undefined;
+    const titles = new Map<number, string>();
+    for (const reply of replies as unknown[]) {
+      if (
+        !isRecord(reply) ||
+        Object.keys(reply).sort().join(",") !== "answer,question,questionItemId" ||
+        typeof reply.questionItemId !== "string" ||
+        typeof reply.question !== "string" ||
+        typeof reply.answer !== "string" ||
+        reply.answer.trim() === ""
+      ) {
+        return null;
+      }
+      const reference: unknown = JSON.parse(reply.questionItemId);
+      if (
+        !Array.isArray(reference) ||
+        reference.length !== 3 ||
+        reference[0] !== "request_user_input_async" ||
+        typeof reference[1] !== "string" ||
+        reference[1] === "" ||
+        (questionId !== undefined && reference[1] !== questionId) ||
+        typeof reference[2] !== "number" ||
+        !Number.isSafeInteger(reference[2]) ||
+        reference[2] < 0 ||
+        titles.has(reference[2]) ||
+        JSON.stringify(reference) !== reply.questionItemId
+      ) {
+        return null;
+      }
+      questionId = reference[1];
+      titles.set(reference[2], reply.question);
     }
-    const reference: unknown = JSON.parse(reply.questionItemId);
-    if (
-      !Array.isArray(reference) ||
-      reference.length !== 3 ||
-      reference[0] !== "request_user_input_async" ||
-      typeof reference[1] !== "string" ||
-      reference[1] === "" ||
-      reference[2] !== 0 ||
-      JSON.stringify(reference) !== reply.questionItemId
-    ) {
-      return null;
-    }
-    return { questionId: reference[1], title: reply.question };
+    return questionId === undefined ? null : { questionId, titles };
   } catch {
     return null;
   }
@@ -401,49 +410,52 @@ function nativeAnsweredQuestion(items: Map<string, NativeItem>, question: Native
     question.type !== "agentMessage" ||
     question.delivery !== "async" ||
     !Array.isArray(question.questions) ||
-    question.questions.length !== 1
+    question.questions.length === 0
   ) {
     return false;
   }
-  const rendered: unknown = question.questions[0];
-  if (
-    !isRecord(rendered) ||
-    Object.keys(rendered).some((key) => key !== "title" && key !== "options") ||
-    typeof rendered.title !== "string" ||
-    rendered.title === "" ||
-    !(
-      rendered.options == null ||
-      (Array.isArray(rendered.options) &&
-        rendered.options.every((option: unknown) => typeof option === "string"))
-    )
-  ) {
-    return false;
-  }
-  const order = [...items.values()];
-  if (
-    order.some(
-      (item) =>
-        item.type === "userMessage" &&
-        Array.isArray(item.content) &&
-        item.content.some(
-          (content: unknown) =>
-            isRecord(content) &&
-            typeof content.text === "string" &&
-            content.text.includes("send_user_message_question_reply"),
-        ) &&
-        nativeReplyBinding(item) === null,
-    )
-  ) {
-    return false;
-  }
-  const matches = order.filter((item) => {
+  let afterQuestion = false;
+  let titles: ReadonlyMap<number, string> | undefined;
+  for (const item of items.values()) {
+    if (item.id === question.id) {
+      afterQuestion = true;
+    }
+    const tagged =
+      item.type === "userMessage" &&
+      Array.isArray(item.content) &&
+      item.content.some(
+        (content: unknown) =>
+          isRecord(content) &&
+          typeof content.text === "string" &&
+          content.text.includes("send_user_message_question_reply"),
+      );
+    if (!tagged) {
+      continue;
+    }
     const binding = nativeReplyBinding(item);
-    return binding?.questionId === question.id;
-  });
+    if (binding === null) {
+      return false;
+    }
+    if (binding.questionId === question.id) {
+      if (!afterQuestion || titles !== undefined) {
+        return false;
+      }
+      titles = binding.titles;
+    }
+  }
   return (
-    matches.length === 1 &&
-    nativeReplyBinding(matches[0]!)?.title === rendered.title &&
-    order.indexOf(matches[0]!) > order.indexOf(question)
+    titles?.size === question.questions.length &&
+    question.questions.every(
+      (rendered: unknown, index) =>
+        isRecord(rendered) &&
+        Object.keys(rendered).every((key) => key === "title" || key === "options") &&
+        typeof rendered.title === "string" &&
+        rendered.title !== "" &&
+        rendered.title === titles?.get(index) &&
+        (rendered.options == null ||
+          (Array.isArray(rendered.options) &&
+            rendered.options.every((option: unknown) => typeof option === "string"))),
+    )
   );
 }
 
