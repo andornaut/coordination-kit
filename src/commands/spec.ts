@@ -98,6 +98,7 @@ const VALUES: Readonly<Record<string, string>> = {
   worker: "NAME",
 };
 /** Help groups, in help order. */
+/* eslint-disable sort-keys -- Group order is the public help order. */
 export const GROUPS = {
   msg: "store messages (caller identified by the registry fence)",
   store: "coordination store maintenance",
@@ -111,6 +112,7 @@ export const GROUPS = {
   work: "repository work files",
   graph: "decision graph",
 } as const;
+/* eslint-enable sort-keys */
 export interface GroupedSpec extends CommandSpec {
   readonly group: keyof typeof GROUPS;
 }
@@ -126,6 +128,7 @@ const READY = {
     "probe whether this harness can deliver now; prints one JSON line, exits 0 when ready, 1 when not",
 } as const satisfies GroupedSpec;
 /** Commands by their words: a noun group and its verb. */
+/* eslint-disable sort-keys -- Specification order is the public command help order. */
 export const SPECS = {
   "msg send": {
     forms: [
@@ -548,6 +551,7 @@ export const SPECS = {
     summary: "rebuild the derived edges index from the registered repositories and the store",
   },
 } as const satisfies Readonly<Record<string, GroupedSpec>>;
+/* eslint-enable sort-keys */
 export type Command = keyof typeof SPECS;
 /** One `coordination-kit COMMAND ...` line per accepted form. */
 export function synopsis(command: Command): string[] {
