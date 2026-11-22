@@ -14,6 +14,7 @@ import {
   questionCancel,
   questionList,
   questionOpen,
+  questionProject,
 } from "./commands/questions.ts";
 import { claudeReady, codexReady, harnessReady } from "./commands/ready.ts";
 import { requestClose } from "./commands/requests.ts";
@@ -69,6 +70,7 @@ export const COMMANDS = [
   "store retire",
   "question open",
   "question answer",
+  "question project",
   "question cancel",
   "question list",
   "hold set",
@@ -174,6 +176,7 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "question cancel": questionCancel,
   "question list": questionList,
   "question open": questionOpen,
+  "question project": questionProject,
   "request close": requestClose,
   "review deliver": reviewDeliver,
   "review show": reviewShow,

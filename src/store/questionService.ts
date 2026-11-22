@@ -1,7 +1,7 @@
 // The question, hold and decision verbs as the CLI runs them: resolve the caller through the
 // registry fence, apply one owner-checked write, then, when the write may have cleared the owner's
-// last wake guard, attempt one guarded wake for it. `question answer` also appends the decision
-// line to the work file in the main checkout of the caller's repository, left unstaged.
+// last wake guard, attempt one guarded wake for it. A recorded answer is projected separately
+// onto the caller's main work file, left unstaged.
 import { readFileSync } from "node:fs";
 
 import { systemGit } from "../status/git.ts";
@@ -11,26 +11,32 @@ import {
   decisionLine,
   fileDecisionNumbers,
   mainWorkFile,
+  type WorkFileTarget,
 } from "./decisionLine.ts";
 import { type CallerOptions, resolveCaller } from "./identity.ts";
 import {
-  answerQuestion,
+  type AnswerInput,
   cancelQuestion,
   type DecisionRow,
+  getQuestionDecision,
   type HoldState,
   type HoldView,
   listDecisions,
   listHolds,
   listQuestions,
+  numberRecordedAnswer,
   openQuestion,
   type QuestionOption,
   type QuestionState,
   type QuestionView,
+  type RecordedAnswer,
+  recordQuestionAnswer,
+  recordQuestionProjection,
   releaseHold,
-  requireOwnQuestion,
   setHold,
 } from "./questions.ts";
 import { registry, type StoreServiceContext, withStore } from "./service.ts";
+import { type Actor, StoreError } from "./types.ts";
 import { wakeRecipient, type WakeStatus } from "./wake.ts";
 
 export interface QuestionOutput {
@@ -39,10 +45,18 @@ export interface QuestionOutput {
   readonly duplicate: boolean;
 }
 
-export interface AnswerOutput extends QuestionOutput {
-  readonly decision: DecisionRow;
-  /** The work file in the main checkout, changed and left unstaged. */
-  readonly workFile: { readonly path: string; readonly written: boolean };
+export interface AnswerProjectionOutput extends QuestionOutput {
+  readonly decision: DecisionRow | null;
+  /** The main checkout work file, left unstaged when changed. */
+  readonly workFile: {
+    readonly path: string | null;
+    readonly written: boolean;
+    readonly status: RecordedAnswer["projection"]["status"];
+    readonly reason: string | null;
+  };
+}
+
+export interface AnswerOutput extends AnswerProjectionOutput {
   readonly wake: { readonly status: WakeStatus };
 }
 
@@ -84,60 +98,150 @@ export async function storeQuestionOpen(
   return withStore(context, (store) => ({ ...openQuestion(store, actor, request), schema: 1 }));
 }
 
-/**
- * Close the caller's own question with a decision: the store row first, then the work-file line.
- * Every precondition of the line (main checkout on `main`, the file and its Decisions section) is
- * checked before the store write. Repeating the same answer writes the line if it is missing.
- */
-export async function storeQuestionAnswer(
+function fileResult<T>(operation: () => T): { value: T } | { reason: string } {
+  try {
+    return { value: operation() };
+  } catch (error) {
+    return { reason: error instanceof StoreError ? error.code : "work-file-io-failed" };
+  }
+}
+
+const ALLOCATION_FAILURES = new Set([
+  "decision-numbers-exhausted",
+  "decision-predecessor-pending",
+  "invalid-supersedes",
+]);
+
+function projectAnswer(
+  store: Store,
+  actor: Actor,
+  result: { readonly question: QuestionView; readonly duplicate: boolean },
+  workFile: () => WorkFileTarget,
+): AnswerProjectionOutput {
+  const { id } = result.question;
+  function finish(
+    path: string | null,
+    write: { value: boolean } | { reason: string },
+  ): AnswerProjectionOutput {
+    const projection: RecordedAnswer["projection"] =
+      "reason" in write
+        ? { reason: write.reason, status: "failed" }
+        : { reason: null, status: "applied" };
+    return {
+      decision: getQuestionDecision(store, actor, id),
+      duplicate: result.duplicate,
+      question: recordQuestionProjection(store, actor, id, projection),
+      schema: 1,
+      workFile: { path, written: "value" in write && write.value, ...projection },
+    };
+  }
+
+  // The receipt is already durable. Numbering commits before the file write, so a retry after a
+  // process interruption can always recognise and verify the exact projected line.
+  const allocation = store.transaction(() => {
+    const file = fileResult(workFile);
+    if ("reason" in file) {
+      return finish(null, file);
+    }
+    const { path } = file.value;
+    const numbers = fileResult(() => fileDecisionNumbers(readFileSync(path, "utf8")));
+    if ("reason" in numbers) {
+      return finish(path, numbers);
+    }
+    try {
+      return numberRecordedAnswer(store, actor, id, numbers.value);
+    } catch (error) {
+      if (error instanceof StoreError && ALLOCATION_FAILURES.has(error.code)) {
+        return finish(path, { reason: error.code });
+      }
+      throw error;
+    }
+  });
+  if ("schema" in allocation) {
+    return allocation;
+  }
+  return store.transaction(() => {
+    const file = fileResult(workFile);
+    if ("reason" in file) {
+      return finish(null, file);
+    }
+    const { path } = file.value;
+    const { decision, n } = allocation;
+    return finish(
+      path,
+      fileResult(() =>
+        appendDecisionLine(
+          path,
+          n,
+          decisionLine({
+            at: decision.at,
+            by: decision.by,
+            n,
+            question: decision.question,
+            supersedes: decision.supersedes?.split("/").at(-1) ?? null,
+            text: decision.text,
+          }),
+        ),
+      ),
+    );
+  });
+}
+
+function answerProjection(
   context: StoreServiceContext,
   options: CallerOptions,
   id: string,
-  request: {
-    readonly work: string;
-    readonly text: string;
-    readonly by?: string;
-    readonly supersedes?: string;
-  },
-): Promise<AnswerOutput> {
+  request: AnswerInput | undefined,
+  wake: true,
+): Promise<AnswerOutput>;
+function answerProjection(
+  context: StoreServiceContext,
+  options: CallerOptions,
+  id: string,
+  request: AnswerInput | undefined,
+  wake: false,
+): Promise<AnswerProjectionOutput>;
+function answerProjection(
+  context: StoreServiceContext,
+  options: CallerOptions,
+  id: string,
+  request: AnswerInput | undefined,
+  wake: boolean,
+): Promise<AnswerProjectionOutput | AnswerOutput> {
   const roles = registry(context);
   const actor = resolveCaller(roles, context.env, options);
   return withStore(context, async (store) => {
-    // The question's owner is checked before any Git or file read names the caller's repository.
-    requireOwnQuestion(store, actor, id);
-    const target = mainWorkFile(
-      systemGit(context.env),
-      context.layout,
-      roles,
-      actor.role,
-      request.work,
+    const result = recordQuestionAnswer(store, actor, id, request);
+    const projected = projectAnswer(store, actor, result, () =>
+      mainWorkFile(
+        systemGit(context.env),
+        context.layout,
+        roles,
+        actor.role,
+        result.question.answer!.work,
+      ),
     );
-    const answer = answerQuestion(store, actor, id, {
-      ...request,
-      fileNumbers: fileDecisionNumbers(readFileSync(target.path, "utf8")),
-    });
-    const { decision } = answer;
-    const written = appendDecisionLine(
-      target.path,
-      answer.n,
-      decisionLine({
-        at: decision.at,
-        by: decision.by,
-        n: answer.n,
-        question: decision.question,
-        supersedes: decision.supersedes === null ? null : decision.supersedes.split("/").at(-1)!,
-        text: decision.text,
-      }),
-    );
-    return {
-      decision,
-      duplicate: answer.duplicate,
-      question: answer.question,
-      schema: 1 as const,
-      wake: await wakeOwner(context, store, actor.role),
-      workFile: { path: target.path, written },
-    };
+    return wake ? { ...projected, wake: await wakeOwner(context, store, actor.role) } : projected;
   });
+}
+
+/** Record the explicit answer, then independently attempt its Markdown projection and a wake. */
+export function storeQuestionAnswer(
+  context: StoreServiceContext,
+  options: CallerOptions,
+  id: string,
+  request: AnswerInput,
+): Promise<AnswerOutput> {
+  return answerProjection(context, options, id, request, true);
+}
+
+/** Retry only the Markdown projection of the caller's recorded answer. */
+export function storeQuestionProject(
+  context: StoreServiceContext,
+  options: CallerOptions,
+  id: string,
+): Promise<AnswerProjectionOutput> {
+  return answerProjection(context, options, id, undefined, false);
 }
 
 export async function storeQuestionCancel(

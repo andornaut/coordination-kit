@@ -52,6 +52,8 @@ export interface QuestionView {
   readonly decision: string | null;
   /** The cancellation reason. */
   readonly reason: string | null;
+  /** Durable answer and the latest Markdown projection outcome, when tracked. */
+  readonly answer?: RecordedAnswer;
 }
 
 /** A typed decision record, the store mirror of a work file's `- D<n> (...)` line. */
@@ -67,6 +69,18 @@ export interface DecisionRow {
   /** `<work>/D<k>`, or null. */
   readonly supersedes: string | null;
   readonly text: string;
+}
+
+export interface RecordedAnswer {
+  readonly at: string;
+  readonly by: string;
+  readonly supersedes: string | null;
+  readonly text: string;
+  readonly work: string;
+  readonly projection: {
+    readonly status: "pending" | "failed" | "applied";
+    readonly reason: string | null;
+  };
 }
 
 export interface HoldView {
@@ -163,9 +177,10 @@ const opened = (db: DatabaseSync, event: StoredEvent): void => {
 const answered = (db: DatabaseSync, event: StoredEvent): void => {
   const p = event.payload;
   const decision = `${text(p, "work")}/D${Number(p.n)}`;
+  const answeredAt = text(p, "answeredAt") ?? event.at;
   db.prepare(
     `UPDATE questions SET state = 'answered', closed_at = ?, decision = ? WHERE id = ?`,
-  ).run(event.at, decision, text(p, "id"));
+  ).run(answeredAt, decision, text(p, "id"));
   db.prepare(
     `INSERT INTO decisions (id, work, n, question, by, at, role, supersedes, text, seq)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -175,7 +190,7 @@ const answered = (db: DatabaseSync, event: StoredEvent): void => {
     Number(p.n),
     text(p, "id"),
     text(p, "by"),
-    event.at,
+    answeredAt,
     text(p, "role"),
     text(p, "supersedes"),
     text(p, "text"),
@@ -294,8 +309,30 @@ export function publicText(value: string): string {
   return value;
 }
 
+const QUESTION_SELECT = `SELECT q.*, a.at AS answer_at, a.by AS answer_by,
+  a.supersedes AS answer_supersedes, a.text AS answer_text, a.work AS answer_work,
+  a.status AS answer_status, a.reason AS answer_reason
+  FROM questions q LEFT JOIN question_answers a ON a.id = q.id`;
+
 function questionRow(store: Store, id: string): Row | undefined {
-  return store.db.prepare("SELECT * FROM questions WHERE id = ?").get(id) as Row | undefined;
+  return store.db.prepare(`${QUESTION_SELECT} WHERE q.id = ?`).get(id) as Row | undefined;
+}
+
+function recordedAnswer(row: Row): RecordedAnswer | undefined {
+  if (row.answer_at == null) {
+    return undefined;
+  }
+  return {
+    at: row.answer_at as string,
+    by: row.answer_by as string,
+    projection: {
+      reason: row.answer_reason as string | null,
+      status: row.answer_status as RecordedAnswer["projection"]["status"],
+    },
+    supersedes: row.answer_supersedes as string | null,
+    text: row.answer_text as string,
+    work: row.answer_work as string,
+  };
 }
 
 function parseOptions(value: SQLInputValue | undefined): QuestionOption[] | null {
@@ -304,7 +341,9 @@ function parseOptions(value: SQLInputValue | undefined): QuestionOption[] | null
 
 function questionView(row: Row): QuestionView {
   const nullable = (key: string) => (row[key] as string | null) ?? null;
+  const answer = recordedAnswer(row);
   return {
+    ...(answer === undefined ? {} : { answer }),
     closedAt: nullable("closed_at"),
     decision: nullable("decision"),
     id: row.id as string,
@@ -432,6 +471,53 @@ export function requireOwnQuestion(store: Store, actor: Actor, id: string): Ques
   return questionView(ownQuestion(store, actor, id));
 }
 
+/** Independent projection so existing schema-1 stores acquire it without rewriting their events. */
+export const QUESTION_ANSWERS_PROJECTION: Projection = {
+  apply: {
+    "question.answer-recorded": (db, event) => {
+      const p = event.payload;
+      const answeredAt = text(p, "answeredAt") ?? event.at;
+      db.prepare(
+        `INSERT INTO question_answers (id, work, text, by, supersedes, at, seq, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+      ).run(
+        text(p, "id"),
+        text(p, "work"),
+        text(p, "text"),
+        text(p, "by"),
+        text(p, "supersedes"),
+        answeredAt,
+        event.seq,
+      );
+      db.prepare("UPDATE questions SET state = 'answered', closed_at = ? WHERE id = ?").run(
+        answeredAt,
+        text(p, "id"),
+      );
+    },
+    "question.projection": (db, event) => {
+      const p = event.payload;
+      db.prepare("UPDATE question_answers SET status = ?, reason = ? WHERE id = ?").run(
+        text(p, "status"),
+        text(p, "reason"),
+        text(p, "id"),
+      );
+    },
+  },
+  ddl: `CREATE TABLE IF NOT EXISTS question_answers (
+    id TEXT PRIMARY KEY,
+    work TEXT NOT NULL,
+    text TEXT NOT NULL,
+    by TEXT NOT NULL,
+    supersedes TEXT,
+    at TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'failed', 'applied')),
+    reason TEXT
+  );
+  CREATE INDEX IF NOT EXISTS question_answers_work ON question_answers (work, seq);`,
+  tables: ["question_answers"],
+};
+
 function decisionRow(row: Row): DecisionRow {
   return {
     at: row.at as string,
@@ -462,78 +548,190 @@ export interface AnswerResult extends QuestionResult {
   readonly n: number;
 }
 
-/**
- * Close the caller's own pending question and record its decision in one write. The decision's
- * number is one above the highest in the store and the work file. Repeating the same answer is a
- * no-op that returns the recorded decision; any other change is `already-closed`.
- */
+type AnswerDetails = Pick<RecordedAnswer, "by" | "supersedes" | "text" | "work">;
+
+function validatedAnswer(input: AnswerInput): AnswerDetails {
+  ensure(WORK_ID.test(input.work), "invalid-work");
+  const decisionText = publicText(input.text);
+  const by = input.by ?? "user";
+  ensure(BY.test(by), "invalid-by");
+  const ref = input.supersedes === undefined ? null : DECISION_REF.exec(input.supersedes);
+  ensure(input.supersedes === undefined || ref !== null, "invalid-supersedes");
+  return {
+    by,
+    supersedes: ref === null ? null : `${input.work}/D${ref[1]}`,
+    text: decisionText,
+    work: input.work,
+  };
+}
+
+function matchesAnswer(recorded: AnswerDetails | undefined, answer: AnswerDetails): boolean {
+  return (
+    recorded?.work === answer.work &&
+    recorded.text === answer.text &&
+    recorded.by === answer.by &&
+    recorded.supersedes === answer.supersedes
+  );
+}
+
+function linkedDecision(store: Store, question: Row): Row | undefined {
+  return question.decision == null
+    ? undefined
+    : (store.db.prepare("SELECT * FROM decisions WHERE id = ?").get(question.decision) as
+        Row | undefined);
+}
+
+/** Return the caller's numbered decision when it has already been allocated. */
+export function getQuestionDecision(store: Store, actor: Actor, id: string): DecisionRow | null {
+  const row = linkedDecision(store, ownQuestion(store, actor, id));
+  return row === undefined ? null : decisionRow(row);
+}
+
+/** Record the exact answer independently of numbering and filesystem access, or verify a retry. */
+export function recordQuestionAnswer(
+  store: Store,
+  actor: Actor,
+  id: string,
+  input?: AnswerInput,
+): QuestionResult {
+  return store.transaction(() => {
+    const row = ownQuestion(store, actor, id);
+    const existing = recordedAnswer(row);
+    const legacy = linkedDecision(store, row);
+    const previous = existing ?? (legacy === undefined ? undefined : decisionRow(legacy));
+    if (input === undefined) {
+      ensure(previous !== undefined, "question-unanswered");
+    }
+    const answer = input === undefined ? previous! : validatedAnswer(input);
+    ensure(row.work == null || row.work === answer.work, "work-mismatch");
+    const duplicate = row.state !== "pending";
+    ensure(!duplicate || matchesAnswer(previous, answer), "already-closed");
+    if (existing === undefined) {
+      store.append({
+        actor,
+        key: `question.answer-recorded:${id}`,
+        kind: "question.answer-recorded",
+        payload: {
+          ...(previous === undefined ? {} : { answeredAt: previous.at }),
+          by: answer.by,
+          id,
+          supersedes: answer.supersedes,
+          text: answer.text,
+          work: answer.work,
+        },
+      });
+    }
+    return { duplicate, question: questionView(questionRow(store, id)!) };
+  });
+}
+
+function numberDecision(
+  store: Store,
+  actor: Actor,
+  id: string,
+  answer: AnswerDetails,
+  fileNumbers: readonly number[],
+): AnswerResult {
+  const row = ownQuestion(store, actor, id);
+  ensure(row.work == null || row.work === answer.work, "work-mismatch");
+  const receipt = recordedAnswer(row);
+  const recorded = linkedDecision(store, row);
+  if (recorded !== undefined) {
+    const decision = decisionRow(recorded);
+    ensure(matchesAnswer(decision, answer), "already-closed");
+    return { decision, duplicate: true, n: Number(recorded.n), question: questionView(row) };
+  }
+  ensure(row.state === "pending" || matchesAnswer(receipt, answer), "already-closed");
+  const predecessor = store.db
+    .prepare(
+      `SELECT a.id FROM question_answers a JOIN questions q ON q.id = a.id
+       WHERE a.work = ? AND q.decision IS NULL AND a.seq <
+         COALESCE((SELECT seq FROM question_answers WHERE id = ?), 9223372036854775807)
+       LIMIT 1`,
+    )
+    .get(answer.work, id);
+  ensure(predecessor === undefined, "decision-predecessor-pending");
+  const stored = store.db
+    .prepare("SELECT n FROM decisions WHERE work = ?")
+    .all(answer.work)
+    .map((item) => Number((item as Row).n));
+  const known = new Set([...stored, ...fileNumbers]);
+  const superseded = answer.supersedes?.split("/D").at(-1);
+  ensure(superseded === undefined || known.has(Number(superseded)), "invalid-supersedes");
+  const n = Math.max(0, ...known) + 1;
+  ensure(n <= 999999, "decision-numbers-exhausted");
+  store.append({
+    actor,
+    key: `question.answered:${id}`,
+    kind: "question.answered",
+    payload: {
+      ...(receipt === undefined ? {} : { answeredAt: receipt.at }),
+      by: answer.by,
+      id,
+      n,
+      role: row.role as string,
+      supersedes: answer.supersedes,
+      text: answer.text,
+      work: answer.work,
+    },
+  });
+  const updated = questionRow(store, id)!;
+  return {
+    decision: decisionRow(linkedDecision(store, updated)!),
+    duplicate: false,
+    n,
+    question: questionView(updated),
+  };
+}
+
+/** Answer directly when decision numbering is already available to the store caller. */
 export function answerQuestion(
   store: Store,
   actor: Actor,
   id: string,
   input: AnswerInput,
 ): AnswerResult {
-  ensure(WORK_ID.test(input.work), "invalid-work");
-  const decisionText = publicText(input.text);
-  const by = input.by ?? "user";
-  ensure(BY.test(by), "invalid-by");
-  const superseded = input.supersedes === undefined ? null : DECISION_REF.exec(input.supersedes);
-  ensure(input.supersedes === undefined || superseded !== null, "invalid-supersedes");
-  const supersedes = superseded === null ? null : `${input.work}/D${superseded[1]}`;
+  const answer = validatedAnswer(input);
+  return store.transaction(() => numberDecision(store, actor, id, answer, input.fileNumbers ?? []));
+}
+
+/** Allocate or retrieve a numbered decision for a durable answer under the store write lock. */
+export function numberRecordedAnswer(
+  store: Store,
+  actor: Actor,
+  id: string,
+  fileNumbers: readonly number[],
+): AnswerResult {
+  return store.transaction(() => {
+    const receipt = recordedAnswer(ownQuestion(store, actor, id));
+    ensure(receipt !== undefined, "question-unanswered");
+    return numberDecision(store, actor, id, receipt, fileNumbers);
+  });
+}
+
+/** Record a changed projection outcome; repeated identical observations are no-ops. */
+export function recordQuestionProjection(
+  store: Store,
+  actor: Actor,
+  id: string,
+  projection: RecordedAnswer["projection"],
+): QuestionView {
   return store.transaction(() => {
     const row = ownQuestion(store, actor, id);
-    ensure(row.work == null || row.work === input.work, "work-mismatch");
-    if (row.state !== "pending") {
-      const recorded =
-        row.decision == null
-          ? undefined
-          : (store.db.prepare("SELECT * FROM decisions WHERE id = ?").get(row.decision) as
-              Row | undefined);
-      ensure(
-        recorded !== undefined &&
-          recorded.work === input.work &&
-          recorded.text === decisionText &&
-          recorded.by === by &&
-          ((recorded.supersedes as string | null) ?? null) === supersedes,
-        "already-closed",
-      );
-      return {
-        decision: decisionRow(recorded),
-        duplicate: true,
-        n: Number(recorded.n),
-        question: questionView(row),
-      };
+    const receipt = recordedAnswer(row);
+    ensure(receipt !== undefined, "question-unanswered");
+    if (
+      receipt.projection.status !== projection.status ||
+      receipt.projection.reason !== projection.reason
+    ) {
+      store.append({
+        actor,
+        key: `question.projection:${id}:${store.head().seq + 1}`,
+        kind: "question.projection",
+        payload: { id, ...projection },
+      });
     }
-    const stored = store.db
-      .prepare("SELECT n FROM decisions WHERE work = ?")
-      .all(input.work)
-      .map((item) => Number((item as Row).n));
-    const known = new Set([...stored, ...(input.fileNumbers ?? [])]);
-    ensure(supersedes === null || known.has(Number(superseded![1])), "invalid-supersedes");
-    const n = Math.max(0, ...known) + 1;
-    store.append({
-      actor,
-      key: `question.answered:${id}`,
-      kind: "question.answered",
-      payload: {
-        by,
-        id,
-        n,
-        role: row.role as string,
-        supersedes,
-        text: decisionText,
-        work: input.work,
-      },
-    });
-    const decision = store.db
-      .prepare("SELECT * FROM decisions WHERE work = ? AND n = ?")
-      .get(input.work, n) as Row;
-    return {
-      decision: decisionRow(decision),
-      duplicate: false,
-      n,
-      question: questionView(questionRow(store, id)!),
-    };
+    return questionView(questionRow(store, id)!);
   });
 }
 
@@ -567,11 +765,15 @@ export function listQuestions(
   filter: { readonly role?: string; readonly states?: readonly QuestionState[] } = {},
 ): QuestionView[] {
   const states = filter.states ?? QUESTION_STATES;
+  const tracked = store.db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'question_answers'")
+    .get();
+  const select = tracked === undefined ? "SELECT q.* FROM questions q" : QUESTION_SELECT;
   return (
     store.db
       .prepare(
-        `SELECT * FROM questions WHERE (? IS NULL OR role = ?)
-           AND state IN (${states.map(() => "?").join(",")}) ORDER BY opened_seq`,
+        `${select} WHERE (? IS NULL OR q.role = ?)
+           AND q.state IN (${states.map(() => "?").join(",")}) ORDER BY q.opened_seq`,
       )
       .all(filter.role ?? null, filter.role ?? null, ...states) as Row[]
   ).map(questionView);

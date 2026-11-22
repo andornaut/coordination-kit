@@ -1,4 +1,4 @@
-// The question, hold and decision verbs: `question open|answer|cancel|list`, `hold set|release|list`
+// The question, hold and decision verbs: `question open|answer|project|cancel|list`, `hold set|release|list`
 // and `decision list`. Writes identify the caller through the registry fence and refuse any other
 // owner's record. Each prints one JSON object on stdout; a refusal prints `coordination-kit: CODE`
 // on stderr and exits 1, and a usage error exits 2.
@@ -20,6 +20,7 @@ import {
   storeQuestionCancel,
   storeQuestionList,
   storeQuestionOpen,
+  storeQuestionProject,
 } from "../store/questionService.ts";
 import { callerOf, required, run, text, Usage, type Values } from "./store.ts";
 
@@ -44,6 +45,8 @@ export const QUESTION_ANSWER_OPTIONS = {
   text: { type: "string" },
   work: { type: "string" },
 } as const;
+
+export const QUESTION_PROJECT_OPTIONS = { ...CALLER, id: { type: "string" } } as const;
 
 export const QUESTION_CANCEL_OPTIONS = {
   ...CALLER,
@@ -120,6 +123,16 @@ export const questionAnswer: Handler = (io, root, args) =>
         ...optional("supersedes", text(values, "supersedes")),
       }),
     QUESTION_ANSWER_OPTIONS,
+  );
+
+export const questionProject: Handler = (io, root, args) =>
+  run(
+    io,
+    root,
+    "question project",
+    args,
+    (context, values) => storeQuestionProject(context, callerOf(values), required(values, "id")),
+    QUESTION_PROJECT_OPTIONS,
   );
 
 export const questionCancel: Handler = (io, root, args) =>

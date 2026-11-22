@@ -1,10 +1,11 @@
 // The work-file half of `question answer`: the decision line `- D<n> (by, YYYY-MM-DD; answers Q[;
 // supersedes Dk]): text`, appended to docs/work/<id>.md in the main checkout of the caller's role
-// repository. The file is written in place and left unstaged for the role's next commit; nothing
-// is staged or committed, and no checkout other than one on `main` is touched.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+// repository. The file is left unstaged for the role's next commit; nothing is staged or
+// committed, and no checkout other than one on `main` is touched.
+import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+import { writeDurable } from "../durable.ts";
 import type { Layout } from "../layout.ts";
 import type { Registry } from "../registry/schema.ts";
 import { type GitRunner, repositoryRoot } from "../status/git.ts";
@@ -51,6 +52,9 @@ export function mainWorkFile(
   const path = join(repository, "docs", "work", `${work}.md`);
   if (!existsSync(path)) {
     throw new StoreError("work-file-missing");
+  }
+  if (!lstatSync(path).isFile()) {
+    throw new StoreError("work-file-not-regular");
   }
   return { path, repository };
 }
@@ -100,27 +104,49 @@ export function decisionLine(input: DecisionLineInput): string {
 
 /**
  * Append `line` as decision `n` to the Decisions section: after its last line, replacing a lone
- * `None yet.` placeholder. A section that already has decision `n` is left as it is, so repeating
- * an answer repairs a missing line without writing a second one. Returns whether it wrote.
+ * `None yet.` placeholder. Repairing a missing line inserts it before any higher-numbered line.
+ * Only an exact match is already applied. A different line using that number is a conflict.
  */
 export function appendDecisionLine(path: string, n: number, line: string): boolean {
-  const text = readFileSync(path, "utf8");
-  if (fileDecisionNumbers(text).includes(n)) {
-    return false;
+  const metadata = lstatSync(path);
+  if (!metadata.isFile()) {
+    throw new StoreError("work-file-not-regular");
   }
-  const lines = text.split("\n");
+  const current = readFileSync(path, "utf8");
+  const lines = current.split("\n");
   const { end, start } = decisionsSection(lines);
   const body = lines.slice(start + 1, end);
   const content = body
     .map((item, index) => ({ index: start + 1 + index, item }))
     .filter(({ item }) => item.trim() !== "");
-  if (content.length === 1 && PLACEHOLDER.test(content[0]!.item)) {
+  const numbered = content.flatMap(({ index, item }) => {
+    const match = D_LINE.exec(item);
+    return match === null ? [] : [{ index, item, n: Number(match[1]) }];
+  });
+  const matches = numbered.filter((entry) => entry.n === n);
+  if (matches.length > 0) {
+    if (matches.length === 1 && matches[0]!.item === line) {
+      return false;
+    }
+    throw new StoreError("decision-line-conflict");
+  }
+  const next = numbered.find((entry) => entry.n > n);
+  if (next !== undefined) {
+    lines.splice(next.index, 0, line);
+  } else if (content.length === 1 && PLACEHOLDER.test(content[0]!.item)) {
     lines[content[0]!.index] = line;
   } else if (content.length === 0) {
     lines.splice(start + 1, end - start - 1, "", line, "");
   } else {
     lines.splice(content.at(-1)!.index + 1, 0, line);
   }
-  writeFileSync(path, lines.join("\n"));
+  writeDurable(path, lines.join("\n"), {
+    mode: metadata.mode & 0o777,
+    onStage: (stage) => {
+      if (stage === "synced" && readFileSync(path, "utf8") !== current) {
+        throw new StoreError("work-file-changed");
+      }
+    },
+  });
   return true;
 }

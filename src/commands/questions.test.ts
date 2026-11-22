@@ -225,20 +225,124 @@ describe("question commands", () => {
     });
   });
 
-  it("refuses before any store write when the work file or the main checkout is unusable", async () => {
-    const { base, reader, tech } = setup();
+  it("persists an exact answer without a role worktree, then projects in receipt order", async () => {
+    const { base, coordinator, reader, tech } = setup();
+    await tech("question", "open", "--id", "q-a", "--title", "Palette?", "--work", "ag-0001");
+    await tech("question", "open", "--id", "q-b", "--title", "Font?", "--work", "ag-0001");
+    const answer = (id: string, text: string) =>
+      tech("question", "answer", "--id", id, "--work", "ag-0001", "--text", text);
+    expect((await answer("q-a", "See /home/fixture/notes.")).err).toContain("text-not-public");
+    expect(
+      (await coordinator("msg", "send", "--to", TECH_ROLE, "--body", "Queued work.")).json,
+    ).toMatchObject({ wake: { status: "guarded" } });
+    const recorded = await answer("q-a", "Use the warm palette.");
+    expect(recorded.code, recorded.err).toBe(EXIT_OK);
+    expect(recorded.json).toMatchObject({
+      decision: null,
+      question: {
+        answer: {
+          projection: { reason: "worktree-unavailable", status: "failed" },
+          text: "Use the warm palette.",
+          work: "ag-0001",
+        },
+        state: "answered",
+      },
+      wake: { status: "guarded" },
+      workFile: { path: null, written: false },
+    });
+    expect((await reader("question", "list", "--state", "pending")).json).toMatchObject({
+      questions: [{ id: "q-b" }],
+    });
+    expect((await reader("question", "list", "--state", "answered")).json).toMatchObject({
+      questions: [{ answer: { text: "Use the warm palette." }, id: "q-a" }],
+    });
+    expect((await answer("q-a", "Change the answer.")).err).toContain("already-closed");
+    expect((await coordinator("question", "project", "--id", "q-a")).err).toContain("not-owner");
+
+    const repo = gameRepository(base);
+    const path = join(repo, "docs", "work", "ag-0001.md");
+    writeFileSync(
+      path,
+      WORK_FILE.replace("None yet.", "- D1 (user, 2026-11-18): Existing choice."),
+    );
+    const later = await answer("q-b", "Keep the current font.");
+    expect(later.json).toMatchObject({
+      decision: null,
+      question: { state: "answered" },
+      workFile: { reason: "decision-predecessor-pending", status: "failed" },
+    });
+    expect((await coordinator("store", "rebuild")).code).toBe(EXIT_OK);
+    const repaired = await tech("question", "project", "--id", "q-a");
+    expect(repaired.json).toMatchObject({
+      decision: { id: "ag-0001/D2", question: "q-a" },
+      duplicate: true,
+      workFile: { path, status: "applied", written: true },
+    });
+    expect((await answer("q-b", "Keep the current font.")).json).toMatchObject({
+      decision: { id: "ag-0001/D3", question: "q-b" },
+      duplicate: true,
+      workFile: { status: "applied", written: true },
+    });
+    expect(readFileSync(path, "utf8")).toMatch(
+      /- D1 .*Existing choice.\n- D2 .*Use the warm palette.\n- D3 .*Keep the current font./,
+    );
+  });
+
+  it("restores a missing writeback and refuses to overwrite a different line with the same number", async () => {
+    const { base, tech } = setup();
+    const repo = gameRepository(base);
+    const path = join(repo, "docs", "work", "ag-0001.md");
+    await tech("question", "open", "--id", "q-a", "--title", "Palette?", "--work", "ag-0001");
+    const recorded = await tech(
+      "question",
+      "answer",
+      "--id",
+      "q-a",
+      "--work",
+      "ag-0001",
+      "--text",
+      "Yes.",
+    );
+    expect(recorded.json).toMatchObject({ workFile: { status: "applied" } });
+    const written = readFileSync(path, "utf8");
+    writeFileSync(path, WORK_FILE);
+    const project = () => tech("question", "project", "--id", "q-a");
+    expect((await project()).json).toMatchObject({
+      workFile: { status: "applied", written: true },
+    });
+    expect(readFileSync(path, "utf8")).toBe(written);
+
+    const changed = written.replace("Yes.", "Different decision.");
+    writeFileSync(path, changed);
+    expect((await project()).json).toMatchObject({
+      decision: { id: "ag-0001/D1", text: "Yes." },
+      workFile: { reason: "decision-line-conflict", status: "failed", written: false },
+    });
+    expect(readFileSync(path, "utf8")).toBe(changed);
+  });
+
+  it("reports a missing work file or an unavailable main checkout without losing the answer", async () => {
+    const { base, tech } = setup();
     const repo = gameRepository(base);
     await tech("question", "open", "--id", "q-a", "--title", "Palette?");
-    const answer = (work: string) =>
-      tech("question", "answer", "--id", "q-a", "--work", work, "--text", "Yes.");
-    expect((await answer("ag-0002")).err).toBe("coordination-kit: work-file-missing\n");
-    git(repo, "checkout", "-q", "-b", "other");
-    expect((await answer("ag-0001")).err).toBe("coordination-kit: main-checkout-not-main\n");
-    git(repo, "checkout", "-q", "main");
-    expect((await reader("question", "list")).json).toMatchObject({
-      questions: [{ id: "q-a", state: "pending" }],
+    const result = await tech(
+      "question",
+      "answer",
+      "--id",
+      "q-a",
+      "--work",
+      "ag-0002",
+      "--text",
+      "Yes.",
+    );
+    expect(result.json).toMatchObject({
+      workFile: { reason: "work-file-missing", status: "failed" },
     });
-    expect((await reader("decision", "list")).json).toEqual({ decisions: [], schema: 1 });
+    git(repo, "checkout", "-q", "-b", "other");
+    expect((await tech("question", "project", "--id", "q-a")).json).toMatchObject({
+      question: { state: "answered" },
+      workFile: { reason: "main-checkout-not-main", status: "failed" },
+    });
   });
 });
 

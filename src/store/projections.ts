@@ -5,7 +5,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import { HANDOFFS_PROJECTION } from "./handoffs.ts";
-import { QUESTIONS_PROJECTION } from "./questions.ts";
+import { QUESTION_ANSWERS_PROJECTION, QUESTIONS_PROJECTION } from "./questions.ts";
 import { REQUESTS_PROJECTION } from "./requests.ts";
 import type { JsonObject, StoredEvent } from "./types.ts";
 import { WORK_PROJECTION } from "./work.ts";
@@ -374,6 +374,7 @@ export const PROJECTIONS: readonly Projection[] = [
   MESSAGES_PROJECTION,
   DELIVERY_PROJECTION,
   QUESTIONS_PROJECTION,
+  QUESTION_ANSWERS_PROJECTION,
   WORK_PROJECTION,
   HANDOFFS_PROJECTION,
   REQUESTS_PROJECTION,

@@ -62,6 +62,7 @@ Projections, updated in the same transaction as their event:
 - `questions`: one row per question with its owning role, title, work ID, options, state
   (`pending`, `answered` or `cancelled`), opening and closing times, the answering decision and
   the cancellation reason. Indexed by `(role, state, opened_seq)`.
+- `question_answers`: the exact answer, its recording sequence and its Markdown projection status.
 - `decisions`: one row per decision, `{id, work, n, question, by, at, role, supersedes, text}`,
   unique per `(work, n)`, where `id` is `<work>/D<n>` and `supersedes` is `<work>/D<k>` or null.
 - `requests`: one row per [imported request](#requests) with its owner, kind, summary, ledger
@@ -77,7 +78,8 @@ Event kinds: `msg.sent`, `msg.imported`, `inbox.read`, `msg.closed`, `msg.retain
 `wake.claimed`, `wake.completed`, `wake.guarded`, `wake.rearmed`, `bus.event`, `bus.complete`,
 `review.brief`, `store.cutover`, `work.started`, `work.evidence`, `work.blocked`,
 `work.unblocked`, `work.ready`, `work.finished`, `work.retained`, `question.opened`,
-`question.answered`, `question.cancelled`, `hold.set`, `hold.released`, `hold.imported`,
+`question.answer-recorded`, `question.answered`, `question.projection`, `question.cancelled`,
+`hold.set`, `hold.released`, `hold.imported`,
 `request.imported`, `request.closed`, `store.retired`, `session.started`, `handoff.opened`,
 `handoff.ready`, `handoff.state` and `handoff.active`. A kind with no projection is still stored and chained, so a
 later projection can read it on its next rebuild. A store written before a projection existed
@@ -127,10 +129,10 @@ that holds no secret is rephrased:
 ## Writer fence
 
 Every writing verb (`msg send`, `inbox`, `msg done`, `msg retain`, `store import`, the `work`
-writes, `question open|answer|cancel`, `hold set|release`, `request close`,
-`store retire --apply`, `session start` and `handoff open|ready|state|active`) and `msg history --include-body`
-resolve their
-caller before it opens the store: the caller is the registry role whose effective harness
+writes, `question open|answer|project|cancel`, `hold set|release`, `request close`,
+`store retire --apply`, `session start` and `handoff open|ready|state|active`) identifies its
+caller before opening the store. `msg status` and `msg history` also identify the caller when
+passed `--include-body`. The caller is the registry role whose effective harness
 conversation ID equals the caller's native ID. The native ID is `--native-id ID`, else, for each
 role, the variable of that role's effective harness: `CLAUDE_CODE_SESSION_ID` for Claude and
 `CODEX_THREAD_ID` for Codex. A Claude ID in `CODEX_THREAD_ID`, or the reverse, binds nothing.
@@ -149,7 +151,7 @@ A worker writes under its parent's binding. `--worker NAME` records an attributi
 role on the event and the message. It is not verified: any caller bound to the role may name any
 worker, so it is a label for reading history, not an identity.
 
-Reads (`msg status`, `msg history` without `--include-body`, `question list`, `hold list`,
+Reads (`msg status` and `msg history` without `--include-body`, `question list`, `hold list`,
 `decision list`, `store export`, `store rebuild`, `store import --dry-run`,
 `store retire --dry-run`, `work show`,
 `work history`, `handoff show` and `graph`) take no caller, and neither does `graph index`, which writes only the
@@ -208,10 +210,11 @@ touched: a question record mirrors a prompt the owner has opened in its own sess
   not open a second question passes `--id`; repeating it with the same owner, title, work and
   options is a no-op (`duplicate: true`), and any other reuse is `id-conflict`.
 - `question answer --id Q --work W --text T [--by user] [--supersedes Dk]` closes the caller's
-  pending question and records its decision in one `question.answered` event. A question opened
-  with `--work` must be answered for that work item (`work-mismatch`). The decision's number is one
-  above the highest in the store and in the work file for `W`, and `--supersedes` must name one of
-  them (`invalid-supersedes`). `--by` defaults to `user`.
+  pending question and durably records the exact answer in a `question.answer-recorded` event before
+  Markdown projection. A question opened with `--work` must be answered for that item
+  (`work-mismatch`). `--by` defaults to `user`.
+- `question project --id Q` retries the caller's stored answer without re-entering it. Repeating the
+  same `question answer` also retries the writeback. Both use the active owner binding.
 - `question cancel --id Q --reason R` cancels the caller's pending question. Answering or
   cancelling a closed question is a no-op when it repeats the recorded close, else
   `already-closed`.
@@ -223,21 +226,29 @@ at run time and never stored.
 
 ### Decision lines
 
-After the store write, `question answer` appends the decision line to `docs/work/<W>.md` in the
-main checkout of the caller's repository: the repository of the caller's registered worktree, as
-`git rev-parse --git-common-dir` resolves it.
+Projection reads `docs/work/<W>.md` in the main checkout of the caller's registered worktree's
+repository. Once the file is readable, a `question.answered` event assigns a decision number one
+above the highest in the store and the work file. An earlier unnumbered answer for the same work
+item must be projected first (`decision-predecessor-pending`). A requested `--supersedes` must name
+an existing number (`invalid-supersedes`).
 
 ```text
 - D<n> (<by>, YYYY-MM-DD; answers <Q>[; supersedes D<k>]): <text>
 ```
 
-The date is the UTC date of the decision time. The line goes after the last line of the
-`## Decisions` section, replacing a lone `None yet.`. The file is written in place and left
-unstaged for the role's next commit; nothing is staged or committed. Before the store write it
-refuses `worktree-unavailable` when Git cannot resolve the worktree, `main-checkout-not-main`
-when that checkout is not on `main`, `work-file-missing` and `decisions-section-missing`, so a
-refused answer leaves the question pending. Repeating the same answer writes the line only if the
-file lacks decision `n`.
+The line uses the UTC date of the recorded answer. It is written atomically under `## Decisions`,
+replacing a lone `None yet.` or inserting a missing line before the next higher number. The change
+is left unstaged. Retrying verifies the exact line and restores a missing one, including after a
+previously successful projection. A different line with the same number is preserved and reported
+as `decision-line-conflict`.
+
+The answer stays recorded when the worktree, main checkout, work file or Decisions section is
+unavailable. In that case the command succeeds with `workFile.status: "failed"` and a reason. An
+interruption before the first projection outcome leaves `question.answer.projection.status` at
+`pending`. After a successful write or verification the status is `applied`. The numbered
+`decision` is `null` until numbering succeeds. A legacy numbered decision can be checked or
+repaired using the same command. Existing schema-1 stores acquire the answer projection when
+opened by the updated CLI. Use that CLI for a rebuild after recording an answer receipt.
 
 ### Holds
 
@@ -252,8 +263,9 @@ while active is a no-op; any other reuse of the ID, including after release, is 
 
 `question list [--role R] [--state pending|answered|cancelled]`, `hold list [--role R]
 [--state active|released]` and `decision list [--work W] [--role R]` take no caller and print
-`{schema, questions}`, `{schema, holds}` and `{schema, decisions}` in recording order. An absent
-store reads as empty.
+`{schema, questions}`, `{schema, holds}` and `{schema, decisions}` in recording order. Tracked
+answered questions expose the exact answer and its latest projection outcome. The decision list
+contains numbered decisions. An absent store reads as empty.
 
 ## Sessions and handoffs
 

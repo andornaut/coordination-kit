@@ -11,6 +11,7 @@ import {
   QUESTION_CANCEL_OPTIONS,
   QUESTION_LIST_OPTIONS,
   QUESTION_OPEN_OPTIONS,
+  QUESTION_PROJECT_OPTIONS,
 } from "./questions.ts";
 import { REQUEST_CLOSE_OPTIONS } from "./requests.ts";
 import { EVENTS_INGEST_OPTIONS, REVIEW_DELIVER_OPTIONS, REVIEW_SHOW_OPTIONS } from "./runner.ts";
@@ -286,8 +287,7 @@ export const SPECS = {
     forms: [["id", "work", "text", "by?", "supersedes?", "native-id?", "worker?"]],
     group: "decisions",
     options: QUESTION_ANSWER_OPTIONS,
-    summary:
-      "close your own question with a decision record and append its line, unstaged, to the work file on main",
+    summary: "record your own question's answer, then attempt the Markdown writeback on main",
   },
   "question cancel": {
     forms: [["id", "reason", "native-id?", "worker?"]],
@@ -307,6 +307,12 @@ export const SPECS = {
     group: "decisions",
     options: QUESTION_OPEN_OPTIONS,
     summary: "record a pending prompt owned by your role; the ID defaults to q-<role>-<n>",
+  },
+  "question project": {
+    forms: [["id", "native-id?", "worker?"]],
+    group: "decisions",
+    options: QUESTION_PROJECT_OPTIONS,
+    summary: "retry the Markdown writeback for your recorded answer",
   },
   "request close": {
     forms: [["id", "reason", "work?", "native-id?", "worker?"]],

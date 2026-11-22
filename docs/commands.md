@@ -15,6 +15,7 @@ every form and flag.
 | `msg status ID --include-body`                                                                                                                                                                                                                                                         | Read one exact body as its sender, recipient or game-coordinator without recording delivery.                                       |
 | `msg history --include-body [--role ROLE] [--since ISO_TIMESTAMP] [--limit N]`                                                                                                                                                                                                         | Message events with the bodies the fenced caller may read; see [store](store.md#message-history).                                  |
 | `question open --title TEXT [--id ID] [--work WORK_ID] [--option LABEL]...`, `question answer --id ID --work WORK_ID --text TEXT [--by user\|ROLE] [--supersedes D<N>]`, `question cancel --id ID --reason TEXT`, `question list [--role ROLE] [--state pending\|answered\|cancelled]` | Pending prompts owned by your role and their decisions; see [questions](store.md#questions-holds-and-decisions).                   |
+| `question project --id ID`                                                                                                                                                                                                                                                             | Retry Markdown writeback for your recorded answer.                                                                                 |
 | `hold set --id ID --scope work:WORK_ID\|role\|game:ID --reason TEXT`, `hold release --id ID`, `hold list [--role ROLE] [--state active\|released]`                                                                                                                                     | Holds owned by your role; see [holds](store.md#holds).                                                                             |
 | `session start`                                                                                                                                                                                                                                                                        | Record your session start and print your binding, checkpoint and counts; see [sessions](store.md#sessions-and-handoffs).           |
 | `handoff open --scope ROLE\|all... --to claude\|codex [--id ID]`, `handoff state prepared\|sent\|completed\|cancelled --id ID`, `handoff ready [--id ID]`, `handoff active [--id ID]`, `handoff show [--id ID]`                                                                        | A harness handoff record; see [handoffs](store.md#sessions-and-handoffs).                                                          |
@@ -59,11 +60,13 @@ every form and flag.
   most `--limit` events (default 1000). `--since` takes an ISO 8601 instant.
 - `msg status ID --include-body` and `msg history --include-body` identify the caller
   through the same registry fence and apply message-body visibility.
-- `question open|answer|cancel` and `hold set|release` identify the caller through the registry fence. Only the owning role answers, cancels or releases its
-  own records (`not-owner`). `question answer` prints the decision and the work file it changed
-  (`workFile.path`), left unstaged for the role's next commit. `question cancel`, `question answer`
-  and `hold release` then attempt one guarded wake for the caller, since the write may clear its
-  last wake guard. `--option LABEL` is repeatable, 1 to 8 labels. The list verbs take no caller and read an absent store as empty.
+- `question open|answer|project|cancel`, `hold set|release` identify the caller through the same
+  registry fence. Only the owning role answers, projects, cancels or releases its own records (`not-owner`). `question answer` records the answer before Markdown writeback and
+  reports its projection status. Use `question project --id ID` to recover a failed or missing
+  writeback. A changed work file is left unstaged for the role's next commit. `question cancel`,
+  `question answer` and `hold release` attempt one guarded wake for the caller, since the write may
+  clear its last wake guard. `--option LABEL` is repeatable, 1 to 8 labels. The list verbs take no
+  caller and read an absent store as empty.
 - `session start`, `handoff ready` and `handoff active` identify the caller through the registry
   fence; `handoff open` and `handoff state` also require game-coordinator (`not-coordinator`).
   `session start` refuses a held role with `session-held: phase held` (or `source-held`).
