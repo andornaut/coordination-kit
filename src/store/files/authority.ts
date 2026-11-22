@@ -54,15 +54,20 @@ export type FileAuthorityStatus =
   | { readonly kind: "pending"; readonly path: string; readonly receipt: CutoverReceipt }
   | ActiveFileAuthority;
 
-/** Inspect the target synchronously within the source write transaction. */
-export type VerifyCutoverTarget = (path: string, receipt: CutoverReceipt) => void;
+/** Inspect the target and any unfenced source within the source write transaction. */
+export type VerifyCutoverTarget = (
+  path: string,
+  receipt: CutoverReceipt,
+  unfencedSource?: DatabaseSync,
+) => void;
 
 function verifyCutoverTarget(
   verify: VerifyCutoverTarget,
   target: string,
   receipt: CutoverReceipt,
+  unfencedSource?: DatabaseSync,
 ): void {
-  const result: unknown = verify(target, receipt);
+  const result: unknown = verify(target, receipt, unfencedSource);
   if (result instanceof Promise) {
     throw new StoreError("file-authority-proof-async");
   }
@@ -390,7 +395,7 @@ export function prepareFileAuthority(
               root: layout.root,
               schema: 1,
             };
-      verifyCutoverTarget(verifyTarget, target, receipt);
+      verifyCutoverTarget(verifyTarget, target, receipt, source);
       if (receipt !== previous) {
         writeJsonDurable(join(layout.varDir, MARKER), receipt);
       }
@@ -428,7 +433,12 @@ export function activateFileAuthority(
       }
       if (receipt.phase === "prepared") {
         assertHead(source, receipt);
-        verifyCutoverTarget(verifyTarget, target, receipt);
+        verifyCutoverTarget(
+          verifyTarget,
+          target,
+          receipt,
+          fence === undefined ? source : undefined,
+        );
         if (fence === undefined) {
           source.exec(`${FENCE_TABLE_DDL}; ${FENCE_DDL};`);
           source.prepare(`INSERT INTO ${FENCE} VALUES (1, ?)`).run(JSON.stringify(receipt));

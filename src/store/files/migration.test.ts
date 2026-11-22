@@ -118,4 +118,21 @@ describe("filesystem migration", () => {
       legacy.close();
     }
   });
+
+  it("refuses unjournaled projection drift even when the SQLite head has not moved", () => {
+    const { base, layout, legacy } = fixture();
+    try {
+      const prepared = prepareMigration(layout, join(base, "backup.db"), join(base, "restore.db"));
+      legacy.db
+        .prepare("UPDATE questions SET title = ? WHERE id = ?")
+        .run("Drift", "question-fixture");
+      expect(legacy.head()).toEqual(prepared.receipt.head);
+      expect(() => activateMigration(layout, prepared.receipt.id)).toThrow(
+        "snapshot-projection-mismatch",
+      );
+      expect(inspectFileAuthority(layout, storePath(layout)).kind).toBe("sqlite");
+    } finally {
+      legacy.close();
+    }
+  });
 });

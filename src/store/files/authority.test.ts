@@ -93,7 +93,7 @@ describe("filesystem authority", () => {
       phase: "prepared",
       root: layout.root,
     });
-    expect(verify).toHaveBeenCalledWith(target, receipt);
+    expect(verify).toHaveBeenCalledWith(target, receipt, expect.anything());
     expect(inspectFileAuthority(layout, source)).toEqual({ kind: "sqlite", path: source, receipt });
     expect(fileAuthority(layout, source)).toEqual({ kind: "sqlite", path: source });
     expect(prepareFileAuthority(layout, source, EVIDENCE, verify)).toEqual(receipt);

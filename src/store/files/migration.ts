@@ -189,7 +189,11 @@ export function prepareMigration(
       layout,
       legacy,
       { head: source.head, proof: hash(canonicalJson(qualification)) },
-      () => {
+      (_path, _receipt, currentSource) => {
+        if (currentSource === undefined) {
+          throw new StoreError("migration-source-unavailable");
+        }
+        assertSqliteEquivalent(source, inspectSqliteConnection(currentSource));
         if (canonicalJson(inventory) !== canonicalJson(sourceInventory(layout))) {
           throw new StoreError("migration-source-inventory-changed");
         }
@@ -215,8 +219,11 @@ function readQualification(path: string, receipt: CutoverReceipt): Qualification
 export function activateMigration(layout: Layout, id: string): CutoverReceipt {
   const target = fileAuthorityTarget(layout);
   return migrationLock(target, () =>
-    activateFileAuthority(layout, storePath(layout), id, (_path, receipt) => {
+    activateFileAuthority(layout, storePath(layout), id, (_path, receipt, currentSource) => {
       const expected = readQualification(join(target, QUALIFICATION), receipt);
+      if (currentSource !== undefined) {
+        assertSqliteEquivalent(expected.source, inspectSqliteConnection(currentSource));
+      }
       assertSqliteEquivalent(expected.source, inspectSqliteState(expected.backup));
       assertSqliteEquivalent(expected.source, inspectSqliteState(expected.restored));
       if (canonicalJson(expected.inventory) !== canonicalJson(sourceInventory(layout))) {

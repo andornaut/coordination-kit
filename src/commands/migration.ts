@@ -26,7 +26,12 @@ function verifyCoordinator(
 ): void {
   const roles = registry(context);
   const actor = resolveCaller(roles, context.env, options);
-  if (actor.role !== "game-coordinator" || roles.roles[actor.role]?.ownership !== "active") {
+  const binding = roles.roles[actor.role];
+  if (
+    actor.role !== "game-coordinator" ||
+    binding?.ownership !== "active" ||
+    (binding.phase !== undefined && binding.phase !== "active")
+  ) {
     throw new StoreError("not-coordinator");
   }
 }

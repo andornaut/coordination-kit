@@ -7,7 +7,7 @@ Moving from coordination-kit 2.1 to 3.0, from 2.0 to 2.1, from 1.3 to 2.0, from 
 
 The coordinator-installed CLI supports the existing SQLite source during preparation. Its
 normal runner seam remains schema 1 and is compatible with Delivery Kit's coordinator CLI range
-`>=2.0.1 <4.0.0`. Use the absolute primary coordinator root for commands from every working
+`>=3.0.0 <4.0.0`. Use the absolute primary coordinator root for commands from every working
 directory. The target is the ignored `var/coordination/` under that root.
 
 1. Install the exact immutable Coordination Kit archive with the verified lockfile integrity.

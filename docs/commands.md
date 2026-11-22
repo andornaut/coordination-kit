@@ -41,6 +41,15 @@ every form and flag.
 | `graph [--work [REPOSITORY:]ID] [--depth N] [--format json\|dot]`, `graph why --decision ID`, `graph index`                                                                                                                                                                            | The decision graph, a decision's supersedes chain, and the derived index; see [decision graph](store.md#decision-graph).           |
 | `help`, `--help`, `--version`, `--version --json`                                                                                                                                                                                                                                      | Usage, the version, and the version with the `dist/cli.js` sha256 as one JSON line.                                                |
 
+## Filesystem migration commands
+
+`store migration-status` reads the current authority and any prepared receipt.
+`store migration-prepare --backup ABSOLUTE_FILE --restore ABSOLUTE_FILE` qualifies fresh
+independent copies outside the checkout and prepares the ignored filesystem target.
+`store migration-activate --id RECEIPT_ID` requires the exact prepared receipt. Preparation and
+activation require the current active game-coordinator binding. See the
+[migration runbook](upgrading.md#filesystem-authority-migration).
+
 ## Command semantics
 
 - `claude channel`: by default it serves the conversation of the `reports.recipient` that every

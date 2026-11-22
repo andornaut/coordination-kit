@@ -161,6 +161,12 @@ A worker writes under its parent's binding. `--worker NAME` records an attributi
 role on the event and the message. It is not verified: any caller bound to the role may name any
 worker, so it is a label for reading history, not an identity.
 
+Under file authority, an approved child work item with a linked parent can be started by
+an exact Codex child whose lineage is verified in the latest applicable scheduled review.
+That child may record its implementation evidence and mark the same item ready. The
+CLI uses the actual child environment binding for this path. An explicit ID or a worker
+label alone retains role attribution. Missing and stale lineage stay unverified.
+
 Reads (`msg status` and `msg history` without `--include-body`, `question list`, `hold list`,
 `decision list`, `store export`, `store rebuild`, `store import --dry-run`,
 `store retire --dry-run`, `work show`,
