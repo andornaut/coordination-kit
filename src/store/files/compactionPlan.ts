@@ -42,6 +42,7 @@ type Reason =
   | "close-sequence-unavailable"
   | "delivery-unresolved"
   | "open-message-reference"
+  | "operational-body-reference"
   | "replacement-unverified"
   | "checkpoint-unverified"
   | "routine-source-unverified"
@@ -123,6 +124,7 @@ function routineSource(scope: CompactionScope, event: StoredEvent): string | nul
 interface DeliveryAttempt {
   readonly event: StoredEvent;
   outcome?: Json;
+  consumed?: boolean;
 }
 
 function unresolvedDelivery(events: readonly StoredEvent[]): ReadonlySet<string> {
@@ -153,6 +155,17 @@ function unresolvedDelivery(events: readonly StoredEvent[]): ReadonlySet<string>
         if (claim && payload.outcome !== undefined) {
           claim.outcome = payload.outcome;
         }
+      } else if (kind === "notice.consumed") {
+        const claim = wakes.get(id) ?? reminders.get(id);
+        if (
+          claim !== undefined &&
+          typeof payload.conversation === "string" &&
+          claim.event.payload.role === payload.role &&
+          (claim.event.payload.conversation ?? claim.event.payload.nativeId) ===
+            payload.conversation
+        ) {
+          claim.consumed = true;
+        }
       }
     }
   }
@@ -167,20 +180,24 @@ function unresolvedDelivery(events: readonly StoredEvent[]): ReadonlySet<string>
       }
     }
   };
-  const wakeUnresolved = (outcome: Json | undefined) =>
-    outcome !== "accepted" && outcome !== "guarded" && outcome !== "failed";
-  for (const { event, outcome } of wakes.values()) {
-    if (wakeUnresolved(outcome)) {
-      addIds(event.payload.messages);
+  const wakeUnresolved = (claim: DeliveryAttempt | undefined) =>
+    claim === undefined ||
+    (!claim.consumed &&
+      claim.outcome !== "guarded" &&
+      claim.outcome !== "failed" &&
+      !(claim.outcome === "accepted" && claim.event.payload.harness === "claude"));
+  for (const claim of wakes.values()) {
+    if (wakeUnresolved(claim)) {
+      addIds(claim.event.payload.messages);
     }
   }
   for (const { payload } of coalesced) {
-    if (wakeUnresolved(wakes.get(text(payload.wake)!)?.outcome)) {
+    if (wakeUnresolved(wakes.get(text(payload.wake)!))) {
       addIds(payload.messages);
     }
   }
-  for (const { event, outcome } of reminders.values()) {
-    if (outcome !== "submitted" && outcome !== "refused") {
+  for (const { event, outcome, consumed } of reminders.values()) {
+    if (!consumed && outcome !== "refused") {
       addIds(event.payload.originals, true);
     }
   }
@@ -230,6 +247,7 @@ export function planFileCompaction(
 ): CompactionPlan {
   let head: Head = { hash: GENESIS, seq: 0 };
   const messages = new Map<string, Message>();
+  const reviewOriginals = new Set<string>();
   for (const event of events) {
     if (event.seq !== head.seq + 1 || event.prevHash !== head.hash) {
       throw new StoreError("compaction-snapshot-order");
@@ -237,6 +255,10 @@ export function planFileCompaction(
     head = { hash: event.hash, seq: event.seq };
     const { actor, kind, payload } = event;
     const id = text(payload.id);
+    const reviewOriginal = kind === "review.brief" ? text(payload.messageId) : null;
+    if (reviewOriginal !== null) {
+      reviewOriginals.add(reviewOriginal);
+    }
     if ((kind === "msg.sent" || kind === "msg.imported") && id !== null) {
       if (messages.has(id)) {
         throw new StoreError("compaction-duplicate-original");
@@ -354,6 +376,13 @@ export function planFileCompaction(
       reason = retained ? "retained-message" : "open-message";
     } else if (referenced.has(id)) {
       reason = "open-message-reference";
+    } else if (
+      reviewOriginals.has(id) ||
+      (original.kind === "msg.imported" &&
+        original.payload.legacy != null &&
+        /\bcomplete\b/i.test(text(original.payload.body) ?? ""))
+    ) {
+      reason = "operational-body-reference";
     } else if (!aged) {
       reason = "within-window";
     } else if (verification?.messageIds.has(id) !== true) {
