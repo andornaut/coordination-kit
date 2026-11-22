@@ -93,6 +93,24 @@ export async function rootRecipient(client: RpcClient, recipient: string): Promi
   return typeof source === "string" && ["cli", "vscode", "exec", "appServer"].includes(source);
 }
 
+export async function idleInputRoot(client: RpcClient, recipient: string): Promise<boolean> {
+  const read = await client.call("thread/read", { includeTurns: false, threadId: recipient });
+  const thread = isRecord(read) ? read.thread : null;
+  if (
+    !isRecord(thread) ||
+    thread.id !== recipient ||
+    thread.parentThreadId != null ||
+    (thread.source !== "cli" && thread.source !== "vscode") ||
+    thread.canAcceptDirectInput !== true ||
+    !isRecord(thread.status) ||
+    thread.status.type !== "idle"
+  ) {
+    return false;
+  }
+  const flags = thread.status.activeFlags;
+  return flags === undefined || (Array.isArray(flags) && flags.length === 0);
+}
+
 function result(
   message: NativeMessage,
   status: TransportReceipt["status"],

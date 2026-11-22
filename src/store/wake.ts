@@ -8,6 +8,7 @@ import { wakeText, writeWakeFile } from "../adapters/claude/wakeFile.ts";
 import { clearanceUnchanged } from "../adapters/codex/guard.ts";
 import {
   codexQueueTransport,
+  idleInputRoot,
   type QueueClearance,
   type TransportReceipt,
 } from "../adapters/codex/queue.ts";
@@ -26,8 +27,8 @@ import {
   safeWakeBlocker,
   safeWakeReason,
 } from "./messageWake.ts";
-import { consumedNotices, type NoticeProof, noticeQueueClear } from "./noticeEvidence.ts";
-import { pendingNotices } from "./noticesInFlight.ts";
+import { type NoticeProof, noticeQueueClear, reconcileNativeNotices } from "./noticeEvidence.ts";
+import { collectedNotices, COLLECTION_RELEASE, pendingNotices } from "./noticesInFlight.ts";
 import { questionHoldGuard } from "./questions.ts";
 import { type Actor, StoreError, type WakeBlocker, type WakeOutcome } from "./types.ts";
 
@@ -212,9 +213,37 @@ async function reconcileNotices(
     return [];
   }
   try {
+    const collected = collectedNotices(context.store, binding);
     const client = await wakeConnection(context);
     try {
-      return await consumedNotices(client, storeRoot(context.layout), binding, notices);
+      const { conversation } = target;
+      return await reconcileNativeNotices(
+        client,
+        storeRoot(context.layout),
+        binding,
+        notices,
+        collected,
+        async () => {
+          try {
+            const directory = decisionDirectory(context.layout, role);
+            if (directory === null || !decisionClear(directory, conversation)) {
+              return false;
+            }
+            const marker = decisionRecord(directory, conversation);
+            if (!(await idleInputRoot(client, conversation))) {
+              return false;
+            }
+            const [selected] = await selectTarget(client, directory, conversation);
+            return (
+              selected?.method === "turn/start" &&
+              (await idleInputRoot(client, conversation)) &&
+              clearanceUnchanged(directory, conversation, marker)
+            );
+          } catch {
+            return false;
+          }
+        },
+      );
     } finally {
       client.close();
     }
@@ -370,13 +399,46 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
     ) {
       const binding = { conversation: target.conversation, role };
       const pending = new Set(pendingNotices(store, binding).map(({ id }) => id));
-      for (const { item, notice, turn } of proofs) {
-        if (pending.has(notice.id)) {
+      const collected =
+        proofs.some(({ kind }) => kind === "released") &&
+        checkStoreGuard(context, role, "codex").status === "clear"
+          ? collectedNotices(store, binding)
+          : new Map<string, number[]>();
+      const directory = decisionDirectory(context.layout, role);
+      for (const proof of proofs) {
+        const { notice } = proof;
+        if (!pending.has(notice.id)) {
+          continue;
+        }
+        if (proof.kind === "consumed") {
           store.append({
             actor: SYSTEM,
             key: `notice.consumed:${notice.id}`,
             kind: "notice.consumed",
-            payload: { ...binding, id: notice.id, item, turn },
+            payload: { ...binding, id: notice.id, item: proof.item, turn: proof.turn },
+          });
+        } else {
+          const inboxReads = collected.get(notice.id);
+          if (
+            directory === null ||
+            !decisionClear(directory, binding.conversation) ||
+            inboxReads?.length !== proof.inboxReads.length ||
+            !inboxReads.every((seq, index) => seq === proof.inboxReads[index])
+          ) {
+            continue;
+          }
+          store.append({
+            actor: SYSTEM,
+            key: `notice.released:${notice.id}`,
+            kind: "notice.released",
+            payload: {
+              ...binding,
+              claimSeq: notice.seq,
+              id: notice.id,
+              inboxReads,
+              queueId: proof.queueId,
+              reason: COLLECTION_RELEASE,
+            },
           });
         }
       }

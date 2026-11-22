@@ -1,12 +1,15 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { readWakeFile, wakeFilePath } from "../adapters/claude/wakeFile.ts";
 import { RpcError } from "../adapters/codex/rpc.ts";
+import { writeJsonDurable } from "../durable.ts";
 import { updateRegistry } from "../registry/store.ts";
-import { Store } from "./db.ts";
+import { Store, storeRoot } from "./db.ts";
 import { readInbox, sendMessage } from "./messages.ts";
+import { noticeText } from "./noticesInFlight.ts";
 import { setPolicyHold } from "./policyHolds.ts";
 import { ART, clearDecision, fakeCodex, GAMEPLAY, storeFixture, TECH } from "./testStore.ts";
 import { pendingWakeRoles, rearmWake, type WakePorts, wakeRecipient, wakeState } from "./wake.ts";
@@ -90,7 +93,7 @@ describe("Claude wakes", () => {
 });
 
 describe("Codex wakes", () => {
-  it("keeps a queued notice across an inbox pull and rearms only after its exact native consumption", async () => {
+  it("requires exact native consumption when a pull lacks owner evidence", async () => {
     const codex = fakeCodex(ART);
     let queued: Record<string, unknown>[] = [];
     let history: Record<string, unknown>[] = [];
@@ -124,7 +127,7 @@ describe("Codex wakes", () => {
     const input = codex.adds()[0]?.input;
     queued = [{ clientUserMessageId: first.wake, id: `queue-${first.wake}`, input }];
     expect(JSON.stringify(codex.calls)).not.toContain("Private body");
-    readInbox(store, { nativeId: ART, role: ART_ROLE });
+    readInbox(store, { nativeId: TECH, role: ART_ROLE });
     store.rebuild();
     expect(await send(ART_ROLE)).toMatchObject({ status: "coalesced", wake: first.wake });
 
@@ -147,6 +150,146 @@ describe("Codex wakes", () => {
       { count: 4, detail: null, harness: "codex", outcome: "accepted", role: ART_ROLE },
     ]);
   });
+
+  it("releases an accepted modern claim after the exact owner collects every original", async () => {
+    const codex = fakeCodex(ART);
+    const ports = { connect: () => Promise.resolve(codex.client) };
+    const { layout, send, store } = setup(ports);
+    clearDecision(layout, ART);
+    const owner = { nativeId: ART, role: ART_ROLE };
+    for (const id of [uuid(101), uuid(102)]) {
+      sendMessage(store, SENDER, { body: "Original.", id, intent: "queue", to: ART_ROLE });
+    }
+    const first = await wakeRecipient({ env: {}, layout, ports, store }, ART_ROLE);
+    const firstPull = store.append({
+      actor: owner,
+      key: "inbox.read:partial",
+      kind: "inbox.read",
+      payload: { delivered: [uuid(101)], role: ART_ROLE },
+    }).event.seq;
+    expect(await send(ART_ROLE)).toMatchObject({ status: "coalesced" });
+    expect(codex.adds()).toHaveLength(1);
+    expect(readInbox(store, owner).delivered).toBe(2);
+    const secondPull = store.events({ kinds: ["inbox.read"] }).at(-1)!.seq;
+
+    const firstLaterCall = codex.calls.length;
+    expect(await send(ART_ROLE)).toMatchObject({ status: "accepted" });
+    expect(codex.adds()).toHaveLength(2);
+    const events = store.events({ kinds: ["notice.consumed", "notice.released"] });
+    expect(events).toMatchObject([
+      {
+        kind: "notice.released",
+        payload: {
+          conversation: ART,
+          id: first.wake,
+          inboxReads: [firstPull, secondPull],
+          queueId: `queue-${first.wake}`,
+          reason: "accepted-queue-absent-originals-collected",
+          role: ART_ROLE,
+        },
+      },
+    ]);
+    expect(
+      codex.calls
+        .slice(firstLaterCall)
+        .filter(
+          ({ method, params }) =>
+            method === "thread/items/list" && !Object.hasOwn(params, "turnId"),
+        ),
+    ).toHaveLength(0);
+    store.rebuild();
+    expect(
+      store.db.prepare("SELECT id FROM pending_notices WHERE id = ?").get(first.wake!),
+    ).toBeUndefined();
+  });
+
+  it.each([
+    { name: "exact count and owner", releases: true },
+    { name: "labelled exact owner", releases: true, worker: "label" },
+    { name: "mismatched count", count: 2 },
+    { name: "labelled different native actor", actor: TECH, worker: "label" },
+    { name: "nonempty native queue", queued: true },
+    { name: "incomplete queue inventory", truncated: true },
+    { name: "pending native question", question: true },
+  ])(
+    "legacy collection with $name",
+    async ({ actor, count = 1, question, queued, releases, truncated, worker }) => {
+      const codex = fakeCodex(ART);
+      const call = codex.client.call.bind(codex.client);
+      const old = uuid(100);
+      const input = [{ text: noticeText(count, ART_ROLE), type: "text" }];
+      codex.client.call = (method, params) => {
+        if (method === "thread/queue/list" && (queued || truncated)) {
+          return Promise.resolve({
+            data: queued ? [{ clientUserMessageId: old, id: `queue-${old}`, input }] : [],
+            truncated,
+          });
+        }
+        if (
+          method === "thread/items/list" &&
+          question &&
+          Object.hasOwn(params as object, "turnId")
+        ) {
+          return Promise.resolve({
+            data: [
+              {
+                item: {
+                  id: "item-question",
+                  questions: [{ title: "Waiting for a decision" }],
+                  type: "agentMessage",
+                },
+                turnId: "turn-1",
+              },
+            ],
+          });
+        }
+        return call(method, params);
+      };
+      const { layout, send, store } = setup({ connect: () => Promise.resolve(codex.client) });
+      clearDecision(layout, ART);
+      sendMessage(store, SENDER, {
+        body: "Original.",
+        id: uuid(101),
+        intent: "queue",
+        to: ART_ROLE,
+      });
+      store.append({
+        actor: SENDER,
+        key: `wake.claimed:${old}`,
+        kind: "wake.claimed",
+        payload: { conversation: ART, count, harness: "codex", role: ART_ROLE, wake: old },
+      });
+      store.append({
+        actor: SENDER,
+        key: `wake.completed:${old}`,
+        kind: "wake.completed",
+        payload: { outcome: "accepted", role: ART_ROLE, wake: old },
+      });
+      const receiptDirectory = join(storeRoot(layout), "wake", "codex");
+      mkdirSync(receiptDirectory, { recursive: true });
+      writeJsonDurable(join(receiptDirectory, `${old}.json`), {
+        clientUserMessageId: old,
+        queueId: `queue-${old}`,
+        recipient: ART,
+        status: "accepted",
+        text: noticeText(count, ART_ROLE),
+      });
+
+      sendMessage(store, SENDER, { body: "Later.", id: uuid(102), intent: "queue", to: ART_ROLE });
+      expect(
+        readInbox(store, {
+          nativeId: actor ?? ART,
+          role: ART_ROLE,
+          ...(worker === undefined ? {} : { worker }),
+        }).delivered,
+      ).toBe(2);
+      expect(await send(ART_ROLE)).toMatchObject({ status: releases ? "accepted" : "coalesced" });
+      expect(codex.adds()).toHaveLength(releases ? 1 : 0);
+      expect(
+        store.events({ kinds: ["notice.consumed", "notice.released"] }).map(({ kind }) => kind),
+      ).toEqual(releases ? ["notice.released"] : []);
+    },
+  );
 
   it("keeps an ambiguous wake reserved across inbox pulls and review without native proof", async () => {
     const codex = fakeCodex(ART, () => {

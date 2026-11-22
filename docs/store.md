@@ -315,13 +315,20 @@ can rearm a Claude wake unpulled for 30 minutes and recover confirmed failures a
 
 Codex queue dispatch and coordinator fallback share one outstanding reservation for the exact role
 and current native conversation. Pulling the durable inbox leaves that reservation in place. A
-confirmed pre-submission refusal releases it. An accepted, uncertain or interrupted queue claim
+confirmed pre-submission refusal releases it. An uncertain or interrupted queue claim
 requires a matching native history user item with the exact client request ID and wake text, plus
 complete queue inventory showing the exact item is no longer queued. A submitted or uncertain
 fallback requires a native history user item with the exact correlated fallback text. The store
-records positive proof in `notice.consumed`. Missing inventory, incomplete history and older
-fallbacks without a correlation marker retain the reservation. An unsettled fallback stays
-reserved while the coordinator may still submit it. No queue item is removed by this check.
+records positive native proof in `notice.consumed`.
+
+An accepted queue wake may also be released once its exact owner has pulled every claimed original.
+The store requires matching transport and journal receipts, a complete empty inventory on the
+current idle native conversation, and current decision clearance. For legacy claims without IDs,
+the first exact owner pull must contain the recorded count of originals sent by the claim.
+`notice.released` records the matching pull references separately from native consumption.
+Missing inventory, unresolved guard states, and older fallback notices without a correlation
+marker retain their reservation. An unsettled fallback stays reserved while the coordinator may
+still submit it. Both proof paths leave native queue entries untouched.
 
 Wake claims and refusals record the exact unread original IDs. An original arriving behind an
 outstanding wake records `wake.coalesced` with its own ID and the prior wake reference.

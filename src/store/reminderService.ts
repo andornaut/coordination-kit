@@ -1,6 +1,7 @@
 import { performance } from "node:perf_hooks";
 
 import { clearanceUnchanged, nativeItems, questionItem } from "../adapters/codex/guard.ts";
+import { idleInputRoot } from "../adapters/codex/queue.ts";
 import { connectControl, type RpcClient } from "../adapters/codex/rpc.ts";
 import { selectTarget } from "../adapters/codex/steer.ts";
 import { decisionDirectory } from "../adapters/shared/decisions.ts";
@@ -66,19 +67,7 @@ type CheckContext = StoreServiceContext & { readonly connectReminder?: () => Pro
 const QUALIFIED_IDLE_VERSION = "0.171.0";
 
 async function requireIdleRoot(client: RpcClient, recipient: string): Promise<void> {
-  const read = await client.call("thread/read", { includeTurns: false, threadId: recipient });
-  const thread = isRecord(read) && isRecord(read.thread) ? read.thread : null;
-  if (
-    thread === null ||
-    thread.id !== recipient ||
-    thread.parentThreadId != null ||
-    (thread.source !== "cli" && thread.source !== "vscode") ||
-    thread.canAcceptDirectInput !== true ||
-    !isRecord(thread.status) ||
-    thread.status.type !== "idle" ||
-    (thread.status.activeFlags !== undefined &&
-      (!Array.isArray(thread.status.activeFlags) || thread.status.activeFlags.length > 0))
-  ) {
+  if (!(await idleInputRoot(client, recipient))) {
     throw new StoreError("reminder-native-guarded");
   }
 }

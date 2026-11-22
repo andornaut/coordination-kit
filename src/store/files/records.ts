@@ -54,6 +54,7 @@ const QUESTION_EVENTS = new Set([
 ]);
 const WAKE_EVENTS = new Set([
   "notice.consumed",
+  "notice.released",
   "wake.claimed",
   "wake.coalesced",
   "wake.completed",

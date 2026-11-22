@@ -1,4 +1,4 @@
-// Native notice reconciliation reads exact queue and history bindings. Queue absence is not proof.
+// Native notice reconciliation uses exact consumption or accepted queue absence with collection.
 import { join } from "node:path";
 
 import { queueEntries, type QueueEntry } from "../adapters/codex/inventory.ts";
@@ -52,11 +52,21 @@ export async function noticeQueueClear(
   }
 }
 
-export interface NoticeProof {
+interface ConsumptionProof {
+  readonly kind: "consumed";
   readonly notice: PendingNotice;
   readonly item: string;
   readonly turn: string;
 }
+
+interface CollectionProof {
+  readonly kind: "released";
+  readonly notice: PendingNotice;
+  readonly inboxReads: readonly number[];
+  readonly queueId: string;
+}
+
+export type NoticeProof = ConsumptionProof | CollectionProof;
 
 interface Reconciliation {
   readonly notice: PendingNotice;
@@ -102,8 +112,8 @@ function historyProofs(
   data: readonly unknown[],
   recipient: string,
   pending: ReadonlyMap<string, Reconciliation>,
-): NoticeProof[] {
-  const proofs: NoticeProof[] = [];
+): ConsumptionProof[] {
+  const proofs: ConsumptionProof[] = [];
   for (const entry of data) {
     if (!isRecord(entry) || (entry.threadId !== undefined && entry.threadId !== recipient)) {
       throw new Error("native history binding unavailable");
@@ -124,29 +134,32 @@ function historyProofs(
     }
     const row = typeof item.clientId === "string" ? pending.get(item.clientId) : undefined;
     if (row?.notice.origin === "wake" && content === row.text) {
-      proofs.push({ item: item.id, notice: row.notice, turn: entry.turnId });
+      proofs.push({ item: item.id, kind: "consumed", notice: row.notice, turn: entry.turnId });
       continue;
     }
     const suffix = / \[([a-f0-9-]{36})\]$/.exec(content)?.[1];
     const fallback = suffix === undefined ? undefined : pending.get(suffix);
     if (fallback?.notice.origin === "reminder" && content === fallback.text) {
-      proofs.push({ item: item.id, notice: fallback.notice, turn: entry.turnId });
+      proofs.push({ item: item.id, kind: "consumed", notice: fallback.notice, turn: entry.turnId });
     }
   }
   return proofs;
 }
 
-export async function consumedNotices(
+export async function reconcileNativeNotices(
   client: RpcClient,
   root: string,
   binding: NoticeBinding,
   notices: readonly PendingNotice[],
+  collected: ReadonlyMap<string, readonly number[]>,
+  canRelease: (client: RpcClient) => Promise<boolean>,
 ): Promise<NoticeProof[]> {
   // A claim that is not yet visibly in-flight supplies no reconciliation evidence.
   const candidates = notices.flatMap((notice) => receiptEvidence(root, notice) ?? []);
   if (candidates.length === 0) {
     return [];
   }
+  let released: CollectionProof[] = [];
   try {
     const { conversation, role } = binding;
     if (!(await rootRecipient(client, conversation))) {
@@ -166,7 +179,25 @@ export async function consumedNotices(
         )
         .map((value) => [value.notice.id, value] as const),
     );
-    const found: NoticeProof[] = [];
+    if (queue.length === 0) {
+      const ready = candidates.flatMap(({ notice, queueId }): CollectionProof[] => {
+        const inboxReads = collected.get(notice.id);
+        return inboxReads === undefined || queueId === null || !REFERENCE.test(queueId)
+          ? []
+          : [{ inboxReads, kind: "released", notice, queueId }];
+      });
+      if (
+        ready.length > 0 &&
+        (await canRelease(client)) &&
+        (await queueEntries(client, conversation, PAGES)).length === 0
+      ) {
+        released = ready;
+        for (const proof of released) {
+          pending.delete(proof.notice.id);
+        }
+      }
+    }
+    const consumed: ConsumptionProof[] = [];
     const cursors = new Set<string>();
     let cursor: string | undefined;
     for (let page = 0; page < PAGES && pending.size > 0; page += 1) {
@@ -185,25 +216,25 @@ export async function consumedNotices(
         response.truncated ||
         response.hasMore
       ) {
-        return [];
+        return released;
       }
       for (const proof of historyProofs(response.data, conversation, pending)) {
         if (pending.delete(proof.notice.id)) {
-          found.push(proof);
+          consumed.push(proof);
         }
       }
       const next = response.nextCursor;
       if (next == null || pending.size === 0) {
-        return found;
+        return [...released, ...consumed];
       }
       if (typeof next !== "string" || !next || cursors.has(next)) {
-        return [];
+        return released;
       }
       cursors.add(next);
       cursor = next;
     }
-    return found;
+    return [...released, ...consumed];
   } catch {
-    return [];
+    return released;
   }
 }
