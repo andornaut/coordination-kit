@@ -1,5 +1,6 @@
 import { isRecord } from "../../adapters/shared/pyjson.ts";
 import { canonicalJson } from "../eventCodec.ts";
+import { COLLECTION_RELEASE } from "../noticesInFlight.ts";
 import { GENESIS, type Json, type StoredEvent, StoreError } from "../types.ts";
 
 const WINDOW = 100;
@@ -155,14 +156,19 @@ function unresolvedDelivery(events: readonly StoredEvent[]): ReadonlySet<string>
         if (claim && payload.outcome !== undefined) {
           claim.outcome = payload.outcome;
         }
-      } else if (kind === "notice.consumed") {
+      } else if (kind === "notice.consumed" || kind === "notice.released") {
         const claim = wakes.get(id) ?? reminders.get(id);
         if (
           claim !== undefined &&
           typeof payload.conversation === "string" &&
           claim.event.payload.role === payload.role &&
           (claim.event.payload.conversation ?? claim.event.payload.nativeId) ===
-            payload.conversation
+            payload.conversation &&
+          (kind === "notice.consumed" ||
+            (claim.event.kind === "wake.claimed" &&
+              claim.outcome === "accepted" &&
+              payload.claimSeq === claim.event.seq &&
+              payload.reason === COLLECTION_RELEASE))
         ) {
           claim.consumed = true;
         }

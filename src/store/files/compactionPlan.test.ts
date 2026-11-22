@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { eventHash } from "../eventCodec.ts";
+import { COLLECTION_RELEASE } from "../noticesInFlight.ts";
 import { GENESIS, type JsonObject, type StoredEvent } from "../types.ts";
 import { type CompactionScope, planFileCompaction } from "./compactionPlan.ts";
 
@@ -213,44 +214,48 @@ describe("file compaction plan", () => {
     expect(() => planFileCompaction(events.slice(1), SCOPE)).toThrow("compaction-snapshot-order");
   });
 
-  it("protects operational bodies and waits for exact native delivery consumption", () => {
-    const { append, close, countCloses, events, send } = journal();
-    send("review", FIRST);
-    append("review.brief", "delivery-kit", { messageId: "review" });
-    close("review", FIRST);
-    append("msg.imported", "system", {
-      body: "Legacy COMPLETE reference",
-      from: SENDER,
-      id: "complete",
-      legacy: { verified: true },
-      to: FIRST,
-    });
-    close("complete", FIRST);
-    send("queued-notice", FIRST);
-    append("wake.claimed", "system", {
-      conversation: "thread",
-      harness: "codex",
-      messages: ["queued-notice"],
-      role: FIRST,
-      wake: "notice",
-    });
-    append("wake.completed", "system", { outcome: "accepted", role: FIRST, wake: "notice" });
-    close("queued-notice", FIRST);
-    countCloses(100, FIRST);
-    const plan = () =>
-      planFileCompaction(events, {
-        ...SCOPE,
-        verifiedEvidence: proof(events, ["review", "complete", "queued-notice"]),
-      }).streams.find((stream) => stream.source === FIRST)!;
-    expect(plan().eligible.count).toBe(0);
-    expect(plan().protected).toMatchObject([
-      { count: 1, reason: "delivery-unresolved" },
-      { count: 2, reason: "operational-body-reference" },
-      { count: 100, reason: "within-window" },
-    ]);
-    append("notice.consumed", "system", { conversation: "other", id: "notice", role: FIRST });
-    expect(plan().eligible.count).toBe(0);
-    append("notice.consumed", "system", { conversation: "thread", id: "notice", role: FIRST });
-    expect(plan().eligible.count).toBe(1);
-  });
+  it.each(["notice.consumed", "notice.released"])(
+    "protects operational bodies until verified delivery clears (%s)",
+    (kind) => {
+      const { append, close, countCloses, events, send } = journal();
+      send("review", FIRST);
+      append("review.brief", "delivery-kit", { messageId: "review" });
+      close("review", FIRST);
+      append("msg.imported", "system", {
+        body: "Legacy COMPLETE reference",
+        from: SENDER,
+        id: "complete",
+        legacy: { verified: true },
+        to: FIRST,
+      });
+      close("complete", FIRST);
+      send("queued-notice", FIRST);
+      const claimSeq = append("wake.claimed", "system", {
+        conversation: "thread",
+        harness: "codex",
+        messages: ["queued-notice"],
+        role: FIRST,
+        wake: "notice",
+      });
+      append("wake.completed", "system", { outcome: "accepted", role: FIRST, wake: "notice" });
+      close("queued-notice", FIRST);
+      countCloses(100, FIRST);
+      const plan = () =>
+        planFileCompaction(events, {
+          ...SCOPE,
+          verifiedEvidence: proof(events, ["review", "complete", "queued-notice"]),
+        }).streams.find((stream) => stream.source === FIRST)!;
+      expect(plan().eligible.count).toBe(0);
+      expect(plan().protected).toMatchObject([
+        { count: 1, reason: "delivery-unresolved" },
+        { count: 2, reason: "operational-body-reference" },
+        { count: 100, reason: "within-window" },
+      ]);
+      const disposition = { claimSeq, id: "notice", reason: COLLECTION_RELEASE, role: FIRST };
+      append(kind, "system", { ...disposition, conversation: "other" });
+      expect(plan().eligible.count).toBe(0);
+      append(kind, "system", { ...disposition, conversation: "thread" });
+      expect(plan().eligible.count).toBe(1);
+    },
+  );
 });
