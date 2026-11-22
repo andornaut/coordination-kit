@@ -31,13 +31,33 @@ const CATEGORIES = [
 const CLASSIFICATIONS = ["guarded", "native-rejected", "outcome-unknown", "unavailable"] as const;
 const RPC_CODES = [-32700, -32600, -32601, -32602, -32603, -32000] as const;
 export type NativeRpcCode = (typeof RPC_CODES)[number];
+export interface NativeQuestionRef {
+  readonly turnId: string;
+  readonly itemId: string;
+}
 export type DeliveryDiagnostic = {
   readonly stage: (typeof STAGES)[number];
   readonly category: (typeof CATEGORIES)[number];
   readonly classification: (typeof CLASSIFICATIONS)[number];
   readonly method?: (typeof DIAGNOSTIC_METHODS)[number];
   readonly rpcCode?: NativeRpcCode;
+  readonly question?: NativeQuestionRef;
 };
+const SAFE_NATIVE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+
+export function safeNativeQuestionRef(value: unknown): NativeQuestionRef | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const { itemId, turnId } = value as Record<string, unknown>;
+  return typeof turnId === "string" &&
+    typeof itemId === "string" &&
+    SAFE_NATIVE_ID.test(turnId) &&
+    SAFE_NATIVE_ID.test(itemId)
+    ? { itemId, turnId }
+    : undefined;
+}
+
 export function safeRpcCode(value: unknown): NativeRpcCode | undefined {
   return RPC_CODES.includes(value as NativeRpcCode) ? (value as NativeRpcCode) : undefined;
 }
@@ -60,11 +80,16 @@ export function safeDeliveryDiagnostic(value: unknown): DeliveryDiagnostic | und
     ? (record.method as NonNullable<DeliveryDiagnostic["method"]>)
     : undefined;
   const rpcCode = safeRpcCode(record.rpcCode);
+  const question =
+    record.category === "pending-question" && record.stage === "question-guard"
+      ? safeNativeQuestionRef(record.question)
+      : undefined;
   return {
     category: record.category as DeliveryDiagnostic["category"],
     classification: record.classification as DeliveryDiagnostic["classification"],
     stage: record.stage as DeliveryDiagnostic["stage"],
     ...(method === undefined ? {} : { method }),
+    ...(question === undefined ? {} : { question }),
     ...(rpcCode === undefined ? {} : { rpcCode }),
   };
 }

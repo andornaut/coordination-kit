@@ -575,7 +575,7 @@ describe("question proof after completed compaction", () => {
     expect(readFileSync(path)).toEqual(before);
   });
 
-  it("keeps an unbound native reply guarded and exposes only an opt-in diagnostic category", async () => {
+  it("keeps an unbound native reply guarded and exposes only the bounded blocker reference", async () => {
     const native = new Native();
     native.items.compact = [
       question,
@@ -590,7 +590,12 @@ describe("question proof after completed compaction", () => {
     expect(result).toEqual([
       false,
       "native question pending: question_turn_id=compact question_item_id=question",
-      { category: "pending-question", classification: "guarded", stage: "question-guard" },
+      {
+        category: "pending-question",
+        classification: "guarded",
+        question: { itemId: "question", turnId: "compact" },
+        stage: "question-guard",
+      },
     ]);
     expect(JSON.stringify(result)).not.toContain("PRIVATE_REPLY");
     expect(readFileSync(path)).toEqual(before);

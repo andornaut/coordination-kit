@@ -2,6 +2,7 @@
 // history by exact turn and item IDs. Unknown or incomplete history defers.
 import { decisionClear, type DecisionRecord, decisionRecord } from "../shared/decisions.ts";
 import { isRecord, sameJson } from "../shared/pyjson.ts";
+import { type NativeQuestionRef, safeNativeQuestionRef } from "../types.ts";
 import type { RpcClient } from "./rpc.ts";
 
 export const NATIVE_ITEM_TYPES: ReadonlySet<string> = new Set([
@@ -45,6 +46,7 @@ export interface NativeQuestionDiagnostic {
     | "compaction-unproven"
     | "binding-mismatch";
   readonly classification: "guarded" | "unavailable";
+  readonly question?: NativeQuestionRef;
 }
 
 type QuestionResult = [boolean, string | null, NativeQuestionDiagnostic?];
@@ -461,8 +463,13 @@ export async function nativeQuestionsClear(
     category: NativeQuestionDiagnostic["category"],
     reason: string,
     classification: NativeQuestionDiagnostic["classification"] = "guarded",
+    question?: NativeQuestionRef,
   ): QuestionResult =>
-    refusedQuestion({ category, classification }, reason, options.diagnostics === true);
+    refusedQuestion(
+      { category, classification, ...(question === undefined ? {} : { question }) },
+      reason,
+      options.diagnostics === true,
+    );
   try {
     const record = decisionRecord(unblockDir, recipient);
     if (record === null || record.state !== "clear") {
@@ -511,6 +518,8 @@ export async function nativeQuestionsClear(
         return refused(
           "pending-question",
           `native question pending: question_turn_id=${proofId} question_item_id=${item.id}`,
+          "guarded",
+          safeNativeQuestionRef({ itemId: item.id, turnId: proofId }),
         );
       }
     }
