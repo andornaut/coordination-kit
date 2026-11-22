@@ -1,0 +1,320 @@
+import {
+  closeSync,
+  fsyncSync,
+  lstatSync,
+  openSync,
+  readdirSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+
+import { isCanonicalUuid } from "../adapters/shared/ids.ts";
+import { isRecord } from "../adapters/shared/pyjson.ts";
+import { fsyncDirectory, readJson } from "../durable.ts";
+import type { Handler } from "../io.ts";
+import { withLock } from "../lock.ts";
+import { storePath, storeRoot } from "../store/db.ts";
+import { canonicalJson } from "../store/eventCodec.ts";
+import { fileAuthority } from "../store/files/authority.ts";
+import {
+  type CheckpointHead,
+  prepareCompactionCheckpoint,
+} from "../store/files/compactionCheckpoint.ts";
+import {
+  type PreparedFileCheckpoint,
+  prepareFileCheckpoint,
+  selectFileCheckpoint,
+} from "../store/files/compactionGeneration.ts";
+import type { CompactionScope } from "../store/files/compactionPlan.ts";
+import { openFileJournal, readFileJournalFence } from "../store/files/journal.ts";
+import { resolveCaller } from "../store/identity.ts";
+import { MESSAGE_ID, REF, ROLE, sha256 } from "../store/messages.ts";
+import { registry, type StoreServiceContext } from "../store/service.ts";
+import { type StoredEvent, StoreError } from "../store/types.ts";
+import { callerOf, required, run, type Values } from "./store.ts";
+
+export const COMPACTION_PREPARE_OPTIONS = {
+  evidence: { type: "string" },
+  "native-id": { type: "string" },
+  receipt: { type: "string" },
+  restore: { type: "string" },
+} as const;
+
+export const COMPACTION_ACTIVATE_OPTIONS = {
+  ...COMPACTION_PREPARE_OPTIONS,
+  approval: { type: "string" },
+  id: { type: "string" },
+} as const;
+
+const HEX = /^[a-f0-9]{64}$/;
+
+function contains(parent: string, child: string): boolean {
+  const path = relative(parent, child);
+  return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`));
+}
+
+function canonicalPath(path: string, parent = path): string {
+  if (!isAbsolute(path) || resolve(path) !== path || realpathSync(parent) !== parent) {
+    throw new StoreError("compaction-path-invalid");
+  }
+  return path;
+}
+
+function externalPath(path: string, ...roots: string[]): string {
+  if (roots.some((root) => contains(root, path) || contains(path, root))) {
+    throw new StoreError("compaction-path-overlap");
+  }
+  return path;
+}
+
+function independentRestore(path: string): void {
+  if (
+    !lstatSync(path).isDirectory() ||
+    readdirSync(path, { recursive: true, withFileTypes: true }).some(
+      (entry) =>
+        !entry.isDirectory() &&
+        (!entry.isFile() || lstatSync(resolve(entry.parentPath, entry.name)).nlink !== 1),
+    )
+  ) {
+    throw new StoreError("compaction-restore-not-independent");
+  }
+}
+
+function regularJson(path: string): unknown {
+  const file = lstatSync(path, { throwIfNoEntry: false });
+  if (!file?.isFile() || file.nlink !== 1 || realpathSync(path) !== path) {
+    throw new StoreError("compaction-record-path-invalid");
+  }
+  return readJson(path);
+}
+
+function writeReceipt(path: string, value: unknown): void {
+  let fd: number;
+  try {
+    fd = openSync(path, "wx", 0o600);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new StoreError("compaction-receipt-exists");
+    }
+    throw error;
+  }
+  try {
+    writeFileSync(fd, `${canonicalJson(value)}\n`);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  fsyncDirectory(dirname(path));
+}
+
+function positive(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function reference(value: unknown, pattern: RegExp): value is string {
+  return typeof value === "string" && pattern.test(value);
+}
+
+function messageProof(input: unknown, events: readonly StoredEvent[]): string {
+  if (
+    !isRecord(input) ||
+    Object.keys(input).sort().join(",") !== "closeSeq,id,owner,replacement" ||
+    !positive(input.closeSeq) ||
+    !reference(input.id, MESSAGE_ID) ||
+    !reference(input.owner, ROLE) ||
+    !reference(input.replacement, REF)
+  ) {
+    throw new StoreError("compaction-message-evidence-invalid");
+  }
+  const close = events[input.closeSeq - 1];
+  if (
+    close?.seq !== input.closeSeq ||
+    close.kind !== "msg.closed" ||
+    close.actor.role !== input.owner ||
+    close.payload.id !== input.id ||
+    (close.payload.state !== "handled" && close.payload.state !== "superseded") ||
+    !Array.isArray(close.payload.evidence) ||
+    !close.payload.evidence.includes(input.replacement)
+  ) {
+    throw new StoreError("compaction-message-replacement-unverified");
+  }
+  return input.id;
+}
+
+function evidence(path: string, events: readonly StoredEvent[]) {
+  const value = regularJson(path);
+  if (
+    !isRecord(value) ||
+    Object.keys(value).sort().join(",") !==
+      "head,messages,registryRevision,routineEventSequences,schema" ||
+    value.schema !== 1 ||
+    !isRecord(value.head) ||
+    Object.keys(value.head).sort().join(",") !== "hash,seq" ||
+    !positive(value.head.seq) ||
+    !reference(value.head.hash, HEX) ||
+    !positive(value.registryRevision) ||
+    !Array.isArray(value.messages) ||
+    !Array.isArray(value.routineEventSequences) ||
+    !value.routineEventSequences.every(positive)
+  ) {
+    throw new StoreError("compaction-evidence-invalid");
+  }
+  const messageIds = new Set(value.messages.map((record: unknown) => messageProof(record, events)));
+  const routineEventSequences = new Set(value.routineEventSequences);
+  if (
+    messageIds.size !== value.messages.length ||
+    routineEventSequences.size !== value.routineEventSequences.length
+  ) {
+    throw new StoreError("compaction-evidence-duplicate");
+  }
+  return {
+    digest: sha256(canonicalJson(value)),
+    selectors: {
+      head: { hash: value.head.hash, seq: value.head.seq },
+      messageIds,
+      registryRevision: value.registryRevision,
+      routineEventSequences,
+    },
+  };
+}
+
+function coordinator(context: StoreServiceContext, values: Values) {
+  const roles = registry(context);
+  const actor = resolveCaller(roles, context.env, callerOf(values));
+  const binding = roles.roles[actor.role];
+  if (
+    actor.role !== "game-coordinator" ||
+    binding?.ownership !== "active" ||
+    (binding.phase !== undefined && binding.phase !== "active")
+  ) {
+    throw new StoreError("not-coordinator");
+  }
+  return roles;
+}
+
+function operation(context: StoreServiceContext, values: Values) {
+  coordinator(context, values);
+  const { layout } = context;
+  const source = fileAuthority(layout, storePath(layout));
+  if (source.kind !== "files") {
+    throw new StoreError("compaction-file-authority-required");
+  }
+  const { path, receipt: cutover } = source;
+  const excluded = [layout.root, storeRoot(layout)];
+  const restored = externalPath(canonicalPath(required(values, "restore")), ...excluded);
+  const file = required(values, "receipt");
+  externalPath(canonicalPath(file, dirname(file)), ...excluded, restored);
+  const proofPath = required(values, "evidence");
+  independentRestore(restored);
+  const events = openFileJournal(restored).snapshot().events;
+  const initial = evidence(proofPath, events);
+  function scope(): CompactionScope {
+    const current = evidence(proofPath, events);
+    const { revision, roles } = coordinator(context, values);
+    if (current.digest !== initial.digest || current.selectors.registryRevision !== revision) {
+      throw new StoreError("compaction-evidence-changed");
+    }
+    return {
+      registeredGames: new Set(Object.keys(layout.config.games)),
+      registeredRoles: new Set(Object.keys(roles)),
+      registryRevision: revision,
+      verifiedEvidence: current.selectors,
+    };
+  }
+  return { cutover, events, file, initial, path, restored, scope };
+}
+
+function receiptMetadata(
+  { cutover, initial, restored }: ReturnType<typeof operation>,
+  id: string,
+  { digest, head }: { readonly digest: string; readonly head: CheckpointHead },
+  restoreDigest: string,
+) {
+  return {
+    cutoverId: cutover.id,
+    digest,
+    evidenceDigest: initial.digest,
+    head,
+    id,
+    registryRevision: initial.selectors.registryRevision,
+    restoreDigest,
+    restored,
+    schema: 1 as const,
+  };
+}
+
+export const compactionPrepare: Handler = (io, root, args) =>
+  run(
+    io,
+    root,
+    "store compaction-prepare",
+    args,
+    (context, values) => {
+      const input = operation(context, values);
+      if (readFileJournalFence(input.path) !== undefined) {
+        throw new StoreError("compaction-source-already-fenced");
+      }
+      const { id, receipt, restoreDigest } = prepareFileCheckpoint(
+        input.path,
+        input.restored,
+        input.scope(),
+        input.cutover.head,
+      );
+      input.scope();
+      const record = receiptMetadata(input, id, receipt, restoreDigest);
+      writeReceipt(input.file, record);
+      return record;
+    },
+    COMPACTION_PREPARE_OPTIONS,
+  );
+
+export const compactionActivate: Handler = (io, root, args) =>
+  run(
+    io,
+    root,
+    "store compaction-activate",
+    args,
+    (context, values) => {
+      const id = required(values, "id");
+      const approval = required(values, "approval");
+      if (!isCanonicalUuid(id) || !reference(approval, REF)) {
+        throw new StoreError("compaction-activation-invalid");
+      }
+      coordinator(context, values);
+      return withLock(
+        context.layout.registryLock,
+        () => {
+          const input = operation(context, values);
+          const saved = regularJson(input.file);
+          if (!isRecord(saved) || !reference(saved.restoreDigest, HEX)) {
+            throw new StoreError("compaction-receipt-invalid");
+          }
+          const candidate = prepareCompactionCheckpoint(
+            input.events,
+            input.scope(),
+            input.cutover.head,
+          );
+          const record = receiptMetadata(input, id, candidate.receipt, saved.restoreDigest);
+          if (canonicalJson(saved) !== canonicalJson(record)) {
+            throw new StoreError("compaction-receipt-mismatch");
+          }
+          const prepared: PreparedFileCheckpoint = {
+            ...candidate,
+            id,
+            restoreDigest: saved.restoreDigest,
+          };
+          selectFileCheckpoint(
+            input.path,
+            input.restored,
+            prepared,
+            input.scope,
+            input.cutover.head,
+          );
+          return { ...record, approval };
+        },
+        { timeoutSeconds: 5 },
+      );
+    },
+    COMPACTION_ACTIVATE_OPTIONS,
+  );

@@ -55,9 +55,17 @@ independent copies outside the checkout and prepares the ignored filesystem targ
 activation require the current active game-coordinator binding. See the
 [migration runbook](upgrading.md#filesystem-authority-migration).
 
-`store compaction-plan` reads the selected filesystem journal and reports the history windows,
-measured bytes, and protected reasons at its exact head. It writes nothing. See the
-[store guide](store.md) for record protection and disk savings.
+## Filesystem compaction commands
+
+- `store compaction-plan` reports history windows, measured bytes and protected reasons at the
+  selected journal head. It writes nothing.
+- `store compaction-prepare --restore DIR --evidence FILE --receipt NEW_FILE` qualifies
+  a candidate against an independent restore and writes a new external receipt.
+- `store compaction-activate --id UUID --restore DIR --evidence FILE --receipt FILE --approval REF`
+  selects the exact candidate during an approved idle boundary.
+
+Prepare and activate require the active game-coordinator binding. See the
+[filesystem compaction runbook](store.md#filesystem-compaction-runbook).
 
 ## Command semantics
 

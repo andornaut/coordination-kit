@@ -1,5 +1,6 @@
 // Every command's options: the one source for argument parsing and for the help text, so a flag a
 // command accepts always appears in `coordination-kit --help`.
+import { COMPACTION_ACTIVATE_OPTIONS, COMPACTION_PREPARE_OPTIONS } from "./compaction.ts";
 import { DOCTOR_OPTIONS } from "./doctor.ts";
 import { GRAPH_INDEX_OPTIONS, GRAPH_OPTIONS, GRAPH_WHY_OPTIONS } from "./graph.ts";
 import {
@@ -209,6 +210,26 @@ export const SPECS = {
     options: STORE_COMPACTION_PLAN_OPTIONS,
     summary:
       "report filesystem history windows, measured bytes and protected records without writing",
+  },
+  "store compaction-prepare": {
+    forms: [["restore", "evidence", "receipt", "native-id?"]],
+    group: "store",
+    options: COMPACTION_PREPARE_OPTIONS,
+    summary: "qualify an exact filesystem checkpoint and write a new external receipt",
+    values: { evidence: "ABSOLUTE_FILE", receipt: "ABSOLUTE_FILE", restore: "ABSOLUTE_DIR" },
+  },
+  "store compaction-activate": {
+    forms: [["id", "restore", "evidence", "receipt", "approval", "native-id?"]],
+    group: "store",
+    options: COMPACTION_ACTIVATE_OPTIONS,
+    summary: "select an exact restored checkpoint at the approved idle boundary",
+    values: {
+      approval: "REF",
+      evidence: "ABSOLUTE_FILE",
+      id: "RECEIPT_ID",
+      receipt: "ABSOLUTE_FILE",
+      restore: "ABSOLUTE_DIR",
+    },
   },
   "store retire": {
     forms: [["dry-run"], ["apply", "native-id?", "worker?"]],

@@ -2,6 +2,7 @@
 // game-coordinator from --root (in any position, once), COORDINATION_KIT_ROOT, DELIVERY_KIT_ROOT or
 // the working directory, in that order; the work group reads --root as the repository instead.
 import { channel } from "./commands/channel.ts";
+import { compactionActivate, compactionPrepare } from "./commands/compaction.ts";
 import { harnessDoctor } from "./commands/doctor.ts";
 import { graph, graphIndex, graphWhy } from "./commands/graph.ts";
 import { harnessSelect } from "./commands/harness.ts";
@@ -142,7 +143,9 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "review show": reviewShow,
   "session start": sessionStart,
   status,
+  "store compaction-activate": compactionActivate,
   "store compaction-plan": storeCompactionPlanCommand,
+  "store compaction-prepare": compactionPrepare,
   "store export": storeExportCommand,
   "store import": storeImportCommand,
   "store migration-activate": migrationActivate,

@@ -113,6 +113,44 @@ and independent restore. At an approved idle review boundary, recheck the exact 
 registry binding before selecting a prepared generation under the writer lock. Keep loose
 copies and backups through the review. Pruning after that review requires a separate decision.
 
+## Filesystem compaction runbook
+
+The active game-coordinator runs these commands against the primary coordinator checkout.
+Use the existing scheduled review and operator approval lane.
+
+1. Run `store compaction-plan` and record the exact head and registry revision. Confirm the
+   decisions, approvals, open or retained messages and other material evidence that must remain
+   accessible. Restore a separate full copy of the selected compactable filesystem authority
+   from backup, including its journal, keys and committed companion records. Use an absolute
+   real path outside the checkout and current state, with independent regular files.
+2. Use a JSON evidence file with schema 1, the plan's `head` and `registryRevision`,
+   `messages`, and `routineEventSequences`. For each message give its exact `id`, `owner`,
+   `closeSeq`, and `replacement`. The owner's terminal close must list that durable reference
+   in its evidence. The owner verifies the replacement and reconciles live references before
+   inclusion. List routine event sequence numbers only after verifying their place in the
+   restored history and confirming the state, evidence, cursor and key coverage. Both arrays may
+   be empty. A candidate needs at least one exact original that passes the plan's eligibility checks.
+3. Run the prepare command with the independent restore, the evidence and a new absolute
+   receipt path outside the checkout, current state and restored copy. The command compares
+   the committed source with the restored copy and writes only the receipt. Keep the receipt,
+   evidence and restore together through the review. The receipt contains the identifier,
+   journal head, registry revision and digests.
+4. Obtain explicit activation approval for that receipt. Record the approval and manual
+   custody at the existing idle review boundary. Verify the source is idle, writers are drained
+   and affected owners are held for the activation. Preserve other questions and holds.
+   Invoke activate with the same restore, evidence, receipt and ID, plus the approval reference.
+   The command validates the reference format and rechecks the exact inputs and registry under
+   the existing locks. The coordinator verifies the approval and actual idle custody.
+5. Verify the selected journal at the review. If activation was interrupted after fencing,
+   retain the custody and retry the same activation with the same inputs. If the head or
+   registry changed before fencing, review a fresh plan and prepare a new receipt. An
+   interrupted prepare may leave a partial receipt at its exclusive path. Use a new path for
+   requalification. Keep the restored backup and all loose copies until the operator separately
+   authorizes cleanup.
+
+The commands select the first checkpoint from a full journal. The retained source and restored
+copy contain the original bodies. There is no scheduled activation or cleanup.
+
 ## Schema
 
 `events` is append-only; triggers abort any `UPDATE` or `DELETE`.
