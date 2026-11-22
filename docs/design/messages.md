@@ -25,3 +25,4 @@ Reference: [messages](../messages.md), [commands](../commands.md#command-semanti
 | ck-0004 | Scale the message store                   | [ck-0004.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0004.md) |
 | ck-0005 | Retry a busy transport                    | [ck-0005.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0005.md) |
 | ck-0009 | Fix the recipient status binding conflict | [ck-0009.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0009.md) |
+| ck-0024 | Read exact messages and clarify retention | [ck-0024.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0024.md) |
