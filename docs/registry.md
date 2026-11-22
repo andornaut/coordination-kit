@@ -98,7 +98,8 @@ only reads them, and a missing or invalid record is never clearance.
 `claude ready` and `codex ready` send nothing and report whether that adapter can deliver now:
 
 - Claude: `claude agents --json` returns a listing.
-- Codex: `CODEX_CONTROL_SOCKET` names an absolute socket path that accepts a connection.
+- Codex: the endpoint selected by the [shared resolver](#scoped-harness-doctor) accepts a
+  connection. An explicit `CODEX_CONTROL_SOCKET` must be a valid absolute socket path.
 - The route's recipient and every target, or every game's `reports.recipient` when there is no
   route, have a conversation ID for that harness. An invalid route is never ready.
 
@@ -152,7 +153,7 @@ Read-only probe eligibility requires `ownership: "active"` and excludes phases `
 `source-held`. Other phases, including `prototype-approved`, describe product scope and do not
 disable probes. Eligibility never proves native HOLD clearance or activation.
 
-Codex endpoint selection uses `resolveCodexControlSocket({env?, home?, controlSocket?})`:
+Codex readiness, doctor and wakes use `resolveCodexControlSocket({env?, home?, controlSocket?})`:
 explicit option, then `CODEX_CONTROL_SOCKET`, then the managed socket under
 `~/.codex/app-server-control/app-server-control.sock`. The result is `{path, source}`, where
 source is `option`, `environment` or `managed`. Selection performs no probe; an invalid

@@ -4,7 +4,7 @@ import { performance } from "node:perf_hooks";
 
 import { listingOrNull } from "../adapters/claude/agents.ts";
 import { connectControl } from "../adapters/codex/rpc.ts";
-import { resolveCodexEndpoint } from "../adapters/shared/endpoints.ts";
+import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
 import { readRoleRoute, routeRecipient } from "../adapters/shared/route.ts";
 import { gameRecipients } from "../config.ts";
 import type { Layout } from "../layout.ts";
@@ -45,18 +45,29 @@ export interface EffectiveReadiness {
 }
 
 const PROBE_MS = 5000;
+const EXPLICIT_SOCKET_REQUIRED =
+  "set CODEX_CONTROL_SOCKET to an available absolute Codex control socket path";
 
 async function codexAdapterStatus(env: NodeJS.ProcessEnv): Promise<string | null> {
-  const socket = resolveCodexEndpoint({ discovery: "configured", env }).path;
+  let endpoint;
   try {
-    if (socket === null || !statSync(socket).isSocket()) {
-      return "set CODEX_CONTROL_SOCKET to an available absolute Codex control socket path";
+    endpoint = resolveCodexControlSocket({ env });
+  } catch {
+    return EXPLICIT_SOCKET_REQUIRED;
+  }
+  const unavailable =
+    endpoint.source === "managed"
+      ? "the managed Codex control socket is unavailable"
+      : EXPLICIT_SOCKET_REQUIRED;
+  try {
+    if (!statSync(endpoint.path).isSocket()) {
+      return unavailable;
     }
   } catch {
-    return "set CODEX_CONTROL_SOCKET to an available absolute Codex control socket path";
+    return unavailable;
   }
   try {
-    (await connectControl(performance.now() + PROBE_MS, socket)).close();
+    (await connectControl(performance.now() + PROBE_MS, endpoint.path)).close();
     return null;
   } catch {
     return "the Codex control socket refused the connection";

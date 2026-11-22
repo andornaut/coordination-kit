@@ -27,6 +27,9 @@ same class another subpath exports. Each bundle imports only `node:` builtins an
 
 `@andornaut/coordination-kit/build/shared` exports, by source module:
 
+- Codex control endpoint: `resolveCodexControlSocket`, `CodexControlSocketEndpoint` and
+  `CodexControlSocketOptions`. Startup tools can use this path selector without probing the
+  socket. See [Codex endpoint selection](registry.md#scoped-harness-doctor).
 - durable files: `writeDurable`, `writeJsonDurable`, `fsyncDirectory`, `readJson`,
   `readJsonIfExists`, `JsonFileError`;
 - locks: `holdLock`, `holdLockAsync`, `withLock`, `lockIsFree`, `LockBusy`, `LockError`,
