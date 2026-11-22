@@ -18,6 +18,7 @@ import {
   storeExport,
   storeHistory,
   storeInbox,
+  storeInboxPeek,
   storeRebuild,
   storeRetain,
   storeSend,
@@ -76,6 +77,7 @@ export const INBOX_OPTIONS = {
   ...CALLER,
   all: { type: "boolean" },
   "include-body": { type: "boolean" },
+  peek: { type: "boolean" },
 } as const;
 
 export const STORE_IMPORT_OPTIONS = {
@@ -359,11 +361,18 @@ export const inbox: Handler = (io, root, args) =>
     root,
     "inbox",
     args,
-    (context, values) =>
-      storeInbox(context, callerOf(values), {
+    (context, values) => {
+      if (values.peek === true) {
+        if (values.all === true || values["include-body"] === true) {
+          throw new Usage();
+        }
+        return storeInboxPeek(context, callerOf(values));
+      }
+      return storeInbox(context, callerOf(values), {
         all: values.all === true,
         includeBody: values["include-body"] === true,
-      }),
+      });
+    },
     INBOX_OPTIONS,
   );
 

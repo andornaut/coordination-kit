@@ -141,8 +141,7 @@ describe("Codex wakes", () => {
       },
     ]);
     expect(pendingWakeRoles(store)).toEqual([ART_ROLE]);
-    // The review seam rearms an outstanding wake; the next wake then goes out once.
-    expect(rearmWake(store, { nativeId: null, role: null }, ART_ROLE, "review slot")).toBe(true);
+    // The review seam preserves unresolved Codex acceptance even at the next slot.
     expect(rearmWake(store, { nativeId: null, role: null }, ART_ROLE, "review slot")).toBe(false);
     expect(
       await wakeRecipient(
@@ -150,9 +149,9 @@ describe("Codex wakes", () => {
         ART_ROLE,
       ),
     ).toMatchObject({
-      status: "ambiguous",
+      status: "coalesced",
     });
-    expect(codex.adds()).toHaveLength(2);
+    expect(codex.adds()).toHaveLength(1);
     expect(
       store.db.prepare("SELECT count(*) AS n FROM messages WHERE state = 'sent'").get(),
     ).toEqual({ n: 3 });

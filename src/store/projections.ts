@@ -5,6 +5,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import { HANDOFFS_PROJECTION } from "./handoffs.ts";
+import { MESSAGE_WAKE_PROJECTION } from "./messageWake.ts";
 import { POLICY_HOLDS_PROJECTION } from "./policyHolds.ts";
 import { QUESTION_ANSWERS_PROJECTION, QUESTIONS_PROJECTION } from "./questions.ts";
 import { REQUESTS_PROJECTION } from "./requests.ts";
@@ -373,6 +374,7 @@ export const DELIVERY_PROJECTION: Projection = {
 /** Every projection, in apply order. A later phase appends its own here. */
 export const PROJECTIONS: readonly Projection[] = [
   MESSAGES_PROJECTION,
+  MESSAGE_WAKE_PROJECTION,
   DELIVERY_PROJECTION,
   QUESTIONS_PROJECTION,
   QUESTION_ANSWERS_PROJECTION,

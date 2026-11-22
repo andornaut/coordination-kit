@@ -102,3 +102,31 @@ export interface MessageView {
 }
 
 export type WakeOutcome = "accepted" | "guarded" | "failed" | "ambiguous";
+
+/** Safe links to an exact blocker, or the wake event carrying unresolved evidence. */
+export interface WakeBlocker {
+  readonly kind: "question" | "hold" | "policy-hold" | "registry" | "wake" | "native-question";
+  readonly id: string;
+  readonly owner: string;
+  readonly native?: { readonly turnId: string; readonly itemId: string };
+}
+
+export interface MessageWakeView {
+  readonly outcome: WakeOutcome | "coalesced" | "unknown";
+  readonly wake: string | null;
+  readonly reason: string | null;
+  readonly blocker: WakeBlocker | null;
+  readonly nextAction:
+    | "collect-at-safe-boundary"
+    | "reconcile-without-resending"
+    | "reconcile-original"
+    | "follow-retention-boundary"
+    | "none";
+}
+
+export interface UnreadMessage {
+  readonly id: string;
+  readonly from: string;
+  readonly to: string;
+  readonly wake: MessageWakeView;
+}

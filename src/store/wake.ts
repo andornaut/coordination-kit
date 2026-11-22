@@ -23,12 +23,19 @@ import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Harness } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 import { type Store, storeRoot } from "./db.ts";
+import {
+  blockerPayload,
+  coalescedMessages,
+  safeWakeBlocker,
+  safeWakeReason,
+} from "./messageWake.ts";
 import { questionHoldGuard } from "./questions.ts";
-import { type Actor, StoreError, type WakeOutcome } from "./types.ts";
+import { type Actor, StoreError, type WakeBlocker, type WakeOutcome } from "./types.ts";
 
 export interface WakeGuard {
   readonly status: "clear" | "blocked";
   readonly reason?: string;
+  readonly blocker?: WakeBlocker;
 }
 
 /**
@@ -111,11 +118,12 @@ function checkStoreGuard(context: WakeContext, role: string, harness: Harness): 
 
 const SYSTEM: Actor = { nativeId: null, role: null };
 
-function undeliveredCount(store: Store, role: string): number {
-  const row = store.db
-    .prepare("SELECT count(*) AS n FROM messages WHERE to_role = ? AND state = 'sent'")
-    .get(role) as { n: number } | undefined;
-  return Number(row?.n ?? 0);
+function undeliveredIds(store: Store, role: string): string[] {
+  return (
+    store.db
+      .prepare("SELECT id FROM messages WHERE to_role = ? AND state = 'sent' ORDER BY sent_seq")
+      .all(role) as { id: string }[]
+  ).map(({ id }) => id);
 }
 
 /** One recipient's wake state: pending since a send, and the outstanding wake if any. */
@@ -148,7 +156,14 @@ export function pendingWakeRoles(store: Store): string[] {
  */
 export function rearmWake(store: Store, actor: Actor, role: string, reason: string): boolean {
   return store.transaction(() => {
-    if (wakeState(store, role).outstanding === null) {
+    const outstanding = wakeState(store, role).outstanding;
+    if (outstanding === null) {
+      return false;
+    }
+    const receipt = store.db
+      .prepare("SELECT harness, outcome FROM wakes WHERE id = ? AND role = ?")
+      .get(outstanding, role);
+    if (receipt === undefined || (receipt.harness !== "claude" && receipt.outcome !== "failed")) {
       return false;
     }
     store.append({
@@ -181,17 +196,35 @@ async function codexWake(
   target: Target,
   wake: string,
   text: string,
-): Promise<{ readonly outcome: WakeOutcome; readonly detail: string | null }> {
+): Promise<{
+  readonly outcome: WakeOutcome;
+  readonly detail: string | null;
+  readonly blocker: WakeBlocker | null;
+}> {
   const { layout } = context;
   const recipient = target.conversation;
+  let refused: WakeGuard | undefined;
   const locallyClear = (): boolean => {
     const directory = decisionDirectory(layout, role);
-    return (
-      directory !== null &&
-      sameTarget(layout, role, target) &&
-      checkStoreGuard(context, role, target.harness).status === "clear" &&
-      decisionClear(directory, recipient)
-    );
+    if (!sameTarget(layout, role, target)) {
+      refused = {
+        blocker: { id: role, kind: "registry", owner: role },
+        reason: "recipient-binding-changed",
+        status: "blocked",
+      };
+      return false;
+    }
+    const guard = checkStoreGuard(context, role, target.harness);
+    if (guard.status === "blocked") {
+      refused = guard;
+      return false;
+    }
+    if (directory === null || !decisionClear(directory, recipient)) {
+      refused = { reason: "decision-clearance", status: "blocked" };
+      return false;
+    }
+    refused = undefined;
+    return true;
   };
   const transport = codexQueueTransport({
     canConnect: locallyClear,
@@ -225,9 +258,26 @@ async function codexWake(
     requestId: wake,
     text,
   });
+  const outcome = codexOutcome(receipt);
+  const native =
+    receipt.diagnostic && "question" in receipt.diagnostic
+      ? receipt.diagnostic.question
+      : undefined;
+  const blocker =
+    safeWakeBlocker(refused?.blocker, role) ??
+    (native === undefined
+      ? null
+      : safeWakeBlocker({ id: wake, kind: "native-question", native, owner: role }, role));
   return {
-    detail: receipt.diagnostic?.category ?? receipt.reason ?? null,
-    outcome: codexOutcome(receipt),
+    blocker,
+    detail:
+      outcome === "accepted"
+        ? null
+        : safeWakeReason(
+            refused?.reason ?? receipt.diagnostic?.category,
+            `transport-${receipt.status}`,
+          ),
+    outcome,
   };
 }
 
@@ -242,24 +292,48 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
   const wake = randomUUID();
   const claim = store.transaction((): WakeResult | { readonly count: number } => {
     const state = wakeState(store, role);
-    const count = undeliveredCount(store, role);
+    const messages = undeliveredIds(store, role);
+    const count = messages.length;
     if (!state.pending || count === 0) {
       return { status: "none" };
     }
     if (state.outstanding !== null) {
+      const outstanding = state.outstanding;
+      const later = coalescedMessages(store, role, outstanding);
+      const last = later.at(-1);
+      if (last !== undefined) {
+        store.append({
+          actor: SYSTEM,
+          key: `wake.coalesced:${outstanding}:${last}`,
+          kind: "wake.coalesced",
+          payload: { messages: later, role, wake: outstanding },
+        });
+      }
       return { status: "coalesced", wake: state.outstanding };
     }
     const guard: WakeGuard =
       "reason" in target
-        ? { reason: target.reason, status: "blocked" }
+        ? {
+            blocker: { id: role, kind: "registry", owner: role },
+            reason: target.reason,
+            status: "blocked",
+          }
         : checkStoreGuard(context, role, target.harness);
     if (guard.status !== "clear" || "reason" in target) {
-      const reason = guard.reason ?? "store-guard";
+      const reason = safeWakeReason(guard.reason, "store-guard");
       store.append({
         actor: SYSTEM,
         key: `wake.guarded:${wake}`,
         kind: "wake.guarded",
-        payload: { count, harness: target.harness, reason, role, wake },
+        payload: {
+          blocker: blockerPayload(safeWakeBlocker(guard.blocker, role)),
+          count,
+          harness: target.harness,
+          messages,
+          reason,
+          role,
+          wake,
+        },
       });
       return { reason, status: "guarded", wake };
     }
@@ -267,7 +341,14 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
       actor: SYSTEM,
       key: `wake.claimed:${wake}`,
       kind: "wake.claimed",
-      payload: { conversation: target.conversation, count, harness: target.harness, role, wake },
+      payload: {
+        conversation: target.conversation,
+        count,
+        harness: target.harness,
+        messages,
+        role,
+        wake,
+      },
     });
     return { count };
   });
@@ -277,6 +358,7 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
   const text = wakeText({ count: claim.count, role, seq: 1 });
   let outcome: WakeOutcome;
   let detail: string | null = null;
+  let blocker: WakeBlocker | null = null;
   try {
     if (target.harness === "claude") {
       const guard = checkStoreGuard(context, role, target.harness);
@@ -284,21 +366,22 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
         writeWakeFile(context.layout, target.conversation, { count: claim.count, role });
         outcome = "accepted";
       } else {
-        detail = guard.reason ?? "store-guard";
+        detail = safeWakeReason(guard.reason, "store-guard");
+        blocker = safeWakeBlocker(guard.blocker, role);
         outcome = "guarded";
       }
     } else {
-      ({ detail, outcome } = await codexWake(context, role, target, wake, text));
+      ({ blocker, detail, outcome } = await codexWake(context, role, target, wake, text));
     }
   } catch (error) {
     outcome = target.harness === "claude" ? "failed" : "ambiguous";
-    detail = error instanceof StoreError ? error.code : "wake-error";
+    detail = safeWakeReason(error instanceof StoreError ? error.code : null, "wake-error");
   }
   store.append({
     actor: SYSTEM,
     key: `wake.completed:${wake}`,
     kind: "wake.completed",
-    payload: { detail, outcome, role, wake },
+    payload: { blocker: blockerPayload(blocker), detail, outcome, role, wake },
   });
   return { status: outcome, wake };
 }

@@ -180,7 +180,8 @@ that holds no secret is rephrased:
 Every writing verb (`msg send`, `inbox`, `msg done`, `msg retain`, `store import`, the `work`
 writes, `question open|answer|project|cancel`, `hold set|release`, `request close`,
 `store retire --apply`, `session start` and `handoff open|ready|state|active`) identifies its
-caller before opening the store. `msg status` and `msg history` also identify the caller when
+caller before opening the store. `inbox --peek` identifies the recipient for its read-only view.
+`msg status` and `msg history` also identify the caller when
 passed `--include-body`. The caller is the registry role whose effective harness
 conversation ID equals the caller's native ID. The native ID is `--native-id ID`, else, for each
 role, the variable of that role's effective harness: `CLAUDE_CODE_SESSION_ID` for Claude and
@@ -227,14 +228,19 @@ wake-pending, has `sent` messages and has no outstanding wake. Before claiming i
 checks the registry: an unregistered, unbound or held recipient (`ownership` not `active`, or
 `phase` `held` or `source-held`) gets no wake. For Codex the guarded queue path also requires the
 recipient-bound decision marker and runs the native question check on the same connection.
-A guard refusal is logged as `guarded`, leaves nothing outstanding, and the next send checks
-again. An accepted wake stays outstanding until the recipient's next pull, except that a review rearms
-an accepted Claude wake still unpulled after 30 minutes, so a wake file written before a channel
-restart is written again. An accepted Codex queue item persists in the recipient's queue and is
-not repeated. A failed or ambiguous
-wake is logged and stays outstanding: it is not retried before the recipient's next pull or the
-next review, which may call `rearmWake`. A wake interrupted between its claim and its outcome
-stays outstanding with no outcome, which reads as ambiguous.
+A guard refusal is logged as `guarded` and leaves nothing outstanding. A new original or the
+existing review can check the guard again. An identical send returns the original's recorded
+evidence without a native attempt. An accepted wake stays outstanding until recipient collection.
+The review can rearm a Claude wake unpulled for 30 minutes and recover failed notifications at its
+existing slot. A confirmed failed Codex wake remains eligible at that slot. A Codex wake with
+uncertain acceptance or an unfinished claim keeps its outstanding reference until collection.
+
+Wake claims and refusals record the exact unread original IDs. An original arriving behind an
+outstanding wake records `wake.coalesced` with its own ID and the prior wake reference.
+`message_wakes` is an additive projection rebuilt from those events. Older events without
+original IDs yield unknown evidence, even when the recipient has other wake records.
+`msg status`, `inbox --peek` and the scheduled brief expose reason codes and safe references
+without native payloads. Peek and review leave delivery and handling to the recipient.
 
 After the registry checks, the store guard (`questionHoldGuard`, the default `storeGuard` port of
 `wakeRecipient`) withholds the wake while the recipient has a pending question or an active hold

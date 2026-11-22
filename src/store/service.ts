@@ -24,12 +24,15 @@ import {
   retainMessage,
   sendMessage,
 } from "./messages.ts";
+import { messageWake, unreadMessages } from "./messageWake.ts";
 import {
   type Actor,
   type MessageIntent,
   type MessageLink,
   type MessageView,
+  type MessageWakeView,
   StoreError,
+  type UnreadMessage,
 } from "./types.ts";
 import { type WakePorts, wakeRecipient, type WakeStatus } from "./wake.ts";
 
@@ -92,10 +95,10 @@ export interface SendOutput {
   readonly schema: 1;
   readonly message: MessageView;
   readonly duplicate: boolean;
-  readonly wake: { readonly status: WakeStatus };
+  readonly wake: { readonly status: WakeStatus; readonly evidence: MessageWakeView };
 }
 
-/** Commit the original, then attempt one guarded wake. A repeated send retries only the wake. */
+/** Commit the original, then attempt one guarded wake. Repeating the original is read-only. */
 export async function storeSend(
   context: StoreServiceContext,
   options: CallerOptions,
@@ -116,20 +119,32 @@ export async function storeSend(
       links: request.links ?? [],
       to,
     });
-    const wake = await wakeRecipient(
-      {
-        env: context.env,
-        layout: context.layout,
-        store,
-        ...(context.ports === undefined ? {} : { ports: context.ports }),
-      },
-      to,
-    );
+    const attempt = sent.duplicate
+      ? undefined
+      : await wakeRecipient(
+          {
+            env: context.env,
+            layout: context.layout,
+            store,
+            ...(context.ports === undefined ? {} : { ports: context.ports }),
+          },
+          to,
+        );
+    const message = messageStatus(store, id);
+    const evidence = messageWake(store, id, message.to, message.state);
+    const previous: WakeStatus =
+      message.state !== "sent"
+        ? "none"
+        : evidence.outcome === "accepted"
+          ? "coalesced"
+          : evidence.outcome === "unknown"
+            ? "none"
+            : evidence.outcome;
     return {
       duplicate: sent.duplicate,
-      message: sent.message,
+      message,
       schema: 1,
-      wake: { status: wake.status },
+      wake: { evidence, status: attempt?.status ?? previous },
     };
   });
 }
@@ -158,6 +173,26 @@ export async function storeInbox(
       schema: 1,
     };
   });
+}
+
+export async function storeInboxPeek(
+  context: StoreServiceContext,
+  options: CallerOptions,
+): Promise<{
+  readonly schema: 1;
+  readonly role: string;
+  readonly count: number;
+  readonly unread: readonly UnreadMessage[];
+}> {
+  const { role } = caller(context, options);
+  return withStore(
+    context,
+    (store) => {
+      const unread = unreadMessages(store, role);
+      return { count: unread.length, role, schema: 1 as const, unread };
+    },
+    { createMissing: false },
+  );
 }
 
 export interface WriteOutput {
@@ -202,7 +237,7 @@ export async function storeStatus(
   context: StoreServiceContext,
   id: string,
   bodyCaller?: CallerOptions,
-): Promise<{ readonly schema: 1; readonly message: MessageView }> {
+): Promise<{ readonly schema: 1; readonly message: MessageView; readonly wake: MessageWakeView }> {
   const viewer = bodyCaller === undefined ? undefined : caller(context, bodyCaller).role;
   if (!MESSAGE_ID.test(id)) {
     throw new StoreError("invalid-id");
@@ -214,7 +249,7 @@ export async function storeStatus(
   try {
     const message =
       viewer === undefined ? messageStatus(store, id) : messageWithBody(store, viewer, id);
-    return { message, schema: 1 };
+    return { message, schema: 1, wake: messageWake(store, id, message.to, message.state) };
   } finally {
     store.close();
   }

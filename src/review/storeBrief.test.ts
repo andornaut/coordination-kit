@@ -12,7 +12,15 @@ import { messageStatus, retainMessage } from "../store/messages.ts";
 import { derivedId } from "../store/notices.ts";
 import { setPolicyHold } from "../store/policyHolds.ts";
 import { storeSend } from "../store/service.ts";
-import { ART, COORDINATOR, fakeCodex, GAME, storeFixture, TECH } from "../store/testStore.ts";
+import {
+  ART,
+  clearDecision,
+  COORDINATOR,
+  fakeCodex,
+  GAME,
+  storeFixture,
+  TECH,
+} from "../store/testStore.ts";
 import { blockWork, finishWork, readyWork, startWork } from "../store/work.ts";
 import { deliverReview, reviewResultsDir } from "./deliver.ts";
 import { coordinationEmit } from "./emit.ts";
@@ -190,6 +198,28 @@ describe("stored review brief", () => {
     out = "";
     expect(await main(io, ["--root", root, "review", "show"])).toBe(EXIT_OK);
     expect(JSON.parse(out)).toMatchObject({ slot: "2026-11-18T17:30:00.000Z" });
+  });
+
+  it("surveys the exact unread original without rearming ambiguous Codex acceptance", async () => {
+    const { layout } = await storeModeFixture();
+    const game = gameLayout(layout, GAME);
+    const codex = fakeCodex(ART, () => {
+      throw new Error("Connection dropped.");
+    });
+    const ports = { connect: () => Promise.resolve(codex.client) };
+    clearDecision(layout, ART);
+    const id = uuid(901);
+    const sent = await storeSend(
+      { env: SENDER, layout, ports },
+      {},
+      { body: "Uncertain wake.", id, to: ART_ROLE },
+    );
+    expect(sent.wake.evidence.outcome).toBe("ambiguous");
+    await deliverReview(layout, game, SLOT, undefined, { env: {}, wakePorts: ports });
+    expect(showBrief(layout, { game: GAME, slot: SLOT })).toMatchObject({
+      unread: [{ id, to: ART_ROLE, wake: sent.wake.evidence }],
+    });
+    expect(codex.adds()).toHaveLength(1);
   });
 
   it("reports a retained original once its declared boundary is due across two slots", async () => {

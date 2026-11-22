@@ -168,15 +168,18 @@ details.
 
 The brief stores one `review-stuck` message for newly stalled IDs or newly overdue retention
 boundaries. Continuing cases stay visible, and the scheduled brief and its own health messages
-cannot generate another health message. After the commit the review rearms each failed
-or ambiguous outstanding wake, then wakes the recipient and every wake-pending role, with no
-payload. A secret-shaped brief omits question titles and retention text.
+cannot generate another health message. After the commit the review checks wake-pending roles.
+It can rearm confirmed failures and existing Claude recovery cases. An outstanding Codex wake
+with unknown acceptance stays guarded. A secret-shaped brief omits question titles and
+retention text.
 
 `coordination-kit --root R review show [--game G] [--slot S]` prints the recorded brief for the
 slot, or the latest one, as one JSON line: `kind` `review-show`, the game, slot, recipient,
 message ID, recording time, result, counts, every exception, the open message IDs and the body.
 New briefs include `decisions` with store references and `native` with per-role evidence and the
-registry revision. Earlier briefs retain their original survey scope and may lack these fields.
+registry revision. The `unread` list preserves the slot's exact passive snapshot with the
+recipient, original ID and wake evidence. Recipients can read current unread status with
+`inbox --peek`. Earlier briefs retain their original survey scope and may lack these fields.
 A missing brief exits 1 with `brief-missing`.
 
 ## Wake files

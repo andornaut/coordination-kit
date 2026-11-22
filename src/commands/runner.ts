@@ -201,6 +201,7 @@ export const reviewShow: Handler = (io, root, args) => {
           ["readyHandoffs", brief.readyHandoffs],
           ["exceptions", brief.exceptions],
           ["open", brief.open],
+          ["unread", brief.unread],
           ["body", brief.body],
         ]),
       )}\n`,

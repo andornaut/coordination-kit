@@ -255,10 +255,13 @@ export const SPECS = {
     values: { scope: "work:WORK_ID|role|game:ID" },
   },
   inbox: {
-    forms: [["include-body?", "all?", "native-id?", "worker?"]],
+    forms: [
+      ["include-body?", "all?", "native-id?", "worker?"],
+      ["peek", "native-id?", "worker?"],
+    ],
     group: "msg",
     options: INBOX_OPTIONS,
-    summary: "list your undelivered and open store messages and record them delivered",
+    summary: "collect messages, or list unread metadata with --peek without recording delivery",
   },
   "msg done": {
     forms: [["ID", "work?", "superseded-by?", "evidence?", "native-id?", "worker?"]],
@@ -302,7 +305,7 @@ export const SPECS = {
     group: "msg",
     options: MSG_STATUS_OPTIONS,
     summary:
-      "read exact message metadata, or its body as the sender, recipient or game-coordinator",
+      "read exact message and wake metadata, or include its body as sender, recipient or game-coordinator",
   },
   "question answer": {
     forms: [["id", "work", "text", "by?", "supersedes?", "native-id?", "worker?"]],

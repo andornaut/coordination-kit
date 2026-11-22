@@ -9,10 +9,17 @@ import type { GameLayout, Layout } from "../layout.ts";
 import { resolveRole } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
+import { unreadMessages } from "../store/messageWake.ts";
 import { clean, DELIVERY_KIT_ACTOR, derivedId, storeNotice } from "../store/notices.ts";
 import { policyHoldEntries, type PolicyHoldView } from "../store/policyHolds.ts";
 import { NEXT_REVIEW_BOUNDARY, retentionInstant } from "../store/retention.ts";
-import { type Json, type JsonObject, type Retention, StoreError } from "../store/types.ts";
+import {
+  type Json,
+  type JsonObject,
+  type Retention,
+  StoreError,
+  type UnreadMessage,
+} from "../store/types.ts";
 import {
   pendingWakeRoles,
   rearmWake,
@@ -130,6 +137,8 @@ export interface BriefRecord {
   readonly exceptions: readonly BriefException[];
   /** Open (sent, delivered or retained) message IDs at this slot, for the next slot's ages. */
   readonly open: readonly string[];
+  /** The unread snapshot at this slot, before any wake attempt. Older briefs omit it. */
+  readonly unread?: readonly UnreadMessage[];
   readonly result: ReviewResult;
   /** Store-recorded questions and decisions, with no claim about native visibility. */
   readonly decisions: RecordedDecisions;
@@ -376,6 +385,7 @@ function survey(
     }
   }
   const afterSeq = previous === undefined ? 0 : Number(previousSeq(store, previous));
+  const unread = unreadMessages(store, null);
   const runner = store.db
     .prepare(
       `SELECT sum(kind = 'bus.event') AS events, sum(kind = 'bus.complete') AS completes
@@ -397,6 +407,7 @@ function survey(
       runnerEvents: Number(runner.events ?? 0),
       states,
       unconfirmed,
+      unread: unread.length,
       wakes,
     },
     decisions,
@@ -406,6 +417,7 @@ function survey(
     policyHolds,
     readyHandoffs,
     reportedWorkerFailures: checked.reported,
+    unread,
   };
 }
 
@@ -477,6 +489,11 @@ export function composeBrief(
     ...Object.entries(byRole).map(
       ([role, c]) => `  ${role}: sent ${c.sent}, delivered ${c.delivered}, retained ${c.retained}`,
     ),
+    ...(Number(counts.unread) > 0
+      ? [
+          `Unread originals: ${String(counts.unread)}. Use inbox --peek for current recipient status.`,
+        ]
+      : []),
     `Wakes: ${wakes.outstanding} outstanding, ${wakes.failed} failed, ${wakes.ambiguous} ambiguous, ` +
       `${wakes.guarded} guarded`,
     `Runner since the previous brief: ${String(counts.runnerEvents)} events, ` +
@@ -633,10 +650,9 @@ export async function storeReview(
         store,
         ...(context.ports === undefined ? {} : { ports: context.ports }),
       };
-      // A failed or ambiguous wake waits for this review before it is attempted again. So does an
-      // accepted Claude wake the recipient has not pulled for STALE_WAKE_MS: a channel that
-      // restarted after the wake file was written may never have announced it. A Codex queue
-      // item persists in the recipient's queue, so an accepted one is not repeated.
+      // A confirmed failed wake can recheck at this scheduled boundary. A Claude channel can
+      // recover an old, unpulled wake. A Codex wake with uncertain acceptance remains guarded
+      // until recipient collection rather than admitting a different native request ID.
       const staleBefore = Date.parse(context.now?.() ?? new Date().toISOString()) - STALE_WAKE_MS;
       for (const role of pendingWakeRoles(store)) {
         const outstanding = wakeState(store, role).outstanding;
@@ -650,7 +666,11 @@ export async function storeReview(
           row?.outcome === "accepted" &&
           row.harness === "claude" &&
           Date.parse(String(row.at)) <= staleBefore;
-        if (outstanding !== null && (row?.outcome !== "accepted" || unpulled)) {
+        const retryable =
+          row?.outcome === "failed" ||
+          (row?.harness === "claude" && row.outcome !== "accepted") ||
+          unpulled;
+        if (outstanding !== null && retryable) {
           rearmWake(store, DELIVERY_KIT_ACTOR, role, `review ${game.id} ${slot}`);
         }
       }
@@ -670,7 +690,10 @@ export function showBrief(
   layout: Layout,
   selection: { readonly game?: string; readonly slot?: number },
 ): BriefRecord & { readonly body: string; readonly at: string } {
-  const store = Store.forLayout(layout);
+  const store = Store.readLayout(layout);
+  if (store === null) {
+    throw new StoreError("brief-missing");
+  }
   try {
     const row = store.db
       .prepare(

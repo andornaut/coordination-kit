@@ -106,6 +106,16 @@ describe("store message commands", () => {
     );
     expect((generated.json?.message as { id: string }).id).toMatch(/^[0-9a-f-]{36}$/);
 
+    const passive = await tech("inbox", "--peek");
+    expect(passive.code, passive.err).toBe(EXIT_OK);
+    expect(passive.json).toMatchObject({
+      count: 2,
+      role: TECH_ROLE,
+      unread: [
+        { id: ID, wake: { nextAction: "collect-at-safe-boundary", outcome: "accepted" } },
+        { wake: { outcome: "coalesced" } },
+      ],
+    });
     const inbox = await tech("inbox", "--include-body");
     expect(inbox.code, inbox.err).toBe(EXIT_OK);
     expect(inbox.json).toMatchObject({ count: 2, delivered: 2, role: TECH_ROLE, schema: 1 });
@@ -278,6 +288,7 @@ describe("store message commands", () => {
       ["store", "import", "--dry-run"],
       ["store", "export"],
       ["inbox", "extra"],
+      ["inbox", "--peek", "--include-body"],
     ]) {
       // eslint-disable-next-line no-await-in-loop
       expect((await run(...argv)).code, argv.join(" ")).toBe(EXIT_USAGE);
@@ -298,6 +309,7 @@ describe("store message commands", () => {
       "msg send --to ROLE --body-file FILE [--intent queue|unblock] [--id UUID] [--link KIND=REF ...]",
     );
     expect(help.out).toContain("inbox [--include-body] [--all]");
+    expect(help.out).toContain("inbox --peek");
     expect(help.out).toContain("store import --approval-ledger FILE [--dry-run]");
     expect(help.out).toContain("store retire --dry-run");
   });

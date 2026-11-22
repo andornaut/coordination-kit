@@ -50,7 +50,13 @@ const QUESTION_EVENTS = new Set([
   "question.cancelled",
   "question.projection",
 ]);
-const WAKE_EVENTS = new Set(["wake.claimed", "wake.completed", "wake.guarded", "wake.rearmed"]);
+const WAKE_EVENTS = new Set([
+  "wake.claimed",
+  "wake.coalesced",
+  "wake.completed",
+  "wake.guarded",
+  "wake.rearmed",
+]);
 
 function text(payload: JsonObject, key: string): string | null {
   const value = payload[key];
