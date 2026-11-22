@@ -115,8 +115,8 @@ export function registerCoordinator(coordinatorRoot, nativeProjectId, conversati
 2. Register the exact role sessions and worktrees with the coordinator's revision-checked
    registry writer. Set `reports.recipient` to a registered role. Any optional review membership
    uses the same role keys in the coordinator's local [route](review.md#review-route).
-3. Follow the coordinator workspace's onboarding procedure for readiness, acceptance and
-   activation. The kit validates references and records coordination state. The coordinator
+3. Follow the [coordinator workspace setup guide](https://github.com/andornaut/game-coordinator/blob/main/docs/setup.md#add-a-game)
+   for readiness, acceptance and activation. The kit validates references and records coordination state. The coordinator
    provisions native sessions, adopts routing and controls, and authorizes scheduled delivery.
 
 ## State
