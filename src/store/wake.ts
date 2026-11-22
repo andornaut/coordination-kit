@@ -33,8 +33,8 @@ export interface WakeGuard {
 
 /**
  * The store question and hold check, run after the registry checks. The default,
- * `questionHoldGuard`, blocks a recipient with a pending question or an active `role` hold; the
- * Codex native question check still runs after it.
+ * `questionHoldGuard`, blocks pending questions, recipient role holds and scoped policy holds.
+ * The Codex native question check still runs after it.
  */
 export type StoreWakeGuard = (store: Store, role: string, harness?: Harness | null) => WakeGuard;
 
@@ -103,6 +103,10 @@ function sameTarget(layout: Layout, role: string, target: Target): boolean {
     current.conversation === target.conversation &&
     current.harness === target.harness
   );
+}
+
+function checkStoreGuard(context: WakeContext, role: string, harness: Harness): WakeGuard {
+  return (context.ports?.storeGuard ?? questionHoldGuard)(context.store, role, harness);
 }
 
 const SYSTEM: Actor = { nativeId: null, role: null };
@@ -183,7 +187,10 @@ async function codexWake(
   const locallyClear = (): boolean => {
     const directory = decisionDirectory(layout, role);
     return (
-      directory !== null && sameTarget(layout, role, target) && decisionClear(directory, recipient)
+      directory !== null &&
+      sameTarget(layout, role, target) &&
+      checkStoreGuard(context, role, target.harness).status === "clear" &&
+      decisionClear(directory, recipient)
     );
   };
   const transport = codexQueueTransport({
@@ -232,10 +239,6 @@ async function codexWake(
 export async function wakeRecipient(context: WakeContext, role: string): Promise<WakeResult> {
   const { store } = context;
   const target = wakeTarget(context.layout, role);
-  const guard =
-    "reason" in target
-      ? ({ reason: target.reason, status: "blocked" } as const)
-      : (context.ports?.storeGuard ?? questionHoldGuard)(store, role, target.harness);
   const wake = randomUUID();
   const claim = store.transaction((): WakeResult | { readonly count: number } => {
     const state = wakeState(store, role);
@@ -246,6 +249,10 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
     if (state.outstanding !== null) {
       return { status: "coalesced", wake: state.outstanding };
     }
+    const guard: WakeGuard =
+      "reason" in target
+        ? { reason: target.reason, status: "blocked" }
+        : checkStoreGuard(context, role, target.harness);
     if (guard.status !== "clear" || "reason" in target) {
       const reason = guard.reason ?? "store-guard";
       store.append({
@@ -272,8 +279,14 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
   let detail: string | null = null;
   try {
     if (target.harness === "claude") {
-      writeWakeFile(context.layout, target.conversation, { count: claim.count, role });
-      outcome = "accepted";
+      const guard = checkStoreGuard(context, role, target.harness);
+      if (guard.status === "clear") {
+        writeWakeFile(context.layout, target.conversation, { count: claim.count, role });
+        outcome = "accepted";
+      } else {
+        detail = guard.reason ?? "store-guard";
+        outcome = "guarded";
+      }
     } else {
       ({ detail, outcome } = await codexWake(context, role, target, wake, text));
     }

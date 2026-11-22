@@ -7,6 +7,8 @@ import {
   HOLD_LIST_OPTIONS,
   HOLD_RELEASE_OPTIONS,
   HOLD_SET_OPTIONS,
+  POLICY_HOLD_RELEASE_OPTIONS,
+  POLICY_HOLD_SET_OPTIONS,
   QUESTION_ANSWER_OPTIONS,
   QUESTION_CANCEL_OPTIONS,
   QUESTION_LIST_OPTIONS,
@@ -49,6 +51,7 @@ export type { CommandSpec, Options } from "./usage.ts";
 export const BINARY = "coordination-kit";
 /** The placeholder each string option shows in help. */
 const VALUES: Readonly<Record<string, string>> = {
+  approval: "REF",
   at: "ISO_TIMESTAMP",
   body: "TEXT",
   "body-file": "FILE",
@@ -219,6 +222,19 @@ export const SPECS = {
     options: HOLD_LIST_OPTIONS,
     summary: "list holds in setting order",
     values: { state: "active|released" },
+  },
+  "hold policy-release": {
+    forms: [["id", "approval", "native-id?"]],
+    group: "decisions",
+    options: POLICY_HOLD_RELEASE_OPTIONS,
+    summary: "release an exact coordinator-issued user policy hold",
+  },
+  "hold policy-set": {
+    forms: [["id", "scope", "reason", "approval", "native-id?"]],
+    group: "decisions",
+    options: POLICY_HOLD_SET_OPTIONS,
+    summary: "record an explicit user policy hold as game-coordinator",
+    values: { scope: "role:ROLE|game:GAME|work:REPOSITORY:WORK_ID" },
   },
   "hold release": {
     forms: [["id", "native-id?", "worker?"]],

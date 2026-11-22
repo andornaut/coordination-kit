@@ -16,6 +16,8 @@ import {
   storeHoldList,
   storeHoldRelease,
   storeHoldSet,
+  storePolicyHoldRelease,
+  storePolicyHoldSet,
   storeQuestionAnswer,
   storeQuestionCancel,
   storeQuestionList,
@@ -67,6 +69,18 @@ export const HOLD_SET_OPTIONS = {
 } as const;
 
 export const HOLD_RELEASE_OPTIONS = { ...CALLER, id: { type: "string" } } as const;
+
+export const POLICY_HOLD_RELEASE_OPTIONS = {
+  ...CALLER,
+  approval: { type: "string" },
+  id: { type: "string" },
+} as const;
+
+export const POLICY_HOLD_SET_OPTIONS = {
+  ...POLICY_HOLD_RELEASE_OPTIONS,
+  reason: { type: "string" },
+  scope: { type: "string" },
+} as const;
 
 export const HOLD_LIST_OPTIONS = QUESTION_LIST_OPTIONS;
 
@@ -190,6 +204,36 @@ export const holdRelease: Handler = (io, root, args) =>
     args,
     (context, values) => storeHoldRelease(context, callerOf(values), required(values, "id")),
     HOLD_RELEASE_OPTIONS,
+  );
+
+export const policyHoldSet: Handler = (io, root, args) =>
+  run(
+    io,
+    root,
+    "hold policy-set",
+    args,
+    (context, values) =>
+      storePolicyHoldSet(context, callerOf(values), {
+        approval: required(values, "approval"),
+        id: required(values, "id"),
+        reason: required(values, "reason"),
+        scope: required(values, "scope"),
+      }),
+    POLICY_HOLD_SET_OPTIONS,
+  );
+
+export const policyHoldRelease: Handler = (io, root, args) =>
+  run(
+    io,
+    root,
+    "hold policy-release",
+    args,
+    (context, values) =>
+      storePolicyHoldRelease(context, callerOf(values), {
+        approval: required(values, "approval"),
+        id: required(values, "id"),
+      }),
+    POLICY_HOLD_RELEASE_OPTIONS,
   );
 
 export const holdList: Handler = (io, root, args) =>

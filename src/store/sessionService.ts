@@ -22,6 +22,7 @@ import {
   setHandoffState,
 } from "./handoffs.ts";
 import { type CallerOptions, resolveCaller } from "./identity.ts";
+import { activePolicyHoldsForRole } from "./policyHolds.ts";
 import type { HoldView } from "./questions.ts";
 import { wakeOwner } from "./questionService.ts";
 import { COORDINATOR_ROLE } from "./retire.ts";
@@ -108,12 +109,13 @@ export async function storeSessionStart(
       checkpoint: checkpointPath(actor.role),
       conversation: actor.nativeId,
       counts: {
-        holds: n(
-          `SELECT COUNT(*) AS n FROM holds WHERE state = 'active'
+        holds:
+          n(
+            `SELECT COUNT(*) AS n FROM holds WHERE state = 'active'
              AND ((role = ? AND scope = 'role') OR scope = ?)`,
-          actor.role,
-          game === null ? "" : `game:${game}`,
-        ),
+            actor.role,
+            game === null ? "" : `game:${game}`,
+          ) + activePolicyHoldsForRole(store, actor.role),
         inbox: n(
           `SELECT COUNT(*) AS n FROM messages WHERE to_role = ?
              AND state IN ('sent', 'delivered', 'retained')`,

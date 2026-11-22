@@ -17,6 +17,7 @@ every form and flag.
 | `question open --title TEXT [--id ID] [--work WORK_ID] [--option LABEL]...`, `question answer --id ID --work WORK_ID --text TEXT [--by user\|ROLE] [--supersedes D<N>]`, `question cancel --id ID --reason TEXT`, `question list [--role ROLE] [--state pending\|answered\|cancelled]` | Pending prompts owned by your role and their decisions; see [questions](store.md#questions-holds-and-decisions).                   |
 | `question project --id ID`                                                                                                                                                                                                                                                             | Retry Markdown writeback for your recorded answer.                                                                                 |
 | `hold set --id ID --scope work:WORK_ID\|role\|game:ID --reason TEXT`, `hold release --id ID`, `hold list [--role ROLE] [--state active\|released]`                                                                                                                                     | Holds owned by your role; see [holds](store.md#holds).                                                                             |
+| `hold policy-set --id ID --scope SCOPE --reason TEXT --approval REF`, `hold policy-release --id ID --approval REF`                                                                                                                                                                     | Record or release an exact coordinator-issued user policy hold.                                                                    |
 | `session start`                                                                                                                                                                                                                                                                        | Record your session start and print your binding, checkpoint and counts; see [sessions](store.md#sessions-and-handoffs).           |
 | `handoff open --scope ROLE\|all... --to claude\|codex [--id ID]`, `handoff state prepared\|sent\|completed\|cancelled --id ID`, `handoff ready [--id ID]`, `handoff active [--id ID]`, `handoff show [--id ID]`                                                                        | A harness handoff record; see [handoffs](store.md#sessions-and-handoffs).                                                          |
 | `decision list [--work WORK_ID] [--role ROLE]`                                                                                                                                                                                                                                         | Read decision records in recording order.                                                                                          |
@@ -67,6 +68,10 @@ every form and flag.
   `question answer` and `hold release` attempt one guarded wake for the caller, since the write may
   clear its last wake guard. `--option LABEL` is repeatable, 1 to 8 labels. The list verbs take no
   caller and read an absent store as empty.
+- `hold policy-set` and `hold policy-release` require the active game-coordinator binding and the
+  exact user approval reference for the action. Policy IDs start with `policy-`. Set names one
+  target as `role:ROLE`, `game:GAME` or `work:REPOSITORY:WORK_ID`. Release names its exact policy
+  ID. See [user policy holds](store.md#user-policy-holds).
 - `session start`, `handoff ready` and `handoff active` identify the caller through the registry
   fence; `handoff open` and `handoff state` also require game-coordinator (`not-coordinator`).
   `session start` refuses a held role with `session-held: phase held` (or `source-held`).
@@ -212,7 +217,7 @@ repositories  [{name, kind, path, roles, status, reason, main, originMain,
                              status: available | absent | unavailable | not-applicable,
                              unreadable}}]
 pendingQuestions  [{id, role, title, work, options, state, openedAt, closedAt, decision, reason}]
-activeHolds       [{id, role, scope, source, reason, state, setAt, releasedAt}]
+activeHolds       [{id, role, scope, source, reason, state, setAt, releasedAt, policy?}]
 unmatchedRequests [{id, repository, owner, state, summary, work, closedAt, ...request fields}]
 recentActivity    [{repository, id, at}]
 recentCompletions [{repository, id, at}]

@@ -10,6 +10,7 @@ import { gameLayout, type Layout } from "../layout.ts";
 import { Store } from "../store/db.ts";
 import { messageStatus, retainMessage } from "../store/messages.ts";
 import { derivedId } from "../store/notices.ts";
+import { setPolicyHold } from "../store/policyHolds.ts";
 import { storeSend } from "../store/service.ts";
 import { ART, COORDINATOR, fakeCodex, GAME, storeFixture, TECH } from "../store/testStore.ts";
 import { blockWork, finishWork, readyWork, startWork } from "../store/work.ts";
@@ -90,6 +91,30 @@ describe("stored review brief", () => {
     expect(await deliverReview(layout, game, SLOT, undefined, { env: {} })).toEqual(result);
     expect(existsSync(join(reviewResultsDir(game), `${SLOT}.json`))).toBe(true);
     expect(briefs(layout)).toHaveLength(1);
+  });
+
+  it("records exact user policy hold evidence in the stored review", async () => {
+    const { layout } = await storeModeFixture();
+    const store = Store.forLayout(layout);
+    setPolicyHold(
+      store,
+      { ...ACTOR, nativeId: COORDINATOR },
+      {
+        approval: "request-1",
+        id: "policy-tech",
+        reason: "User paused Tech.",
+        scope: `role:${TECH_ROLE}`,
+      },
+    );
+    store.close();
+    await deliverReview(layout, gameLayout(layout, GAME), SLOT, undefined, { env: {} });
+    expect(showBrief(layout, { game: GAME, slot: SLOT })).toMatchObject({
+      counts: { policyHolds: 1 },
+      policyHolds: [
+        { id: "policy-tech", policy: { approval: "request-1", target: { role: TECH_ROLE } } },
+      ],
+    });
+    expect(briefs(layout)[0]!.body).toContain("Active user policy holds: 1");
   });
 
   it("writes an accepted Claude wake again once it has gone unpulled for the stale interval", async () => {

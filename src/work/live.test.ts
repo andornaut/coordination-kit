@@ -4,6 +4,7 @@ import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../io.ts";
 import { loadLayout } from "../layout.ts";
 import { Store } from "../store/db.ts";
+import { releasePolicyHold, setPolicyHold } from "../store/policyHolds.ts";
 import {
   answerQuestion,
   listDecisions,
@@ -165,6 +166,36 @@ describe("work verbs", () => {
     // The imported hold has no owner, so no binding can release it and it still covers the item.
     expect(code(() => releaseHold(store, kitActor, "approval-ledger:hold-1"))).toBe("not-owner");
     expect(code(() => workStart(kit, {}, sk))).toBe("work-held");
+    store.close();
+  });
+
+  it("checks exact policy targets before start and keeps other work available", () => {
+    const fixture = kitFixture();
+    const store = Store.forLayout(loadLayout(fixture.root));
+    const actor = { nativeId: IDS.coordinator, role: ROLES.coordinator };
+    const item = (id: string) => ({ id, worktree: fixture.game });
+    const set = (id: string, scope: string) =>
+      setPolicyHold(store, actor, { approval: "request-1", id, reason: "User paused.", scope });
+    set("policy-exact", `work:${GAME}:sg-0001`);
+    set("policy-game", `game:${GAME}`);
+    set("policy-art", `role:${ROLES.art}`);
+    expect(workShow(live(fixture), item("sg-0001")).holds).toMatchObject([
+      { id: "policy-exact", owner: ROLES.coordinator, policy: { target: { repository: GAME } } },
+      { id: "policy-game" },
+    ]);
+    expect(code(() => workStart(live(fixture, IDS.tech), {}, item("sg-0001")))).toBe("work-held");
+    expect(code(() => workStart(live(fixture, IDS.art), {}, item("sg-0002")))).toBe("work-held");
+    expect(
+      workStart(live(fixture, IDS.kit), {}, { id: "sk-0001", worktree: fixture.kit }).record.state,
+    ).toBe("started");
+    releasePolicyHold(store, actor, { approval: "request-2", id: "policy-game" });
+    expect(code(() => workStart(live(fixture, IDS.tech), {}, item("sg-0001")))).toBe("work-held");
+    releasePolicyHold(store, actor, { approval: "request-3", id: "policy-exact" });
+    expect(workStart(live(fixture, IDS.tech), {}, item("sg-0001")).record.state).toBe("started");
+    expect(code(() => workStart(live(fixture, IDS.art), {}, item("sg-0002")))).toBe("work-held");
+    const before = workShow(live(fixture), item("sg-0002")).holds;
+    store.rebuild();
+    expect(workShow(live(fixture), item("sg-0002")).holds).toEqual(before);
     store.close();
   });
 

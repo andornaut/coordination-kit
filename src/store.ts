@@ -84,6 +84,16 @@ export {
   storeNotice,
 } from "./store/notices.ts";
 export {
+  activePolicyHoldsForRole,
+  type PolicyHoldInput,
+  type PolicyHoldTarget,
+  policyHoldTarget,
+  type PolicyHoldView,
+  policyTargetCoversRole,
+  releasePolicyHold,
+  setPolicyHold,
+} from "./store/policyHolds.ts";
+export {
   DELIVERY_PROJECTION,
   MESSAGES_PROJECTION,
   type Projection,
@@ -128,6 +138,8 @@ export {
   storeHoldList,
   storeHoldRelease,
   storeHoldSet,
+  storePolicyHoldRelease,
+  storePolicyHoldSet,
   storeQuestionAnswer,
   storeQuestionCancel,
   storeQuestionList,

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, main } from "../cli.ts";
-import { ART, COORDINATOR, storeFixture, TECH } from "../store/testStore.ts";
+import { ART, COORDINATOR, GAME, storeFixture, TECH } from "../store/testStore.ts";
 
 const TECH_ROLE = "archies-dog-walks/tech";
 const ART_ROLE = "archies-dog-walks/art";
@@ -369,6 +369,105 @@ describe("hold commands", () => {
       holds: [],
       schema: 1,
     });
+  });
+
+  it("records explicit coordinator policy holds and releases only the exact policy ID", async () => {
+    const { coordinator, reader, tech } = setup();
+    const args = [
+      "hold",
+      "policy-set",
+      "--id",
+      "policy-current",
+      "--scope",
+      `role:${TECH_ROLE}`,
+      "--reason",
+      "User paused Tech.",
+      "--approval",
+      "request-1",
+    ];
+    const release = ["hold", "policy-release", "--id", "policy-current", "--approval", "request-2"];
+    expect((await tech(...args)).err).toContain("not-coordinator");
+    expect((await coordinator(...args, "--worker", "unverified")).err).toContain("not-coordinator");
+    expect(
+      (await coordinator(...args.slice(0, 5), "role:unknown", ...args.slice(6))).err,
+    ).toContain("policy-role-unregistered");
+    expect((await coordinator(...args)).json).toMatchObject({
+      duplicate: false,
+      hold: {
+        policy: {
+          approval: "request-1",
+          issuer: "game-coordinator",
+          target: {
+            kind: "role",
+            role: TECH_ROLE,
+          },
+        },
+        role: TECH_ROLE,
+        source: "user-policy",
+      },
+    });
+    expect((await coordinator(...args)).json).toMatchObject({ duplicate: true });
+    expect(
+      (await reader("hold", "list", "--role", TECH_ROLE, "--state", "active")).json,
+    ).toMatchObject({ holds: [{ id: "policy-current" }] });
+    expect((await tech("session", "start")).json).toMatchObject({ counts: { holds: 1 } });
+    expect(
+      (await coordinator("msg", "send", "--to", TECH_ROLE, "--body", "Independent work.")).json,
+    ).toMatchObject({ wake: { status: "guarded" } });
+    expect((await tech("hold", "release", "--id", "policy-current")).err).toContain("missing");
+    expect((await tech(...release)).err).toContain("not-coordinator");
+
+    await tech("hold", "set", "--id", "independent", "--scope", "role", "--reason", "Other hold.");
+    await tech("question", "open", "--id", "q-independent", "--title", "Keep waiting?");
+    expect((await coordinator(...release)).json).toMatchObject({
+      duplicate: false,
+      hold: { policy: { releaseApproval: "request-2" }, state: "released" },
+      wakes: [{ role: TECH_ROLE, status: "guarded" }],
+    });
+    expect((await coordinator(...release)).json).toMatchObject({ duplicate: true });
+    expect((await coordinator(...release.slice(0, -1), "request-3")).err).toContain("id-conflict");
+    expect((await reader("hold", "list", "--state", "active")).json).toMatchObject({
+      holds: [{ id: "independent" }],
+    });
+    expect((await reader("question", "list", "--state", "pending")).json).toMatchObject({
+      questions: [{ id: "q-independent" }],
+    });
+  });
+
+  it("validates registered policy scopes and distinguishes game wakes from exact work", async () => {
+    const { coordinator, reader } = setup();
+    const set = (id: string, scope: string) =>
+      coordinator(
+        "hold",
+        "policy-set",
+        "--id",
+        id,
+        "--scope",
+        scope,
+        "--reason",
+        "User paused.",
+        "--approval",
+        "request-1",
+      );
+    expect((await set("policy-invalid", "game:missing")).err).toContain("policy-game-unregistered");
+    expect((await set("policy-invalid", "work:missing:ag-0001")).err).toContain(
+      "policy-repository-unregistered",
+    );
+    expect((await set("policy-work", `work:${GAME}:ag-0001`)).json).toMatchObject({
+      hold: { policy: { target: { id: "ag-0001", kind: "work", repository: GAME } } },
+    });
+    expect(
+      (await coordinator("msg", "send", "--to", TECH_ROLE, "--body", "Role inbox.")).json,
+    ).toMatchObject({ wake: { status: "accepted" } });
+    expect((await set("policy-game", `game:${GAME}`)).json).toMatchObject({
+      hold: { policy: { target: { game: GAME, kind: "game" } } },
+    });
+    expect((await reader("hold", "list", "--role", ART_ROLE)).json).toMatchObject({
+      holds: [{ id: "policy-game" }],
+    });
+    expect(
+      (await coordinator("hold", "policy-release", "--id", "policy-work", "--approval", "r2")).json,
+    ).toMatchObject({ wakes: [] });
   });
 
   it("withholds a wake while the hold is active and wakes the owner on release", async () => {

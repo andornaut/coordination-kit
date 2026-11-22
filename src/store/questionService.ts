@@ -15,6 +15,13 @@ import {
 } from "./decisionLine.ts";
 import { type CallerOptions, resolveCaller } from "./identity.ts";
 import {
+  type PolicyHoldInput,
+  policyHoldTarget,
+  policyTargetCoversRole,
+  releasePolicyHold,
+  setPolicyHold,
+} from "./policyHolds.ts";
+import {
   type AnswerInput,
   cancelQuestion,
   type DecisionRow,
@@ -286,6 +293,69 @@ export async function storeHoldRelease(
   return withStore(context, async (store) => {
     const result = releaseHold(store, actor, id);
     return { ...result, schema: 1 as const, wake: await wakeOwner(context, store, actor.role) };
+  });
+}
+
+function policyIssuer(context: StoreServiceContext, options: CallerOptions) {
+  const roles = registry(context);
+  const actor = resolveCaller(roles, context.env, options);
+  const binding = roles.roles[actor.role]!;
+  if (
+    actor.role !== "game-coordinator" ||
+    actor.worker !== undefined ||
+    binding.ownership !== "active" ||
+    binding.phase === "held" ||
+    binding.phase === "source-held"
+  ) {
+    throw new StoreError("not-coordinator");
+  }
+  return { actor, roles };
+}
+
+export async function storePolicyHoldSet(
+  context: StoreServiceContext,
+  options: CallerOptions,
+  request: PolicyHoldInput,
+): Promise<HoldOutput> {
+  const { actor, roles } = policyIssuer(context, options);
+  const target = policyHoldTarget(request.scope);
+  const { games, kits } = context.layout.config;
+  if (target.kind === "role" && !Object.hasOwn(roles.roles, target.role)) {
+    throw new StoreError("policy-role-unregistered");
+  }
+  if (target.kind === "game" && !Object.hasOwn(games, target.game)) {
+    throw new StoreError("policy-game-unregistered");
+  }
+  if (
+    target.kind === "work" &&
+    target.repository !== "game-coordinator" &&
+    !Object.hasOwn(games, target.repository) &&
+    !Object.hasOwn(kits, target.repository)
+  ) {
+    throw new StoreError("policy-repository-unregistered");
+  }
+  return withStore(context, (store) => ({ ...setPolicyHold(store, actor, request), schema: 1 }));
+}
+
+export async function storePolicyHoldRelease(
+  context: StoreServiceContext,
+  options: CallerOptions,
+  request: { readonly id: string; readonly approval: string },
+): Promise<
+  HoldOutput & {
+    readonly wakes: readonly { readonly role: string; readonly status: WakeStatus }[];
+  }
+> {
+  const { actor, roles } = policyIssuer(context, options);
+  return withStore(context, async (store) => {
+    const result = releasePolicyHold(store, actor, request);
+    const targets = Object.keys(roles.roles)
+      .sort()
+      .filter((role) => policyTargetCoversRole(result.hold.policy.target, role));
+    const wakes = await Promise.all(
+      targets.map(async (role) => ({ role, ...(await wakeOwner(context, store, role)) })),
+    );
+    return { ...result, schema: 1, wakes };
   });
 }
 

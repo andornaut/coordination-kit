@@ -67,6 +67,8 @@ Projections, updated in the same transaction as their event:
   unique per `(work, n)`, where `id` is `<work>/D<n>` and `supersedes` is `<work>/D<k>` or null.
 - `requests`: one row per [imported request](#requests) with its owner, kind, summary, ledger
   state, question status, source, named work IDs, reason, required owner and close.
+- `policy_holds`: one row per coordinator-issued user hold with issuer, exact scope and the
+  approval references for set and release.
 - `holds`: one row per hold with its owning role (null for an imported hold without one), scope,
   covered work items, source, ledger state, reason, state (`active` or `released`) and times.
   Indexed by `(role, state, set_seq)`.
@@ -184,8 +186,10 @@ stays outstanding with no outcome, which reads as ambiguous.
 After the registry checks, the store guard (`questionHoldGuard`, the default `storeGuard` port of
 `wakeRecipient`) withholds the wake while the recipient has a pending question or an active hold
 with scope `role`; it is logged `guarded` with `recipient-question-pending` or
-`recipient-hold-active`. Work and game holds do not withhold wakes. For Codex the native question
-check still runs after it. A wake carries no payload, so it never answers or clears a prompt or
+`recipient-hold-active`. User policy holds for the exact role or its game withhold wakes with
+`recipient-policy-hold-active`. Work-scoped holds and role-owned game holds apply at work start.
+The guard is checked when claiming a wake and again before native delivery. For Codex the native
+question check still runs after it. A wake carries no payload, so it never answers or clears a prompt or
 hold. When the owner answers or cancels its question or releases its hold, that command attempts
 one guarded wake for it, which goes out only if no other guard remains.
 
@@ -259,6 +263,28 @@ while active is a no-op; any other reuse of the ID, including after release, is 
 `approval-ledger:<id>` hold it owns; a repeated release is a no-op. Holds also gate `work start`
 ([hold seam](#hold-seam)).
 
+### User policy holds
+
+Game-coordinator uses `hold policy-set --id H --scope S --reason R --approval REF` to record an
+explicit user instruction. Only its active registered conversation may issue or release these
+holds. `REF` cites the explicit user instruction for the action. `H` is a distinct `policy-` ID.
+Set appends `hold.policy-set` with the ID, issuer, scope, reason and approval reference.
+
+| Scope                     | Work starts covered                 | Wakes covered        |
+| ------------------------- | ----------------------------------- | -------------------- |
+| `role:ROLE`               | Items owned by the registered role  | The registered role  |
+| `game:GAME`               | Items in the configured game        | Its registered roles |
+| `work:REPOSITORY:WORK_ID` | That exact repository and work item | None                 |
+
+`hold policy-release --id H --approval REF` appends `hold.policy-released` for the exact policy
+hold. Release keeps independent questions and holds intact. It attempts existing guarded wakes
+for the affected registered roles. Matching retries are idempotent. Released IDs stay in history.
+
+`hold list`, work show and status expose the exact target, issuer and approval references under
+`policy`. The store appends these events and checks covering holds and work-start admission
+under the same write lock. The derived policy projection is added when an existing schema-1
+store is opened by a CLI that supports it.
+
 ### Lists
 
 `question list [--role R] [--state pending|answered|cancelled]`, `hold list [--role R]
@@ -273,8 +299,8 @@ contains numbered decisions. An absent store reads as empty.
 appends `session.started` with the role, harness, native ID, CLI version and cwd, and prints the
 role, harness and bound conversation, the registry revision, phase and ownership, the checkpoint
 `var/handoffs/<scope>/current.md` (`games/<game>/<role>`, `kits/<kit>` or `game-coordinator`),
-counts of pending questions, active holds (the role's own `role` holds and its game's `game:`
-holds) and open inbox messages (`sent`, `delivered` and `retained`), and each open handoff that
+counts of pending questions, active holds (including user policy holds for the role or game),
+and open inbox messages (`sent`, `delivered` and `retained`), and each open handoff that
 includes the role. A role whose phase is `held` or `source-held` is refused `session-held` with
 the phase; an unbound caller gets the fence refusal. Repeating it appends another event.
 
@@ -479,7 +505,8 @@ holds covering the item. `work history ID` prints the item's work events in orde
 `work start` and `work show` ask a `HoldLookup` port for the active holds covering the item. The
 default, `storeHolds`, reads the [hold records](#holds): a `work:` hold that names the item, a
 `role` hold whose owner is the item's owner, and a `game:` hold whose game is the item's
-repository. `store import --approval-ledger` records each ledger hold as one `hold.imported`
+repository. It also covers items under an exact [user policy hold](#user-policy-holds).
+`store import --approval-ledger` records each ledger hold as one `hold.imported`
 event, which the hold projection applies:
 
 ```json

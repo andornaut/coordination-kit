@@ -124,6 +124,9 @@ exact live capability. The brief counts the shared visibility limitation once; t
 per-role reasons and history remain in `review show`. The wake guard continues to require
 its own current clearance.
 
+The review counts active [user policy holds](store.md#user-policy-holds). `review show` includes
+their exact target, issuer and approval evidence as recorded for the slot.
+
 The review reads ready handoffs from existing store work records. Each ready item identifies its
 recorded owner and exact linked parent, including a parent whose work record is still unavailable.
 Blocked and finished work do not appear as ready handoffs.

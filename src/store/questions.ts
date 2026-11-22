@@ -7,6 +7,13 @@ import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
 import { ID_PATTERN as WORK_ID } from "../work/check.ts";
 import type { Store } from "./db.ts";
+import {
+  activePolicyHoldsForRole,
+  policyHoldEntries,
+  policyHoldIdExists,
+  type PolicyHoldView,
+  policyTargetCoversRole,
+} from "./policyHolds.ts";
 import type { Projection } from "./projections.ts";
 import { secretShape } from "./secrets.ts";
 import { type Actor, type Json, type JsonObject, type StoredEvent, StoreError } from "./types.ts";
@@ -92,8 +99,9 @@ export interface HoldView {
    * `<repository>:<id>` items joined by `,`.
    */
   readonly scope: string;
-  /** `approval-ledger` for an imported hold, else null. */
+  /** `approval-ledger` for an imported hold, `user-policy` for a policy hold, else null. */
   readonly source: string | null;
+  readonly policy?: PolicyHoldView["policy"];
   readonly reason: string;
   readonly state: HoldState;
   readonly setAt: string;
@@ -859,6 +867,7 @@ export function setHold(
       );
       return { duplicate: true, hold: holdView(existing) };
     }
+    ensure(!policyHoldIdExists(store, input.id), "id-conflict");
     store.append({
       actor,
       key: `hold.set:${input.id}`,
@@ -891,19 +900,24 @@ export function listHolds(
   filter: { readonly role?: string; readonly states?: readonly HoldState[] } = {},
 ): HoldView[] {
   const states = filter.states ?? HOLD_STATES;
-  return (
-    store.db
-      .prepare(
-        `SELECT * FROM holds WHERE (? IS NULL OR role = ?)
-           AND state IN (${states.map(() => "?").join(",")}) ORDER BY set_seq`,
-      )
-      .all(filter.role ?? null, filter.role ?? null, ...states) as Row[]
-  ).map(holdView);
+  const rows = store.db
+    .prepare(
+      `SELECT * FROM holds WHERE (? IS NULL OR role = ?)
+         AND state IN (${states.map(() => "?").join(",")})`,
+    )
+    .all(filter.role ?? null, filter.role ?? null, ...states) as Row[];
+  const policy = policyHoldEntries(store, states).filter(
+    ({ hold }) =>
+      filter.role === undefined || policyTargetCoversRole(hold.policy.target, filter.role),
+  );
+  return [...rows.map((row) => ({ hold: holdView(row), seq: Number(row.set_seq) })), ...policy]
+    .sort((a, b) => a.seq - b.seq)
+    .map(({ hold }) => hold);
 }
 
 /**
  * The store wake guard: a recipient with a pending question or an active `role` hold gets no
- * wake. It reads the projections only; a wake never answers or clears either.
+ * wake. Policy holds apply to their exact role or game scope. A wake never answers or clears either.
  */
 export function questionHoldGuard(store: Store, role: string, harness?: string | null): WakeGuard {
   if (
@@ -912,6 +926,9 @@ export function questionHoldGuard(store: Store, role: string, harness?: string |
       .get(role) !== undefined
   ) {
     return { reason: "recipient-question-pending", status: "blocked" };
+  }
+  if (activePolicyHoldsForRole(store, role) > 0) {
+    return { reason: "recipient-policy-hold-active", status: "blocked" };
   }
   if (
     store.db
@@ -937,8 +954,8 @@ export function questionHoldGuard(store: Store, role: string, harness?: string |
  * covers it by ID (and repository, for an imported hold), a `role` hold when its owner is the
  * item's owner, and a `game:` hold when the item's repository is that game.
  */
-export const storeHolds: HoldLookup = (store, ref, cover) =>
-  (store.db.prepare("SELECT * FROM holds WHERE state = 'active' ORDER BY set_seq").all() as Row[])
+export const storeHolds: HoldLookup = (store, ref, cover) => {
+  const local = (store.db.prepare("SELECT * FROM holds WHERE state = 'active'").all() as Row[])
     .filter((row) => {
       const scope = row.scope as string;
       if (scope === "role") {
@@ -952,8 +969,28 @@ export const storeHolds: HoldLookup = (store, ref, cover) =>
           item.id === ref.id && (item.repository === null || item.repository === ref.repository),
       );
     })
-    .map((row): CoveringHold => ({
-      id: row.id as string,
-      owner: (row.role as string | null) ?? null,
-      reason: row.reason as string,
+    .map((row) => ({
+      hold: {
+        id: row.id as string,
+        owner: (row.role as string | null) ?? null,
+        reason: row.reason as string,
+      },
+      seq: Number(row.set_seq),
     }));
+  const policy = policyHoldEntries(store, ["active"])
+    .filter(({ hold }) => {
+      const { target } = hold.policy;
+      if (target.kind === "role") {
+        return target.role === cover?.owner;
+      }
+      if (target.kind === "game") {
+        return target.game === cover?.game;
+      }
+      return target.id === ref.id && target.repository === ref.repository;
+    })
+    .map(({ hold, seq }) => ({
+      hold: { id: hold.id, owner: hold.policy.issuer, policy: hold.policy, reason: hold.reason },
+      seq,
+    }));
+  return [...local, ...policy].sort((a, b) => a.seq - b.seq).map(({ hold }): CoveringHold => hold);
+};

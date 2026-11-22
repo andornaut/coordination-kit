@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
 import type { Store } from "./db.ts";
+import type { PolicyHoldView } from "./policyHolds.ts";
 import type { Projection } from "./projections.ts";
 import { secretShape } from "./secrets.ts";
 import { type Actor, type JsonObject, type StoredEvent, StoreError } from "./types.ts";
@@ -620,6 +621,7 @@ export function workHistory(store: Store, ref: WorkRef): WorkHistoryEntry[] {
 export interface CoveringHold {
   readonly id: string;
   readonly owner: string | null;
+  readonly policy?: PolicyHoldView["policy"];
   readonly reason: string | null;
 }
 

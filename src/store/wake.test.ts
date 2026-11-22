@@ -7,6 +7,7 @@ import { RpcError } from "../adapters/codex/rpc.ts";
 import { updateRegistry } from "../registry/store.ts";
 import { Store } from "./db.ts";
 import { readInbox, sendMessage } from "./messages.ts";
+import { setPolicyHold } from "./policyHolds.ts";
 import { ART, clearDecision, fakeCodex, GAMEPLAY, storeFixture, TECH } from "./testStore.ts";
 import { pendingWakeRoles, rearmWake, type WakePorts, wakeRecipient, wakeState } from "./wake.ts";
 
@@ -188,6 +189,31 @@ describe("Codex wakes", () => {
         type: "text",
       },
     ]);
+  });
+
+  it("rechecks an exact policy hold set while a Codex wake is connecting", async () => {
+    const codex = fakeCodex(ART);
+    const { layout, send, store } = setup({
+      connect: () => {
+        const writer = Store.forLayout(layout);
+        setPolicyHold(writer, SENDER, {
+          approval: "request-1",
+          id: "policy-art",
+          reason: "User paused.",
+          scope: `role:${ART_ROLE}`,
+        });
+        writer.close();
+        return Promise.resolve(codex.client);
+      },
+    });
+    clearDecision(layout, ART);
+    expect(await send(ART_ROLE)).toMatchObject({ status: "guarded" });
+    expect(codex.adds()).toEqual([]);
+    expect(wakeState(store, ART_ROLE)).toEqual({ outstanding: null, pending: true });
+    expect(await send(ART_ROLE)).toMatchObject({
+      reason: "recipient-policy-hold-active",
+      status: "guarded",
+    });
   });
 
   it("guards on a pending native question", async () => {

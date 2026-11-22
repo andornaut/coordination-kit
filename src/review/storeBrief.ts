@@ -10,6 +10,7 @@ import { resolveRole } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
 import { clean, DELIVERY_KIT_ACTOR, derivedId, storeNotice } from "../store/notices.ts";
+import { policyHoldEntries, type PolicyHoldView } from "../store/policyHolds.ts";
 import { NEXT_REVIEW_BOUNDARY, retentionInstant } from "../store/retention.ts";
 import { type Json, type JsonObject, type Retention, StoreError } from "../store/types.ts";
 import {
@@ -134,6 +135,8 @@ export interface BriefRecord {
   readonly decisions: RecordedDecisions;
   /** The native question and child health checks as this slot read them. */
   readonly native: NativeSurvey;
+  /** Active coordinator-issued policy holds recorded at this slot. */
+  readonly policyHolds?: readonly PolicyHoldView[];
   /** Store work handoffs, absent from briefs recorded before work coverage. */
   readonly readyHandoffs?: readonly ReadyHandoff[];
   /** Worker failures any brief of this game has reported, so each is reminded once. */
@@ -285,6 +288,7 @@ function survey(
   const checked = nativeExceptions(native, previous);
   const decisions = recordedDecisions(store);
   const readyHandoffs = readReadyHandoffs(store);
+  const policyHolds = policyHoldEntries(store, ["active"]).map(({ hold }) => hold);
   const nativeAndDecisionExceptions: BriefException[] = [
     ...decisions.pending.map(({ id, role }): BriefException => ({
       id,
@@ -388,6 +392,7 @@ function survey(
       },
       native: checked.counts,
       open: rows.length,
+      policyHolds: policyHolds.length,
       readyHandoffs: readyHandoffs.length,
       runnerEvents: Number(runner.events ?? 0),
       states,
@@ -398,6 +403,7 @@ function survey(
     exceptions: [...nativeAndDecisionExceptions, ...newStalls, ...exceptions],
     native,
     open: rows.map((row) => row.id as string),
+    policyHolds,
     readyHandoffs,
     reportedWorkerFailures: checked.reported,
   };
@@ -476,6 +482,9 @@ export function composeBrief(
     `Runner since the previous brief: ${String(counts.runnerEvents)} events, ` +
       `${String(counts.completes)} COMPLETE`,
     `Store decisions: ${decisions.recorded} recorded, ${decisions.pending} pending questions`,
+    ...(Number(counts.policyHolds) > 0
+      ? [`Active user policy holds: ${String(counts.policyHolds)}`]
+      : []),
     `Native prompt visibility: ${native.questions.visibilityUnknown} unknown; history: ` +
       `${native.questions.historyComplete} complete, ${native.questions.pending} with pending attestations`,
     ...(unavailableCapability > 0

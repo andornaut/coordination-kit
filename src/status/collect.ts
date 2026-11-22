@@ -703,6 +703,7 @@ export function collectStatus(
     (hold) =>
       options.scope === "all" ||
       (hold.role !== null && inScope(hold.role)) ||
+      (hold.policy?.target.kind === "work" && selected.names.has(hold.policy.target.repository)) ||
       (hold.scope.startsWith("game:") && selected.names.has(hold.scope.slice(5))) ||
       (hold.source === "approval-ledger" &&
         hold.scope

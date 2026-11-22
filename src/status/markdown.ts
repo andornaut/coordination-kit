@@ -115,8 +115,8 @@ export function renderMarkdown(report: StatusReport): string {
     "Active holds",
     fromStore(
       report.activeHolds.map(
-        ({ id, reason, role, scope }) =>
-          `- ${id} (${role ?? "owner unknown"}, ${scope}) ${inline(reason)}`,
+        ({ id, policy, reason, role, scope }) =>
+          `- ${id} (${policy?.issuer ?? role ?? "owner unknown"}, ${scope}) ${inline(reason)}`,
       ),
     ),
   );
