@@ -30,7 +30,7 @@ function journal() {
   };
   const projection: FileProjection = {
     journal: { events: read, withWriter: (body) => body(writer) },
-    records: (batch) =>
+    records: (_index, _previousSeq, batch) =>
       batch.map(({ key, seq }) => ({ data: key, path: `roles/shared/${seq}.json` })),
   };
   return {

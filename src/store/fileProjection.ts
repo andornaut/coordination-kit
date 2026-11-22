@@ -1,3 +1,5 @@
+import type { DatabaseSync } from "node:sqlite";
+
 import type { Json, StoredEvent } from "./types.ts";
 
 export interface FileRecord {
@@ -20,5 +22,9 @@ export interface FileJournalPort extends FileJournalReader {
 
 export interface FileProjection {
   readonly journal: FileJournalPort;
-  readonly records: (events: readonly StoredEvent[]) => readonly FileRecord[];
+  readonly records: (
+    index: DatabaseSync,
+    previousSeq: number,
+    events: readonly StoredEvent[],
+  ) => readonly FileRecord[];
 }

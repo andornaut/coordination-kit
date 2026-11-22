@@ -276,6 +276,10 @@ export class Store {
     }
   }
 
+  get fileBacked(): boolean {
+    return this.#files !== undefined;
+  }
+
   close(): void {
     this.db.close();
   }
@@ -303,7 +307,7 @@ export class Store {
         }
         const events = this.events({ afterSeq: before });
         if (events.length > 0) {
-          writer.commit(events, files.records(events));
+          writer.commit(events, files.records(this.db, before, events));
         }
         return result;
       });
