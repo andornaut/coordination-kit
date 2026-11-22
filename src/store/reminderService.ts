@@ -66,7 +66,7 @@ async function requireIdleRoot(client: RpcClient, recipient: string): Promise<vo
     thread === null ||
     thread.id !== recipient ||
     thread.parentThreadId != null ||
-    thread.source !== "cli" ||
+    (thread.source !== "cli" && thread.source !== "vscode") ||
     thread.canAcceptDirectInput !== true ||
     !isRecord(thread.status) ||
     thread.status.type !== "idle" ||

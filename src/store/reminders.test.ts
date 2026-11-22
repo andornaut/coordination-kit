@@ -106,83 +106,86 @@ describe("coordinator reminder ledger", () => {
     }
   });
 
-  it("qualifies pinned current idle independently of an absent marker or past compaction", async () => {
-    const { context, scope, store } = setup(false);
-    try {
-      wake(store, "decision-clearance", "guarded", ORIGINAL, ART, "decision-clearance");
-      expect(listReminders(store, scope)).toMatchObject([
-        { originals: [{ id: ORIGINAL }], role: ROLE },
-      ]);
-      const { receipt } = await storeReminderClaim(
-        context,
-        {},
-        { originals: [ORIGINAL], role: ROLE },
-      );
-      const codex = fakeCodex(ART);
-      const normal = () => Promise.resolve(codex.client);
-      const pinned = () => Promise.resolve({ ...codex.client, serverVersion: "0.171.0" });
-      await expect(
-        storeReminderCheck({ ...context, connectReminder: normal }, {}, receipt.id),
-      ).rejects.toThrow("reminder-native-clearance-unverified");
-      expect(
-        await storeReminderCheck({ ...context, connectReminder: pinned }, {}, receipt.id),
-      ).toMatchObject({ nativeIdle: true, receipt });
-
-      clearDecision(scope.layout, ART);
-      const withItem = (item: Record<string, unknown>) => () =>
-        Promise.resolve({
-          ...codex.client,
-          serverVersion: "0.171.0",
-          call: (method: string, params: unknown) =>
-            method === "thread/items/list"
-              ? Promise.resolve({ data: [{ item, turnId: "turn-1" }] })
-              : codex.client.call(method, params),
-        });
-      expect(
-        await storeReminderCheck(
-          {
-            ...context,
-            connectReminder: withItem({ id: "item-compact", type: "contextCompaction" }),
-          },
+  it.each(["cli", "vscode"])(
+    "qualifies a pinned idle %s root after compaction or a missing marker",
+    async (source) => {
+      const { context, scope, store } = setup(false);
+      try {
+        wake(store, "decision-clearance", "guarded", ORIGINAL, ART, "decision-clearance");
+        expect(listReminders(store, scope)).toMatchObject([
+          { originals: [{ id: ORIGINAL }], role: ROLE },
+        ]);
+        const { receipt } = await storeReminderClaim(
+          context,
           {},
-          receipt.id,
-        ),
-      ).toMatchObject({ nativeIdle: true, receipt });
-      await expect(
-        storeReminderCheck(
-          {
-            ...context,
-            connectReminder: withItem({
-              delivery: "async",
-              id: "item-question",
-              questions: [{ title: "Still waiting" }],
-              type: "agentMessage",
-            }),
-          },
-          {},
-          receipt.id,
-        ),
-      ).rejects.toThrow("reminder-native-guarded");
+          { originals: [ORIGINAL], role: ROLE },
+        );
+        const codex = fakeCodex(ART, undefined, source);
+        const normal = () => Promise.resolve(codex.client);
+        const pinned = () => Promise.resolve({ ...codex.client, serverVersion: "0.171.0" });
+        await expect(
+          storeReminderCheck({ ...context, connectReminder: normal }, {}, receipt.id),
+        ).rejects.toThrow("reminder-native-clearance-unverified");
+        expect(
+          await storeReminderCheck({ ...context, connectReminder: pinned }, {}, receipt.id),
+        ).toMatchObject({ nativeIdle: true, receipt });
 
-      const marker = join(
-        gameLayout(scope.layout, GAME).busDir,
-        "unblock",
-        "decisions",
-        `${ART}.json`,
-      );
-      writeFileSync(marker, JSON.stringify({ state: "pending", thread_id: ART }));
-      await expect(
-        storeReminderCheck({ ...context, connectReminder: pinned }, {}, receipt.id),
-      ).rejects.toThrow("reminder-owner-clearance-required");
-      writeFileSync(marker, "{");
-      await expect(
-        storeReminderCheck({ ...context, connectReminder: pinned }, {}, receipt.id),
-      ).rejects.toThrow("reminder-owner-clearance-required");
-      expect(codex.adds()).toEqual([]);
-    } finally {
-      store.close();
-    }
-  });
+        clearDecision(scope.layout, ART);
+        const withItem = (item: Record<string, unknown>) => () =>
+          Promise.resolve({
+            ...codex.client,
+            serverVersion: "0.171.0",
+            call: (method: string, params: unknown) =>
+              method === "thread/items/list"
+                ? Promise.resolve({ data: [{ item, turnId: "turn-1" }] })
+                : codex.client.call(method, params),
+          });
+        expect(
+          await storeReminderCheck(
+            {
+              ...context,
+              connectReminder: withItem({ id: "item-compact", type: "contextCompaction" }),
+            },
+            {},
+            receipt.id,
+          ),
+        ).toMatchObject({ nativeIdle: true, receipt });
+        await expect(
+          storeReminderCheck(
+            {
+              ...context,
+              connectReminder: withItem({
+                delivery: "async",
+                id: "item-question",
+                questions: [{ title: "Still waiting" }],
+                type: "agentMessage",
+              }),
+            },
+            {},
+            receipt.id,
+          ),
+        ).rejects.toThrow("reminder-native-guarded");
+
+        const marker = join(
+          gameLayout(scope.layout, GAME).busDir,
+          "unblock",
+          "decisions",
+          `${ART}.json`,
+        );
+        writeFileSync(marker, JSON.stringify({ state: "pending", thread_id: ART }));
+        await expect(
+          storeReminderCheck({ ...context, connectReminder: pinned }, {}, receipt.id),
+        ).rejects.toThrow("reminder-owner-clearance-required");
+        writeFileSync(marker, "{");
+        await expect(
+          storeReminderCheck({ ...context, connectReminder: pinned }, {}, receipt.id),
+        ).rejects.toThrow("reminder-owner-clearance-required");
+        expect(codex.adds()).toEqual([]);
+      } finally {
+        store.close();
+      }
+    },
+  );
 
   it("retains a claim across reopen and rebuild and settles it idempotently", () => {
     const { scope, store } = setup();

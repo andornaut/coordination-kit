@@ -91,6 +91,7 @@ export function fakeCodex(
       input: params.input,
     },
   }),
+  source = "cli",
 ): FakeCodex {
   const calls: { method: string; params: Record<string, unknown> }[] = [];
   const client: RpcClient = {
@@ -104,7 +105,7 @@ export function fakeCodex(
               canAcceptDirectInput: true,
               id: conversation,
               parentThreadId: null,
-              source: "cli",
+              source,
               status: { type: "idle" },
             },
           });
