@@ -216,3 +216,4 @@ Each deletion needs its phase's exit criteria plus explicit user approval; archi
 | ck-0020 | Add a cross-repository status command and proposed and declined work items | [ck-0020.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0020.md) |
 | ck-0022 | Persist explicit answers before Markdown projection                        | [ck-0022.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0022.md) |
 | ck-0023 | Report open work, questions and holds together                             | [ck-0023.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0023.md) |
+| ck-0027 | Migrate coordination to role-owned filesystem records                 | [ck-0027.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0027.md) |
