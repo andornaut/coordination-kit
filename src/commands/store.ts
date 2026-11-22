@@ -417,13 +417,17 @@ export const storeCompactionPlanCommand: Handler = (io, root, args) =>
     "store compaction-plan",
     args,
     (context) => {
+      const { revision, roles } = registry(context);
       const store = Store.readLayout(context.layout);
       try {
         if (!store?.fileBacked) {
           throw new StoreError("compaction-file-authority-required");
         }
-        const { revision, roles } = registry(context);
-        return planFileCompaction(store.events(), {
+        const events = store.events();
+        if (registry(context).revision !== revision) {
+          throw new StoreError("compaction-registry-changed");
+        }
+        return planFileCompaction(events, {
           registeredGames: new Set(Object.keys(context.layout.config.games)),
           registeredRoles: new Set(Object.keys(roles)),
           registryRevision: revision,
