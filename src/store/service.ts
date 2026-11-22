@@ -25,6 +25,7 @@ import {
   sendMessage,
 } from "./messages.ts";
 import { messageWake, unreadMessages } from "./messageWake.ts";
+import { derivedId } from "./notices.ts";
 import {
   type Actor,
   type MessageIntent,
@@ -35,6 +36,8 @@ import {
   type UnreadMessage,
 } from "./types.ts";
 import { type WakePorts, wakeRecipient, type WakeStatus } from "./wake.ts";
+
+const COORDINATOR = "game-coordinator";
 
 export interface StoreServiceContext {
   readonly layout: Layout;
@@ -96,9 +99,62 @@ export interface SendOutput {
   readonly message: MessageView;
   readonly duplicate: boolean;
   readonly wake: { readonly status: WakeStatus; readonly evidence: MessageWakeView };
+  readonly attention?: {
+    readonly id: string;
+    readonly status: "recorded" | "unavailable";
+    readonly wake?: WakeStatus;
+  };
 }
 
-/** Commit the original, then attempt one guarded wake. Repeating the original is read-only. */
+/**
+ * Route a confirmed unblock wake failure to the coordinator once. The original is already
+ * committed. An attention write or wake failure must not turn that committed send into a retry.
+ */
+async function notifyCoordinator(
+  ports: Parameters<typeof wakeRecipient>[0],
+  actor: Actor,
+  original: MessageView,
+): Promise<NonNullable<SendOutput["attention"]> | undefined> {
+  const { store } = ports;
+  const id = derivedId("unread-unblock", original.id);
+  try {
+    const notice = store.transaction(() => {
+      const current = messageStatus(store, original.id);
+      const { outcome, wake } = messageWake(store, current.id, current.to, current.state);
+      if (
+        current.state !== "sent" ||
+        wake === null ||
+        (outcome !== "guarded" && outcome !== "failed")
+      ) {
+        return undefined;
+      }
+      return sendMessage(store, actor, {
+        body:
+          `Unblock original ${current.id} remains unread after a ${outcome} wake to ${current.to}. ` +
+          "Review safe inbox collection for the exact original.",
+        id,
+        intent: "queue",
+        links: [{ kind: "message", ref: current.id }],
+        to: COORDINATOR,
+      });
+    });
+    if (notice === undefined) {
+      return undefined;
+    }
+    if (notice.duplicate) {
+      return { id, status: "recorded" };
+    }
+    try {
+      return { id, status: "recorded", wake: (await wakeRecipient(ports, COORDINATOR)).status };
+    } catch {
+      return { id, status: "recorded" };
+    }
+  } catch {
+    return { id, status: "unavailable" };
+  }
+}
+
+/** Commit the original, then attempt one guarded recipient wake. Repeating it is read-only. */
 export async function storeSend(
   context: StoreServiceContext,
   options: CallerOptions,
@@ -119,17 +175,22 @@ export async function storeSend(
       links: request.links ?? [],
       to,
     });
-    const attempt = sent.duplicate
-      ? undefined
-      : await wakeRecipient(
-          {
-            env: context.env,
-            layout: context.layout,
-            store,
-            ...(context.ports === undefined ? {} : { ports: context.ports }),
-          },
-          to,
-        );
+    const ports = {
+      env: context.env,
+      layout: context.layout,
+      store,
+      ...(context.ports === undefined ? {} : { ports: context.ports }),
+    };
+    const attempt = sent.duplicate ? undefined : await wakeRecipient(ports, to);
+    const attention =
+      !sent.duplicate &&
+      sent.message.intent === "unblock" &&
+      actor.role !== COORDINATOR &&
+      to !== COORDINATOR &&
+      Object.hasOwn(roles.roles, COORDINATOR) &&
+      (attempt?.status === "guarded" || attempt?.status === "failed")
+        ? await notifyCoordinator(ports, actor, sent.message)
+        : undefined;
     const message = messageStatus(store, id);
     const evidence = messageWake(store, id, message.to, message.state);
     const previous: WakeStatus =
@@ -141,6 +202,7 @@ export async function storeSend(
             ? "none"
             : evidence.outcome;
     return {
+      ...(attention === undefined ? {} : { attention }),
       duplicate: sent.duplicate,
       message,
       schema: 1,

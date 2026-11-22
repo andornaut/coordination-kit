@@ -31,6 +31,44 @@ function cli(root: string, cwd: string, env: NodeJS.ProcessEnv) {
 }
 
 describe("store message commands", () => {
+  it("puts a confirmed unread unblock in the coordinator inbox once", async () => {
+    const { base, root } = storeFixture();
+    const tech = cli(root, base, { CLAUDE_CODE_SESSION_ID: TECH });
+    const coordinator = cli(root, base, { CLAUDE_CODE_SESSION_ID: COORDINATOR });
+    const args = [
+      "msg",
+      "send",
+      "--to",
+      ART_ROLE,
+      "--body",
+      "Private transfer details.",
+      "--intent",
+      "unblock",
+      "--id",
+      ID,
+    ];
+    const original = await tech(...args);
+    expect(original).toMatchObject({
+      code: EXIT_OK,
+      json: {
+        attention: { id: expect.any(String), status: "recorded", wake: "accepted" },
+        message: { id: ID, deliveredAt: null, state: "sent" },
+        wake: { status: "guarded" },
+      },
+    });
+    const attention = original.json?.attention as { id: string };
+    expect(await tech(...args)).toMatchObject({ code: EXIT_OK, json: { duplicate: true } });
+    const inbox = await coordinator("inbox", "--include-body");
+    expect(inbox.json).toMatchObject({
+      count: 1,
+      messages: [{ id: attention.id, from: TECH_ROLE, links: [{ kind: "message", ref: ID }] }],
+    });
+    expect(inbox.out).not.toContain("Private transfer details");
+    expect(await tech("msg", "status", ID)).toMatchObject({
+      json: { message: { deliveredAt: null, state: "sent" } },
+    });
+  });
+
   it("reports empty history and export without creating a store", async () => {
     const { base, root } = storeFixture();
     const run = cli(root, base, {});
