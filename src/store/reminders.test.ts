@@ -524,7 +524,7 @@ describe("coordinator reminder ledger", () => {
       code: EXIT_OK,
       value: {
         candidates: [{ deferredOriginals: [], originals: [ORIGINAL], role: ROLE }],
-        schema: 1,
+        schema: 2,
       },
     });
     const denied = await run(
