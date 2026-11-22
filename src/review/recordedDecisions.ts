@@ -1,10 +1,15 @@
+import type { CodexQuestion } from "../store/codexQuestions.ts";
 import type { Store } from "../store/db.ts";
+import { listQuestions, type QuestionOption } from "../store/questions.ts";
 
 export interface RecordedDecisions {
   readonly pending: readonly {
     readonly id: string;
     readonly role: string;
     readonly work: string | null;
+    readonly codex?: CodexQuestion;
+    readonly title?: string;
+    readonly options?: readonly QuestionOption[] | null;
   }[];
   readonly recorded: readonly {
     readonly role: string;
@@ -19,11 +24,14 @@ export interface RecordedDecisions {
 
 /** Store references only. A local record carries no assertion about the recipient's visible UI. */
 export function recordedDecisions(store: Store): RecordedDecisions {
-  const pending = store.db
-    .prepare(
-      "SELECT id, role, work FROM questions WHERE state = 'pending' ORDER BY role, opened_seq",
-    )
-    .all() as unknown as RecordedDecisions["pending"];
+  const pending = listQuestions(store, { states: ["pending"] })
+    .map(({ codex, id, options, role, title, work }) => ({
+      ...(codex === undefined ? {} : { codex, options, title }),
+      id,
+      role,
+      work,
+    }))
+    .sort((left, right) => left.role.localeCompare(right.role));
   const rows = store.db
     .prepare(
       `SELECT d.role, grouped.count, d.id, d.question, d.work

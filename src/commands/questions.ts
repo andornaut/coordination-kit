@@ -19,11 +19,15 @@ import {
   storePolicyHoldRelease,
   storePolicyHoldSet,
   storeQuestionAnswer,
+  storeQuestionAttach,
   storeQuestionCancel,
   storeQuestionList,
   storeQuestionOpen,
   storeQuestionProject,
+  storeQuestionReask,
+  storeQuestionReconcile,
 } from "../store/questionService.ts";
+import { parseWorkRef } from "../work/live.ts";
 import { callerOf, required, run, text, Usage, type Values } from "./store.ts";
 
 const CALLER = {
@@ -33,8 +37,10 @@ const CALLER = {
 
 export const QUESTION_OPEN_OPTIONS = {
   ...CALLER,
+  "depends-on": { multiple: true, type: "string" },
   id: { type: "string" },
   option: { multiple: true, type: "string" },
+  "option-json": { multiple: true, type: "string" },
   title: { type: "string" },
   work: { type: "string" },
 } as const;
@@ -49,6 +55,12 @@ export const QUESTION_ANSWER_OPTIONS = {
 } as const;
 
 export const QUESTION_PROJECT_OPTIONS = { ...CALLER, id: { type: "string" } } as const;
+export const QUESTION_ATTACH_OPTIONS = {
+  ...QUESTION_PROJECT_OPTIONS,
+  index: { type: "string" },
+  item: { type: "string" },
+  turn: { type: "string" },
+} as const;
 
 export const QUESTION_CANCEL_OPTIONS = {
   ...CALLER,
@@ -112,8 +124,22 @@ export const questionOpen: Handler = (io, root, args) =>
     args,
     (context, values) => {
       const labels = values.option;
-      const options = Array.isArray(labels) ? normalizeOptions(labels) : undefined;
+      const descriptions = values["option-json"];
+      const dependencies = values["depends-on"];
+      if (labels !== undefined && descriptions !== undefined) {
+        throw new Usage();
+      }
+      let entries: unknown = labels;
+      if (Array.isArray(descriptions)) {
+        try {
+          entries = descriptions.map((entry) => JSON.parse(entry) as unknown);
+        } catch {
+          throw new Usage();
+        }
+      }
+      const options = entries === undefined ? undefined : normalizeOptions(entries);
       return storeQuestionOpen(context, callerOf(values), {
+        ...(Array.isArray(dependencies) ? { dependsOn: dependencies.map(parseWorkRef) } : {}),
         title: required(values, "title"),
         ...optional("id", text(values, "id")),
         ...optional("work", text(values, "work")),
@@ -146,6 +172,41 @@ export const questionProject: Handler = (io, root, args) =>
     "question project",
     args,
     (context, values) => storeQuestionProject(context, callerOf(values), required(values, "id")),
+    QUESTION_PROJECT_OPTIONS,
+  );
+
+export const questionAttach: Handler = (io, root, args) =>
+  run(
+    io,
+    root,
+    "question attach",
+    args,
+    (context, values) =>
+      storeQuestionAttach(context, callerOf(values), required(values, "id"), {
+        index: Number(required(values, "index")),
+        item: required(values, "item"),
+        turn: required(values, "turn"),
+      }),
+    QUESTION_ATTACH_OPTIONS,
+  );
+
+export const questionReconcile: Handler = (io, root, args) =>
+  run(
+    io,
+    root,
+    "question reconcile",
+    args,
+    (context, values) => storeQuestionReconcile(context, callerOf(values), required(values, "id")),
+    QUESTION_PROJECT_OPTIONS,
+  );
+
+export const questionReask: Handler = (io, root, args) =>
+  run(
+    io,
+    root,
+    "question reask",
+    args,
+    (context, values) => storeQuestionReask(context, callerOf(values), required(values, "id")),
     QUESTION_PROJECT_OPTIONS,
   );
 

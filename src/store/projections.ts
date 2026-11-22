@@ -4,6 +4,7 @@
 // add appliers for existing kinds and pick them up on the next rebuild.
 import type { DatabaseSync } from "node:sqlite";
 
+import { QUESTION_CODEX_PROJECTION } from "./codexQuestions.ts";
 import { HANDOFFS_PROJECTION } from "./handoffs.ts";
 import { MESSAGE_WAKE_PROJECTION } from "./messageWake.ts";
 import { POLICY_HOLDS_PROJECTION } from "./policyHolds.ts";
@@ -378,6 +379,7 @@ export const PROJECTIONS: readonly Projection[] = [
   DELIVERY_PROJECTION,
   QUESTIONS_PROJECTION,
   QUESTION_ANSWERS_PROJECTION,
+  QUESTION_CODEX_PROJECTION,
   POLICY_HOLDS_PROJECTION,
   WORK_PROJECTION,
   HANDOFFS_PROJECTION,

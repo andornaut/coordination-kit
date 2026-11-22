@@ -1,6 +1,13 @@
 // @andornaut/coordination-kit/build/store: the SQLite coordination store, its message lifecycle,
 // wakes, the registry writer fence, runner event ingest, the retirement, imported requests, work
 // records, and questions, holds and decisions.
+export {
+  type CodexQuestion,
+  type CodexQuestionInput,
+  dependentQuestions,
+  type NativeQuestionIdentity,
+  type NativeQuestionProof,
+} from "./store/codexQuestions.ts";
 export type { AppendResult, VerifyResult } from "./store/db.ts";
 export {
   canonicalJson,
@@ -110,6 +117,7 @@ export {
   holdScope,
   type HoldState,
   type HoldView,
+  linkNativeQuestion,
   listDecisions,
   listHolds,
   listQuestions,
@@ -124,6 +132,7 @@ export {
   QUESTIONS_PROJECTION,
   type QuestionState,
   type QuestionView,
+  reaskNativeQuestion,
   RECORD_ID,
   releaseHold,
   requireOwnQuestion,
@@ -141,9 +150,12 @@ export {
   storePolicyHoldRelease,
   storePolicyHoldSet,
   storeQuestionAnswer,
+  storeQuestionAttach,
   storeQuestionCancel,
   storeQuestionList,
   storeQuestionOpen,
+  storeQuestionReask,
+  storeQuestionReconcile,
 } from "./store/questionService.ts";
 export {
   closeRequest,

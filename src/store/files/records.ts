@@ -45,6 +45,8 @@ const RECORD_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const WORK_EVENTS: ReadonlySet<string> = new Set(WORK_KINDS);
 const QUESTION_EVENTS = new Set([
   "question.opened",
+  "question.native-linked",
+  "question.native-reasked",
   "question.answer-recorded",
   "question.answered",
   "question.cancelled",

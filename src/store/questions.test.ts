@@ -278,6 +278,7 @@ describe("wake guard", () => {
     };
     openQuestion(store, TECH_ACTOR, { id: "q-a", title: "Ship it?" });
     expect(questionHoldGuard(store, TECH_ROLE)).toEqual({
+      blocker: { id: "q-a", kind: "question", owner: TECH_ROLE },
       reason: "recipient-question-pending",
       status: "blocked",
     });

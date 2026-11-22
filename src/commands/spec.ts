@@ -15,6 +15,7 @@ import {
   POLICY_HOLD_RELEASE_OPTIONS,
   POLICY_HOLD_SET_OPTIONS,
   QUESTION_ANSWER_OPTIONS,
+  QUESTION_ATTACH_OPTIONS,
   QUESTION_CANCEL_OPTIONS,
   QUESTION_LIST_OPTIONS,
   QUESTION_OPEN_OPTIONS,
@@ -62,6 +63,7 @@ const VALUES: Readonly<Record<string, string>> = {
   "body-file": "FILE",
   by: "user|ROLE",
   conversation: "UUID",
+  "depends-on": "REPOSITORY:WORK_ID",
   evidence: "REF",
   "expected-revision": "N",
   game: "ID",
@@ -73,6 +75,7 @@ const VALUES: Readonly<Record<string, string>> = {
   "native-id": "ID",
   "next-boundary": "TEXT",
   option: "LABEL",
+  "option-json": "JSON",
   owner: "ROLE",
   parent: "ROLE|UUID",
   "poll-seconds": "SECONDS",
@@ -313,6 +316,13 @@ export const SPECS = {
     options: QUESTION_ANSWER_OPTIONS,
     summary: "record your own question's answer, then attempt the Markdown writeback on main",
   },
+  "question attach": {
+    forms: [["id", "turn", "item", "index", "native-id?"]],
+    group: "decisions",
+    options: QUESTION_ATTACH_OPTIONS,
+    summary: "attach exact rendered Codex question identity for your recorded question",
+    values: { index: "N", item: "ID", turn: "ID" },
+  },
   "question cancel": {
     forms: [["id", "reason", "native-id?", "worker?"]],
     group: "decisions",
@@ -327,7 +337,10 @@ export const SPECS = {
     values: { state: "pending|answered|cancelled" },
   },
   "question open": {
-    forms: [["title", "id?", "work?", "option?", "native-id?", "worker?"]],
+    forms: [
+      ["title", "id?", "work?", "option?", "depends-on?", "native-id?", "worker?"],
+      ["title", "id?", "work?", "option-json", "depends-on?", "native-id?", "worker?"],
+    ],
     group: "decisions",
     options: QUESTION_OPEN_OPTIONS,
     summary: "record a pending prompt owned by your role; the ID defaults to q-<role>-<n>",
@@ -337,6 +350,18 @@ export const SPECS = {
     group: "decisions",
     options: QUESTION_PROJECT_OPTIONS,
     summary: "retry the Markdown writeback for your recorded answer",
+  },
+  "question reask": {
+    forms: [["id", "native-id?"]],
+    group: "decisions",
+    options: QUESTION_PROJECT_OPTIONS,
+    summary: "prepare the same recorded question after verified native closure without an answer",
+  },
+  "question reconcile": {
+    forms: [["id", "native-id?"]],
+    group: "decisions",
+    options: QUESTION_PROJECT_OPTIONS,
+    summary: "read exact Codex question evidence and native form capability",
   },
   "request close": {
     forms: [["id", "reason", "work?", "native-id?", "worker?"]],

@@ -9,6 +9,7 @@ import { readRegistry } from "../registry/store.ts";
 import { StateRootError } from "../stateRoot.ts";
 import { repositories, type Repository } from "../status/collect.ts";
 import { type GitRunner, repositoryRoot } from "../status/git.ts";
+import { dependentQuestions } from "../store/codexQuestions.ts";
 import { MEMORY, Store } from "../store/db.ts";
 import { fileWorkerCaller } from "../store/files/workerAccess.ts";
 import { type CallerOptions, resolveCaller } from "../store/identity.ts";
@@ -271,6 +272,12 @@ export function parseWorkRef(value: string): WorkRef {
   return checkRef({ id: value.slice(at + 1), repository: value.slice(0, at) });
 }
 
+function requireAnsweredDependencies(store: Store, ref: WorkRef): void {
+  if (dependentQuestions(store, ref).length > 0) {
+    throw new StoreError("work-question-pending");
+  }
+}
+
 export function workStart(
   context: LiveContext,
   options: CallerOptions,
@@ -293,6 +300,7 @@ export function workStart(
       if (holds.length > 0) {
         throw new StoreError("work-held");
       }
+      requireAnsweredDependencies(store, at.ref);
       return output(at, startWork(store, actor, { owner: at.owner, parent, ref: at.ref }));
     }),
   );
@@ -373,7 +381,10 @@ export function workReady(
   const at = target(context, input.worktree, input.id);
   const actor = ownerActor(context, at, options, "started");
   return withStore(context, at.coordinator.layout, (store) =>
-    output(at, readyWork(store, actor, { ref: at.ref })),
+    store.transaction(() => {
+      requireAnsweredDependencies(store, at.ref);
+      return output(at, readyWork(store, actor, { ref: at.ref }));
+    }),
   );
 }
 
@@ -386,7 +397,10 @@ export function workFinish(
   const actor = ownerActor(context, at, options);
   requireStatus(at, ["done"], "work-not-done");
   return withStore(context, at.coordinator.layout, (store) =>
-    output(at, finishWork(store, actor, { owner: at.owner, ref: at.ref })),
+    store.transaction(() => {
+      requireAnsweredDependencies(store, at.ref);
+      return output(at, finishWork(store, actor, { owner: at.owner, ref: at.ref }));
+    }),
   );
 }
 
@@ -403,6 +417,7 @@ export interface ShowOutput {
   /** Null when the store has no record of the item. */
   readonly record: WorkRecord | null;
   readonly holds: readonly CoveringHold[];
+  readonly pendingQuestions?: readonly string[];
 }
 
 export function workShow(
@@ -413,15 +428,19 @@ export function workShow(
   return withStore(
     context,
     at.coordinator.layout,
-    (store) => ({
-      holds: (context.holds ?? storeHolds)(store, at.ref, holdCover(at)),
-      id: at.ref.id,
-      owner: at.owner,
-      record: readWorkRecord(store.db, at.ref),
-      repository: at.ref.repository,
-      schema: 1 as const,
-      workFile: { path: at.file.path, status: at.file.status, title: at.file.title },
-    }),
+    (store) => {
+      const pendingQuestions = dependentQuestions(store, at.ref);
+      return {
+        holds: (context.holds ?? storeHolds)(store, at.ref, holdCover(at)),
+        id: at.ref.id,
+        owner: at.owner,
+        ...(pendingQuestions.length === 0 ? {} : { pendingQuestions }),
+        record: readWorkRecord(store.db, at.ref),
+        repository: at.ref.repository,
+        schema: 1 as const,
+        workFile: { path: at.file.path, status: at.file.status, title: at.file.title },
+      };
+    },
     false,
   );
 }

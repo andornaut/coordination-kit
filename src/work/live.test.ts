@@ -9,6 +9,7 @@ import {
   answerQuestion,
   listDecisions,
   openQuestion,
+  recordQuestionAnswer,
   releaseHold,
   setHold,
 } from "../store/questions.ts";
@@ -197,6 +198,30 @@ describe("work verbs", () => {
     store.rebuild();
     expect(workShow(live(fixture), item("sg-0002")).holds).toEqual(before);
     store.close();
+  });
+
+  it("fences only exact Codex question dependencies and releases them on the explicit answer", () => {
+    const fixture = kitFixture();
+    const tech = live(fixture, IDS.tech);
+    const art = live(fixture, IDS.art);
+    const host = Store.forLayout(loadLayout(fixture.root));
+    const actor = { nativeId: IDS.art, role: ROLES.art };
+    const blocked = { id: "sg-0001", worktree: fixture.game };
+    const independent = { id: "sg-0002", worktree: fixture.game };
+    openQuestion(host, actor, {
+      codex: { dependsOn: [{ id: blocked.id, repository: GAME }], thread: IDS.art },
+      id: "q-required",
+      title: "Which technical option?",
+    });
+    expect(workShow(tech, blocked).pendingQuestions).toEqual(["q-required"]);
+    expect(code(() => workStart(tech, {}, blocked))).toBe("work-question-pending");
+    expect(workStart(art, {}, independent).record.state).toBe("started");
+    recordQuestionAnswer(host, actor, "q-required", {
+      text: "Use the first option.",
+      work: "sg-0002",
+    });
+    expect(workStart(tech, {}, blocked).record.state).toBe("started");
+    host.close();
   });
 
   it("blocks, unblocks, readies and records evidence", () => {

@@ -287,6 +287,41 @@ public work file, so it is one line of at most 1000 characters with no secret sh
 home-directory path, UUID or this machine's host name (`text-not-public`); the host name is read
 at run time and never stored.
 
+### Codex question recovery
+
+Before opening a Codex form in the owning conversation, use `question open` to record its exact
+wording, ordered options and every dependent `--depends-on REPOSITORY:WORK_ID`. Repeated
+`--option LABEL` takes ordered labels. Repeated `--option-json JSON` takes objects with a
+`label` and optional `description`. `--work` separately names the decision Markdown target.
+The durable record includes the bound owner thread. The registered owner alone can attach
+or reconcile its native identity.
+
+- `question attach --id Q --turn TURN --item ITEM --index N` attaches the matching rendered
+  history identity. It requires the same thread, turn, item, index, wording and ordered labels.
+  Each attachment is unique across the ledger.
+- `question reconcile --id Q` reads bounded native history and reports the exact attached
+  observation or an explicit unknown. The installed client provides no original-form resurfacing
+  operation. Its blocking `item/tool/requestUserInput` server request is distinct from an
+  asynchronous `agentMessage.questions` history projection. A history observation gives no
+  live UI visibility. A `serverRequest/resolved` notification records lifecycle cleanup or
+  response bookkeeping and supplies no answer or cancellation classification.
+- An explicit live answer may be recorded by the owner from its conversation when native identity
+  was unavailable. Once attached, `question answer` requires the exact existing owner resolution
+  reference and complete native history proving a later user reply for that rendered question.
+  Ambiguous indexes, partial history and compaction keep the ledger open. The caller supplies the
+  public decision text explicitly.
+- `question cancel` and `question reask` require verified exact native cancellation or closure
+  without an answer respectively. The current native observer cannot verify those outcomes.
+  A supported closure proof would let the owner reserve another attempt under the same ID, then
+  attach its new request. The command itself never presents a form.
+
+`question list`, session startup and reviews expose the recorded question independently of
+native prompt visibility. Session startup includes the owning role's unread count. Messages
+remain eligible for an explicit recipient inbox pull. Existing guarded native wakes still apply.
+Only exact listed work dependencies are fenced at start, ready and finish under the store
+transaction. Independent work and ordinary Claude question handling retain their existing path.
+The additional schema-1 question projections rebuild from the same event history.
+
 ### Decision lines
 
 Projection reads `docs/work/<W>.md` in the main checkout of the caller's registered worktree's

@@ -149,6 +149,57 @@ describe("question commands", () => {
     );
   });
 
+  it("persists a Codex prompt before presentation and shows unresolved evidence on resume", async () => {
+    const { art, coordinator, reader } = setup();
+    const title = "Choose the palette.\nWhich option should ship?";
+    const opts = [
+      '{ "label": "Warm", "description": "High saturation" }',
+      '{ "label": "Cool", "description": "Low saturation" }',
+    ];
+    const opened = await art(
+      "question",
+      "open",
+      "--id",
+      "q-codex",
+      "--title",
+      title,
+      "--option-json",
+      opts[0]!,
+      "--option-json",
+      opts[1]!,
+      "--depends-on",
+      `${GAME}:ag-0001`,
+    );
+    expect(opened.json).toMatchObject({
+      question: {
+        codex: { dependsOn: [{ id: "ag-0001", repository: GAME }], native: null, thread: ART },
+        options: [
+          { description: "High saturation", label: "Warm" },
+          { description: "Low saturation", label: "Cool" },
+        ],
+        title,
+      },
+    });
+    expect((await coordinator("question", "reconcile", "--id", "q-codex")).err).toContain(
+      "not-owner",
+    );
+    expect((await art("question", "reconcile", "--id", "q-codex")).json).toMatchObject({
+      form: "unsupported",
+      observation: { reason: "native-question-unlinked", status: "unknown" },
+      question: { state: "pending" },
+    });
+    await coordinator("msg", "send", "--to", ART_ROLE, "--body", "Independent work.");
+    expect((await art("session", "start")).json).toMatchObject({
+      questionRecovery: { pending: [{ id: "q-codex", title }], unread: 1 },
+    });
+    expect((await art("question", "reask", "--id", "q-codex")).err).toContain(
+      "native-question-unlinked",
+    );
+    expect((await reader("question", "list", "--state", "pending")).json).toMatchObject({
+      questions: [{ id: "q-codex", state: "pending" }],
+    });
+  });
+
   it("appends the decision line to the work file on main, unstaged, and lists the decision", async () => {
     const { base, reader, tech } = setup();
     const repo = gameRepository(base);

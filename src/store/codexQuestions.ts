@@ -1,0 +1,237 @@
+import type { SQLInputValue } from "node:sqlite";
+
+import { isCanonicalUuid } from "../adapters/shared/ids.ts";
+import type { Store } from "./db.ts";
+import type { Projection } from "./projections.ts";
+import { type Actor, type JsonObject, StoreError } from "./types.ts";
+import { checkRef, type WorkRef } from "./work.ts";
+
+type Reader = Pick<Store, "db">;
+type Row = Record<string, SQLInputValue>;
+const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
+
+export interface NativeQuestionIdentity {
+  readonly turn: string;
+  readonly item: string;
+  readonly index: number;
+}
+
+export interface CodexQuestionInput {
+  readonly thread: string;
+  readonly dependsOn: readonly WorkRef[];
+}
+
+export interface CodexQuestion extends CodexQuestionInput {
+  readonly attempt: number;
+  readonly native: NativeQuestionIdentity | null;
+  readonly resolution: {
+    readonly outcome: "answered" | "cancelled";
+    readonly reply: { readonly turn: string; readonly item: string } | null;
+  } | null;
+}
+
+export type NativeQuestionProof =
+  | { readonly status: "unknown"; readonly reason: string }
+  | {
+      readonly status: "observed" | "pending" | "cancelled" | "closed-without-answer";
+      readonly thread: string;
+      readonly native: NativeQuestionIdentity;
+    }
+  | {
+      readonly status: "answered";
+      readonly thread: string;
+      readonly native: NativeQuestionIdentity;
+      readonly reply: { readonly turn: string; readonly item: string };
+    };
+
+export function normalizeCodexQuestion(
+  actor: Actor,
+  input: CodexQuestionInput,
+): CodexQuestionInput {
+  if (!isCanonicalUuid(input.thread) || input.thread !== actor.nativeId) {
+    throw new StoreError("question-thread-mismatch");
+  }
+  const dependsOn = input.dependsOn.map(checkRef);
+  const unique = new Set(dependsOn.map(({ id, repository }) => `${repository}:${id}`));
+  if (dependsOn.length > 32 || unique.size !== dependsOn.length) {
+    throw new StoreError("invalid-question-dependencies");
+  }
+  return { dependsOn, thread: input.thread };
+}
+
+export function nativeQuestionIdentity(input: NativeQuestionIdentity): NativeQuestionIdentity {
+  const { index, item, turn } = input;
+  if (!TOKEN.test(turn) || !TOKEN.test(item) || !Number.isSafeInteger(index) || index < 0) {
+    throw new StoreError("invalid-native-question");
+  }
+  return { index, item, turn };
+}
+
+export function sameNativeQuestion(
+  a: NativeQuestionIdentity | null,
+  b: NativeQuestionIdentity,
+): boolean {
+  return a?.turn === b.turn && a.item === b.item && a.index === b.index;
+}
+
+function hasCodexQuestions(store: Reader): boolean {
+  return (
+    store.db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'question_codex'")
+      .get() !== undefined
+  );
+}
+
+export function readCodexQuestion(store: Reader, id: string): CodexQuestion | undefined {
+  if (!hasCodexQuestions(store)) {
+    return undefined;
+  }
+  const row = store.db.prepare("SELECT * FROM question_codex WHERE id = ?").get(id) as
+    Row | undefined;
+  if (row === undefined) {
+    return undefined;
+  }
+  return {
+    attempt: Number(row.attempt),
+    dependsOn: JSON.parse(row.dependencies as string) as WorkRef[],
+    native: JSON.parse(row.native as string) as NativeQuestionIdentity | null,
+    resolution: JSON.parse(row.resolution as string) as CodexQuestion["resolution"],
+    thread: row.thread as string,
+  };
+}
+
+export const QUESTION_CODEX_PROJECTION: Projection = {
+  apply: {
+    "question.answer-recorded": (db, event) => {
+      if (event.payload.nativeResolution !== undefined) {
+        db.prepare("UPDATE question_codex SET resolution = ? WHERE id = ?").run(
+          JSON.stringify(event.payload.nativeResolution),
+          event.payload.id as string,
+        );
+      }
+    },
+    "question.cancelled": (db, event) => {
+      if (event.payload.nativeResolution !== undefined) {
+        db.prepare("UPDATE question_codex SET resolution = ? WHERE id = ?").run(
+          JSON.stringify(event.payload.nativeResolution),
+          event.payload.id as string,
+        );
+      }
+    },
+    "question.native-linked": (db, event) => {
+      const { id, native, thread } = event.payload;
+      const { index, item, turn } = native as unknown as NativeQuestionIdentity;
+      db.prepare(
+        "INSERT INTO question_native_links (thread, turn, item, idx) VALUES (?, ?, ?, ?)",
+      ).run(thread as string, turn, item, index);
+      db.prepare("UPDATE question_codex SET native = ? WHERE id = ?").run(
+        JSON.stringify(native),
+        id as string,
+      );
+    },
+    "question.native-reasked": (db, event) => {
+      db.prepare(
+        "UPDATE question_codex SET attempt = attempt + 1, native = 'null' WHERE id = ?",
+      ).run(event.payload.id as string);
+    },
+    "question.opened": (db, event) => {
+      const { codex, id } = event.payload;
+      if (codex !== undefined) {
+        const { dependsOn, thread } = codex as unknown as CodexQuestionInput;
+        db.prepare("INSERT INTO question_codex (id, dependencies, thread) VALUES (?, ?, ?)").run(
+          id as string,
+          JSON.stringify(dependsOn),
+          thread,
+        );
+      }
+    },
+  },
+  ddl: `CREATE TABLE IF NOT EXISTS question_codex (
+    id TEXT PRIMARY KEY,
+    thread TEXT NOT NULL,
+    dependencies TEXT NOT NULL,
+    attempt INTEGER NOT NULL DEFAULT 1,
+    native TEXT NOT NULL DEFAULT 'null',
+    resolution TEXT NOT NULL DEFAULT 'null'
+  );
+  CREATE TABLE IF NOT EXISTS question_native_links (
+    thread TEXT NOT NULL,
+    turn TEXT NOT NULL,
+    item TEXT NOT NULL,
+    idx INTEGER NOT NULL,
+    PRIMARY KEY (thread, turn, item, idx)
+  );`,
+  tables: ["question_codex", "question_native_links"],
+};
+
+export function requireCodexOwner(actor: Actor, codex: CodexQuestion): void {
+  if (actor.nativeId !== codex.thread) {
+    throw new StoreError("question-thread-mismatch");
+  }
+}
+
+export function requireNativeProof(
+  codex: CodexQuestion,
+  native: NativeQuestionIdentity,
+  proof: NativeQuestionProof | undefined,
+  expected?: "answered" | "cancelled" | "closed-without-answer",
+): Exclude<NativeQuestionProof, { readonly status: "unknown" }> {
+  if (proof === undefined || proof.status === "unknown") {
+    throw new StoreError("native-question-unverified");
+  }
+  if (
+    proof.thread !== codex.thread ||
+    !sameNativeQuestion(proof.native, native) ||
+    (expected !== undefined && proof.status !== expected)
+  ) {
+    throw new StoreError("native-question-proof-mismatch");
+  }
+  if (
+    proof.status === "answered" &&
+    (!TOKEN.test(proof.reply.turn) ||
+      !TOKEN.test(proof.reply.item) ||
+      (native.turn === proof.reply.turn && native.item === proof.reply.item))
+  ) {
+    throw new StoreError("native-question-proof-mismatch");
+  }
+  return proof;
+}
+
+export function nativeQuestionUnused(
+  store: Reader,
+  thread: string,
+  native: NativeQuestionIdentity,
+): boolean {
+  return (
+    store.db
+      .prepare(
+        "SELECT 1 FROM question_native_links WHERE thread = ? AND turn = ? AND item = ? AND idx = ?",
+      )
+      .get(thread, native.turn, native.item, native.index) === undefined
+  );
+}
+
+export function nativeResolution(proof: NativeQuestionProof): JsonObject {
+  if (proof.status !== "answered" && proof.status !== "cancelled") {
+    throw new StoreError("native-question-proof-mismatch");
+  }
+  return { outcome: proof.status, reply: proof.status === "answered" ? { ...proof.reply } : null };
+}
+
+/** Work fencing uses only explicitly named repository and work pairs, regardless of work owner. */
+export function dependentQuestions(store: Reader, ref: WorkRef): string[] {
+  if (!hasCodexQuestions(store)) {
+    return [];
+  }
+  return store.db
+    .prepare(
+      `SELECT q.id FROM questions q JOIN question_codex c ON c.id = q.id
+     WHERE q.state = 'pending' AND EXISTS (
+       SELECT 1 FROM json_each(c.dependencies) AS dependency
+       WHERE json_extract(dependency.value, '$.id') = ?
+         AND json_extract(dependency.value, '$.repository') = ?
+     ) ORDER BY q.opened_seq`,
+    )
+    .all(ref.id, ref.repository)
+    .map((row) => row.id as string);
+}

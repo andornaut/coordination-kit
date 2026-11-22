@@ -78,6 +78,11 @@ activation require the current active game-coordinator binding. See the
   `question answer` and `hold release` attempt one guarded wake for the caller, since the write may
   clear its last wake guard. `--option LABEL` is repeatable, 1 to 8 labels. The list verbs take no
   caller and read an absent store as empty.
+- For Codex, record exact prompt wording, ordered `--option LABEL` or `--option-json JSON`,
+  and repeated `--depends-on REPOSITORY:WORK_ID` through `question open` before presentation.
+  `question attach --id ID --turn TURN --item ITEM --index N` links a verified rendered identity.
+  `question reconcile --id ID` shows exact evidence and capability. `question reask --id ID`
+  requires verified closure without an answer. See [Codex question recovery](store.md#codex-question-recovery).
 - `hold policy-set` and `hold policy-release` require the active game-coordinator binding and the
   exact user approval reference for the action. Policy IDs start with `policy-`. Set names one
   target as `role:ROLE`, `game:GAME` or `work:REPOSITORY:WORK_ID`. Release names its exact policy

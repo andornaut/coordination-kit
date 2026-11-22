@@ -6,9 +6,22 @@ import { hostname } from "node:os";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
 import { ID_PATTERN as WORK_ID } from "../work/check.ts";
+import {
+  type CodexQuestion,
+  type CodexQuestionInput,
+  type NativeQuestionIdentity,
+  nativeQuestionIdentity,
+  type NativeQuestionProof,
+  nativeQuestionUnused,
+  nativeResolution,
+  normalizeCodexQuestion,
+  readCodexQuestion,
+  requireCodexOwner,
+  requireNativeProof,
+  sameNativeQuestion,
+} from "./codexQuestions.ts";
 import type { Store } from "./db.ts";
 import {
-  activePolicyHoldsForRole,
   policyHoldEntries,
   policyHoldIdExists,
   type PolicyHoldView,
@@ -61,6 +74,7 @@ export interface QuestionView {
   readonly reason: string | null;
   /** Durable answer and the latest Markdown projection outcome, when tracked. */
   readonly answer?: RecordedAnswer;
+  readonly codex?: CodexQuestion;
 }
 
 /** A typed decision record, the store mirror of a work file's `- D<n> (...)` line. */
@@ -347,12 +361,14 @@ function parseOptions(value: SQLInputValue | undefined): QuestionOption[] | null
   return value == null ? null : (JSON.parse(value as string) as QuestionOption[]);
 }
 
-function questionView(row: Row): QuestionView {
+function questionView(store: Pick<Store, "db">, row: Row): QuestionView {
   const nullable = (key: string) => (row[key] as string | null) ?? null;
   const answer = recordedAnswer(row);
+  const codex = readCodexQuestion(store, row.id as string);
   return {
     ...(answer === undefined ? {} : { answer }),
     closedAt: nullable("closed_at"),
+    ...(codex === undefined ? {} : { codex }),
     decision: nullable("decision"),
     id: row.id as string,
     openedAt: row.opened_at as string,
@@ -409,6 +425,7 @@ function nextQuestionId(store: Store, role: string): string {
 }
 
 export interface OpenInput {
+  readonly codex?: CodexQuestionInput;
   readonly id?: string;
   readonly title: string;
   readonly work?: string;
@@ -430,26 +447,44 @@ export function openQuestion(store: Store, actor: Actor, input: OpenInput): Ques
   const role = ownerOf(actor);
   ensure(input.id === undefined || RECORD_ID.test(input.id), "invalid-id");
   ensure(input.work === undefined || WORK_ID.test(input.work), "invalid-work");
-  const title = storeText(input.title, 500, "invalid-title");
+  const codex = input.codex === undefined ? undefined : normalizeCodexQuestion(actor, input.codex);
+  const title = codex === undefined ? storeText(input.title, 500, "invalid-title") : input.title;
+  if (codex !== undefined) {
+    ensure(
+      title.trim() !== "" &&
+        title.isWellFormed() &&
+        Buffer.byteLength(title, "utf8") <= 4096 &&
+        !/[\r\0]/.test(title),
+      "invalid-title",
+    );
+    ensure(secretShape(title) === null, "secret-shaped-body");
+  }
   const options = input.options === undefined ? null : normalizeOptions(input.options);
   return store.transaction(() => {
     const id = input.id ?? nextQuestionId(store, role);
     const existing = questionRow(store, id);
     if (existing !== undefined) {
+      const prior = readCodexQuestion(store, id);
       ensure(
         existing.role === role &&
+          (prior === undefined
+            ? codex === undefined || codex.dependsOn.length === 0
+            : codex !== undefined &&
+              prior.thread === codex.thread &&
+              JSON.stringify(prior.dependsOn) === JSON.stringify(codex.dependsOn)) &&
           existing.title === title &&
           ((existing.work as string | null) ?? null) === (input.work ?? null) &&
           optionsKey(parseOptions(existing.options)) === optionsKey(options),
         "id-conflict",
       );
-      return { duplicate: true, question: questionView(existing) };
+      return { duplicate: true, question: questionView(store, existing) };
     }
     store.append({
       actor,
       key: `question.opened:${id}`,
       kind: "question.opened",
       payload: {
+        ...(codex === undefined ? {} : { codex: codex as unknown as Json }),
         id,
         options: options as unknown as Json,
         role,
@@ -457,7 +492,7 @@ export function openQuestion(store: Store, actor: Actor, input: OpenInput): Ques
         work: input.work ?? null,
       },
     });
-    return { duplicate: false, question: questionView(questionRow(store, id)!) };
+    return { duplicate: false, question: questionView(store, questionRow(store, id)!) };
   });
 }
 
@@ -476,7 +511,96 @@ function ownQuestion(store: Store, actor: Actor, id: string): Row {
  * before it reads anything else the write needs.
  */
 export function requireOwnQuestion(store: Store, actor: Actor, id: string): QuestionView {
-  return questionView(ownQuestion(store, actor, id));
+  return questionView(store, ownQuestion(store, actor, id));
+}
+
+function ownCodexQuestion(
+  store: Store,
+  actor: Actor,
+  id: string,
+): QuestionView & {
+  readonly codex: CodexQuestion;
+} {
+  const question = requireOwnQuestion(store, actor, id);
+  ensure(question.codex !== undefined, "codex-question-required");
+  requireCodexOwner(actor, question.codex);
+  return { ...question, codex: question.codex };
+}
+
+export function linkNativeQuestion(
+  store: Store,
+  actor: Actor,
+  id: string,
+  input: NativeQuestionIdentity,
+  proof: NativeQuestionProof,
+): QuestionResult {
+  const native = nativeQuestionIdentity(input);
+  return store.transaction(() => {
+    const question = ownCodexQuestion(store, actor, id);
+    ensure(question.state === "pending", "already-closed");
+    if (sameNativeQuestion(question.codex.native, native)) {
+      return { duplicate: true, question };
+    }
+    ensure(question.codex.native === null, "native-question-already-linked");
+    requireNativeProof(question.codex, native, proof);
+    ensure(
+      nativeQuestionUnused(store, question.codex.thread, native),
+      "native-question-id-conflict",
+    );
+    store.append({
+      actor,
+      key: `question.native-linked:${id}:${question.codex.attempt}`,
+      kind: "question.native-linked",
+      payload: { id, native: { ...native }, thread: question.codex.thread },
+    });
+    return { duplicate: false, question: requireOwnQuestion(store, actor, id) };
+  });
+}
+
+export function reaskNativeQuestion(
+  store: Store,
+  actor: Actor,
+  id: string,
+  proof: NativeQuestionProof,
+): QuestionResult {
+  return store.transaction(() => {
+    const question = ownCodexQuestion(store, actor, id);
+    ensure(question.state === "pending", "already-closed");
+    const { codex } = question;
+    if (codex.native === null && codex.attempt > 1) {
+      return { duplicate: true, question };
+    }
+    ensure(codex.native !== null, "native-question-unlinked");
+    requireNativeProof(codex, codex.native, proof, "closed-without-answer");
+    store.append({
+      actor,
+      key: `question.native-reasked:${id}:${codex.attempt}`,
+      kind: "question.native-reasked",
+      payload: { id, native: { ...codex.native }, thread: codex.thread },
+    });
+    return { duplicate: false, question: requireOwnQuestion(store, actor, id) };
+  });
+}
+
+function confirmedClosure(
+  store: Store,
+  actor: Actor,
+  id: string,
+  outcome: "answered" | "cancelled",
+  proof: NativeQuestionProof | undefined,
+): JsonObject | undefined {
+  const codex = readCodexQuestion(store, id);
+  if (codex === undefined) {
+    return undefined;
+  }
+  requireCodexOwner(actor, codex);
+  if (codex.native === null && outcome === "answered") {
+    // The owner can still record an explicit answer received in its own conversation.
+    // The receipt carries no native reconciliation proof.
+    return undefined;
+  }
+  ensure(codex.native !== null, "native-question-unlinked");
+  return nativeResolution(requireNativeProof(codex, codex.native, proof, outcome));
 }
 
 /** Independent projection so existing schema-1 stores acquire it without rewriting their events. */
@@ -601,6 +725,7 @@ export function recordQuestionAnswer(
   actor: Actor,
   id: string,
   input?: AnswerInput,
+  proof?: NativeQuestionProof,
 ): QuestionResult {
   return store.transaction(() => {
     const row = ownQuestion(store, actor, id);
@@ -615,6 +740,13 @@ export function recordQuestionAnswer(
     const duplicate = row.state !== "pending";
     ensure(!duplicate || matchesAnswer(previous, answer), "already-closed");
     if (existing === undefined) {
+      const resolution = duplicate
+        ? undefined
+        : confirmedClosure(store, actor, id, "answered", proof);
+      ensure(
+        duplicate || readCodexQuestion(store, id) === undefined || answer.by === "user",
+        "invalid-by",
+      );
       store.append({
         actor,
         key: `question.answer-recorded:${id}`,
@@ -623,13 +755,14 @@ export function recordQuestionAnswer(
           ...(previous === undefined ? {} : { answeredAt: previous.at }),
           by: answer.by,
           id,
+          ...(resolution === undefined ? {} : { nativeResolution: resolution }),
           supersedes: answer.supersedes,
           text: answer.text,
           work: answer.work,
         },
       });
     }
-    return { duplicate, question: questionView(questionRow(store, id)!) };
+    return { duplicate, question: questionView(store, questionRow(store, id)!) };
   });
 }
 
@@ -641,13 +774,17 @@ function numberDecision(
   fileNumbers: readonly number[],
 ): AnswerResult {
   const row = ownQuestion(store, actor, id);
+  ensure(
+    row.state !== "pending" || readCodexQuestion(store, id) === undefined,
+    "native-question-unverified",
+  );
   ensure(row.work == null || row.work === answer.work, "work-mismatch");
   const receipt = recordedAnswer(row);
   const recorded = linkedDecision(store, row);
   if (recorded !== undefined) {
     const decision = decisionRow(recorded);
     ensure(matchesAnswer(decision, answer), "already-closed");
-    return { decision, duplicate: true, n: Number(recorded.n), question: questionView(row) };
+    return { decision, duplicate: true, n: Number(recorded.n), question: questionView(store, row) };
   }
   ensure(row.state === "pending" || matchesAnswer(receipt, answer), "already-closed");
   const predecessor = store.db
@@ -688,7 +825,7 @@ function numberDecision(
     decision: decisionRow(linkedDecision(store, updated)!),
     duplicate: false,
     n,
-    question: questionView(updated),
+    question: questionView(store, updated),
   };
 }
 
@@ -739,7 +876,7 @@ export function recordQuestionProjection(
         payload: { id, ...projection },
       });
     }
-    return questionView(questionRow(store, id)!);
+    return questionView(store, questionRow(store, id)!);
   });
 }
 
@@ -749,21 +886,27 @@ export function cancelQuestion(
   actor: Actor,
   id: string,
   reason: string,
+  proof?: NativeQuestionProof,
 ): QuestionResult {
   const why = storeText(reason, 1000, "invalid-reason");
   return store.transaction(() => {
     const row = ownQuestion(store, actor, id);
     if (row.state !== "pending") {
       ensure(row.state === "cancelled" && row.reason === why, "already-closed");
-      return { duplicate: true, question: questionView(row) };
+      return { duplicate: true, question: questionView(store, row) };
     }
+    const resolution = confirmedClosure(store, actor, id, "cancelled", proof);
     store.append({
       actor,
       key: `question.cancelled:${id}`,
       kind: "question.cancelled",
-      payload: { id, reason: why },
+      payload: {
+        id,
+        ...(resolution === undefined ? {} : { nativeResolution: resolution }),
+        reason: why,
+      },
     });
-    return { duplicate: false, question: questionView(questionRow(store, id)!) };
+    return { duplicate: false, question: questionView(store, questionRow(store, id)!) };
   });
 }
 
@@ -784,7 +927,7 @@ export function listQuestions(
            AND q.state IN (${states.map(() => "?").join(",")}) ORDER BY q.opened_seq`,
       )
       .all(filter.role ?? null, filter.role ?? null, ...states) as Row[]
-  ).map(questionView);
+  ).map((row) => questionView(store, row));
 }
 
 /** Decision records in recording order, optionally of one work item and one owning role. */
@@ -919,34 +1062,64 @@ export function listHolds(
  * The store wake guard: a recipient with a pending question or an active `role` hold gets no
  * wake. Policy holds apply to their exact role or game scope. A wake never answers or clears either.
  */
-export function questionHoldGuard(store: Store, role: string, harness?: string | null): WakeGuard {
-  if (
-    store.db
-      .prepare("SELECT 1 FROM questions WHERE role = ? AND state = 'pending' LIMIT 1")
-      .get(role) !== undefined
-  ) {
-    return { reason: "recipient-question-pending", status: "blocked" };
+export function questionHoldGuard(
+  store: Store,
+  role: string,
+  harness?: string | null,
+): WakeGuard & {
+  readonly blocker?: {
+    readonly kind: "question" | "hold" | "policy-hold";
+    readonly id: string;
+    readonly owner: string;
+    readonly native?: { readonly turnId: string; readonly itemId: string };
+  };
+} {
+  const pending = store.db
+    .prepare(
+      "SELECT id FROM questions WHERE role = ? AND state = 'pending' ORDER BY opened_seq LIMIT 1",
+    )
+    .get(role) as { id: string } | undefined;
+  if (pending !== undefined) {
+    const native = readCodexQuestion(store, pending.id)?.native;
+    return {
+      blocker: {
+        id: pending.id,
+        kind: "question",
+        owner: role,
+        ...(native == null ? {} : { native: { itemId: native.item, turnId: native.turn } }),
+      },
+      reason: "recipient-question-pending",
+      status: "blocked",
+    };
   }
-  if (activePolicyHoldsForRole(store, role) > 0) {
-    return { reason: "recipient-policy-hold-active", status: "blocked" };
+  const policy = policyHoldEntries(store, ["active"]).find(({ hold }) =>
+    policyTargetCoversRole(hold.policy.target, role),
+  );
+  if (policy !== undefined) {
+    return {
+      blocker: { id: policy.hold.id, kind: "policy-hold", owner: policy.hold.policy.issuer },
+      reason: "recipient-policy-hold-active",
+      status: "blocked",
+    };
   }
-  if (
-    store.db
-      // A handoff hold quiets the idle source only: once the role is bound on the handoff's target
-      // harness, the target must be woken to run `handoff active`, which releases the hold.
-      .prepare(
-        `SELECT 1 FROM holds h WHERE h.role = ? AND h.scope = 'role' AND h.state = 'active'
-           AND NOT EXISTS (
-             SELECT 1 FROM handoff_roles r JOIN handoffs o ON o.id = r.handoff
-             WHERE r.role = h.role AND o.to_harness = ?
-               AND h.id = 'handoff-' || r.handoff || '-' || replace(r.role, '/', '-'))
-         LIMIT 1`,
-      )
-      .get(role, harness ?? "") !== undefined
-  ) {
-    return { reason: "recipient-hold-active", status: "blocked" };
-  }
-  return { status: "clear" };
+  // A handoff hold quiets the source. The target must be woken to release that hold.
+  const hold = store.db
+    .prepare(
+      `SELECT h.id FROM holds h WHERE h.role = ? AND h.scope = 'role' AND h.state = 'active'
+       AND NOT EXISTS (
+         SELECT 1 FROM handoff_roles r JOIN handoffs o ON o.id = r.handoff
+         WHERE r.role = h.role AND o.to_harness = ?
+           AND h.id = 'handoff-' || r.handoff || '-' || replace(r.role, '/', '-'))
+     ORDER BY h.set_seq LIMIT 1`,
+    )
+    .get(role, harness ?? "") as { id: string } | undefined;
+  return hold === undefined
+    ? { status: "clear" }
+    : {
+        blocker: { id: hold.id, kind: "hold", owner: role },
+        reason: "recipient-hold-active",
+        status: "blocked",
+      };
 }
 
 /**

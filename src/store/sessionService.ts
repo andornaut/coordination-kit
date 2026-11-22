@@ -23,7 +23,7 @@ import {
 } from "./handoffs.ts";
 import { type CallerOptions, resolveCaller } from "./identity.ts";
 import { activePolicyHoldsForRole } from "./policyHolds.ts";
-import type { HoldView } from "./questions.ts";
+import { type HoldView, listQuestions, type QuestionView } from "./questions.ts";
 import { wakeOwner } from "./questionService.ts";
 import { COORDINATOR_ROLE } from "./retire.ts";
 import { registry, type StoreServiceContext, withStore } from "./service.ts";
@@ -64,6 +64,10 @@ export interface SessionOutput {
   };
   readonly checkpoint: string;
   readonly counts: { readonly questions: number; readonly holds: number; readonly inbox: number };
+  readonly questionRecovery?: {
+    readonly pending: readonly QuestionView[];
+    readonly unread: number;
+  };
   readonly handoffs: readonly {
     readonly id: string;
     readonly state: HandoffState;
@@ -105,6 +109,12 @@ export async function storeSessionStart(
   return withStore(context, (store) => {
     const event = recordSession(store, actor, { harness, key: randomUUID(), ...request });
     const n = count(store);
+    const pending =
+      harness === "codex"
+        ? listQuestions(store, { role: actor.role, states: ["pending"] }).filter(
+            (question) => question.codex !== undefined,
+          )
+        : [];
     return {
       checkpoint: checkpointPath(actor.role),
       conversation: actor.nativeId,
@@ -137,6 +147,17 @@ export async function storeSessionStart(
         };
       }),
       harness,
+      ...(pending.length === 0
+        ? {}
+        : {
+            questionRecovery: {
+              pending,
+              unread: n(
+                "SELECT COUNT(*) AS n FROM messages WHERE to_role = ? AND state = 'sent'",
+                actor.role,
+              ),
+            },
+          }),
       registry: {
         ownership: record.ownership,
         phase: record.phase ?? null,

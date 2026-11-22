@@ -4,7 +4,15 @@
 // onto the caller's main work file, left unstaged.
 import { readFileSync } from "node:fs";
 
+import { resolveHarness } from "../registry/resolve.ts";
 import { systemGit } from "../status/git.ts";
+import { type QuestionEvidence, readCodexQuestionEvidence } from "./codexQuestionEvidence.ts";
+import {
+  type NativeQuestionIdentity,
+  nativeQuestionIdentity,
+  type NativeQuestionProof,
+  requireCodexOwner,
+} from "./codexQuestions.ts";
 import type { Store } from "./db.ts";
 import {
   appendDecisionLine,
@@ -28,6 +36,7 @@ import {
   getQuestionDecision,
   type HoldState,
   type HoldView,
+  linkNativeQuestion,
   listDecisions,
   listHolds,
   listQuestions,
@@ -36,15 +45,22 @@ import {
   type QuestionOption,
   type QuestionState,
   type QuestionView,
+  reaskNativeQuestion,
   type RecordedAnswer,
   recordQuestionAnswer,
   recordQuestionProjection,
   releaseHold,
+  requireOwnQuestion,
   setHold,
 } from "./questions.ts";
 import { registry, type StoreServiceContext, withStore } from "./service.ts";
 import { type Actor, StoreError } from "./types.ts";
 import { wakeRecipient, type WakeStatus } from "./wake.ts";
+import type { WorkRef } from "./work.ts";
+
+interface QuestionContext extends StoreServiceContext {
+  readonly questionEvidence?: QuestionEvidence;
+}
 
 export interface QuestionOutput {
   readonly schema: 1;
@@ -99,10 +115,118 @@ export async function storeQuestionOpen(
     readonly title: string;
     readonly work?: string;
     readonly options?: readonly QuestionOption[];
+    readonly dependsOn?: readonly WorkRef[];
   },
 ): Promise<QuestionOutput> {
+  const roles = registry(context);
+  const actor = resolveCaller(roles, context.env, options);
+  const codex = resolveHarness(roles, actor.role) === "codex";
+  if (!codex && request.dependsOn !== undefined) {
+    throw new StoreError("codex-question-required");
+  }
+  const input = codex
+    ? { ...request, codex: { dependsOn: request.dependsOn ?? [], thread: actor.nativeId } }
+    : request;
+  return withStore(context, (store) => ({ ...openQuestion(store, actor, input), schema: 1 }));
+}
+
+function evidence(
+  context: QuestionContext,
+  question: QuestionView,
+  native?: NativeQuestionIdentity | null,
+): Promise<NativeQuestionProof> {
+  if (native == null) {
+    return Promise.resolve({ reason: "native-question-unlinked", status: "unknown" });
+  }
+  return (
+    context.questionEvidence?.(question, native) ??
+    readCodexQuestionEvidence(context, question, native)
+  );
+}
+
+function ownEvidenceQuestion(store: Store, actor: Actor, id: string): QuestionView {
+  const question = requireOwnQuestion(store, actor, id);
+  if (question.codex !== undefined) {
+    requireCodexOwner(actor, question.codex);
+  }
+  return question;
+}
+
+export async function storeQuestionAttach(
+  context: QuestionContext,
+  options: CallerOptions,
+  id: string,
+  input: NativeQuestionIdentity,
+): Promise<QuestionOutput> {
   const actor = resolveCaller(registry(context), context.env, options);
-  return withStore(context, (store) => ({ ...openQuestion(store, actor, request), schema: 1 }));
+  const native = nativeQuestionIdentity(input);
+  return withStore(
+    context,
+    async (store) => {
+      const question = ownEvidenceQuestion(store, actor, id);
+      if (question.codex === undefined) {
+        throw new StoreError("codex-question-required");
+      }
+      return {
+        ...linkNativeQuestion(store, actor, id, native, await evidence(context, question, native)),
+        schema: 1,
+      };
+    },
+    { createMissing: false },
+  );
+}
+
+export async function storeQuestionReconcile(
+  context: QuestionContext,
+  options: CallerOptions,
+  id: string,
+): Promise<{
+  readonly schema: 1;
+  readonly question: QuestionView;
+  readonly observation: NativeQuestionProof;
+  readonly form: "unsupported";
+}> {
+  const actor = resolveCaller(registry(context), context.env, options);
+  return withStore(
+    context,
+    async (store) => {
+      const question = ownEvidenceQuestion(store, actor, id);
+      if (question.codex === undefined) {
+        throw new StoreError("codex-question-required");
+      }
+      return {
+        form: "unsupported",
+        observation: await evidence(context, question, question.codex.native),
+        question,
+        schema: 1,
+      };
+    },
+    { createMissing: false },
+  );
+}
+
+export async function storeQuestionReask(
+  context: QuestionContext,
+  options: CallerOptions,
+  id: string,
+): Promise<QuestionOutput> {
+  const actor = resolveCaller(registry(context), context.env, options);
+  return withStore(
+    context,
+    async (store) => {
+      const question = ownEvidenceQuestion(store, actor, id);
+      return {
+        ...reaskNativeQuestion(
+          store,
+          actor,
+          id,
+          await evidence(context, question, question.codex?.native),
+        ),
+        schema: 1,
+      };
+    },
+    { createMissing: false },
+  );
 }
 
 function fileResult<T>(operation: () => T): { value: T } | { reason: string } {
@@ -195,21 +319,21 @@ function projectAnswer(
 }
 
 function answerProjection(
-  context: StoreServiceContext,
+  context: QuestionContext,
   options: CallerOptions,
   id: string,
   request: AnswerInput | undefined,
   wake: true,
 ): Promise<AnswerOutput>;
 function answerProjection(
-  context: StoreServiceContext,
+  context: QuestionContext,
   options: CallerOptions,
   id: string,
   request: AnswerInput | undefined,
   wake: false,
 ): Promise<AnswerProjectionOutput>;
 function answerProjection(
-  context: StoreServiceContext,
+  context: QuestionContext,
   options: CallerOptions,
   id: string,
   request: AnswerInput | undefined,
@@ -218,7 +342,12 @@ function answerProjection(
   const roles = registry(context);
   const actor = resolveCaller(roles, context.env, options);
   return withStore(context, async (store) => {
-    const result = recordQuestionAnswer(store, actor, id, request);
+    const question = ownEvidenceQuestion(store, actor, id);
+    const proof =
+      request !== undefined && question.state === "pending" && question.codex?.native != null
+        ? await evidence(context, question, question.codex.native)
+        : undefined;
+    const result = recordQuestionAnswer(store, actor, id, request, proof);
     const projected = projectAnswer(store, actor, result, () =>
       mainWorkFile(
         systemGit(context.env),
@@ -234,7 +363,7 @@ function answerProjection(
 
 /** Record the explicit answer, then independently attempt its Markdown projection and a wake. */
 export function storeQuestionAnswer(
-  context: StoreServiceContext,
+  context: QuestionContext,
   options: CallerOptions,
   id: string,
   request: AnswerInput,
@@ -252,14 +381,19 @@ export function storeQuestionProject(
 }
 
 export async function storeQuestionCancel(
-  context: StoreServiceContext,
+  context: QuestionContext,
   options: CallerOptions,
   id: string,
   reason: string,
 ): Promise<QuestionOutput & { readonly wake: { readonly status: WakeStatus } }> {
   const actor = resolveCaller(registry(context), context.env, options);
   return withStore(context, async (store) => {
-    const result = cancelQuestion(store, actor, id, reason);
+    const question = ownEvidenceQuestion(store, actor, id);
+    const proof =
+      question.state === "pending" && question.codex?.native != null
+        ? await evidence(context, question, question.codex.native)
+        : undefined;
+    const result = cancelQuestion(store, actor, id, reason, proof);
     return { ...result, schema: 1 as const, wake: await wakeOwner(context, store, actor.role) };
   });
 }
