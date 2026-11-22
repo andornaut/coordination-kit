@@ -138,11 +138,12 @@ commands.
   `unmatchedRequests` also identifies those imports explicitly, including recent closed entries
   without a matching work file. Their repository is null when the owner has no registered repository.
   Store work records with missing work files are shown with `workFile: null`.
-- **Store:** the [work records](store.md#work-records), pending questions, active holds and imported requests of
-  `<stateRoot>/coordination.db`, read once
-  through a read-only connection; nothing is created or migrated. A missing store file is
-  `absent`. Each item carries its record as `store` (null without one).
-  `pendingQuestions` reports recorded question state. Native prompt visibility is outside this read.
+- **Store:** a read-only snapshot of [work records](store.md#work-records), pending questions,
+  unread originals, active holds and imported requests from the configured authority. An absent
+  store reports `absent`. Each item carries its record as `store` (null without one).
+  `pendingQuestions` reports stored wording, ordered options and the owning Codex thread when
+  available. `unread` lists exact original IDs and wake evidence within the selection. Reading
+  status leaves delivery and native prompts untouched.
 - **Scope:** `all` (the default); a game or kit ID selects its repository; a registry role key
   selects its repository and keeps the items that role owns as a request or in the store, or
   whose `design` area is the role's name (a game's `art`, `gameplay` or `tech`).
@@ -231,7 +232,8 @@ repositories  [{name, kind, path, roles, status, reason, main, originMain,
                 deployment: {channel: bus | release-tag | none,
                              status: available | absent | unavailable | not-applicable,
                              unreadable}}]
-pendingQuestions  [{id, role, title, work, options, state, openedAt, closedAt, decision, reason}]
+pendingQuestions  [{id, role, title, work, options, state, openedAt, closedAt, decision, reason, codex?}]
+unread            [{id, from, to, wake}]
 activeHolds       [{id, role, scope, source, reason, state, setAt, releasedAt, policy?}]
 unmatchedRequests [{id, repository, owner, state, summary, work, closedAt, ...request fields}]
 recentActivity    [{repository, id, at}]

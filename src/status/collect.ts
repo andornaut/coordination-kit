@@ -10,6 +10,7 @@ import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 import type { HoldView, QuestionView } from "../store/questions.ts";
 import type { RequestRecord } from "../store/requests.ts";
+import type { UnreadMessage } from "../store/types.ts";
 import type { WorkRecord } from "../store/work.ts";
 import { CONVENTION_FILE, fieldIds, parseFrontMatter } from "../work/files.ts";
 import {
@@ -156,6 +157,7 @@ export interface StatusReport {
   readonly repositories: readonly RepositoryStatus[];
   readonly items: readonly StatusItem[];
   readonly pendingQuestions: readonly QuestionView[];
+  readonly unread: readonly UnreadMessage[];
   readonly activeHolds: readonly HoldView[];
   readonly unmatchedRequests: readonly UnmatchedRequest[];
   readonly recentActivity: readonly WorkTime[];
@@ -699,6 +701,7 @@ export function collectStatus(
   }));
   const questions = storeWork.questions.filter((question) => inScope(question.role));
   const pendingQuestions = questions.filter(({ state }) => state === "pending");
+  const unread = storeWork.unread.filter(({ to }) => inScope(to));
   const activeHolds = storeWork.holds.filter(
     (hold) =>
       options.scope === "all" ||
@@ -721,10 +724,15 @@ export function collectStatus(
     )
     .map(recordOnlyItem);
   const questionsByItem = new Map<string, QuestionView[]>();
-  for (const question of questions) {
+  for (const question of storeWork.questions) {
     const repository = namedRepository(question.role);
-    if (repository !== null && question.work !== null) {
-      const key = `${repository}\n${question.work}`;
+    const refs =
+      question.codex?.dependsOn ??
+      (inScope(question.role) && repository !== null && question.work !== null
+        ? [{ id: question.work, repository }]
+        : []);
+    for (const ref of refs) {
+      const key = `${ref.repository}\n${ref.id}`;
       const belonging = questionsByItem.get(key) ?? [];
       belonging.push(question);
       questionsByItem.set(key, belonging);
@@ -789,6 +797,7 @@ export function collectStatus(
     repositories: reports.map((report) => report.status),
     schema: STATUS_SCHEMA,
     unmatchedRequests,
+    unread,
   };
 }
 

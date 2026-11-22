@@ -115,6 +115,7 @@ async function lifecycle(
       .replaceAll(role, "ROLE")
       .replaceAll(id, "ID")
       .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, "AT")
+      .replace(/"wake":"[0-9a-f-]{36}"/g, '"wake":"WAKE-ID"')
       .replace(/"seq":\d+/g, '"seq":0'),
   ) as unknown;
 }

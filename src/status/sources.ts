@@ -4,8 +4,10 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Layout } from "../layout.ts";
 import { StateRootError } from "../stateRoot.ts";
 import { Store } from "../store/db.ts";
+import { unreadMessages } from "../store/messageWake.ts";
 import { type HoldView, listHolds, listQuestions, type QuestionView } from "../store/questions.ts";
 import { readRequests, type RequestRecord } from "../store/requests.ts";
+import type { UnreadMessage } from "../store/types.ts";
 import { readWorkRecords, type WorkRecord } from "../store/work.ts";
 import { type DeployPoint, storedDeployPoint } from "./delivery.ts";
 
@@ -22,6 +24,7 @@ export interface StoreWorkSnapshot {
   readonly requests: ReadonlyMap<string, RequestRecord>;
   readonly questions: readonly QuestionView[];
   readonly holds: readonly HoldView[];
+  readonly unread: readonly UnreadMessage[];
   readonly deployments: ReadonlyMap<string, readonly DeployPoint[]>;
 }
 
@@ -33,6 +36,7 @@ function empty(state: StoreSourceState): StoreWorkSnapshot {
     records: new Map(),
     requests: new Map(),
     state,
+    unread: [],
   };
 }
 
@@ -81,6 +85,7 @@ export function readStoreWork(layout: Layout): StoreWorkSnapshot {
         : new Map(),
       requests: new Map(readRequests(db).map((request) => [request.id, request])),
       state: { status: "available" },
+      unread: tables.has("messages") ? unreadMessages({ db }, null) : [],
     };
     db.exec("COMMIT");
     return snapshot;

@@ -104,9 +104,29 @@ export function renderMarkdown(report: StatusReport): string {
     out,
     "Recorded pending questions",
     fromStore(
-      report.pendingQuestions.map(
-        ({ id, role, title, work }) =>
-          `- ${id} (${role}${work === null ? "" : `, ${work}`}) ${inline(title)}`,
+      report.pendingQuestions.flatMap(({ codex, id, options, role, title, work }) => [
+        `- ${id} (${role}${work === null ? "" : `, ${work}`}) ${inline(title)}`,
+        ...(codex === undefined
+          ? []
+          : [
+              `  - Codex thread ${codex.thread}`,
+              ...(options ?? []).map(({ description, label }, index) => {
+                const detail = description === undefined ? "" : ` (${inline(description)})`;
+                return `  - Option ${index + 1}. ${inline(label)}${detail}`;
+              }),
+            ]),
+      ]),
+    ),
+  );
+  section(
+    out,
+    report.coordinator.store.status === "available"
+      ? `Unread originals (${report.unread.length})`
+      : "Unread originals",
+    fromStore(
+      report.unread.map(
+        ({ id, to, wake }) =>
+          `- ${id} (${to}) ${wake.outcome}${wake.reason === null ? "" : ` (${wake.reason})`}. ${wake.nextAction}.`,
       ),
     ),
   );

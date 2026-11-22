@@ -19,6 +19,7 @@ import { EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
 import { loadLayout } from "../layout.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
 import { Store } from "../store/db.ts";
+import { sendMessage } from "../store/messages.ts";
 import { openQuestion, setHold } from "../store/questions.ts";
 import { importRequest, type RequestImport } from "../store/requests.ts";
 import { CLAUDE_COORDINATOR, CLAUDE_TECH, CODEX_TECH, stateRootFixture } from "../testFixtures.ts";
@@ -34,6 +35,7 @@ import { DIGEST_HEADINGS } from "./markdown.ts";
 const GAME = "sample-game";
 const KIT = "sample-kit";
 const TECH_ROLE = `${GAME}/tech`;
+const UNREAD = "00000000-0000-4000-8000-000000000970";
 const AT = "2026-10-01T00:00:00.000Z";
 function request(id: string, owner: string, fields: Partial<RequestImport> = {}): RequestImport {
   return {
@@ -315,13 +317,21 @@ async function buildFixture(): Promise<Fixture> {
   );
   openQuestion(
     store,
-    { nativeId: CLAUDE_TECH, role: TECH_ROLE },
+    { nativeId: CODEX_TECH, role: TECH_ROLE },
     {
+      codex: { dependsOn: [{ id: "sg-0001", repository: GAME }], thread: CODEX_TECH },
       id: "exact-question",
+      options: [{ label: "First", description: "First candidate." }, { label: "Second" }],
       title: "Choose a revision",
       work: "sg-0001",
     },
   );
+  sendMessage(store, importer, {
+    body: "Unread status fixture.",
+    id: UNREAD,
+    intent: "queue",
+    to: TECH_ROLE,
+  });
   setHold(
     store,
     { nativeId: CLAUDE_TECH, role: TECH_ROLE },
@@ -630,10 +640,14 @@ describe("status", () => {
     expect(recent.recentActivity.map((entry) => entry.id)).not.toContain("sg-0015");
     const future = run(fixture, { scope: TECH_ROLE, since: "2100-01-01" });
     expect(future.pendingQuestions).toMatchObject([{ id: "exact-question", work: "sg-0001" }]);
+    expect(future.unread).toMatchObject([
+      { id: UNREAD, to: TECH_ROLE, wake: { outcome: "unknown" } },
+    ]);
     expect(future.activeHolds).toMatchObject([{ id: "exact-hold", scope: "role" }]);
     expect(future.recentActivity).toEqual([]);
     expect(future.recentCompletions).toEqual([]);
     expect(run(fixture, { scope: KIT }).pendingQuestions).toEqual([]);
+    expect(run(fixture, { scope: KIT }).unread).toEqual([]);
     expect(run(fixture, { scope: KIT }).activeHolds).toEqual([]);
     expect(() => run(fixture, { scope: "nowhere" })).toThrow(/--scope/);
   });
@@ -644,6 +658,10 @@ describe("status", () => {
     expect(JSON.parse(json.out)).toMatchObject({ schema: 2 });
     const digest = await cli(fixture, "--format", "markdown");
     expect(digest.code).toBe(EXIT_OK);
+    expect(digest.out).toContain(`Codex thread ${CODEX_TECH}`);
+    expect(digest.out).toContain("Option 1. First (First candidate.)\n  - Option 2. Second");
+    expect(digest.out).toContain("## Unread originals (1)");
+    expect(digest.out).toContain(`- ${UNREAD} (${TECH_ROLE}) unknown`);
     const section = digest.out.split(`## ${GAME}\n`)[1]!.split("\n## ")[0]!;
     expect(section.match(/^### .*$/gm)).toEqual(DIGEST_HEADINGS.map((heading) => `### ${heading}`));
     const under = (heading: string) =>
