@@ -2,13 +2,12 @@
 
 NODE_IMAGE := node:$(shell sed 's/^v//' .nvmrc)
 SHELLCHECK_IMAGE := koalaman/shellcheck:v0.11.0
-CHECK_MEMORY ?= 4g
 
 # The checkout is bound read-only; the Node checks run in a tmpfs copy without Git metadata,
 # dependencies or build output, with four CPUs and the host user's identity.
 USER_ID := $(shell id -u)
 GROUP_ID := $(shell id -g)
-DOCKER_RUN := docker run --rm --cpus 4 --memory $(CHECK_MEMORY) --pids-limit 512 \
+DOCKER_RUN := docker run --rm --cpus 4 --memory 4g --pids-limit 512 \
 	--user $(USER_ID):$(GROUP_ID) --read-only --cap-drop ALL --security-opt no-new-privileges \
 	--mount type=bind,src=$(CURDIR),dst=/source,readonly \
 	--tmpfs /work:exec,size=3g,uid=$(USER_ID),gid=$(GROUP_ID) \

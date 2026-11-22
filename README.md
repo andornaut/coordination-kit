@@ -99,7 +99,7 @@ Errors go to stderr prefixed `coordination-kit:`. Commands with a JSON result ke
 
 Every target runs in stock images: the Node version pinned in `.nvmrc` and
 `koalaman/shellcheck:v0.11.0`. No image is built. Each container binds the checkout read-only,
-runs as the host user with four CPUs and 4 GiB memory (`CHECK_MEMORY`), a read-only root
+runs as the host user with four CPUs and a fixed 4 GiB memory ceiling, a read-only root
 filesystem and no capabilities. The Node container copies the source without `.git`,
 dependencies or build output into tmpfs, installs the root and contract dependencies with
 `npm ci`, then runs the native npm checks. ShellCheck reads the bound source directly with no
@@ -149,7 +149,8 @@ The thin wrappers `scripts/check.sh`, `scripts/pack.sh` and `tests/contract/run.
 native Node helpers. The separately invoked
 `npm run pack -- EXACT_COMMIT_SHA /new/absolute/directory` is the explicit host
 release-controller exception: it archives the requested commit and starts its own offline release
-container with the pinned Node image and the read-only `coordination-kit-npm-check` cache volume
+container with four CPUs, a 4 GiB memory ceiling, the pinned Node image and the read-only
+`coordination-kit-npm-check` cache volume
 (`COORDINATION_KIT_NPM_VOLUME` names another); a missing volume or dependency fails without
 fallback. The controller retains the source epoch and copies the exact revision's `SOURCE_COMMIT`
 and `SHA256SUMS` out with the archive. CI fills the cache volume from the lockfile, then invokes
