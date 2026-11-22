@@ -243,8 +243,7 @@ label alone retains role attribution. Missing and stale lineage stay unverified.
 Reads (`msg status` and `msg history` without `--include-body`, `question list`, `hold list`,
 `decision list`, `store export`, `store rebuild`, `store import --dry-run`,
 `store retire --dry-run`, `work show`,
-`work history`, `handoff show` and `graph`) take no caller, and neither does `graph index`, which writes only the
-derived index.
+`work history`, `handoff show` and the `graph` commands) take no caller.
 
 ## Wakes
 
@@ -728,11 +727,12 @@ one repository that holds it.
 - `graph why --decision [REPOSITORY:]WORK_ID/Dn` prints the decision, the older decisions it
   supersedes and the newer ones that supersede it (nearest first), each with its work item's
   approval reference, and `current`, the newest of the chain.
-- `graph index` rebuilds the derived cache for the selected authority. The SQLite store uses
-  the `edges`, `graph_nodes` and `graph_index` tables. The filesystem store uses
-  `graph-index.json` in its root. Queries use the cache when available (`index.status` `stored`,
-  with its time) and build live otherwise (`live`). The cache can be discarded and rebuilt from
-  work files and store events. `unavailable` lists repositories that could not be read.
+- `graph index` prints the live graph's node, edge and repository counts for compatibility
+  with existing scripts.
+
+These commands read Git and the selected store on every invocation. `unavailable` lists
+repositories whose work files could not be read. Schema 1 JSON keeps
+`"index":{"at":null,"status":"live"}` for compatibility.
 
 ## Approval-ledger import
 

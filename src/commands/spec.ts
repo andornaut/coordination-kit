@@ -556,7 +556,7 @@ export const SPECS = {
     forms: [[]],
     group: "graph",
     options: GRAPH_INDEX_OPTIONS,
-    summary: "rebuild the derived edges index from the registered repositories and the store",
+    summary: "print the live graph summary for compatibility",
   },
 } as const satisfies Readonly<Record<string, GroupedSpec>>;
 /* eslint-enable sort-keys */

@@ -3,6 +3,16 @@
 Moving from coordination-kit 2.1 to 3.0, from 2.0 to 2.1, from 1.3 to 2.0, from 1.1 to 1.2, and from delivery-kit
 4.7 to coordination-kit 1.0.
 
+## Live decision graph
+
+Run `graph` or `graph why` directly. The derived cache from
+[ck-0018/D3](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0018.md#decisions)
+could outlive a new Git commit or store event. Both commands now read the current sources on
+each invocation. Schema 1 JSON keeps the `index` field with `status: "live"` and `at: null`.
+`graph index` remains available as a read-only summary. Scripts can omit pre-query calls to it.
+Existing `graph-index.json` files and SQLite cache tables remain in place for older installations
+and recovery.
+
 ## Filesystem authority migration
 
 The coordinator-installed CLI supports the existing SQLite source during preparation. Its

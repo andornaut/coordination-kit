@@ -1,4 +1,4 @@
-// `graph`, `graph why` and `graph index` over the coordinator's registered repositories and the
+// Decision graph queries over the coordinator's registered repositories and the
 // store. Each prints one JSON object (or DOT for `graph --format dot`); a refusal prints
 // `coordination-kit: CODE` and exits 1, a usage error exits 2.
 import { parseArgs } from "node:util";
@@ -15,9 +15,7 @@ import {
   graphDot,
   graphJson,
   neighbourhood,
-  readIndex,
   why,
-  writeIndex,
 } from "../work/graph.ts";
 import { type Coordinator, openCoordinator } from "../work/live.ts";
 
@@ -31,19 +29,12 @@ export const GRAPH_INDEX_OPTIONS = {} as const;
 
 class Usage extends Error {}
 
-interface Loaded {
-  readonly graph: Graph;
-  readonly index: { readonly status: "stored" | "live"; readonly at: string | null };
-}
+const LIVE_INDEX = { at: null, status: "live" } as const;
 
-function load(git: GitRunner, coordinator: Coordinator): Loaded {
+function load(git: GitRunner, coordinator: Coordinator): Graph {
   const store = Store.readLayout(coordinator.layout);
   try {
-    const stored = store === null ? null : readIndex(store);
-    if (stored !== null) {
-      return { graph: stored, index: { at: stored.at, status: "stored" } };
-    }
-    return { graph: buildGraph(git, coordinator, store), index: { at: null, status: "live" } };
+    return buildGraph(git, coordinator, store);
   } finally {
     store?.close();
   }
@@ -94,20 +85,20 @@ export const graph: Handler = (io, root, args) =>
       throw new Usage();
     }
     const git = systemGit(io.env);
-    const loaded = load(git, openCoordinator(git, root));
+    const current = load(git, openCoordinator(git, root));
     const work = values.work as string | undefined;
     const selected =
       work === undefined
-        ? loaded.graph
-        : neighbourhood(loaded.graph, findWork(loaded.graph, work), Number(depthText ?? 2));
+        ? current
+        : neighbourhood(current, findWork(current, work), Number(depthText ?? 2));
     if (format === "dot") {
       return graphDot(selected);
     }
     return `${JSON.stringify({
-      index: loaded.index,
+      index: LIVE_INDEX,
       kind: "graph",
       schema: 1,
-      unavailable: loaded.graph.unavailable,
+      unavailable: current.unavailable,
       ...graphJson(selected),
     })}\n`;
   });
@@ -119,13 +110,13 @@ export const graphWhy: Handler = (io, root, args) =>
       throw new Usage();
     }
     const git = systemGit(io.env);
-    const loaded = load(git, openCoordinator(git, root));
+    const current = load(git, openCoordinator(git, root));
     return `${JSON.stringify({
-      index: loaded.index,
+      index: LIVE_INDEX,
       kind: "graph-why",
       schema: 1,
-      unavailable: loaded.graph.unavailable,
-      ...why(loaded.graph, findDecision(loaded.graph, decision)),
+      unavailable: current.unavailable,
+      ...why(current, findDecision(current, decision)),
     })}\n`;
   });
 
@@ -133,19 +124,13 @@ export const graphIndex: Handler = (io, root, args) =>
   run(io, "graph index", args, GRAPH_INDEX_OPTIONS, () => {
     const git = systemGit(io.env);
     const coordinator = openCoordinator(git, root);
-    const store = Store.forLayout(coordinator.layout);
-    try {
-      const built = buildGraph(git, coordinator, store);
-      writeIndex(store, built);
-      return `${JSON.stringify({
-        edges: built.edges.length,
-        kind: "graph-index",
-        nodes: built.nodes.size,
-        repositories: built.repositories.length,
-        schema: 1,
-        unavailable: built.unavailable,
-      })}\n`;
-    } finally {
-      store.close();
-    }
+    const current = load(git, coordinator);
+    return `${JSON.stringify({
+      edges: current.edges.length,
+      kind: "graph-index",
+      nodes: current.nodes.size,
+      repositories: coordinator.repositories.length,
+      schema: 1,
+      unavailable: current.unavailable,
+    })}\n`;
   });

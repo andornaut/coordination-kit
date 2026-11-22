@@ -1,13 +1,9 @@
 // The decision graph: work items, decisions, questions, roles and commits, joined by typed edges.
 // Git is the durable copy (work files on each registered repository's `main`, with their front
 // matter and Decisions lines); the store adds work records (parent links, stage commits) and its
-// decision and question records. `graph index` writes a derived cache beside the selected
-// authority. Every query falls back to a live build without the cache.
-import { join } from "node:path";
+// decision and question records.
 import type { DatabaseSync } from "node:sqlite";
 
-import { isRecord } from "../adapters/shared/pyjson.ts";
-import { readJsonIfExists, writeJsonDurable } from "../durable.ts";
 import type { Repository } from "../status/collect.ts";
 import { type GitRunner, readMainFiles } from "../status/git.ts";
 import type { Store } from "../store/db.ts";
@@ -52,7 +48,6 @@ export interface Graph {
   readonly edges: readonly GraphEdge[];
   /** Registered repositories whose work files could not be read. */
   readonly unavailable: readonly string[];
-  readonly repositories: readonly string[];
 }
 
 const WORK_DIRECTORY = "docs/work";
@@ -212,7 +207,6 @@ export function buildGraph(
   return {
     edges: [...builder.edges.values()],
     nodes: builder.nodes,
-    repositories: coordinator.repositories.map((repository) => repository.name),
     unavailable,
   };
 }
@@ -308,161 +302,6 @@ function addStore(builder: Builder, store: Pick<Store, "db">): void {
       builder.edge("owned-by", key, builder.node("role", question.owner), "store");
     }
   }
-}
-
-const INDEX_DDL = `
-CREATE TABLE IF NOT EXISTS graph_nodes (
-  key TEXT PRIMARY KEY,
-  type TEXT NOT NULL,
-  id TEXT NOT NULL,
-  attrs TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS edges (
-  kind TEXT NOT NULL,
-  src TEXT NOT NULL,
-  dst TEXT NOT NULL,
-  source TEXT NOT NULL,
-  detail TEXT NOT NULL DEFAULT '',
-  PRIMARY KEY (kind, src, dst, detail)
-);
-CREATE INDEX IF NOT EXISTS edges_dst ON edges (dst);
-CREATE TABLE IF NOT EXISTS graph_index (
-  id INTEGER PRIMARY KEY CHECK (id = 1),
-  at TEXT NOT NULL,
-  repositories TEXT NOT NULL,
-  unavailable TEXT NOT NULL
-);
-`;
-
-const INDEX_FILE = "graph-index.json";
-
-interface FileIndex extends GraphJson {
-  readonly schema: 1;
-  readonly at: string;
-  readonly repositories: readonly string[];
-  readonly unavailable: readonly string[];
-}
-
-function readFileIndex(path: string): (Graph & { readonly at: string }) | null {
-  try {
-    const value: unknown = readJsonIfExists(join(path, INDEX_FILE));
-    if (
-      !isRecord(value) ||
-      value.schema !== 1 ||
-      typeof value.at !== "string" ||
-      !Array.isArray(value.repositories) ||
-      !value.repositories.every((item) => typeof item === "string") ||
-      !Array.isArray(value.unavailable) ||
-      !value.unavailable.every((item) => typeof item === "string") ||
-      !Array.isArray(value.nodes) ||
-      !value.nodes.every(
-        (item: unknown) =>
-          isRecord(item) &&
-          typeof item.key === "string" &&
-          typeof item.id === "string" &&
-          typeof item.type === "string" &&
-          isRecord(item.attrs),
-      ) ||
-      !Array.isArray(value.edges) ||
-      !value.edges.every(
-        (item: unknown) =>
-          isRecord(item) &&
-          typeof item.kind === "string" &&
-          typeof item.from === "string" &&
-          typeof item.to === "string" &&
-          typeof item.source === "string" &&
-          (item.detail === null || typeof item.detail === "string"),
-      )
-    ) {
-      return null;
-    }
-    const { at, edges, nodes, repositories, unavailable } = value as unknown as FileIndex;
-    return {
-      at,
-      edges,
-      nodes: new Map(nodes.map((node) => [node.key, node])),
-      repositories,
-      unavailable,
-    };
-  } catch {
-    return null;
-  }
-}
-
-/** Replace the derived index with `graph`. Events are untouched. */
-export function writeIndex(store: Store, graph: Graph): void {
-  if (store.fileBacked) {
-    writeJsonDurable(join(store.path, INDEX_FILE), {
-      ...graphJson(graph),
-      at: store.now(),
-      repositories: graph.repositories,
-      schema: 1,
-      unavailable: graph.unavailable,
-    } satisfies FileIndex);
-    return;
-  }
-  store.transaction(() => {
-    store.db.exec(INDEX_DDL);
-    store.db.exec("DELETE FROM edges; DELETE FROM graph_nodes; DELETE FROM graph_index;");
-    const node = store.db.prepare(
-      "INSERT INTO graph_nodes (key, type, id, attrs) VALUES (?, ?, ?, ?)",
-    );
-    for (const item of graph.nodes.values()) {
-      node.run(item.key, item.type, item.id, JSON.stringify(item.attrs));
-    }
-    const edge = store.db.prepare(
-      "INSERT OR IGNORE INTO edges (kind, src, dst, source, detail) VALUES (?, ?, ?, ?, ?)",
-    );
-    for (const item of graph.edges) {
-      edge.run(item.kind, item.from, item.to, item.source, item.detail ?? "");
-    }
-    store.db
-      .prepare("INSERT INTO graph_index (id, at, repositories, unavailable) VALUES (1, ?, ?, ?)")
-      .run(store.now(), JSON.stringify(graph.repositories), JSON.stringify(graph.unavailable));
-  });
-}
-
-/** The stored index, or null when the derived cache is missing. */
-export function readIndex(store: Store): (Graph & { readonly at: string }) | null {
-  if (store.fileBacked) {
-    return readFileIndex(store.path);
-  }
-  if (!["edges", "graph_nodes", "graph_index"].every((table) => tableExists(store.db, table))) {
-    return null;
-  }
-  const meta = store.db.prepare("SELECT * FROM graph_index WHERE id = 1").get() as
-    Record<string, string> | undefined;
-  if (meta === undefined) {
-    return null;
-  }
-  const nodes = new Map<string, GraphNode>();
-  for (const row of store.db.prepare("SELECT * FROM graph_nodes").all() as Record<
-    string,
-    string
-  >[]) {
-    nodes.set(row.key!, {
-      attrs: JSON.parse(row.attrs!) as Record<string, string | null>,
-      id: row.id!,
-      key: row.key!,
-      type: row.type as NodeType,
-    });
-  }
-  const edges = (store.db.prepare("SELECT * FROM edges").all() as Record<string, string>[]).map(
-    (row) => ({
-      detail: row.detail === "" ? null : row.detail!,
-      from: row.src!,
-      kind: row.kind as EdgeKind,
-      source: row.source as GraphEdge["source"],
-      to: row.dst!,
-    }),
-  );
-  return {
-    at: meta.at!,
-    edges,
-    nodes,
-    repositories: JSON.parse(meta.repositories!) as string[],
-    unavailable: JSON.parse(meta.unavailable!) as string[],
-  };
 }
 
 function sortedEdges(edges: readonly GraphEdge[]): GraphEdge[] {

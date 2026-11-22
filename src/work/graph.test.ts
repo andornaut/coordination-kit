@@ -1,5 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -8,10 +7,10 @@ import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK } from "../io.ts";
 import { loadLayout } from "../layout.ts";
 import { Store } from "../store/db.ts";
+import { activateMigration, prepareMigration } from "../store/files/migration.ts";
 import { answerQuestion, openQuestion } from "../store/questions.ts";
-import { type Graph, readIndex, writeIndex } from "./graph.ts";
 import { workEvidence, workStart } from "./live.ts";
-import { GAME, IDS, KIT, live, liveFixture, liveIo, ROLES, workFile } from "./testLive.ts";
+import { commit, GAME, IDS, KIT, live, liveFixture, liveIo, ROLES, workFile } from "./testLive.ts";
 
 const SHA = "89abcdef0123456789abcdef0123456789abcdef";
 
@@ -154,58 +153,94 @@ describe("graph", () => {
     );
   });
 
-  it("stores a derived index whose deletion loses nothing", async () => {
+  it("reads new Git decisions and store evidence while leaving an old cache untouched", async () => {
     const made = fixture();
-    const live = await run(made, "graph");
-    const indexed = await run(made, "graph", "index");
-    expect(indexed.exit, indexed.err).toBe(EXIT_OK);
-    expect(indexed.json).toMatchObject({ kind: "graph-index", repositories: 3, unavailable: [] });
-    const stored = await run(made, "graph");
-    expect(stored.json.index.status).toBe("stored");
-    expect(stored.json.edges).toEqual(live.json.edges);
-    expect(stored.json.nodes).toEqual(live.json.nodes);
-    const store = Store.forLayout(loadLayout(made.root));
-    store.db.exec("DROP TABLE edges; DROP TABLE graph_nodes; DROP TABLE graph_index;");
-    expect(store.verify().events).toBeGreaterThan(0);
-    store.close();
-    const rebuilt = await run(made, "graph");
-    expect(rebuilt.json.index.status).toBe("live");
-    expect(rebuilt.json.edges).toEqual(live.json.edges);
+    const layout = loadLayout(made.root);
+    const { receipt } = prepareMigration(
+      layout,
+      join(made.base, "backup.db"),
+      join(made.base, "restore.db"),
+    );
+    activateMigration(layout, receipt.id);
+    const previous = await run(made, "graph");
+    expect(previous.exit, previous.err).toBe(EXIT_OK);
+    const cache = join(layout.varDir, "coordination", "graph-index.json");
+    const bytes = JSON.stringify({
+      at: "2026-11-06T12:00:00.000Z",
+      edges: previous.json.edges,
+      nodes: previous.json.nodes,
+      repositories: [ROLES.coordinator, GAME, KIT],
+      schema: 1,
+      unavailable: previous.json.unavailable,
+    });
+    writeFileSync(cache, bytes);
+    const before = statSync(cache, { bigint: true });
+
+    commit(made.kit, "Record a new decision", {
+      "docs/work/sk-0003.md": workFile("sk-0003", "Third approach", "approved", {
+        decisions: ["- D1 (user, 2026-11-07; supersedes sk-0002/D2): Use one journal."],
+      }),
+    });
+    const context = live(made, IDS.kit);
+    workStart(context, {}, { id: "sk-0003", worktree: made.kit });
+    workEvidence(
+      context,
+      {},
+      { id: "sk-0003", sha: SHA, stage: "implemented", worktree: made.kit },
+    );
+
+    const head = () => {
+      const store = Store.readLayout(layout)!;
+      try {
+        return store.head();
+      } finally {
+        store.close();
+      }
+    };
+    const written = head();
+    const graph = await run(made, "graph");
+    expect(graph.exit, graph.err).toBe(EXIT_OK);
+    expect(graph.json.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from: `commit:${SHA}`,
+          kind: "implements",
+          source: "store",
+          to: `work:${KIT}:sk-0003`,
+        }),
+      ]),
+    );
+
+    const why = await run(made, "graph", "why", "--decision", "sk-0002/D2");
+    expect(why.exit, why.err).toBe(EXIT_OK);
+    expect(why.json.current).toBe(`${KIT}:sk-0003/D1`);
+    expect(why.json.index).toEqual({ at: null, status: "live" });
+
+    const summary = await run(made, "graph", "index");
+    expect(summary.exit, summary.err).toBe(EXIT_OK);
+    expect(summary.json).toEqual({
+      edges: graph.json.edges.length,
+      kind: "graph-index",
+      nodes: graph.json.nodes.length,
+      repositories: 3,
+      schema: 1,
+      unavailable: [],
+    });
+
+    expect(head()).toEqual(written);
+    expect(readFileSync(cache, "utf8")).toBe(bytes);
+    const after = statSync(cache, { bigint: true });
+    expect({ ino: after.ino, mtime: after.mtimeNs }).toEqual({
+      ino: before.ino,
+      mtime: before.mtimeNs,
+    });
   });
 
-  it("stores a rebuildable graph cache alongside the files authority", () => {
-    const directory = mkdtempSync(join(tmpdir(), "coordination-graph-"));
-    const open = () =>
-      Store.openFileProjection(directory, {
-        journal: {
-          events: () => [],
-          withWriter: () => {
-            throw new Error("cache entered authoritative write transaction");
-          },
-        },
-        records: () => [],
-      });
-    const node = { attrs: {}, id: KIT, key: `role:${KIT}`, type: "role" } as const;
-    const graph: Graph = {
-      edges: [],
-      nodes: new Map([[node.key, node]]),
-      repositories: [KIT],
-      unavailable: [],
-    };
-    const writer = open();
-    try {
-      writeIndex(writer, graph);
-      expect(writer.head().seq).toBe(0);
-    } finally {
-      writer.close();
-    }
-    const reader = open();
-    try {
-      expect(readIndex(reader)).toEqual({ ...graph, at: expect.any(String) });
-      writeFileSync(join(directory, "graph-index.json"), '{"schema":1,"nodes":[null]}');
-      expect(readIndex(reader)).toBeNull();
-    } finally {
-      reader.close();
-    }
+  it("reports unavailable sources", async () => {
+    const made = fixture();
+    renameSync(made.game, join(made.base, "unavailable-game"));
+    const graph = await run(made, "graph");
+    expect(graph.exit, graph.err).toBe(EXIT_OK);
+    expect(graph.json.unavailable).toEqual([GAME]);
   });
 });

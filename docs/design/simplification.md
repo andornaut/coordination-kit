@@ -161,7 +161,7 @@ Three additions:
 - **Nodes:** work item (`ck-0006`), decision (`ck-0006/D1`), question (`q-<role>-<n>`, store only), role (registry name), commit (SHA).
 - **Decision record:** a line in the work file's Decisions section, `- D2 (user, 2026-11-18; answers q-coordination-kit-14; supersedes D1): text`, mirrored as a typed store row `{id, work, question, by, at, role, supersedes, text}`.
 - **Edges:** `decides` (decision to work), `answers` (decision to question), `owned-by` (question and work to role), `supersedes` (decision to decision, work to work), `related` (work to work), `implements` (commit to work, from `work evidence`).
-- **Storage:** git is the durable public copy; the store holds questions (private, local) and the derived `edges` table, rebuilt by `graph index` from the repositories named in `config.json`. Deleting the index loses nothing.
+- **Storage:** Git holds public work files and decision lines. The coordination store holds questions and live work and decision records. Each query builds the graph from both sources.
 - **Queries:** `decision list --work ID`, `graph --work ID --depth 2 --format json|dot`, `graph why --decision ID` (the supersedes chain with approval references). No service, no daemon.
 - `question answer --id Q --work W --text T` closes the question, writes the store row and appends the D line to the work file in the caller's `main` worktree for the role's next commit; `work check --decisions` reports store decisions missing from git.
 
