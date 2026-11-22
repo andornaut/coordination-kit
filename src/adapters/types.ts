@@ -31,10 +31,10 @@ const CATEGORIES = [
 const CLASSIFICATIONS = ["guarded", "native-rejected", "outcome-unknown", "unavailable"] as const;
 const RPC_CODES = [-32700, -32600, -32601, -32602, -32603, -32000] as const;
 export type NativeRpcCode = (typeof RPC_CODES)[number];
-export interface NativeQuestionRef {
+export type NativeQuestionRef = {
   readonly turnId: string;
   readonly itemId: string;
-}
+};
 export type DeliveryDiagnostic = {
   readonly stage: (typeof STAGES)[number];
   readonly category: (typeof CATEGORIES)[number];
