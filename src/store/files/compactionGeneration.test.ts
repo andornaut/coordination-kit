@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,7 +11,7 @@ import {
   selectedFileCheckpoint,
   selectFileCheckpoint,
 } from "./compactionGeneration.ts";
-import { fenceFileJournal, openFileJournal } from "./journal.ts";
+import { openFileJournal } from "./journal.ts";
 
 const ROLE = "fixture-kit";
 const NATIVE_ID = "00000000-0000-4000-8000-000000000011";
@@ -99,16 +100,19 @@ it("reports pending after a fence interruption and resumes only the exact verifi
     "checkpoint-restore-path-invalid",
   );
   const prepared = prepareFileCheckpoint(root, restored, scope, anchor);
-  expect(() =>
-    fenceFileJournal(
-      root,
-      { ...prepared.receipt, id: prepared.id },
-      () => {},
-      () => {
-        throw new Error("selection interrupted");
-      },
-    ),
-  ).toThrow("selection interrupted");
+  const stopped = spawnSync(process.execPath, [
+    "--input-type=module",
+    "-e",
+    `
+      const [, journalModule, root, input] = process.argv;
+      const { fenceFileJournal } = await import(journalModule);
+      fenceFileJournal(root, JSON.parse(input), () => {}, () => process.kill(process.pid, "SIGKILL"));
+    `,
+    new URL("./journal.ts", import.meta.url).href,
+    root,
+    JSON.stringify({ ...prepared.receipt, id: prepared.id }),
+  ]);
+  expect(stopped.signal).toBe("SIGKILL");
   expect(() => selectedFileCheckpoint(root)).toThrow("checkpoint-selection-pending");
   expect(existsSync(join(root, "journal", `checkpoint-${prepared.id}.json`))).toBe(false);
   selectFileCheckpoint(root, restored, prepared, () => scope, anchor);
