@@ -252,6 +252,7 @@ describe("reason tokens", () => {
       [
         "already-delivered",
         "cli-error",
+        "compaction-reserved",
         "held",
         "in-flight",
         "no-events",
