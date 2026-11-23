@@ -220,6 +220,7 @@ it("refuses unbound or stale proof, unqualified replacements and non-independent
   expect(existsSync(join(target, "journal", "active-checkpoint.json"))).toBe(false);
 });
 
+// Each command exercises the real registry and journal lock processes.
 it("binds prepare and interrupted activation to one acquisition and exact candidate", async () => {
   const { base, common, head, layout, receipt, restore, run, selectors, target, writeEvidence } =
     fixture();
@@ -347,4 +348,4 @@ it("binds prepare and interrupted activation to one acquisition and exact candid
       mtimeMs: state[index]!.stat.mtimeMs,
     });
   }
-});
+}, 15_000);

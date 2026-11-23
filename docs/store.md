@@ -147,9 +147,11 @@ Use the existing scheduled review and operator approval lane.
    with the restore and writes only the receipt. The receipt ID identifies the exact prepared
    candidate, including its acquisition, evidence and restore. Keep the receipt, evidence and
    restore together through the review.
-5. Obtain explicit activation approval for that receipt ID. Invoke activate with the same
-   restore, evidence and receipt, the receipt ID and the approval reference. The coordinator
-   verifies approval and custody. The command rechecks the inputs, registry and reservation
+5. Obtain explicit activation approval for that receipt ID and preserve its evidence outside
+   the reserved journal. Store-backed question and answer writes defer during the reservation.
+   Invoke activate with the same restore, evidence and receipt, the receipt ID and the approval
+   reference. The coordinator verifies approval and custody. The command rechecks the inputs,
+   registry and reservation
    before permanently fencing the old journal. The selected journal accepts writes after
    activation. If interrupted after fencing, retain custody and retry the same activation.
 6. To withdraw before fencing, use cancel with the original request UUID, acquisition UUID,
