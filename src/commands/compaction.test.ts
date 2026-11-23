@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
 import { updateRegistry } from "../registry/store.ts";
@@ -24,6 +24,9 @@ import { activateMigration, prepareMigration } from "../store/files/migration.ts
 import { recordSession } from "../store/handoffs.ts";
 import { closeMessage, messageStatus, sendMessage } from "../store/messages.ts";
 import { COORDINATOR, storeFixture, TECH } from "../store/testStore.ts";
+
+// These command cases exercise real registry and journal lock processes.
+vi.setConfig({ testTimeout: 15_000 });
 
 const OWNER = { nativeId: TECH, role: "archies-dog-walks/tech" };
 const SENDER = { nativeId: COORDINATOR, role: "game-coordinator" };
@@ -220,7 +223,6 @@ it("refuses unbound or stale proof, unqualified replacements and non-independent
   expect(existsSync(join(target, "journal", "active-checkpoint.json"))).toBe(false);
 });
 
-// Each command exercises the real registry and journal lock processes.
 it("binds prepare and interrupted activation to one acquisition and exact candidate", async () => {
   const { base, common, head, layout, receipt, restore, run, selectors, target, writeEvidence } =
     fixture();
@@ -348,4 +350,4 @@ it("binds prepare and interrupted activation to one acquisition and exact candid
       mtimeMs: state[index]!.stat.mtimeMs,
     });
   }
-}, 15_000);
+});
