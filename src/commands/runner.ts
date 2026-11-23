@@ -27,6 +27,12 @@ export const REVIEW_SHOW_OPTIONS = {
 
 class Usage extends Error {}
 
+const RESERVED = {
+  status: "deferred",
+  reason: "compaction-reserved",
+  detail: "The journal is reserved for compaction. Retry after the reservation ends.",
+} as const;
+
 /** An ISO 8601 instant with an explicit offset. */
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 
@@ -108,6 +114,10 @@ export const reviewDeliver: Handler = async (io, root, args) => {
     io.out(reviewDeliverLine(resolved.cli, resolved.game.id, values.slot, result));
     return EXIT_OK;
   } catch (error) {
+    if (error instanceof StoreError && error.code === RESERVED.reason) {
+      io.out(reviewDeliverLine(resolved.cli, resolved.game.id, values.slot, RESERVED));
+      return EXIT_OK;
+    }
     io.err(`coordination-kit: review deliver failed: ${message(error)}\n`);
     return EXIT_INVALID;
   } finally {
@@ -152,6 +162,19 @@ export const eventsIngest: Handler = async (io, root, args) => {
     io.out(eventsIngestLine(resolved.cli, resolved.game.id, result));
     return EXIT_OK;
   } catch (error) {
+    if (error instanceof StoreError && error.code === RESERVED.reason) {
+      io.out(
+        eventsIngestLine(resolved.cli, resolved.game.id, {
+          ...RESERVED,
+          completed: 0,
+          delivered: 0,
+          held: 0,
+          ingested: 0,
+          quarantined: 0,
+        }),
+      );
+      return EXIT_OK;
+    }
     io.err(`coordination-kit: events ingest failed: ${message(error)}\n`);
     return EXIT_INVALID;
   }

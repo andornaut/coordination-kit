@@ -16,6 +16,7 @@ export const REASON_TOKENS = [
   "cli-error",
   "outbox-unreadable",
   "in-flight",
+  "compaction-reserved",
 ] as const;
 
 export type ReasonToken = (typeof REASON_TOKENS)[number];
