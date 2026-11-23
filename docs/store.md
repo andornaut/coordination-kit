@@ -320,6 +320,10 @@ resolution references. The role owner can inspect or correct the marker using ve
 evidence. Marker states and native question evidence are checked independently.
 Existing `decision-clearance` evidence remains readable.
 
+An exact collected wake may include retired generated coordinator attention. The journal
+records these disposition sequences as `attentionClosures`, separate from `inboxReads`.
+Their use still requires confirmed acceptance, verified native clearance and an empty queue.
+
 Codex queue dispatch and coordinator fallback share one outstanding reservation for the exact role
 and current native conversation. Pulling the durable inbox leaves that reservation in place. A
 confirmed pre-submission refusal releases it. An uncertain or interrupted queue claim

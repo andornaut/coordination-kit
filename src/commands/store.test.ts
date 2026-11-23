@@ -90,13 +90,12 @@ describe("store compaction-plan", () => {
 });
 
 describe("store message commands", () => {
-  it.each([
-    ["an explicit unblock", ["--intent", "unblock"]],
-    ["a work-linked queue message", ["--link", "work=ck-0031"]],
-  ] as const)("alerts the coordinator once for %s with a guarded wake", async (_case, metadata) => {
+  it("coalesces distinct guarded unblockers by recipient and retires the generated alert", async () => {
     const { base, root } = storeFixture();
     const tech = cli(root, base, { CLAUDE_CODE_SESSION_ID: TECH });
     const coordinator = cli(root, base, { CLAUDE_CODE_SESSION_ID: COORDINATOR });
+    const art = cli(root, base, { CODEX_THREAD_ID: ART });
+    const secondId = "00000000-0000-4000-8000-000000000302";
     const args = [
       "msg",
       "send",
@@ -104,7 +103,10 @@ describe("store message commands", () => {
       ART_ROLE,
       "--body",
       "Private transfer details.",
-      ...metadata,
+      "--intent",
+      "unblock",
+      "--link",
+      "work=ck-0031",
       "--id",
       ID,
     ];
@@ -119,22 +121,73 @@ describe("store message commands", () => {
     });
     const attention = original.json?.attention as { id: string };
     expect(await tech(...args)).toMatchObject({ code: EXIT_OK, json: { duplicate: true } });
+    const second = await tech(
+      "msg",
+      "send",
+      "--to",
+      ART_ROLE,
+      "--intent",
+      "unblock",
+      "--link",
+      "work=ck-0038",
+      "--id",
+      secondId,
+      "--body",
+      "Separate transfer.",
+    );
+    expect(second.json?.attention).toEqual({ id: attention.id, status: "recorded" });
+    const separate = await tech(
+      "msg",
+      "send",
+      "--to",
+      "archies-dog-walks/gameplay",
+      "--intent",
+      "unblock",
+      "--body",
+      "Independent transfer.",
+    );
+    expect(separate.json?.attention).toMatchObject({ id: expect.any(String) });
+    const separateAttention = separate.json?.attention as { id: string };
+    expect(separateAttention.id).not.toBe(attention.id);
+    expect(await coordinator("inbox", "--peek")).toMatchObject({ json: { count: 2 } });
+    expect(await coordinator("msg", "status", attention.id, "--include-body")).toMatchObject({
+      json: { message: { body: expect.stringContaining(ART_ROLE), state: "sent" } },
+    });
+    const pulled = await art("inbox", "--include-body");
+    expect(pulled.json).toMatchObject({
+      delivered: 2,
+      messages: [
+        { id: ID, body: "Private transfer details.", state: "delivered" },
+        { id: secondId, body: "Separate transfer.", state: "delivered" },
+      ],
+    });
+    expect(await coordinator("msg", "status", attention.id)).toMatchObject({
+      json: {
+        message: { state: "handled", deliveredAt: null, evidence: ["attention-source-cleared"] },
+      },
+    });
     const inbox = await coordinator("inbox", "--include-body");
     expect(inbox.json).toMatchObject({
       count: 1,
-      messages: [{ id: attention.id, from: TECH_ROLE, links: [{ kind: "message", ref: ID }] }],
+      messages: [{ id: separateAttention.id }],
     });
     expect(inbox.out).not.toContain("Private transfer details");
-    expect(await tech("msg", "status", ID)).toMatchObject({
-      json: { message: { deliveredAt: null, state: "sent" } },
-    });
   });
 
-  it("keeps a guarded routine message visible through the normal review", async () => {
+  it("keeps a guarded work-linked queue message in the normal unread projection", async () => {
     const { base, root } = storeFixture();
     const tech = cli(root, base, { CLAUDE_CODE_SESSION_ID: TECH });
     const coordinator = cli(root, base, { CLAUDE_CODE_SESSION_ID: COORDINATOR });
-    const original = await tech("msg", "send", "--to", ART_ROLE, "--body", "Routine update.");
+    const original = await tech(
+      "msg",
+      "send",
+      "--to",
+      ART_ROLE,
+      "--body",
+      "Routine update.",
+      "--link",
+      "work=ck-0031",
+    );
     expect(original).toMatchObject({
       code: EXIT_OK,
       json: { message: { deliveredAt: null, state: "sent" }, wake: { status: "guarded" } },
@@ -143,6 +196,10 @@ describe("store message commands", () => {
     expect(await coordinator("inbox", "--peek")).toMatchObject({
       code: EXIT_OK,
       json: { count: 0 },
+    });
+    const art = cli(root, base, { CODEX_THREAD_ID: ART });
+    expect(await art("inbox", "--peek")).toMatchObject({
+      json: { count: 1, unread: [{ wake: { outcome: "guarded" } }] },
     });
   });
 

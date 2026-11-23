@@ -143,7 +143,7 @@ describe("stored review brief", () => {
     expect(seq()).toBe(2);
   });
 
-  it("caps the brief at one page, stores review-stuck once per episode and shows the detail", async () => {
+  it("stores one bounded brief per slot with the new stall count and exact details", async () => {
     const { base, layout, root } = await storeModeFixture();
     const game = gameLayout(layout, GAME);
     await send(layout, 100);
@@ -151,6 +151,9 @@ describe("stored review brief", () => {
     await deliverReview(layout, game, NEXT, undefined, { env: {} });
     await deliverReview(layout, game, LATER, undefined, { env: {} });
     const stored = briefs(layout);
+    expect(stored.map(({ id }) => id)).toEqual(
+      [SLOT, NEXT, LATER].map((slot) => derivedId("review-brief", GAME, slot)),
+    );
     const next = stored.find((message) => message.id === derivedId("review-brief", GAME, NEXT))!;
     expect(next.body.split("\n").length).toBeLessThanOrEqual(BRIEF_MAX_LINES);
     expect(Buffer.byteLength(next.body, "utf8")).toBeLessThanOrEqual(BRIEF_MAX_BYTES);
@@ -158,11 +161,8 @@ describe("stored review brief", () => {
     expect(next.body).toMatch(
       /- \d+ more: coordination-kit review show --game archies-dog-walks --slot 2026-11-18T16:30:00.000Z/,
     );
-    const stuck = stored.filter((message) =>
-      message.body.includes("Review needs owner reconciliation"),
-    );
-    expect(stuck).toHaveLength(1);
-    expect(stuck[0]!.body).toContain("100 messages unhandled across two distinct slots");
+    expect(next.body).toContain("100 newly stalled");
+    expect(brief(layout, LATER)).not.toContain("New review exceptions:");
 
     let out = "";
     const io = { cwd: base, env: {}, err: () => {}, out: (text: string) => (out += text) };
@@ -282,12 +282,13 @@ describe("stored review brief", () => {
       },
       expect.objectContaining({ id: uuid(4) }),
     ]);
-    expect(brief(layout, NEXT)).toContain("recipient reconciles the original with its owner");
-    const notices = briefs(layout).filter((message) =>
-      message.body.includes("retained messages with a passed review boundary"),
-    );
-    expect(notices).toHaveLength(1);
-    expect(notices[0]?.body).toContain("2 retained messages with a passed review boundary");
+    const due = brief(layout, NEXT);
+    expect(due).toContain("recipient reconciles the original with its owner");
+    expect(due).toContain("2 newly overdue retained");
+    const later = brief(layout, LATER);
+    expect(later).toContain(`- retention-overdue ${uuid(1)}`);
+    expect(later).not.toContain("New review exceptions:");
+    expect(briefs(layout)).toHaveLength(3);
     const store = Store.forLayout(layout);
     try {
       expect(messageStatus(store, uuid(1))).toMatchObject({
@@ -312,14 +313,9 @@ describe("stored review brief", () => {
     expect(last).toContain(`- stalled ${uuid(1)} to ${TECH_ROLE} (sent, continuing,`);
     expect(last).toContain(`- stalled ${uuid(2)} to ${TECH_ROLE} (sent, newly stalled,`);
     expect(last.indexOf(uuid(2))).toBeLessThan(last.indexOf(uuid(1)));
-    const notices = briefs(layout).filter((message) =>
-      message.body.includes("unhandled across two distinct slots"),
-    );
-    expect(notices).toHaveLength(2);
-    expect(notices.map(({ body }) => body)).toEqual([
-      expect.stringContaining("1 message unhandled"),
-      expect.stringContaining("1 message unhandled"),
-    ]);
+    expect(brief(layout, NEXT)).toContain("1 newly stalled");
+    expect(last).toContain("1 newly stalled");
+    expect(briefs(layout)).toHaveLength(3);
   });
 
   it("skips a game that does not host the route without storing anything", async () => {

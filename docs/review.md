@@ -95,9 +95,8 @@ SIGTERM or an aborted signal before the brief is stored records nothing, prints 
 
 `@andornaut/coordination-kit/build/review` exports `deliverReview(layout, game, slot, signal?,
 options?)`, which returns the typed result above without `cli`, `storeReview`, `composeBrief`,
-`showBrief`, the route readers and `REASON_TOKENS`. A review health event (`review-stuck`) goes
-through `coordinationEmit`, which stores it as a message from `delivery-kit` to the game's
-`reports.recipient`.
+`showBrief`, the route readers and `REASON_TOKENS`. `coordinationEmit` stores explicit events as
+messages from `delivery-kit` to the game's `reports.recipient`.
 
 ## Stored brief
 
@@ -166,9 +165,9 @@ details.
 - `wake-failed` and `wake-ambiguous`: an outstanding wake with that outcome;
 - `wake-guarded`: a wake-pending recipient whose last wake a guard refused.
 
-The brief stores one `review-stuck` message for newly stalled IDs or newly overdue retention
-boundaries. Continuing cases stay visible, and the scheduled brief and its own health messages
-cannot generate another health message. After the commit the review checks wake-pending roles.
+The existing brief includes the counts of newly stalled originals and newly overdue retention
+boundaries. Continuing cases and exact original IDs stay visible in the detailed review.
+After the commit the review checks wake-pending roles.
 It can rearm confirmed failures and existing Claude recovery cases. An outstanding Codex wake
 with unknown acceptance stays guarded. A secret-shaped brief omits question titles and
 retention text.

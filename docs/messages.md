@@ -23,16 +23,19 @@ coordination-kit msg retain 00000000-0000-4000-8000-000000000003 --reason "check
 ```
 
 - States are `sent`, `delivered` (the recipient's own `inbox` read), then `handled`, `superseded`
-  or `retained`. A message closes with one write, by its recipient only.
+  or `retained`. The recipient alone closes an original.
 - `msg send` stores the original, marks the recipient wake-pending and attempts at most one
   guarded wake, which carries no payload. Repeating the same original returns its recorded
   evidence without another native attempt. A wake outcome never changes message state.
-- A new `--intent unblock` or message with a `work` link from another role creates one
-  coordinator attention notice if the original is unread after a confirmed guarded or failed
-  wake. The notice carries the original ID
-  and wake category. The coordinator wake uses the regular guard. The optional `attention`
-  receipt reports whether the notice was recorded. Ambiguous or coalesced outcomes remain
-  visible for reconciliation and do not create another native input.
+- An explicit `--intent unblock` can create one generated coordinator attention notice per
+  source recipient while urgent originals remain unread after a confirmed guarded or failed
+  wake. Later qualifying sends reuse the existing notice without another coordinator wake.
+  Ordinary queues, including work-linked queues, stay visible in the original inbox and review.
+  The optional `attention` receipt identifies the shared notice. Ambiguous or coalesced outcomes
+  remain visible for reconciliation.
+- Source collection closes obsolete generated attention metadata once the recipient has no
+  unread unblockers. It leaves original disposition to the source recipient. The scheduled
+  review and reminder planner expose the current exact originals and wake evidence.
 - Native session messages and channel notifications are wakes only; `msg send` is the one payload
   path between roles.
 - Output is one JSON object, identical for Claude and Codex callers. `msg status ID` and

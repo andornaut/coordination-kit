@@ -7,7 +7,12 @@ import type { RpcClient } from "../adapters/codex/rpc.ts";
 import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { isRecord } from "../adapters/shared/pyjson.ts";
 import { readJsonIfExists } from "../durable.ts";
-import { type NoticeBinding, noticeText, type PendingNotice } from "./noticesInFlight.ts";
+import {
+  type NoticeBinding,
+  type NoticeDispositions,
+  noticeText,
+  type PendingNotice,
+} from "./noticesInFlight.ts";
 
 const PAGES = 10;
 const MAX_PAGE_SIZE = 100;
@@ -59,10 +64,9 @@ interface ConsumptionProof {
   readonly turn: string;
 }
 
-interface CollectionProof {
+interface CollectionProof extends NoticeDispositions {
   readonly kind: "released";
   readonly notice: PendingNotice;
-  readonly inboxReads: readonly number[];
   readonly queueId: string;
 }
 
@@ -151,7 +155,7 @@ export async function reconcileNativeNotices(
   root: string,
   binding: NoticeBinding,
   notices: readonly PendingNotice[],
-  collected: ReadonlyMap<string, readonly number[]>,
+  collected: ReadonlyMap<string, NoticeDispositions>,
   canRelease: (client: RpcClient) => Promise<boolean>,
 ): Promise<NoticeProof[]> {
   // A claim that is not yet visibly in-flight supplies no reconciliation evidence.
@@ -181,10 +185,10 @@ export async function reconcileNativeNotices(
     );
     if (queue.length === 0) {
       const ready = candidates.flatMap(({ notice, queueId }): CollectionProof[] => {
-        const inboxReads = collected.get(notice.id);
-        return inboxReads === undefined || queueId === null || !REFERENCE.test(queueId)
+        const dispositions = collected.get(notice.id);
+        return dispositions === undefined || queueId === null || !REFERENCE.test(queueId)
           ? []
-          : [{ inboxReads, kind: "released", notice, queueId }];
+          : [{ ...dispositions, kind: "released", notice, queueId }];
       });
       if (
         ready.length > 0 &&

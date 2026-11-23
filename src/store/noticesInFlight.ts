@@ -2,6 +2,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import { wakeText } from "../adapters/claude/wakeFile.ts";
+import { ATTENTION_CLEARED, ATTENTION_ORIGIN } from "./attention.ts";
 import { MESSAGE_ID } from "./messages.ts";
 import type { Projection } from "./projections.ts";
 import type { JsonObject, StoredEvent } from "./types.ts";
@@ -137,6 +138,11 @@ interface AcceptedClaim {
   readonly legacy: number;
 }
 
+export interface NoticeDispositions {
+  readonly inboxReads: readonly number[];
+  readonly attentionClosures: readonly number[];
+}
+
 function exactIds(value: string): string[] | null {
   const ids = JSON.parse(value) as unknown[];
   return new Set(ids).size === ids.length &&
@@ -145,8 +151,11 @@ function exactIds(value: string): string[] | null {
     : null;
 }
 
-/** Compare accepted wake claims with exact inbox pulls made by the same native owner. */
-export function collectedNotices(store: Reader, binding: NoticeBinding): Map<string, number[]> {
+/** Compare accepted claims with exact owner pulls or trusted generated attention closures. */
+export function collectedNotices(
+  store: Reader,
+  binding: NoticeBinding,
+): Map<string, NoticeDispositions> {
   const { conversation, role } = binding;
   const claims = store.db
     .prepare(
@@ -205,29 +214,61 @@ export function collectedNotices(store: Reader, binding: NoticeBinding): Map<str
       }
     }
   }
-  const proven = new Map<string, number[]>();
+  const closures = new Map<string, number>();
+  if (role === "game-coordinator") {
+    const closed = store.db
+      .prepare(
+        `SELECT m.id, m.sent_seq, e.seq FROM events e
+       JOIN messages m ON m.id = json_extract(e.payload, '$.id')
+       JOIN events origin ON origin.seq = m.sent_seq
+       WHERE e.seq > ? AND e.kind = 'msg.closed' AND e.actor_role = ?
+         AND e.actor_native_id IS NULL AND json_extract(e.payload, '$.evidence[0]') = ?
+         AND ${ATTENTION_ORIGIN}`,
+      )
+      .all(claims[0]!.seq, role, ATTENTION_CLEARED) as {
+      id: string;
+      sent_seq: number;
+      seq: number;
+    }[];
+    for (const { id, sent_seq, seq } of closed) {
+      sentById.set(id, sent_seq);
+      closures.set(id, seq);
+    }
+  }
+  const unique = (seqs: number[]) => [...new Set(seqs)].sort((a, b) => a - b);
+  const proven = new Map<string, NoticeDispositions>();
   for (const claim of claims) {
     if (claim.legacy) {
       // Originals delivered by the first pull and sent by the claim are exactly the wake's
       // contents when their count agrees. Later sent originals do not contribute.
       const first = reads.find(({ seq }) => seq > claim.seq);
       if (first?.originals?.filter((sent) => sent <= claim.seq).length === claim.count) {
-        proven.set(claim.id, [first.seq]);
+        proven.set(claim.id, { attentionClosures: [], inboxReads: [first.seq] });
       }
     } else if (claim.originals !== null) {
       const ids = exactIds(claim.originals);
       if (ids?.length !== claim.count) {
         continue;
       }
-      const proof = ids.map((id) => readById.get(id) ?? 0);
+      const inboxReads: number[] = [];
+      const attentionClosures: number[] = [];
+      for (const id of ids) {
+        const read = readById.get(id) ?? 0;
+        const closure = closures.get(id) ?? 0;
+        if (read > claim.seq) {
+          inboxReads.push(read);
+        } else if (closure > claim.seq) {
+          attentionClosures.push(closure);
+        }
+      }
       if (
-        proof.every((seq) => seq > claim.seq) &&
+        inboxReads.length + attentionClosures.length === ids.length &&
         ids.every((id) => (sentById.get(id) ?? Infinity) <= claim.seq)
       ) {
-        proven.set(
-          claim.id,
-          [...new Set(proof)].sort((a, b) => a - b),
-        );
+        proven.set(claim.id, {
+          attentionClosures: unique(attentionClosures),
+          inboxReads: unique(inboxReads),
+        });
       }
     }
   }

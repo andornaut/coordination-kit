@@ -4,6 +4,7 @@
 // add appliers for existing kinds and pick them up on the next rebuild.
 import type { DatabaseSync } from "node:sqlite";
 
+import { ATTENTION_CLEARED } from "./attention.ts";
 import { QUESTION_CODEX_PROJECTION } from "./codexQuestions.ts";
 import { HANDOFFS_PROJECTION } from "./handoffs.ts";
 import { MESSAGE_WAKE_PROJECTION } from "./messageWake.ts";
@@ -159,6 +160,11 @@ const inboxRead = (db: DatabaseSync, event: StoredEvent): void => {
 
 const closed = (db: DatabaseSync, event: StoredEvent): void => {
   const p = event.payload;
+  const retiredAttention =
+    event.actor.role === "game-coordinator" &&
+    event.actor.nativeId === null &&
+    Array.isArray(p.evidence) &&
+    p.evidence[0] === ATTENTION_CLEARED;
   db.prepare(
     `UPDATE messages SET state = ?, closed_at = ?, delivered_at = COALESCE(delivered_at, ?),
        work = ?, superseded_by = ?, evidence = ?, updated_seq = ?, updated_at = ?
@@ -166,7 +172,7 @@ const closed = (db: DatabaseSync, event: StoredEvent): void => {
   ).run(
     text(p, "state"),
     event.at,
-    event.at,
+    retiredAttention ? null : event.at,
     text(p, "work"),
     text(p, "supersededBy"),
     json(p, "evidence"),

@@ -8,11 +8,12 @@ import { RpcError } from "../adapters/codex/rpc.ts";
 import { decisionDirectory } from "../adapters/shared/decisions.ts";
 import { writeJsonDurable } from "../durable.ts";
 import { updateRegistry } from "../registry/store.ts";
+import { recordAttention, retireAttention } from "./attention.ts";
 import { Store, storeRoot } from "./db.ts";
-import { readInbox, sendMessage } from "./messages.ts";
+import { messageStatus, readInbox, sendMessage } from "./messages.ts";
 import { noticeText } from "./noticesInFlight.ts";
 import { setPolicyHold } from "./policyHolds.ts";
-import { ART, clearDecision, fakeCodex, GAMEPLAY, storeFixture, TECH } from "./testStore.ts";
+import { ART, clearDecision, fakeCodex, GAME, GAMEPLAY, storeFixture, TECH } from "./testStore.ts";
 import { pendingWakeRoles, rearmWake, type WakePorts, wakeRecipient, wakeState } from "./wake.ts";
 
 const SENDER = { nativeId: "00000000-0000-4000-8000-0000000000c1", role: "game-coordinator" };
@@ -202,6 +203,54 @@ describe("Codex wakes", () => {
     expect(
       store.db.prepare("SELECT id FROM pending_notices WHERE id = ?").get(first.wake!),
     ).toBeUndefined();
+  });
+
+  it("releases an accepted wake for retired generated attention without inventing an inbox read", async () => {
+    const coordinator = SENDER.role;
+    const codex = fakeCodex(SENDER.nativeId);
+    const ports = { connect: () => Promise.resolve(codex.client) };
+    const { layout } = storeFixture((roles) => {
+      roles[coordinator]!.conversations = { codex: SENDER.nativeId };
+      roles[coordinator]!.harness = "codex";
+    });
+    writeFileSync(
+      layout.routeFile,
+      JSON.stringify({
+        host: GAME,
+        schema: 2,
+        state: "active",
+        targets: [ART_ROLE],
+      }),
+    );
+    clearDecision(layout, SENDER.nativeId);
+    const store = Store.forLayout(layout);
+    const context = { env: {}, layout, ports, store };
+    const original = {
+      body: "Urgent original.",
+      id: uuid(201),
+      intent: "unblock",
+      to: ART_ROLE,
+    } as const;
+    sendMessage(store, SENDER, original);
+    const { id } = recordAttention(store, ART_ROLE, original.id);
+    const first = await wakeRecipient(context, coordinator);
+    expect(first.status).toBe("accepted");
+    readInbox(store, { nativeId: ART, role: ART_ROLE });
+    retireAttention(store, ART_ROLE);
+    expect(messageStatus(store, id)).toMatchObject({ deliveredAt: null, state: "handled" });
+    expect(wakeState(store, coordinator).outstanding).toBe(first.wake);
+    const closure = store.events({ kinds: ["msg.closed"] }).at(-1)!.seq;
+    sendMessage(store, SENDER, {
+      body: "New message.",
+      id: uuid(202),
+      intent: "queue",
+      to: coordinator,
+    });
+    expect((await wakeRecipient(context, coordinator)).status).toBe("accepted");
+    expect(store.events({ kinds: ["notice.released"] })).toMatchObject([
+      { payload: { attentionClosures: [closure], inboxReads: [], id: first.wake } },
+    ]);
+    expect(codex.adds()).toHaveLength(2);
   });
 
   it.each([

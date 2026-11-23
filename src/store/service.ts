@@ -8,6 +8,7 @@ import type { Layout } from "../layout.ts";
 import { resolveRole } from "../registry/resolve.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
+import { attentionId, recordAttention, retireAttention } from "./attention.ts";
 import { MEMORY, Store } from "./db.ts";
 import { type CallerOptions, resolveCaller } from "./identity.ts";
 import {
@@ -25,7 +26,6 @@ import {
   sendMessage,
 } from "./messages.ts";
 import { messageWake, unreadMessages } from "./messageWake.ts";
-import { derivedId } from "./notices.ts";
 import {
   type Actor,
   type MessageIntent,
@@ -107,16 +107,15 @@ export interface SendOutput {
 }
 
 /**
- * Route a confirmed work-message wake failure to the coordinator once. The original is already
+ * Route a confirmed unblock wake failure to the coordinator once. The original is already
  * committed. An attention write or wake failure must not turn that committed send into a retry.
  */
 async function notifyCoordinator(
   ports: Parameters<typeof wakeRecipient>[0],
-  actor: Actor,
   original: MessageView,
 ): Promise<NonNullable<SendOutput["attention"]> | undefined> {
   const { store } = ports;
-  const id = derivedId("unread-unblock", original.id);
+  let id = attentionId(original.to, original.id);
   try {
     const notice = store.transaction(() => {
       const current = messageStatus(store, original.id);
@@ -128,19 +127,12 @@ async function notifyCoordinator(
       ) {
         return undefined;
       }
-      return sendMessage(store, actor, {
-        body:
-          `Work original ${current.id} remains unread after a ${outcome} wake to ${current.to}. ` +
-          "Review safe inbox collection for the exact original.",
-        id,
-        intent: "queue",
-        links: [{ kind: "message", ref: current.id }],
-        to: COORDINATOR,
-      });
+      return recordAttention(store, current.to, current.id);
     });
     if (notice === undefined) {
       return undefined;
     }
+    id = notice.id;
     if (notice.duplicate) {
       return { id, status: "recorded" };
     }
@@ -184,13 +176,12 @@ export async function storeSend(
     const attempt = sent.duplicate ? undefined : await wakeRecipient(ports, to);
     const attention =
       !sent.duplicate &&
-      (sent.message.intent === "unblock" ||
-        sent.message.links.some(({ kind }) => kind === "work")) &&
+      sent.message.intent === "unblock" &&
       actor.role !== COORDINATOR &&
       to !== COORDINATOR &&
       Object.hasOwn(roles.roles, COORDINATOR) &&
       (attempt?.status === "guarded" || attempt?.status === "failed")
-        ? await notifyCoordinator(ports, actor, sent.message)
+        ? await notifyCoordinator(ports, sent.message)
         : undefined;
     const message = messageStatus(store, id);
     const evidence = messageWake(store, id, message.to, message.state);
@@ -226,16 +217,21 @@ export async function storeInbox(
   selection: { readonly all?: boolean; readonly includeBody?: boolean },
 ): Promise<InboxOutput> {
   const actor = caller(context, options);
-  return withStore(context, (store) => {
-    const inbox = readInbox(store, actor, selection);
-    return {
-      count: inbox.messages.length,
-      delivered: inbox.delivered,
-      messages: inbox.messages,
-      role: inbox.role,
-      schema: 1,
-    };
-  });
+  return withStore(context, (store) =>
+    store.transaction(() => {
+      const inbox = readInbox(store, actor, selection);
+      if (inbox.delivered > 0) {
+        retireAttention(store, inbox.role);
+      }
+      return {
+        count: inbox.messages.length,
+        delivered: inbox.delivered,
+        messages: inbox.messages,
+        role: inbox.role,
+        schema: 1,
+      };
+    }),
+  );
 }
 
 export async function storeInboxPeek(
@@ -271,10 +267,15 @@ export async function storeDone(
   input: CloseInput,
 ): Promise<WriteOutput> {
   const actor = caller(context, options);
-  return withStore(context, (store) => ({
-    ...closeMessage(store, actor, id, input),
-    schema: 1 as const,
-  }));
+  return withStore(context, (store) =>
+    store.transaction(() => {
+      const result = closeMessage(store, actor, id, input);
+      if (result.message.intent === "unblock" && !result.duplicate) {
+        retireAttention(store, actor.role);
+      }
+      return { ...result, schema: 1 as const };
+    }),
+  );
 }
 
 export async function storeRetain(
@@ -286,14 +287,19 @@ export async function storeRetain(
   const roles = registry(context);
   const actor = resolveCaller(roles, context.env, options);
   const owner = registered(roles, input.owner ?? actor.role, "owner-unregistered");
-  return withStore(context, (store) => ({
-    ...retainMessage(store, actor, id, {
-      nextBoundary: input.nextBoundary,
-      owner,
-      reason: input.reason,
+  return withStore(context, (store) =>
+    store.transaction(() => {
+      const result = retainMessage(store, actor, id, {
+        nextBoundary: input.nextBoundary,
+        owner,
+        reason: input.reason,
+      });
+      if (result.message.intent === "unblock" && !result.duplicate) {
+        retireAttention(store, actor.role);
+      }
+      return { ...result, schema: 1 as const };
     }),
-    schema: 1 as const,
-  }));
+  );
 }
 
 export async function storeStatus(

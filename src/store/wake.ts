@@ -21,6 +21,7 @@ import {
   inspectDecisionMarker,
 } from "../adapters/shared/decisions.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
+import { sameJson } from "../adapters/shared/pyjson.ts";
 import type { Layout } from "../layout.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Harness } from "../registry/schema.ts";
@@ -33,7 +34,12 @@ import {
   safeWakeReason,
 } from "./messageWake.ts";
 import { type NoticeProof, noticeQueueClear, reconcileNativeNotices } from "./noticeEvidence.ts";
-import { collectedNotices, COLLECTION_RELEASE, pendingNotices } from "./noticesInFlight.ts";
+import {
+  collectedNotices,
+  COLLECTION_RELEASE,
+  type NoticeDispositions,
+  pendingNotices,
+} from "./noticesInFlight.ts";
 import { questionHoldGuard } from "./questions.ts";
 import { type Actor, StoreError, type WakeBlocker, type WakeOutcome } from "./types.ts";
 
@@ -413,7 +419,7 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
         proofs.some(({ kind }) => kind === "released") &&
         checkStoreGuard(context, role, "codex").status === "clear"
           ? collectedNotices(store, binding)
-          : new Map<string, number[]>();
+          : new Map<string, NoticeDispositions>();
       const directory = decisionDirectory(context.layout, role);
       for (const proof of proofs) {
         const { notice } = proof;
@@ -428,12 +434,13 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
             payload: { ...binding, id: notice.id, item: proof.item, turn: proof.turn },
           });
         } else {
-          const inboxReads = collected.get(notice.id);
+          const dispositions = collected.get(notice.id);
           if (
             directory === null ||
             !decisionClear(directory, binding.conversation) ||
-            inboxReads?.length !== proof.inboxReads.length ||
-            !inboxReads.every((seq, index) => seq === proof.inboxReads[index])
+            dispositions === undefined ||
+            !sameJson(dispositions.inboxReads, proof.inboxReads) ||
+            !sameJson(dispositions.attentionClosures, proof.attentionClosures)
           ) {
             continue;
           }
@@ -445,7 +452,10 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
               ...binding,
               claimSeq: notice.seq,
               id: notice.id,
-              inboxReads,
+              inboxReads: dispositions.inboxReads,
+              ...(dispositions.attentionClosures.length === 0
+                ? {}
+                : { attentionClosures: dispositions.attentionClosures }),
               queueId: proof.queueId,
               reason: COLLECTION_RELEASE,
             },

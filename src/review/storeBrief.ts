@@ -28,7 +28,6 @@ import {
   wakeState,
 } from "../store/wake.ts";
 import type { ReviewResult } from "./deliver.ts";
-import { coordinationNotice } from "./emit.ts";
 import { readReadyHandoffs, type ReadyHandoff } from "./ready.ts";
 import { type RecordedDecisions, recordedDecisions } from "./recordedDecisions.ts";
 import {
@@ -122,7 +121,7 @@ export interface BriefException {
   readonly detail?: string;
   readonly retention?: Retention;
   readonly newlyStalled?: true;
-  /** Automatic review messages remain visible without triggering new review health messages. */
+  /** Automatic review messages remain visible and are excluded from new episode counts. */
   readonly reviewGenerated?: true;
   /** A pending question's title, at most 80 characters; left out of a secret-shaped fallback. */
   readonly title?: string;
@@ -466,7 +465,7 @@ export function composeBrief(
   game: GameLayout,
   slot: number,
   record: Pick<BriefRecord, "counts" | "exceptions">,
-  options: { readonly titles?: boolean } = {},
+  options: { readonly newlyOverdue?: number; readonly titles?: boolean } = {},
 ): string {
   const titles = options.titles !== false;
   const counts = record.counts as Record<string, Json>;
@@ -481,6 +480,10 @@ export function composeBrief(
   const byRole = counts.byRole as Record<string, Record<string, number>>;
   const unavailableCapability = native.questions.unavailableCapability ?? 0;
   const visibilityRoles = unavailableCapability === 1 ? "role" : "roles";
+  const newlyStalled = record.exceptions.filter(
+    (item) => item.newlyStalled === true && item.reviewGenerated !== true,
+  ).length;
+  const newlyOverdue = options.newlyOverdue ?? 0;
   const show = `coordination-kit review show --game ${game.id} --slot ${new Date(slot * 1000).toISOString()}`;
   const head = [
     `Scheduled review, ${game.name}, slot ${new Date(slot * 1000).toISOString()} (stored brief)`,
@@ -514,6 +517,11 @@ export function composeBrief(
       : []),
     `Worker parents: ${native.workers.ok} read, ${native.workers.unknown} unknown, ` +
       `${native.workers.failed} failed children`,
+    ...(newlyStalled > 0 || newlyOverdue > 0
+      ? [
+          `New review exceptions: ${newlyStalled} newly stalled, ${newlyOverdue} newly overdue retained`,
+        ]
+      : []),
     `Exceptions: ${record.exceptions.length}`,
   ];
   const tail = [
@@ -541,7 +549,7 @@ export function composeBrief(
 
 /**
  * Store this slot's brief once and wake the recipient. A recorded brief for (game, slot) returns
- * its recorded result. A new episode of stalled messages also stores one `review-stuck` message.
+ * its recorded result. The brief includes first-episode counts based on the preceding slot.
  */
 export async function storeReview(
   context: StoreReviewContext,
@@ -580,46 +588,23 @@ export async function storeReview(
       const previous = previousBrief(store, game.id, slot);
       const surveyed = survey(store, previous, native, slot);
       const messageId = derivedId("review-brief", game.id, slot);
-      storeNotice(store, {
-        body: composeBrief(game, slot, surveyed),
-        fallback: composeBrief(game, slot, surveyed, { titles: false }),
-        id: messageId,
-        to: recipient,
-      });
-      const priorExceptions = previous?.exceptions ?? [];
-      const stalled = surveyed.exceptions.filter(
-        (item) => item.newlyStalled === true && item.reviewGenerated !== true,
-      ).length;
       const priorRetentions = new Set(
-        priorExceptions.filter((item) => item.kind === "retention-overdue").map(retentionEpisode),
+        previous?.exceptions
+          .filter((item) => item.kind === "retention-overdue")
+          .map(retentionEpisode),
       );
-      const overdue = surveyed.exceptions.filter(
+      const newlyOverdue = surveyed.exceptions.filter(
         (item) =>
           item.kind === "retention-overdue" &&
           item.reviewGenerated !== true &&
           !priorRetentions.has(retentionEpisode(item)),
       ).length;
-      if (stalled > 0 || overdue > 0) {
-        const summary = [
-          ...(stalled > 0
-            ? [
-                `${stalled} ${stalled === 1 ? "message" : "messages"} unhandled across two distinct slots`,
-              ]
-            : []),
-          ...(overdue > 0 ? [`${overdue} retained messages with a passed review boundary`] : []),
-        ].join(", ");
-        storeNotice(
-          store,
-          coordinationNotice(recipient, game, game.name, {
-            key: `${recipient}-${slot}`,
-            kind: "review-stuck",
-            message:
-              `Review needs owner reconciliation: ${summary}; run coordination-kit review show ` +
-              `--game ${game.id} --slot ${new Date(slot * 1000).toISOString()} ` +
-              "and reconcile each original with its recipient.",
-          }),
-        );
-      }
+      storeNotice(store, {
+        body: composeBrief(game, slot, surveyed, { newlyOverdue }),
+        fallback: composeBrief(game, slot, surveyed, { newlyOverdue, titles: false }),
+        id: messageId,
+        to: recipient,
+      });
       const result: ReviewResult = {
         detail:
           `brief ${messageId} stored for ${recipient}: ${String(surveyed.counts.open)} open, ` +
