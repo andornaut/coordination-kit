@@ -16,10 +16,26 @@ const FIELDS = [
 
 export type DecisionRecord = Readonly<Record<string, unknown>>;
 
-export type DecisionMarkerInspection =
-  | { readonly state: "clear" | "pending"; readonly record: DecisionRecord }
-  | { readonly state: "absent" | "unreadable"; readonly record: null }
-  | { readonly state: "invalid"; readonly record: DecisionRecord | null };
+export type DecisionMarkerDiagnostic =
+  | { readonly state: "clear" | "pending" | "absent" | "unreadable" }
+  | {
+      readonly state: "invalid";
+      readonly reason:
+        | "recipient-id"
+        | "json"
+        | "record"
+        | "thread-binding"
+        | "resolutions"
+        | "resolution"
+        | "resolution-fields"
+        | "duplicate-resolution"
+        | "state";
+      readonly fields?: readonly (typeof FIELDS)[number][];
+    };
+
+export type DecisionMarkerInspection = DecisionMarkerDiagnostic & {
+  readonly record: DecisionRecord | null;
+};
 
 function markerAbsent(path: string): boolean {
   try {
@@ -36,7 +52,7 @@ export function inspectDecisionMarker(
   recipient: string,
 ): DecisionMarkerInspection {
   if (!CANONICAL_UUID.test(recipient)) {
-    return { record: null, state: "invalid" };
+    return { reason: "recipient-id", record: null, state: "invalid" };
   }
   const path = join(unblockDir, "decisions", `${recipient}.json`);
   let raw: string;
@@ -50,38 +66,41 @@ export function inspectDecisionMarker(
   try {
     marker = JSON.parse(raw) as unknown;
   } catch {
-    return { record: null, state: "invalid" };
+    return { reason: "json", record: null, state: "invalid" };
   }
   if (typeof marker !== "object" || marker === null || Array.isArray(marker)) {
-    return { record: null, state: "invalid" };
+    return { reason: "record", record: null, state: "invalid" };
   }
   const record = marker as DecisionRecord;
   if (record.thread_id !== recipient) {
-    return { record: null, state: "invalid" };
+    return { reason: "thread-binding", record: null, state: "invalid" };
   }
   const resolutions = Object.hasOwn(record, "resolutions") ? record.resolutions : [];
   if (!Array.isArray(resolutions)) {
-    return { record: null, state: "invalid" };
+    return { reason: "resolutions", record: null, state: "invalid" };
   }
   const seen = new Set<string>();
   for (const resolution of resolutions as unknown[]) {
     if (typeof resolution !== "object" || resolution === null) {
-      return { record: null, state: "invalid" };
+      return { reason: "resolution", record: null, state: "invalid" };
     }
     const entry = resolution as Record<string, unknown>;
-    if (FIELDS.some((field) => typeof entry[field] !== "string" || entry[field] === "")) {
-      return { record: null, state: "invalid" };
+    const fields = FIELDS.filter(
+      (field) => typeof entry[field] !== "string" || entry[field] === "",
+    );
+    if (fields.length > 0) {
+      return { fields, reason: "resolution-fields", record: null, state: "invalid" };
     }
     const reference = JSON.stringify([entry.question_turn_id, entry.question_item_id]);
     if (seen.has(reference)) {
-      return { record: null, state: "invalid" };
+      return { reason: "duplicate-resolution", record: null, state: "invalid" };
     }
     seen.add(reference);
   }
   const state = record.state;
   return state === "clear" || state === "pending"
     ? { record, state }
-    : { record, state: "invalid" };
+    : { reason: "state", record, state: "invalid" };
 }
 
 /** The validated marker in `<unblock>/decisions/<recipient>.json`, or null. */

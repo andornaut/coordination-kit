@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { expect, it, vi } from "vitest";
@@ -151,12 +151,14 @@ it("surveys registered recipients and parents using each exact decision record",
         visibility: "unknown",
       }),
       expect.objectContaining({
+        decisionMarker: { state: "pending" },
         decisionRecord: "pending",
         pending: [],
         role: `${CHIBI}/art`,
         status: "unknown",
       }),
       expect.objectContaining({
+        decisionMarker: { state: "clear" },
         decisionRecord: "clear",
         history: { answered: 0, reason: null, status: "complete", unresolved: 0 },
         role: "art-kit",
@@ -192,6 +194,45 @@ it("surveys registered recipients and parents using each exact decision record",
       expect.objectContaining({ lineage: null, role: "game-coordinator" }),
     ]),
   );
+});
+
+it("reports only safe field names for a malformed legacy owner marker", async () => {
+  const { layout } = storeFixture();
+  const directory = join(gameLayout(layout, GAME).busDir, "unblock", "decisions");
+  mkdirSync(directory, { recursive: true });
+  const path = join(directory, `${ART}.json`);
+  writeFixtureJson(path, {
+    resolutions: [
+      {
+        answer: "Private synthetic answer",
+        answer_reference: "legacy-only",
+        native_turn_ids: ["legacy-turn"],
+        question_item_id: "legacy-item",
+      },
+    ],
+    state: "clear",
+    thread_id: ART,
+  });
+  const before = readFileSync(path);
+  const collect = vi.fn<NativeCollect>(() =>
+    Promise.resolve({
+      collection_budget: {},
+      history: {},
+      question_state: {},
+      worker_health: {},
+    }),
+  );
+  const survey = await surveyNative({ collect, env: {}, layout }, 1);
+  const art = survey.questions.find(({ role }) => role === `${GAME}/art`);
+  expect(collect.mock.calls[0]?.[0].decisionRecords[ART]).toBeNull();
+  expect(art?.decisionRecord).toBe("unknown");
+  expect(art?.decisionMarker).toEqual({
+    fields: ["question_turn_id", "answer_turn_id", "answer_item_id"],
+    reason: "resolution-fields",
+    state: "invalid",
+  });
+  expect(art?.visibility).toBe("unknown");
+  expect(readFileSync(path)).toEqual(before);
 });
 
 it("reports exact recorded replies as historical proof while visibility stays unknown", async () => {

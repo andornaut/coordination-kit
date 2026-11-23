@@ -91,7 +91,11 @@ after select, and select fences out the source sessions.
 
 Recipient decision records (`unblock/decisions/<conversation>.json`) stay keyed by conversation
 ID, because a pending question belongs to one conversation. Their owner writes them; coordination-kit
-only reads them, and a missing or invalid record is never clearance.
+only reads them, and a missing or invalid record is never clearance. Each resolution requires
+`question_turn_id`, `question_item_id`, `answer_turn_id` and `answer_item_id` from the same exact
+recipient's native history. Each question turn and item pair appears once. Preserve pending
+decisions and unrelated resolutions when correcting owner evidence. See
+[stored review diagnostics](review.md#stored-brief).
 
 ## Readiness probe
 

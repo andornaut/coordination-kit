@@ -128,7 +128,10 @@ markers, native history and current prompt visibility. The native collector can 
 historical question or answer reference. Current prompt visibility remains unknown without an
 exact live capability. The brief counts the shared visibility limitation once; the exact
 per-role reasons and history remain in `review show`. The wake guard continues to require
-its own current clearance.
+its own current clearance. In new `review show` records, `native.questions[].decisionMarker`
+reports the local marker's structural state. Invalid markers include a reason and, for incomplete
+resolution references, the invalid required field names. The diagnostic contains no marker
+values or answer text. A null diagnostic means the marker was not inspected.
 
 The review counts active [user policy holds](store.md#user-policy-holds). `review show` includes
 their exact target, issuer and approval evidence as recorded for the slot.

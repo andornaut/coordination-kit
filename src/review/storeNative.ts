@@ -5,8 +5,9 @@ import { collectAll, unavailableCollected } from "../adapters/codex/collect.ts";
 import { connectControl, type RpcClient } from "../adapters/codex/rpc.ts";
 import {
   decisionDirectory,
-  type DecisionRecord,
-  decisionRecord,
+  type DecisionMarkerDiagnostic,
+  type DecisionMarkerInspection,
+  inspectDecisionMarker,
 } from "../adapters/shared/decisions.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
 import { isCanonicalUuid } from "../adapters/shared/ids.ts";
@@ -64,6 +65,8 @@ export interface NativeQuestion {
   readonly visibility: "unknown";
   readonly visibilityReason: string;
   readonly decisionRecord: "clear" | "pending" | "unknown";
+  /** Marker structure only. Native question state and owner clearance are independent. */
+  readonly decisionMarker: DecisionMarkerDiagnostic | null;
   readonly history: {
     readonly status: "complete" | "partial" | "unavailable";
     readonly answered: number;
@@ -168,10 +171,18 @@ function answeredProven(recipient: string, question: Json): boolean {
 
 export const NO_PROMPT_VISIBILITY = "exact_unresolved_request_unavailable";
 
+function publicDecisionMarker(marker: DecisionMarkerInspection): DecisionMarkerDiagnostic {
+  if (marker.state === "invalid") {
+    const { fields, reason, state } = marker;
+    return fields === undefined ? { reason, state } : { fields, reason, state };
+  }
+  return { state: marker.state };
+}
+
 function questionStatus(
   role: string,
   conversation: string | null,
-  marker: DecisionRecord | null,
+  marker: DecisionMarkerInspection | null,
   unavailable: string | null,
   value: unknown,
 ): NativeQuestion {
@@ -196,6 +207,7 @@ function questionStatus(
     unavailable ?? (history === "unavailable" ? reasonOf(state) : NO_PROMPT_VISIBILITY);
   const decision = marker?.state;
   return {
+    decisionMarker: marker === null ? null : publicDecisionMarker(marker),
     decisionRecord: decision === "clear" || decision === "pending" ? decision : "unknown",
     history: {
       answered,
@@ -339,14 +351,16 @@ export async function surveyNative(context: NativeContext, slot: number): Promis
     const recipient = reason === null ? conversation : null;
     const directory = recipient === null ? null : decisionDirectory(layout, role);
     const marker =
-      directory === null || recipient === null ? null : decisionRecord(directory, recipient);
+      directory === null || recipient === null ? null : inspectDecisionMarker(directory, recipient);
     return { marker, reason, recipient, role };
   });
 
   const recipients = targets.flatMap(({ recipient }) => (recipient === null ? [] : [recipient]));
   const request: CollectRequest = {
     decisionRecords: Object.fromEntries(
-      targets.flatMap(({ marker, recipient }) => (recipient === null ? [] : [[recipient, marker]])),
+      targets.flatMap(({ marker, recipient }) =>
+        recipient === null ? [] : [[recipient, marker?.record ?? null]],
+      ),
     ),
     parents: recipients,
     recipients,
