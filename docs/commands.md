@@ -59,12 +59,17 @@ activation require the current active game-coordinator binding. See the
 
 - `store compaction-plan` reports history windows, measured bytes and protected reasons at the
   selected journal head. It writes nothing.
-- `store compaction-prepare --restore DIR --evidence FILE --receipt NEW_FILE` qualifies
-  a candidate against an independent restore and writes a new external receipt.
-- `store compaction-activate --id UUID --restore DIR --evidence FILE --receipt FILE --approval REF`
+- `store compaction-reserve --id REQUEST_UUID --head-seq SEQ --head-hash SHA256 --registry-revision REVISION`
+  blocks journal writes at the exact reviewed head and reports its acquisition `nonce`.
+- `store compaction-prepare --id REQUEST_UUID --restore DIR --evidence FILE --receipt NEW_FILE`
+  qualifies a candidate against an independent restore and writes a new external receipt.
+- `store compaction-activate --id RECEIPT_ID --restore DIR --evidence FILE --receipt FILE --approval REF`
   selects the exact candidate during an approved idle boundary.
+- `store compaction-cancel --id REQUEST_UUID --nonce ACQUISITION_UUID --head-seq SEQ
+--head-hash SHA256 --registry-revision REVISION` releases the exact reservation before permanent
+  fencing.
 
-Prepare and activate require the active game-coordinator binding. See the
+Reserve, prepare, activate and cancel require the active game-coordinator binding. See the
 [filesystem compaction runbook](store.md#filesystem-compaction-runbook).
 
 ## Command semantics

@@ -1,6 +1,11 @@
 // Every command's options: the one source for argument parsing and for the help text, so a flag a
 // command accepts always appears in `coordination-kit --help`.
-import { COMPACTION_ACTIVATE_OPTIONS, COMPACTION_PREPARE_OPTIONS } from "./compaction.ts";
+import {
+  COMPACTION_ACTIVATE_OPTIONS,
+  COMPACTION_CANCEL_OPTIONS,
+  COMPACTION_PREPARE_OPTIONS,
+  COMPACTION_RESERVATION_OPTIONS,
+} from "./compaction.ts";
 import { DOCTOR_OPTIONS } from "./doctor.ts";
 import { GRAPH_OPTIONS, GRAPH_WHY_OPTIONS } from "./graph.ts";
 import {
@@ -211,12 +216,42 @@ export const SPECS = {
     summary:
       "report filesystem history windows, measured bytes and protected records without writing",
   },
+  "store compaction-reserve": {
+    forms: [["id", "head-seq", "head-hash", "registry-revision", "native-id?"]],
+    group: "store",
+    options: COMPACTION_RESERVATION_OPTIONS,
+    summary: "reserve the exact filesystem journal head under the writer lock",
+    values: {
+      "head-hash": "SHA256",
+      "head-seq": "SEQ",
+      id: "REQUEST_UUID",
+      "registry-revision": "REVISION",
+    },
+  },
+  "store compaction-cancel": {
+    forms: [["id", "nonce", "head-seq", "head-hash", "registry-revision", "native-id?"]],
+    group: "store",
+    options: COMPACTION_CANCEL_OPTIONS,
+    summary: "cancel the exact reservation before the permanent fence",
+    values: {
+      "head-hash": "SHA256",
+      "head-seq": "SEQ",
+      id: "REQUEST_UUID",
+      nonce: "ACQUISITION_UUID",
+      "registry-revision": "REVISION",
+    },
+  },
   "store compaction-prepare": {
-    forms: [["restore", "evidence", "receipt", "native-id?"]],
+    forms: [["restore", "evidence", "receipt", "id?", "native-id?"]],
     group: "store",
     options: COMPACTION_PREPARE_OPTIONS,
     summary: "qualify an exact filesystem checkpoint and write a new external receipt",
-    values: { evidence: "ABSOLUTE_FILE", receipt: "ABSOLUTE_FILE", restore: "ABSOLUTE_DIR" },
+    values: {
+      evidence: "ABSOLUTE_FILE",
+      id: "REQUEST_UUID",
+      receipt: "ABSOLUTE_FILE",
+      restore: "ABSOLUTE_DIR",
+    },
   },
   "store compaction-activate": {
     forms: [["id", "restore", "evidence", "receipt", "approval", "native-id?"]],

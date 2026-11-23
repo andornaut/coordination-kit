@@ -1,5 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, linkSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  linkSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 import { expect, it } from "vitest";
@@ -7,7 +15,11 @@ import { expect, it } from "vitest";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
 import { updateRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
-import { fenceFileJournal, openFileJournal } from "../store/files/journal.ts";
+import {
+  fenceFileJournal,
+  openFileJournal,
+  readFileJournalReservation,
+} from "../store/files/journal.ts";
 import { activateMigration, prepareMigration } from "../store/files/migration.ts";
 import { recordSession } from "../store/handoffs.ts";
 import { closeMessage, messageStatus, sendMessage } from "../store/messages.ts";
@@ -206,4 +218,133 @@ it("refuses unbound or stale proof, unqualified replacements and non-independent
     await run(["compaction-activate", "--approval", "decision-1", "--id", id, ...cleanArgs]),
   ).toMatchObject({ code: EXIT_INVALID, err: "coordination-kit: compaction-evidence-changed\n" });
   expect(existsSync(join(target, "journal", "active-checkpoint.json"))).toBe(false);
+});
+
+it("binds prepare and interrupted activation to one acquisition and exact candidate", async () => {
+  const { base, common, head, layout, receipt, restore, run, selectors, target, writeEvidence } =
+    fixture();
+  const request = [
+    "--id",
+    OTHER_ID,
+    "--head-seq",
+    String(head.seq),
+    "--head-hash",
+    head.hash,
+    "--registry-revision",
+    "1",
+  ];
+  const journal = openFileJournal(target);
+  const original = journal.snapshot();
+  const legacyPath = join(base, "legacy-receipt.json");
+  const alternatePath = join(base, "alternate-receipt.json");
+  const at = (file: string) => common.map((arg) => (arg === receipt ? file : arg));
+  const legacyPrepare = await run(["compaction-prepare", ...at(legacyPath)]);
+  expect(legacyPrepare.code).toBe(EXIT_OK);
+  const legacy = JSON.parse(legacyPrepare.out) as { id: string };
+  expect(await run(["compaction-reserve", ...request], TECH)).toMatchObject({
+    code: EXIT_INVALID,
+    err: "coordination-kit: not-coordinator\n",
+  });
+  const reserved = await run(["compaction-reserve", ...request]);
+  expect(reserved.code).toBe(EXIT_OK);
+  const first = JSON.parse(reserved.out) as { nonce: string };
+  expect(await run(["compaction-reserve", ...request])).toEqual(reserved);
+  expect(journal.snapshot()).toEqual(original);
+  const markedRestore = join(base, "marked-restore");
+  cpSync(target, markedRestore, { recursive: true });
+  expect(
+    await run([
+      "compaction-prepare",
+      "--id",
+      OTHER_ID,
+      ...common.map((arg) => (arg === restore ? markedRestore : arg)),
+    ]),
+  ).toMatchObject({ code: EXIT_INVALID, err: "coordination-kit: compaction-restore-reserved\n" });
+  expect(await run(["compaction-prepare", ...common])).toMatchObject({
+    code: EXIT_INVALID,
+    err: "coordination-kit: compaction-reserved\n",
+  });
+  const activation = (id: string, file: string) => [
+    "compaction-activate",
+    "--approval",
+    "decision-1",
+    "--id",
+    id,
+    ...at(file),
+  ];
+  expect(await run(activation(legacy.id, legacyPath))).toMatchObject({
+    code: EXIT_INVALID,
+    err: "coordination-kit: compaction-reserved\n",
+  });
+  const prior = await run(["compaction-prepare", "--id", OTHER_ID, ...common]);
+  expect(prior.code).toBe(EXIT_OK);
+  const old = JSON.parse(prior.out) as { id: string };
+  expect(await run(["compaction-cancel", ...request, "--nonce", first.nonce])).toMatchObject({
+    code: EXIT_OK,
+  });
+  expect(await run(activation(old.id, receipt))).toMatchObject({
+    code: EXIT_INVALID,
+    err: "coordination-kit: compaction-reservation-required\n",
+  });
+
+  const next = await run(["compaction-reserve", ...request]);
+  expect(next.code).toBe(EXIT_OK);
+  const { nonce } = JSON.parse(next.out) as { nonce: string };
+  expect(nonce).not.toBe(first.nonce);
+  expect(await run(["compaction-cancel", ...request, "--nonce", first.nonce])).toMatchObject({
+    code: EXIT_INVALID,
+    err: "coordination-kit: compaction-reservation-mismatch\n",
+  });
+  expect(await run(activation(old.id, receipt))).toMatchObject({
+    code: EXIT_INVALID,
+    err: "coordination-kit: compaction-reservation-mismatch\n",
+  });
+  const again = await run(["compaction-prepare", "--id", OTHER_ID, ...at(alternatePath)]);
+  expect(again.code).toBe(EXIT_OK);
+  const { digest, id } = JSON.parse(again.out) as { digest: string; id: string };
+  expect(id).not.toBe(old.id);
+  const selected = join(base, "distinct-candidate.json");
+  writeEvidence({ ...selectors, routineEventSequences: [] });
+  const distinct = await run(["compaction-prepare", "--id", OTHER_ID, ...at(selected)]);
+  expect(distinct.code).toBe(EXIT_OK);
+  expect((JSON.parse(distinct.out) as { id: string }).id).not.toBe(id);
+  writeEvidence();
+
+  const activeReservation = readFileJournalReservation(target)!;
+  expect(() =>
+    fenceFileJournal(
+      target,
+      { digest, head, id },
+      () => {},
+      () => {
+        throw new Error("interrupted");
+      },
+      activeReservation,
+    ),
+  ).toThrow("interrupted");
+  expect(await run(["compaction-cancel", ...request, "--nonce", nonce])).toMatchObject({
+    code: EXIT_INVALID,
+    err: "coordination-kit: compaction-source-already-fenced\n",
+  });
+  expect(() => Store.readLayout(layout)).toThrow("checkpoint-selection-pending");
+  expect(await run(activation(id, alternatePath))).toMatchObject({ code: EXIT_OK });
+  expect(readFileJournalReservation(target)).toBeUndefined();
+  expect(await run(activation(old.id, receipt))).toMatchObject({
+    code: EXIT_INVALID,
+    err: "coordination-kit: checkpoint-fence-mismatch\n",
+  });
+  const selector = join(target, "journal", "active-checkpoint.json");
+  const candidate = join(target, "journal", `checkpoint-${id}.json`);
+  const state = [selector, candidate].map((file) => ({
+    bytes: readFileSync(file),
+    stat: statSync(file),
+  }));
+  expect(await run(activation(id, alternatePath))).toMatchObject({ code: EXIT_OK });
+  for (const [index, file] of [selector, candidate].entries()) {
+    expect(readFileSync(file)).toEqual(state[index]!.bytes);
+    expect(statSync(file)).toMatchObject({
+      ino: state[index]!.stat.ino,
+      mtimeMs: state[index]!.stat.mtimeMs,
+    });
+  }
 });

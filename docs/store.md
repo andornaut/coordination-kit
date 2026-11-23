@@ -123,6 +123,8 @@ Use the existing scheduled review and operator approval lane.
    accessible. Restore a separate full copy of the selected compactable filesystem authority
    from backup, including its journal, keys and committed companion records. Use an absolute
    real path outside the checkout and current state, with independent regular files.
+   Restore committed journal state and its companions. Exclude any transient
+   `compaction-reservation.json` from the restored copy.
 2. Use a JSON evidence file with schema 1, the plan's `head` and `registryRevision`,
    `messages`, and `routineEventSequences`. For each message give its exact `id`, `owner`,
    `closeSeq`, and `replacement`. The owner's terminal close must list that durable reference
@@ -130,26 +132,37 @@ Use the existing scheduled review and operator approval lane.
    inclusion. List routine event sequence numbers only after verifying their place in the
    restored history and confirming the state, evidence, cursor and key coverage. Both arrays may
    be empty. A candidate needs at least one exact original that passes the plan's eligibility checks.
-3. Run the prepare command with the independent restore, the evidence and a new absolute
-   receipt path outside the checkout, current state and restored copy. The command compares
-   the committed source with the restored copy and writes only the receipt. Keep the receipt,
-   evidence and restore together through the review. The receipt contains the identifier,
-   journal head, registry revision and digests.
-4. Obtain explicit activation approval for that receipt. Record the approval and manual
-   custody at the existing idle review boundary. Verify the source is idle, writers are drained
-   and affected owners are held for the activation. Preserve other questions and holds.
-   Invoke activate with the same restore, evidence, receipt and ID, plus the approval reference.
-   The command validates the reference format and rechecks the exact inputs and registry under
-   the existing locks. The coordinator verifies the approval and actual idle custody.
-5. Verify the selected journal at the review. If activation was interrupted after fencing,
-   retain the custody and retry the same activation with the same inputs. If the head or
-   registry changed before fencing, review a fresh plan and prepare a new receipt. An
-   interrupted prepare may leave a partial receipt at its exclusive path. Use a new path for
-   requalification. Keep the restored backup and all loose copies until the operator separately
-   authorizes cleanup.
+3. Obtain custody at the existing idle review boundary. Confirm every writer is on a
+   reservation-aware version or is parked, and drain operations that can still send, record
+   receipts or advance cursors after the journal commit. Preserve independent questions and holds.
+   Reserve with a new operator request UUID and the exact planned head and registry revision.
+   The reservation waits for the existing writer lock before recording the tuple and an
+   acquisition UUID (`nonce`) in `var/coordination/compaction-reservation.json`. The journal
+   stays readable. Reservation-aware writes refuse with `compaction-reserved` before their
+   journal transaction begins. Keep custody and preserve the registry revision and routing through
+   activation or an exact retry. The reservation has no automatic expiration. An exact reserve
+   retry returns the same acquisition while it is active.
+4. Run prepare with the reservation request UUID, independent restore, evidence and a new absolute
+   receipt path outside the checkout, current state and restored copy. It compares the source
+   with the restore and writes only the receipt. The receipt ID identifies the exact prepared
+   candidate, including its acquisition, evidence and restore. Keep the receipt, evidence and
+   restore together through the review.
+5. Obtain explicit activation approval for that receipt ID. Invoke activate with the same
+   restore, evidence and receipt, the receipt ID and the approval reference. The coordinator
+   verifies approval and custody. The command rechecks the inputs, registry and reservation
+   before permanently fencing the old journal. The selected journal accepts writes after
+   activation. If interrupted after fencing, retain custody and retry the same activation.
+6. To withdraw before fencing, use cancel with the original request UUID, acquisition UUID,
+   head and revision. A registry change before fencing requires a new plan and acquisition.
+   Cancelling allows writes to the original journal again and invalidates its reserved receipts.
+   After fencing, use the exact activation retry. A partial receipt from interrupted prepare
+   can remain at its exclusive path. Use a new path for requalification. Keep the restored backup
+   and all loose copies until the operator separately authorizes cleanup.
 
-The commands select the first checkpoint from a full journal. The retained source and restored
-copy contain the original bodies. There is no scheduled activation or cleanup.
+The commands select the first checkpoint from a full journal. Legacy unreserved prepare
+and activate remain available when no reservation exists. Exact retries of an existing
+permanent fence are supported with their original receipt. The retained source and
+restored copy contain the original bodies. There is no scheduled activation or cleanup.
 
 ## Schema
 

@@ -19,8 +19,10 @@ import {
 import type { CompactionScope } from "./compactionPlan.ts";
 import {
   assertFileJournalFence,
+  assertFileJournalReservation,
   fenceFileJournal,
   type FileJournal,
+  type FileJournalReservation,
   openFileJournal,
   readFileJournalFence,
 } from "./journal.ts";
@@ -114,18 +116,32 @@ export function prepareFileCheckpoint(
   restored: string,
   scope: CompactionScope,
   anchor: CheckpointHead,
+  reservation?: FileJournalReservation,
 ): PreparedFileCheckpoint {
+  assertFileJournalReservation(root, reservation);
   const source = openFileJournal(root).snapshot();
   const restoredSource = separateRestore(root, restored).snapshot();
   const restoreDigest = snapshotDigest(restoredSource);
   if (snapshotDigest(source) !== restoreDigest) {
     throw new StoreError("checkpoint-restore-mismatch");
   }
-  return {
-    ...prepareCompactionCheckpoint(source.events, scope, anchor),
-    id: randomUUID(),
-    restoreDigest,
-  };
+  const prepared = prepareCompactionCheckpoint(source.events, scope, anchor);
+  assertReservationCheckpoint(prepared.checkpoint, reservation);
+  return { ...prepared, id: randomUUID(), restoreDigest };
+}
+
+function assertReservationCheckpoint(
+  checkpoint: CompactionCheckpoint,
+  reservation?: FileJournalReservation,
+): void {
+  if (
+    reservation !== undefined &&
+    (reservation.registryRevision !== checkpoint.registryRevision ||
+      reservation.head.seq !== checkpoint.head.seq ||
+      reservation.head.hash !== checkpoint.head.hash)
+  ) {
+    throw new StoreError("compaction-reservation-mismatch");
+  }
 }
 
 /** Select the same prepared checkpoint under the old journal's exclusive writer lock. */
@@ -135,8 +151,10 @@ export function selectFileCheckpoint(
   prepared: PreparedFileCheckpoint,
   readScope: () => CompactionScope,
   anchor: CheckpointHead,
+  reservation?: FileJournalReservation,
 ): void {
   const { checkpoint, id, receipt } = prepared;
+  assertReservationCheckpoint(checkpoint, reservation);
   const selection = { ...receipt, id, schema: 2 };
   const fence = selector(selection);
   const directory = metadata(root);
@@ -171,6 +189,7 @@ export function selectFileCheckpoint(
         writeDurable(activePath, `${canonicalJson(selection)}\n`);
       }
     },
+    reservation,
   );
 }
 

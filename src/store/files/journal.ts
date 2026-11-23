@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
   constants,
@@ -74,6 +74,7 @@ const SAFE_SEGMENT = /^(?:[A-Za-z0-9_~.-]|%[0-9A-F]{2})+$/;
 const BATCH_FILE = /^\d{16}\.json$/;
 const HEX = /^[a-f0-9]{64}$/;
 const CHECKPOINT_FENCE = "checkpoint-fence.json";
+const RESERVATION = "compaction-reservation.json";
 const EMPTY_BASELINE: JournalBaseline = { head: { hash: GENESIS, seq: 0 }, keys: new Set() };
 const WRITE_TIMEOUT_SECONDS = 5;
 
@@ -541,6 +542,134 @@ function locked<T>(paths: Paths, shared: boolean, run: () => T): T {
   }
 }
 
+export interface FileJournalReservationRequest {
+  readonly head: Head;
+  readonly id: string;
+  readonly registryRevision: number;
+}
+
+export interface FileJournalReservation extends FileJournalReservationRequest {
+  readonly nonce: string;
+}
+
+function validReservationRequest(value: unknown): value is FileJournalReservationRequest {
+  return (
+    isRecord(value) &&
+    isCanonicalUuid(value.id) &&
+    typeof value.registryRevision === "number" &&
+    Number.isSafeInteger(value.registryRevision) &&
+    value.registryRevision > 0 &&
+    isRecord(value.head) &&
+    Object.keys(value.head).sort().join(",") === "hash,seq" &&
+    typeof value.head.hash === "string" &&
+    HEX.test(value.head.hash) &&
+    value.head.hash !== GENESIS &&
+    typeof value.head.seq === "number" &&
+    Number.isSafeInteger(value.head.seq) &&
+    value.head.seq > 0
+  );
+}
+
+function reservationBytes(reservation: FileJournalReservation): string {
+  const { head, id, nonce, registryRevision } = reservation;
+  return json({ head, id, nonce, registryRevision, schema: 1 });
+}
+
+export function readFileJournalReservation(root: string): FileJournalReservation | undefined {
+  const file = join(root, RESERVATION);
+  const stats = lstatSync(file, { throwIfNoEntry: false });
+  if (stats === undefined) {
+    return undefined;
+  }
+  ensure(stats.isFile() && stats.nlink === 1, "compaction-reservation-invalid");
+  const bytes = readFileSync(file, "utf8");
+  let value: unknown;
+  try {
+    value = JSON.parse(bytes) as unknown;
+  } catch {
+    throw new StoreError("compaction-reservation-invalid");
+  }
+  ensure(
+    isRecord(value) && isCanonicalUuid(value.nonce) && validReservationRequest(value),
+    "compaction-reservation-invalid",
+  );
+  const reservation = {
+    head: value.head,
+    id: value.id,
+    nonce: value.nonce,
+    registryRevision: value.registryRevision,
+  };
+  ensure(bytes === reservationBytes(reservation), "compaction-reservation-invalid");
+  return reservation;
+}
+
+export function assertFileJournalReservation(
+  root: string,
+  expected?: FileJournalReservation,
+): void {
+  const found = readFileJournalReservation(root);
+  if (expected === undefined) {
+    ensure(found === undefined, "compaction-reserved");
+  } else {
+    ensure(found !== undefined, "compaction-reservation-required");
+    ensure(
+      reservationBytes(found) === reservationBytes(expected),
+      "compaction-reservation-mismatch",
+    );
+  }
+}
+
+function withExistingWriter<T>(root: string, run: (journal: Paths) => T): T {
+  const journal = paths(resolve(root), EMPTY_BASELINE);
+  ensure(
+    scopedDirectory(journal.root, journal.batches) && isFile(journal.lock),
+    "checkpoint-source-unavailable",
+  );
+  return locked(journal, false, () => run(journal));
+}
+
+export function reserveFileJournal(
+  root: string,
+  request: FileJournalReservationRequest,
+): FileJournalReservation {
+  ensure(validReservationRequest(request), "compaction-reservation-invalid");
+  return withExistingWriter(root, (journal) => {
+    ensure(readFileJournalFence(journal.root) === undefined, "compaction-source-already-fenced");
+    const current = readFileJournalReservation(journal.root);
+    const reservation = { ...request, nonce: current?.nonce ?? randomUUID() };
+    if (current !== undefined) {
+      assertFileJournalReservation(journal.root, reservation);
+    } else {
+      recover(journal);
+    }
+    const head = readEvents(journal, batchFiles(journal), 0).at(-1);
+    ensure(
+      head?.seq === reservation.head.seq && head.hash === reservation.head.hash,
+      "checkpoint-source-head-changed",
+    );
+    if (current === undefined) {
+      writeDurable(join(journal.root, RESERVATION), reservationBytes(reservation));
+    }
+    return reservation;
+  });
+}
+
+export function cancelFileJournalReservation(
+  root: string,
+  reservation: FileJournalReservation,
+): void {
+  ensure(
+    validReservationRequest(reservation) && isCanonicalUuid(reservation.nonce),
+    "compaction-reservation-invalid",
+  );
+  withExistingWriter(root, (journal) => {
+    ensure(readFileJournalFence(journal.root) === undefined, "compaction-source-already-fenced");
+    assertFileJournalReservation(journal.root, reservation);
+    unlinkSync(join(journal.root, RESERVATION));
+    fsyncDirectory(journal.root);
+  });
+}
+
 interface CheckpointFence {
   readonly digest: string;
   readonly head: Head;
@@ -569,8 +698,8 @@ export function fenceFileJournal<T>(
   fence: CheckpointFence,
   verifySource: (snapshot: ReturnType<FileJournal["snapshot"]>) => void,
   select: () => T,
+  reservation?: FileJournalReservation,
 ): T {
-  const journal = paths(resolve(root), EMPTY_BASELINE);
   ensure(
     isCanonicalUuid(fence.id) &&
       HEX.test(fence.digest) &&
@@ -579,16 +708,25 @@ export function fenceFileJournal<T>(
       fence.head.seq > 0,
     "checkpoint-fence-invalid",
   );
-  ensure(
-    scopedDirectory(journal.root, journal.batches) && isFile(journal.lock),
-    "checkpoint-source-unavailable",
-  );
-  return locked(journal, false, () => {
-    recover(journal);
+  if (reservation !== undefined) {
+    ensure(
+      validReservationRequest(reservation) &&
+        isCanonicalUuid(reservation.nonce) &&
+        reservation.head.seq === fence.head.seq &&
+        reservation.head.hash === fence.head.hash,
+      "compaction-reservation-mismatch",
+    );
+  }
+  return withExistingWriter(root, (journal) => {
     const file = join(journal.batches, CHECKPOINT_FENCE);
     const original = readFile(file);
     const expected = fenceBytes(fence);
     ensure(original === undefined || original.equals(expected), "checkpoint-fence-mismatch");
+    const reserved = readFileJournalReservation(journal.root);
+    if (original === undefined || reserved !== undefined) {
+      assertFileJournalReservation(journal.root, reservation);
+    }
+    recover(journal);
     const files = batchFiles(journal, original !== undefined);
     const events = readEvents(journal, files, 0);
     const head = events.at(-1);
@@ -607,6 +745,10 @@ export function fenceFileJournal<T>(
     fsyncDirectory(journal.batches);
     const result = select();
     ensure(!(result instanceof Promise), "checkpoint-selection-async");
+    if (reserved !== undefined) {
+      unlinkSync(join(journal.root, RESERVATION));
+      fsyncDirectory(journal.root);
+    }
     return result;
   });
 }
@@ -653,6 +795,7 @@ export function openFileJournal(
       ensureDirectory(journal.root);
       scopedDirectory(journal.root, journal.journal, true);
       return locked(journal, false, () => {
+        assertFileJournalReservation(journal.root);
         scopedDirectory(journal.root, journal.batches, true);
         scopedDirectory(journal.root, journal.keys, true);
         recover(journal);

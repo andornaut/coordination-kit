@@ -17,10 +17,12 @@ import { expect, it } from "vitest";
 import { eventHash } from "../db.ts";
 import { GENESIS, type StoredEvent } from "../types.ts";
 import {
+  cancelFileJournalReservation,
   fenceFileJournal,
   type FileRecord,
   type JournalWriter,
   openFileJournal,
+  reserveFileJournal,
 } from "./journal.ts";
 
 const exec = promisify(execFile);
@@ -84,7 +86,8 @@ const WRITE = `
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15_000);
       return;
     }
-    if (mode === "pause") {
+    if (mode === "pause" || mode === "pause-report") {
+      if (mode === "pause-report") process.stdout.write("locked\\n");
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
     }
     const previous = writer.events().at(-1);
@@ -289,6 +292,49 @@ it("serializes independent append processes without losing either event", async 
   expect(events.map(({ seq }) => seq)).toEqual([1, 2]);
   expect(events.map(({ key }) => key).sort()).toEqual(["one", "two"]);
   expect(events[1]?.prevHash).toBe(events[0]?.hash);
+});
+
+it("drains an in-flight append, refuses a stale head, and fences a preopened writer", async () => {
+  const root = scratch();
+  const journal = openFileJournal(root);
+  const first = event("first");
+  journal.withWriter((writer) => writer.commit([first]));
+  const child = spawn(process.execPath, args(WRITE, root, "pause-report", { key: "in-flight" }), {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const closed = once(child, "close");
+  const request = {
+    head: { hash: first.hash, seq: first.seq },
+    id: "00000000-0000-4000-8000-000000000214",
+    registryRevision: 1,
+  };
+  try {
+    const [data] = await once(child.stdout, "data");
+    expect(String(data)).toBe("locked\n");
+    expect(() => reserveFileJournal(root, request)).toThrow("checkpoint-source-head-changed");
+  } finally {
+    await closed;
+  }
+  const current = journal.events().at(-1)!;
+  expect(current.key).toBe("in-flight");
+  const active = reserveFileJournal(root, {
+    ...request,
+    head: { hash: current.hash, seq: current.seq },
+  });
+  expect(journal.events().at(-1)).toEqual(current);
+  let writes = 0;
+  expect(() =>
+    journal.withWriter((writer) => {
+      writes += 1;
+      writer.commit([event("blocked", current)]);
+    }),
+  ).toThrow("compaction-reserved");
+  expect(writes).toBe(0);
+  expect(journal.events().at(-1)).toEqual(current);
+  cancelFileJournalReservation(root, active);
+  const next = event("after-cancel", current);
+  journal.withWriter((writer) => writer.commit([next]));
+  expect(journal.events().at(-1)).toEqual(next);
 });
 
 it("bounds lock contention and permits a writer once the lock holder exits", async () => {
