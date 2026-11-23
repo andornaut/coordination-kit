@@ -14,7 +14,19 @@
    Old cache files and SQLite cache tables can remain on disk during the cutover.
 
 Filesystem compaction is a separate coordinator operation with its own restore, approval and
-idle boundary. Follow the [compaction runbook](store.md#filesystem-compaction) before activation.
+idle boundary. Follow the [compaction runbook](store.md#filesystem-compaction-runbook) before activation.
+
+## Repeat filesystem compaction
+
+A runtime that supports repeat compaction opens a first-generation store from Coordination Kit
+4.1.x directly. Before selecting a second checkpoint, qualify and upgrade every reader and
+writer that shares the store, including running Delivery Kit consumers and the coordinator CLI.
+Coordination Kit 4.1.x checks the selected receipt against the original journal's first fence.
+After a successor is selected it refuses access with `checkpoint-fence-mismatch`. Existing open
+old-generation writers also refuse because their own journal is permanently fenced. Keep the
+prior checkpoint, tails and independent restore. Re-selecting a predecessor cannot roll back
+the store. Follow the [compaction runbook](store.md#filesystem-compaction-runbook) for custody,
+approval and recovery.
 
 ## Filesystem authority migration
 

@@ -26,6 +26,7 @@ export interface CompactionCheckpoint {
   readonly anchor: CheckpointHead;
   readonly head: CheckpointHead;
   readonly registryRevision: number;
+  readonly predecessor?: CheckpointSelection;
   readonly entries: readonly CheckpointEntry[];
 }
 
@@ -33,6 +34,15 @@ export interface CompactionCheckpoint {
 export interface CheckpointReceipt {
   readonly head: CheckpointHead;
   readonly digest: string;
+}
+
+export interface CheckpointSelection extends CheckpointReceipt {
+  readonly id: string;
+}
+
+export interface CheckpointPredecessor {
+  readonly checkpoint: CompactionCheckpoint;
+  readonly selection: CheckpointSelection;
 }
 
 const INITIAL_HEAD: CheckpointHead = { hash: GENESIS, seq: 0 };
@@ -138,15 +148,24 @@ function reduce(event: StoredEvent): CheckpointEntry {
 
 /** Build a deterministic candidate from the complete, independently adjudicated source. */
 export function prepareCompactionCheckpoint(
-  events: readonly StoredEvent[],
+  tail: readonly StoredEvent[],
   scope: CompactionScope,
   cutoverAnchor?: CheckpointHead,
+  previous?: CheckpointPredecessor,
 ): { readonly checkpoint: CompactionCheckpoint; readonly receipt: CheckpointReceipt } {
-  const head = verifyEvents(INITIAL_HEAD, new Set(), events);
+  const prefix = previous && verifyCompactionCheckpoint(previous.checkpoint, previous.selection);
+  const head = prefix
+    ? verifyCompactionTail(prefix, tail)
+    : verifyEvents(INITIAL_HEAD, new Set(), tail);
+  const events = prefix ? [...prefix.entries.map(({ event }) => event), ...tail] : tail;
   const first = events[0] === undefined ? INITIAL_HEAD : headOf(events[0]);
-  const anchor = cutoverAnchor === undefined ? first : headOf(cutoverAnchor);
+  const anchor = headOf(cutoverAnchor ?? prefix?.anchor ?? first);
   const sourceAnchor = anchor.seq === 0 ? INITIAL_HEAD : events[anchor.seq - 1];
-  if (sourceAnchor === undefined || !sameHead(anchor, sourceAnchor)) {
+  if (
+    sourceAnchor === undefined ||
+    !sameHead(anchor, sourceAnchor) ||
+    (prefix !== undefined && !sameHead(anchor, prefix.anchor))
+  ) {
     throw new StoreError("checkpoint-anchor-mismatch");
   }
   const evidence = scope.verifiedEvidence;
@@ -158,7 +177,12 @@ export function prepareCompactionCheckpoint(
     throw new StoreError("checkpoint-evidence-mismatch");
   }
   const count = evidence.messageIds.size + evidence.routineEventSequences.size;
-  const plan = planFileCompaction(events, scope);
+  const reduced = new Set(
+    prefix?.entries
+      .filter(({ reducedDigest }) => reducedDigest !== undefined)
+      .map(({ event }) => event.seq),
+  );
+  const plan = planFileCompaction(events, scope, reduced);
   const eligible = plan.streams.reduce((sum, stream) => sum + stream.eligible.count, 0);
   if (count === 0 || eligible !== count) {
     throw new StoreError("checkpoint-selection-unqualified");
@@ -172,7 +196,9 @@ export function prepareCompactionCheckpoint(
       typeof id === "string" &&
       evidence.messageIds.has(id);
     const routine = evidence.routineEventSequences.has(event.seq);
-    if (message || routine) {
+    if (reduced.has(event.seq)) {
+      entries.push(prefix!.entries[event.seq - 1]!);
+    } else if (message || routine) {
       if (event.seq === (anchor.seq || first.seq)) {
         throw new StoreError("checkpoint-anchor-protected");
       }
@@ -186,6 +212,7 @@ export function prepareCompactionCheckpoint(
     anchor,
     entries,
     head,
+    ...(previous === undefined ? {} : { predecessor: previous.selection }),
     registryRevision: scope.registryRevision,
     schema: 2,
   };
@@ -199,8 +226,9 @@ export function verifyCompactionSource(
   events: readonly StoredEvent[],
   scope: CompactionScope,
   cutoverAnchor?: CheckpointHead,
+  previous?: CheckpointPredecessor,
 ): CompactionCheckpoint {
-  const expected = prepareCompactionCheckpoint(events, scope, cutoverAnchor);
+  const expected = prepareCompactionCheckpoint(events, scope, cutoverAnchor, previous);
   if (
     receipt.digest !== expected.receipt.digest ||
     !sameHead(receipt.head, expected.receipt.head)

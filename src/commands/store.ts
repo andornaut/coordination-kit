@@ -427,11 +427,15 @@ export const storeCompactionPlanCommand: Handler = (io, root, args) =>
         if (registry(context).revision !== revision) {
           throw new StoreError("compaction-registry-changed");
         }
-        return planFileCompaction(events, {
-          registeredGames: new Set(Object.keys(context.layout.config.games)),
-          registeredRoles: new Set(Object.keys(roles)),
-          registryRevision: revision,
-        });
+        return planFileCompaction(
+          events,
+          {
+            registeredGames: new Set(Object.keys(context.layout.config.games)),
+            registeredRoles: new Set(Object.keys(roles)),
+            registryRevision: revision,
+          },
+          store.compactedEventSequences(),
+        );
       } finally {
         store?.close();
       }

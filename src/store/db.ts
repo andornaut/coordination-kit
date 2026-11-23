@@ -277,6 +277,10 @@ export class Store {
     return this.#files !== undefined;
   }
 
+  compactedEventSequences(): ReadonlySet<number> {
+    return new Set(this.#reducedDigests.keys());
+  }
+
   close(): void {
     this.db.close();
   }

@@ -111,6 +111,18 @@ it("anchors a journal tail to its verified checkpoint and preserves retired keys
   const baseline = { head: prefix, keys: new Set([prefix.key]) };
   const journal = openFileJournal(root, baseline);
   expect(journal.events()).toEqual([]);
+  const reservation = reserveFileJournal(
+    root,
+    {
+      head: { hash: prefix.hash, seq: prefix.seq },
+      id: "00000000-0000-4000-8000-000000000210",
+      registryRevision: 1,
+    },
+    baseline,
+  );
+  expect(journal.events()).toEqual([]);
+  expect(() => journal.withWriter(() => {})).toThrow("compaction-reserved");
+  cancelFileJournalReservation(root, reservation, baseline);
 
   journal.withWriter((writer) => {
     expect(() => writer.commit([event(prefix.key, prefix)])).toThrow("journal-key-conflict");

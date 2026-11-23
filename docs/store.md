@@ -121,10 +121,11 @@ Use the existing scheduled review and operator approval lane.
 1. Run `store compaction-plan` and record the exact head and registry revision. Confirm the
    decisions, approvals, open or retained messages and other material evidence that must remain
    accessible. Restore a separate full copy of the selected compactable filesystem authority
-   from backup, including its journal, keys and committed companion records. Use an absolute
-   real path outside the checkout and current state, with independent regular files.
-   Restore committed journal state and its companions. Exclude any transient
-   `compaction-reservation.json` from the restored copy.
+   from backup. Include its selector, checkpoint files, selected tail, permanently fenced
+   predecessor journals, keys and committed companions. Use an absolute real path outside the
+   checkout and current state, with independent regular files. Exclude every transient
+   `compaction-reservation.json` from the restored copy. Preserve external runner cursors and
+   receipts at their existing paths.
 2. Use a JSON evidence file with schema 1, the plan's `head` and `registryRevision`,
    `messages`, and `routineEventSequences`. For each message give its exact `id`, `owner`,
    `closeSeq`, and `replacement`. The owner's terminal close must list that durable reference
@@ -132,13 +133,16 @@ Use the existing scheduled review and operator approval lane.
    inclusion. List routine event sequence numbers only after verifying their place in the
    restored history and confirming the state, evidence, cursor and key coverage. Both arrays may
    be empty. A candidate needs at least one exact original that passes the plan's eligibility checks.
+   Entries reported as `already-compacted` retain their original sequence, key, hash and proof.
+   Leave them out of the new evidence.
 3. Obtain custody at the existing idle review boundary. Confirm every writer is on a
    reservation-aware version or is parked, and drain operations that can still send, record
    receipts or advance cursors after the journal commit. Preserve independent questions and holds.
    Reserve with a new operator request UUID and the exact planned head and registry revision.
    The reservation waits for the existing writer lock before recording the tuple and an
-   acquisition UUID (`nonce`) in `var/coordination/compaction-reservation.json`. The journal
-   stays readable. Reservation-aware writes refuse with `compaction-reserved` before their
+   acquisition UUID (`nonce`) beside the selected journal. The first journal uses
+   `var/coordination/compaction-reservation.json`. A selected checkpoint uses the marker at the
+   root of its tail. The journal stays readable. Reservation-aware writes refuse with `compaction-reserved` before their
    journal transaction begins. Keep custody and preserve the registry revision and routing through
    activation or an exact retry. The reservation has no automatic expiration. An exact reserve
    retry returns the same acquisition while it is active.
@@ -161,10 +165,22 @@ Use the existing scheduled review and operator approval lane.
    can remain at its exclusive path. Use a new path for requalification. Keep the restored backup
    and all loose copies until the operator separately authorizes cleanup.
 
-The commands select the first checkpoint from a full journal. Legacy unreserved prepare
-and activate remain available when no reservation exists. Exact retries of an existing
-permanent fence are supported with their original receipt. The retained source and
-restored copy contain the original bodies. There is no scheduled activation or cleanup.
+Repeat the same procedure for the next generation. A repeat requires a reservation on the
+selected tail. The successor checkpoint binds the predecessor's exact ID, head and digest.
+Activation permanently fences that tail and selects the successor with a fresh tail. The restore
+check verifies the committed manifests and companion hashes from each predecessor. Exact retry
+uses the same receipt while its predecessor or that receipt remains selected. An older receipt
+cannot move the selector back.
+
+Keep the selected and predecessor checkpoint files, permanent fences, committed batch manifests,
+per-event keys and every companion named by a manifest in both the live chain and independent
+restore. Future repeat qualification reads these files. A separate cleanup review can assess
+unreferenced loose copies. Preserve the committed chain even after that review.
+
+Legacy unreserved prepare and activate remain available for the first checkpoint when no
+reservation exists. The retained journals and restored copy contain the original bodies.
+There is no scheduled activation or cleanup. Before a second activation, follow the
+[repeat compaction compatibility requirements](upgrading.md#repeat-filesystem-compaction).
 
 ## Schema
 

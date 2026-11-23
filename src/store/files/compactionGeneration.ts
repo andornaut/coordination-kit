@@ -10,7 +10,9 @@ import type { FileProjection } from "../fileProjection.ts";
 import { StoreError } from "../types.ts";
 import {
   type CheckpointHead,
+  type CheckpointPredecessor,
   type CheckpointReceipt,
+  type CheckpointSelection,
   type CompactionCheckpoint,
   prepareCompactionCheckpoint,
   verifyCompactionCheckpoint,
@@ -23,17 +25,22 @@ import {
   fenceFileJournal,
   type FileJournal,
   type FileJournalReservation,
+  type JournalBaseline,
   openFileJournal,
   readFileJournalFence,
+  retiredFileJournalSnapshot,
 } from "./journal.ts";
 
 const ACTIVE = "active-checkpoint.json";
 const HEX = /^[a-f0-9]{64}$/;
 
-interface Selection {
-  readonly digest: string;
-  readonly head: CheckpointHead;
-  readonly id: string;
+type JournalSnapshot = ReturnType<FileJournal["snapshot"]>;
+
+interface FileCheckpointSource {
+  readonly archives: readonly string[];
+  readonly events: JournalSnapshot["events"];
+  readonly previous: CheckpointPredecessor | undefined;
+  readonly tail: JournalSnapshot;
 }
 
 export interface PreparedFileCheckpoint {
@@ -62,7 +69,7 @@ function metadata(root: string): string {
   return directory;
 }
 
-function selector(value: unknown): Selection {
+function selector(value: unknown): CheckpointSelection {
   if (
     !isRecord(value) ||
     value.schema !== 2 ||
@@ -87,7 +94,7 @@ function selector(value: unknown): Selection {
   };
 }
 
-function separateRestore(root: string, restored: string): ReturnType<typeof openFileJournal> {
+function separateRestore(root: string, restored: string): FileCheckpointSource {
   if (
     !isAbsolute(root) ||
     resolve(root) !== root ||
@@ -103,14 +110,134 @@ function separateRestore(root: string, restored: string): ReturnType<typeof open
       throw new StoreError("checkpoint-restore-path-invalid");
     }
   }
-  return openFileJournal(restored);
+  return readFileCheckpointSource(restored);
 }
 
-function snapshotDigest(snapshot: ReturnType<FileJournal["snapshot"]>): string {
-  return createHash("sha256").update(canonicalJson(snapshot)).digest("hex");
+function digest(value: unknown): string {
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
 }
 
-/** Qualify a read-only candidate against a separately restored copy of the full history. */
+function sourceDigest({ archives, previous, tail }: Omit<FileCheckpointSource, "events">): string {
+  return digest(previous === undefined ? tail : { archives, previous: previous.selection, tail });
+}
+
+function activeSelection(root: string): CheckpointSelection | undefined {
+  const directory = join(root, "journal");
+  const journal = lstatSync(directory, { throwIfNoEntry: false });
+  if (journal === undefined) {
+    return undefined;
+  }
+  if (!journal.isDirectory()) {
+    throw new StoreError("checkpoint-path-invalid");
+  }
+  const value = readRegular(join(directory, ACTIVE));
+  return value === undefined ? undefined : selector(value);
+}
+
+function tailPath(root: string, previous?: CheckpointSelection): string {
+  return previous === undefined ? root : join(root, "journal", `tail-${previous.id}`);
+}
+
+function predecessor(checkpoint: CompactionCheckpoint): CheckpointSelection | undefined {
+  const prior = checkpoint.predecessor;
+  if (prior === undefined) {
+    return undefined;
+  }
+  const qualified = selector({ ...prior, schema: 2 });
+  if (
+    qualified.head.seq > checkpoint.head.seq ||
+    canonicalJson(qualified) !== canonicalJson(prior)
+  ) {
+    throw new StoreError("checkpoint-predecessor-invalid");
+  }
+  return qualified;
+}
+
+function generation(
+  root: string,
+  selection?: CheckpointSelection,
+): CheckpointPredecessor | undefined {
+  if (selection === undefined) {
+    return undefined;
+  }
+  const value = readRegular(join(metadata(root), `checkpoint-${selection.id}.json`));
+  const checkpoint = verifyCompactionCheckpoint(value, selection);
+  const prior = predecessor(checkpoint);
+  if (prior?.id === selection.id) {
+    throw new StoreError("checkpoint-predecessor-invalid");
+  }
+  assertFileJournalFence(tailPath(root, prior), selection);
+  return { checkpoint, selection };
+}
+
+function journalFor(
+  root: string,
+  previous?: CheckpointPredecessor,
+): {
+  readonly baseline: JournalBaseline | undefined;
+  readonly path: string;
+} {
+  return {
+    baseline:
+      previous === undefined
+        ? undefined
+        : {
+            head: previous.checkpoint.head,
+            keys: new Set(previous.checkpoint.entries.map(({ event }) => event.key)),
+          },
+    path: tailPath(root, previous?.selection),
+  };
+}
+
+export function fileCheckpointJournal(root: string) {
+  return journalFor(root, generation(root, activeSelection(root)));
+}
+
+function readyJournal(path: string, baseline?: JournalBaseline): FileJournal {
+  if (readFileJournalFence(path) !== undefined) {
+    throw new StoreError("checkpoint-selection-pending");
+  }
+  return openFileJournal(path, baseline);
+}
+
+function archivedDigests(root: string, previous?: CheckpointPredecessor): string[] {
+  const ids = new Set<string>();
+  const archives: string[] = [];
+  let current = previous;
+  while (current !== undefined) {
+    const { checkpoint, selection } = current;
+    if (ids.has(selection.id)) {
+      throw new StoreError("checkpoint-predecessor-invalid");
+    }
+    ids.add(selection.id);
+    current = generation(root, predecessor(checkpoint));
+    const { baseline, path } = journalFor(root, current);
+    archives.push(digest(retiredFileJournalSnapshot(path, selection, baseline)));
+  }
+  return archives;
+}
+
+/** Inspect committed chains and companion digests, including retired journals, for restore proof. */
+export function readFileCheckpointSource(root: string): FileCheckpointSource {
+  const previous = generation(root, activeSelection(root));
+  const { baseline, path } = journalFor(root, previous);
+  const tail = readyJournal(path, baseline).snapshot();
+  const events =
+    previous === undefined
+      ? tail.events
+      : [...previous.checkpoint.entries.map(({ event }) => event), ...tail.events];
+  return { archives: archivedDigests(root, previous), events, previous, tail };
+}
+
+export function fileCheckpointCandidate(
+  { previous, tail }: FileCheckpointSource,
+  scope: CompactionScope,
+  anchor: CheckpointHead,
+) {
+  return prepareCompactionCheckpoint(tail.events, scope, anchor, previous);
+}
+
+/** Qualify a candidate against a separate restore of the selected generation and its archives. */
 export function prepareFileCheckpoint(
   root: string,
   restored: string,
@@ -118,16 +245,26 @@ export function prepareFileCheckpoint(
   anchor: CheckpointHead,
   reservation?: FileJournalReservation,
 ): PreparedFileCheckpoint {
-  assertFileJournalReservation(root, reservation);
-  const source = openFileJournal(root).snapshot();
-  const restoredSource = separateRestore(root, restored).snapshot();
-  const restoreDigest = snapshotDigest(restoredSource);
-  if (snapshotDigest(source) !== restoreDigest) {
+  const source = readFileCheckpointSource(root);
+  requireRepeatReservation(source.previous, reservation);
+  assertFileJournalReservation(journalFor(root, source.previous).path, reservation);
+  const restoredSource = separateRestore(root, restored);
+  const restoreDigest = sourceDigest(restoredSource);
+  if (sourceDigest(source) !== restoreDigest) {
     throw new StoreError("checkpoint-restore-mismatch");
   }
-  const prepared = prepareCompactionCheckpoint(source.events, scope, anchor);
+  const prepared = fileCheckpointCandidate(source, scope, anchor);
   assertReservationCheckpoint(prepared.checkpoint, reservation);
   return { ...prepared, id: randomUUID(), restoreDigest };
+}
+
+function requireRepeatReservation(
+  previous: CheckpointPredecessor | undefined,
+  reservation: FileJournalReservation | undefined,
+): void {
+  if (previous !== undefined && reservation === undefined) {
+    throw new StoreError("compaction-reservation-required");
+  }
 }
 
 function assertReservationCheckpoint(
@@ -144,7 +281,13 @@ function assertReservationCheckpoint(
   }
 }
 
-/** Select the same prepared checkpoint under the old journal's exclusive writer lock. */
+function sameSelection(left?: CheckpointSelection, right?: CheckpointSelection): boolean {
+  return left === undefined || right === undefined
+    ? left === right
+    : canonicalJson(left) === canonicalJson(right);
+}
+
+/** Fence the restored predecessor's exact journal and select the verified successor. */
 export function selectFileCheckpoint(
   root: string,
   restored: string,
@@ -160,68 +303,81 @@ export function selectFileCheckpoint(
   const directory = metadata(root);
   const activePath = join(directory, ACTIVE);
   const checkpointPath = join(directory, `checkpoint-${id}.json`);
-  const restoredSource = separateRestore(root, restored).snapshot();
-  if (snapshotDigest(restoredSource) !== prepared.restoreDigest) {
+  const restoredSource = separateRestore(root, restored);
+  const previousSelection = restoredSource.previous?.selection;
+  requireRepeatReservation(restoredSource.previous, reservation);
+  if (sourceDigest(restoredSource) !== prepared.restoreDigest) {
     throw new StoreError("checkpoint-restore-mismatch");
   }
-  verifyCompactionSource(checkpoint, receipt, restoredSource.events, readScope(), anchor);
+  verifyCompactionSource(
+    checkpoint,
+    receipt,
+    restoredSource.tail.events,
+    readScope(),
+    anchor,
+    restoredSource.previous,
+  );
+  const previous = generation(root, previousSelection);
+  const archives = archivedDigests(root, previous);
+  const { baseline, path } = journalFor(root, previous);
+  function mustBeSourceOrSelected() {
+    const active = activeSelection(root);
+    if (!sameSelection(active, previousSelection) && !sameSelection(active, fence)) {
+      if (previousSelection === undefined) {
+        assertFileJournalFence(root, fence);
+      }
+      throw new StoreError("checkpoint-selection-conflict");
+    }
+    return active;
+  }
+  mustBeSourceOrSelected();
   fenceFileJournal(
-    root,
+    path,
     fence,
-    (source) => {
-      if (snapshotDigest(source) !== prepared.restoreDigest) {
+    (tail) => {
+      mustBeSourceOrSelected();
+      if (sourceDigest({ archives, previous, tail }) !== prepared.restoreDigest) {
         throw new StoreError("checkpoint-restore-mismatch");
       }
-      const active = readRegular(activePath);
-      if (active !== undefined && canonicalJson(active) !== canonicalJson(selection)) {
-        throw new StoreError("checkpoint-selection-conflict");
-      }
-      verifyCompactionSource(checkpoint, receipt, source.events, readScope(), anchor);
-      const previous = readRegular(checkpointPath);
-      if (previous === undefined) {
-        writeDurable(checkpointPath, `${canonicalJson(checkpoint)}\n`);
+      verifyCompactionSource(checkpoint, receipt, tail.events, readScope(), anchor, previous);
+      const staged = readRegular(checkpointPath);
+      if (staged === undefined) {
+        writeDurable(
+          checkpointPath,
+          `${canonicalJson(checkpoint)}
+`,
+        );
       } else {
-        verifyCompactionCheckpoint(previous, receipt);
+        verifyCompactionCheckpoint(staged, receipt);
       }
     },
     () => {
-      if (readRegular(activePath) === undefined) {
-        writeDurable(activePath, `${canonicalJson(selection)}\n`);
+      if (!sameSelection(mustBeSourceOrSelected(), fence)) {
+        writeDurable(
+          activePath,
+          `${canonicalJson(selection)}
+`,
+        );
       }
     },
     reservation,
+    baseline,
   );
 }
 
-/** Open only the exact fenced checkpoint and its normal append-only tail. */
+/** Open the selected checkpoint and its unfenced ordinary tail. */
 export function selectedFileCheckpoint(
   root: string,
 ): Pick<FileProjection, "checkpoint" | "journal"> | undefined {
-  const directory = join(root, "journal");
-  const journal = lstatSync(directory, { throwIfNoEntry: false });
-  if (journal === undefined) {
+  const previous = generation(root, activeSelection(root));
+  const { baseline, path } = journalFor(root, previous);
+  const journal = readyJournal(path, baseline);
+  if (previous === undefined) {
     return undefined;
   }
-  if (!journal.isDirectory()) {
-    throw new StoreError("checkpoint-path-invalid");
-  }
-  const active = readRegular(join(directory, ACTIVE));
-  if (active === undefined) {
-    if (readFileJournalFence(root) !== undefined) {
-      throw new StoreError("checkpoint-selection-pending");
-    }
-    return undefined;
-  }
-  const selection = selector(active);
-  assertFileJournalFence(root, selection);
-  const value = readRegular(join(directory, `checkpoint-${selection.id}.json`));
-  const receipt = { digest: selection.digest, head: selection.head };
-  const checkpoint = verifyCompactionCheckpoint(value, receipt);
+  const { digest: hash, head } = previous.selection;
   return {
-    checkpoint: { receipt, value: checkpoint },
-    journal: openFileJournal(join(directory, `tail-${selection.id}`), {
-      head: checkpoint.head,
-      keys: new Set(checkpoint.entries.map(({ event }) => event.key)),
-    }),
+    checkpoint: { receipt: { digest: hash, head }, value: previous.checkpoint },
+    journal,
   };
 }

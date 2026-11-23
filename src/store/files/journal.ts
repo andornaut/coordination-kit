@@ -64,7 +64,7 @@ interface Head {
   readonly seq: number;
 }
 
-interface JournalBaseline {
+export interface JournalBaseline {
   readonly head: Head;
   readonly keys: ReadonlySet<string>;
 }
@@ -619,8 +619,21 @@ export function assertFileJournalReservation(
   }
 }
 
-function withExistingWriter<T>(root: string, run: (journal: Paths) => T): T {
-  const journal = paths(resolve(root), EMPTY_BASELINE);
+function withExistingWriter<T>(
+  root: string,
+  baseline: JournalBaseline,
+  run: (journal: Paths) => T,
+  initializeTail = false,
+): T {
+  const journal = paths(resolve(root), baseline);
+  if (initializeTail && baseline.head.seq > 0) {
+    ensureDirectory(journal.root);
+    scopedDirectory(journal.root, journal.journal, true);
+    return locked(journal, false, () => {
+      scopedDirectory(journal.root, journal.batches, true);
+      return run(journal);
+    });
+  }
   ensure(
     scopedDirectory(journal.root, journal.batches) && isFile(journal.lock),
     "checkpoint-source-unavailable",
@@ -628,41 +641,56 @@ function withExistingWriter<T>(root: string, run: (journal: Paths) => T): T {
   return locked(journal, false, () => run(journal));
 }
 
+function snapshot(paths: Paths, files: readonly string[]): ReturnType<FileJournal["snapshot"]> {
+  return {
+    events: readEvents(paths, files, 0),
+    records: files.flatMap((filename) => readBatch(paths, filename).records),
+  };
+}
+
 export function reserveFileJournal(
   root: string,
   request: FileJournalReservationRequest,
+  baseline: JournalBaseline = EMPTY_BASELINE,
 ): FileJournalReservation {
   ensure(validReservationRequest(request), "compaction-reservation-invalid");
-  return withExistingWriter(root, (journal) => {
-    ensure(readFileJournalFence(journal.root) === undefined, "compaction-source-already-fenced");
-    const current = readFileJournalReservation(journal.root);
-    const reservation = { ...request, nonce: current?.nonce ?? randomUUID() };
-    if (current !== undefined) {
-      assertFileJournalReservation(journal.root, reservation);
-    } else {
-      recover(journal);
-    }
-    const head = readEvents(journal, batchFiles(journal), 0).at(-1);
-    ensure(
-      head?.seq === reservation.head.seq && head.hash === reservation.head.hash,
-      "checkpoint-source-head-changed",
-    );
-    if (current === undefined) {
-      writeDurable(join(journal.root, RESERVATION), reservationBytes(reservation));
-    }
-    return reservation;
-  });
+  // A selected tail can be empty. Acquire its usual writer lock before checking the head.
+  return withExistingWriter(
+    root,
+    baseline,
+    (journal) => {
+      ensure(readFileJournalFence(journal.root) === undefined, "compaction-source-already-fenced");
+      const current = readFileJournalReservation(journal.root);
+      const reservation = { ...request, nonce: current?.nonce ?? randomUUID() };
+      if (current !== undefined) {
+        assertFileJournalReservation(journal.root, reservation);
+      } else {
+        recover(journal);
+      }
+      const head = readEvents(journal, batchFiles(journal), 0).at(-1) ?? baseline.head;
+      ensure(
+        head.seq === reservation.head.seq && head.hash === reservation.head.hash,
+        "checkpoint-source-head-changed",
+      );
+      if (current === undefined) {
+        writeDurable(join(journal.root, RESERVATION), reservationBytes(reservation));
+      }
+      return reservation;
+    },
+    true,
+  );
 }
 
 export function cancelFileJournalReservation(
   root: string,
   reservation: FileJournalReservation,
+  baseline: JournalBaseline = EMPTY_BASELINE,
 ): void {
   ensure(
     validReservationRequest(reservation) && isCanonicalUuid(reservation.nonce),
     "compaction-reservation-invalid",
   );
-  withExistingWriter(root, (journal) => {
+  withExistingWriter(root, baseline, (journal) => {
     ensure(readFileJournalFence(journal.root) === undefined, "compaction-source-already-fenced");
     assertFileJournalReservation(journal.root, reservation);
     unlinkSync(join(journal.root, RESERVATION));
@@ -692,6 +720,26 @@ export function readFileJournalFence(root: string): Buffer | undefined {
     : undefined;
 }
 
+/** Read a retired journal only for qualification, against its exact committed fence. */
+export function retiredFileJournalSnapshot(
+  root: string,
+  fence: CheckpointFence,
+  baseline: JournalBaseline = EMPTY_BASELINE,
+): ReturnType<FileJournal["snapshot"]> {
+  const journal = paths(resolve(root), baseline);
+  ensure(isFile(journal.lock), "checkpoint-source-unavailable");
+  return locked(journal, true, () => {
+    assertFileJournalFence(journal.root, fence);
+    const source = snapshot(journal, batchFiles(journal, true));
+    const head = source.events.at(-1) ?? baseline.head;
+    ensure(
+      head.seq === fence.head.seq && head.hash === fence.head.hash,
+      "checkpoint-source-head-changed",
+    );
+    return source;
+  });
+}
+
 /** Fence the old journal, including preopened writers, while selecting an exact verified candidate. */
 export function fenceFileJournal<T>(
   root: string,
@@ -699,6 +747,7 @@ export function fenceFileJournal<T>(
   verifySource: (snapshot: ReturnType<FileJournal["snapshot"]>) => void,
   select: () => T,
   reservation?: FileJournalReservation,
+  baseline: JournalBaseline = EMPTY_BASELINE,
 ): T {
   ensure(
     isCanonicalUuid(fence.id) &&
@@ -717,7 +766,7 @@ export function fenceFileJournal<T>(
       "compaction-reservation-mismatch",
     );
   }
-  return withExistingWriter(root, (journal) => {
+  return withExistingWriter(root, baseline, (journal) => {
     const file = join(journal.batches, CHECKPOINT_FENCE);
     const original = readFile(file);
     const expected = fenceBytes(fence);
@@ -727,15 +776,13 @@ export function fenceFileJournal<T>(
       assertFileJournalReservation(journal.root, reservation);
     }
     recover(journal);
-    const files = batchFiles(journal, original !== undefined);
-    const events = readEvents(journal, files, 0);
-    const head = events.at(-1);
+    const source = snapshot(journal, batchFiles(journal, original !== undefined));
+    const head = source.events.at(-1) ?? baseline.head;
     ensure(
-      head?.seq === fence.head.seq && head.hash === fence.head.hash,
+      head.seq === fence.head.seq && head.hash === fence.head.hash,
       "checkpoint-source-head-changed",
     );
-    const records = files.flatMap((filename) => readBatch(journal, filename).records);
-    const verified: unknown = verifySource({ events, records });
+    const verified: unknown = verifySource(source);
     ensure(!(verified instanceof Promise), "checkpoint-verification-async");
     if (original === undefined) {
       const intent = join(journal.journal, CHECKPOINT_FENCE);
@@ -786,10 +833,7 @@ export function openFileJournal(
       return read((files) => readEvents(journal, files, afterSeq));
     },
     snapshot() {
-      return read((files) => ({
-        events: readEvents(journal, files, 0),
-        records: files.flatMap((filename) => readBatch(journal, filename).records),
-      }));
+      return read((files) => snapshot(journal, files));
     },
     withWriter<T>(run: (writer: JournalWriter) => T): T {
       ensureDirectory(journal.root);

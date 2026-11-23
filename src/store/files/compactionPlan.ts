@@ -36,6 +36,7 @@ interface Tally {
 type StreamKind = "messages" | "routine" | "other";
 
 type Reason =
+  | "already-compacted"
   | "within-window"
   | "open-message"
   | "retained-message"
@@ -250,6 +251,7 @@ type MutableStream = Omit<Stream, "protected"> & { readonly reasons: Map<Reason,
 export function planFileCompaction(
   events: readonly StoredEvent[],
   scope: CompactionScope,
+  alreadyReduced: ReadonlySet<number> = new Set(),
 ): CompactionPlan {
   let head: Head = { hash: GENESIS, seq: 0 };
   const messages = new Map<string, Message>();
@@ -372,7 +374,9 @@ export function planFileCompaction(
     const aged =
       close !== undefined && !invalidClose && ownershipKnown && outside("messages", source);
     let reason: Reason | null = null;
-    if (!ownershipKnown) {
+    if (alreadyReduced.has(original.seq)) {
+      reason = "already-compacted";
+    } else if (!ownershipKnown) {
       reason = "ownership-unverified";
     } else if (invalidClose || (close === undefined && terminal(original.payload.state))) {
       reason = "close-sequence-unavailable";
@@ -415,16 +419,22 @@ export function planFileCompaction(
         event.kind,
         event,
         false,
-        knownStream ? "routine-source-unverified" : "protected-event-kind",
+        alreadyReduced.has(event.seq)
+          ? "already-compacted"
+          : knownStream
+            ? "routine-source-unverified"
+            : "protected-event-kind",
       );
       continue;
     }
     const aged = outside("routine", source);
-    const reason = !aged
-      ? "within-window"
-      : verification?.routineEventSequences.has(event.seq) === true
-        ? null
-        : "checkpoint-unverified";
+    const reason = alreadyReduced.has(event.seq)
+      ? "already-compacted"
+      : !aged
+        ? "within-window"
+        : verification?.routineEventSequences.has(event.seq) === true
+          ? null
+          : "checkpoint-unverified";
     report("routine", source, event, aged, reason);
   }
 

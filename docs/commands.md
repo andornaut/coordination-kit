@@ -64,6 +64,7 @@ activation require the current active game-coordinator binding. See the
   blocks journal writes at the exact reviewed head and reports its acquisition `nonce`.
 - `store compaction-prepare --id REQUEST_UUID --restore DIR --evidence FILE --receipt NEW_FILE`
   qualifies a candidate against an independent restore and writes a new external receipt.
+  A repeat checkpoint requires the selected tail's reservation.
 - `store compaction-activate --id RECEIPT_ID --restore DIR --evidence FILE --receipt FILE --approval REF`
   selects the exact candidate during an approved idle boundary.
 - `store compaction-cancel --id REQUEST_UUID --nonce ACQUISITION_UUID --head-seq SEQ

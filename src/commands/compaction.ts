@@ -17,13 +17,13 @@ import { withLock } from "../lock.ts";
 import { storePath, storeRoot } from "../store/db.ts";
 import { canonicalJson } from "../store/eventCodec.ts";
 import { fileAuthority } from "../store/files/authority.ts";
+import { type CheckpointHead } from "../store/files/compactionCheckpoint.ts";
 import {
-  type CheckpointHead,
-  prepareCompactionCheckpoint,
-} from "../store/files/compactionCheckpoint.ts";
-import {
+  fileCheckpointCandidate,
+  fileCheckpointJournal,
   type PreparedFileCheckpoint,
   prepareFileCheckpoint,
+  readFileCheckpointSource,
   selectFileCheckpoint,
 } from "../store/files/compactionGeneration.ts";
 import type { CompactionScope } from "../store/files/compactionPlan.ts";
@@ -32,7 +32,6 @@ import {
   cancelFileJournalReservation,
   type FileJournalReservation,
   type FileJournalReservationRequest,
-  openFileJournal,
   readFileJournalFence,
   readFileJournalReservation,
   reserveFileJournal,
@@ -266,17 +265,17 @@ function reservationCommand(cancel: boolean): Handler {
       (context, values) =>
         coordinatorLock(context, values, ({ revision }) => {
           const reservation = expectedReservation(values);
-          const { path } = files(context);
+          const { baseline, path } = fileCheckpointJournal(files(context).path);
           if (cancel) {
             const nonce = required(values, "nonce");
             const acquired = { ...reservation, nonce };
-            cancelFileJournalReservation(path, acquired);
+            cancelFileJournalReservation(path, acquired, baseline);
             return { ...acquired, reserved: false, schema: 1 };
           }
           if (revision !== reservation.registryRevision) {
             throw new StoreError("compaction-registry-changed");
           }
-          return { ...reserveFileJournal(path, reservation), reserved: true, schema: 1 };
+          return { ...reserveFileJournal(path, reservation, baseline), reserved: true, schema: 1 };
         }),
       cancel ? COMPACTION_CANCEL_OPTIONS : COMPACTION_RESERVATION_OPTIONS,
     );
@@ -295,13 +294,16 @@ function operation(context: StoreServiceContext, values: Values) {
   externalPath(canonicalPath(file, dirname(file)), ...excluded, restored);
   const proofPath = required(values, "evidence");
   independentRestore(restored);
-  if (readFileJournalReservation(restored) !== undefined) {
+  if (
+    readFileJournalReservation(restored) !== undefined ||
+    readFileJournalReservation(fileCheckpointJournal(restored).path) !== undefined
+  ) {
     throw new StoreError("compaction-restore-reserved");
   }
-  const events = openFileJournal(restored).snapshot().events;
-  const initial = evidence(proofPath, events);
+  const restoredSource = readFileCheckpointSource(restored);
+  const initial = evidence(proofPath, restoredSource.events);
   function scope(): CompactionScope {
-    const current = evidence(proofPath, events);
+    const current = evidence(proofPath, restoredSource.events);
     const { revision, roles } = coordinator(context, values);
     if (current.digest !== initial.digest || current.selectors.registryRevision !== revision) {
       throw new StoreError("compaction-evidence-changed");
@@ -317,11 +319,11 @@ function operation(context: StoreServiceContext, values: Values) {
   return {
     binding: { head, registryRevision },
     cutover,
-    events,
     file,
     initial,
     path,
     restored,
+    restoredSource,
     scope,
   };
 }
@@ -359,14 +361,15 @@ export const compactionPrepare: Handler = (io, root, args) =>
     (context, values) =>
       coordinatorLock(context, values, () => {
         const input = operation(context, values);
-        if (readFileJournalFence(input.path) !== undefined) {
+        const { path } = fileCheckpointJournal(input.path);
+        if (readFileJournalFence(path) !== undefined) {
           throw new StoreError("compaction-source-already-fenced");
         }
         const id = text(values, "id");
         if (id !== undefined && !isCanonicalUuid(id)) {
           throw new StoreError("compaction-reservation-invalid");
         }
-        const current = id === undefined ? undefined : readFileJournalReservation(input.path);
+        const current = id === undefined ? undefined : readFileJournalReservation(path);
         if (id !== undefined && current === undefined) {
           throw new StoreError("compaction-reservation-required");
         }
@@ -382,7 +385,7 @@ export const compactionPrepare: Handler = (io, root, args) =>
           reservation,
         );
         input.scope();
-        assertFileJournalReservation(input.path, reservation);
+        assertFileJournalReservation(path, reservation);
         const record = receiptMetadata(
           input,
           prepared.id,
@@ -414,8 +417,8 @@ export const compactionActivate: Handler = (io, root, args) =>
         if (!isRecord(saved) || !reference(saved.restoreDigest, HEX)) {
           throw new StoreError("compaction-receipt-invalid");
         }
-        const candidate = prepareCompactionCheckpoint(
-          input.events,
+        const candidate = fileCheckpointCandidate(
+          input.restoredSource,
           input.scope(),
           input.cutover.head,
         );
