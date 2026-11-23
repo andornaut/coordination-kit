@@ -8,6 +8,7 @@ import {
   compactionPrepare,
   compactionReserve,
 } from "./commands/compaction.ts";
+import { decisionMarker, decisionResolve } from "./commands/decisionMarker.ts";
 import { harnessDoctor } from "./commands/doctor.ts";
 import { graph, graphWhy } from "./commands/graph.ts";
 import { harnessSelect } from "./commands/harness.ts";
@@ -108,6 +109,8 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "claude ready": claudeReady,
   "codex ready": codexReady,
   "decision list": decisionList,
+  "decision marker": decisionMarker,
+  "decision resolve": decisionResolve,
   "events ingest": eventsIngest,
   graph,
   "graph why": graphWhy,

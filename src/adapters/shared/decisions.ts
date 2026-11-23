@@ -1,5 +1,5 @@
 // Recipient-bound user-decision clearance. The marker is written by the
-// recipient's owner; this kit only reads it. A missing or invalid marker is never clearance.
+// recipient's owner. A missing or invalid marker is never clearance.
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -68,6 +68,14 @@ export function inspectDecisionMarker(
   } catch {
     return { reason: "json", record: null, state: "invalid" };
   }
+  return inspectDecisionRecord(marker, recipient);
+}
+
+/** Validate an in-memory marker using the same rules as the wake guard. */
+export function inspectDecisionRecord(
+  marker: unknown,
+  recipient: string,
+): DecisionMarkerInspection {
   if (typeof marker !== "object" || marker === null || Array.isArray(marker)) {
     return { reason: "record", record: null, state: "invalid" };
   }

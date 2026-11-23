@@ -6,6 +6,7 @@ import {
   COMPACTION_PREPARE_OPTIONS,
   COMPACTION_RESERVATION_OPTIONS,
 } from "./compaction.ts";
+import { DECISION_MARKER_OPTIONS, DECISION_RESOLVE_OPTIONS } from "./decisionMarker.ts";
 import { DOCTOR_OPTIONS } from "./doctor.ts";
 import { GRAPH_OPTIONS, GRAPH_WHY_OPTIONS } from "./graph.ts";
 import {
@@ -384,6 +385,20 @@ export const SPECS = {
     group: "decisions",
     options: DECISION_LIST_OPTIONS,
     summary: "list decision records in recording order",
+  },
+  "decision marker": {
+    forms: [[]],
+    group: "decisions",
+    options: DECISION_MARKER_OPTIONS,
+    summary: "inspect your own Codex decision marker and its compare-and-swap revision",
+  },
+  "decision resolve": {
+    forms: [
+      ["expect", "expect-revision", "question-turn", "question-item", "answer-turn", "answer-item"],
+    ],
+    group: "decisions",
+    options: DECISION_RESOLVE_OPTIONS,
+    summary: "record an exact verified reply in your own Codex decision marker",
   },
   "session start": {
     forms: [["native-id?", "worker?"]],

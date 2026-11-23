@@ -60,7 +60,7 @@ function refusedQuestion(
   return include ? [false, reason, { ...diagnostic, stage: "question-guard" }] : [false, reason];
 }
 
-interface Resolution {
+export interface Resolution {
   readonly question_turn_id: string;
   readonly question_item_id: string;
   readonly answer_turn_id: string;
@@ -406,17 +406,18 @@ function nativeReplyBinding(item: NativeItem): NativeReplyBinding | null {
   }
 }
 
-function nativeAnsweredQuestion(items: Map<string, NativeItem>, question: NativeItem): boolean {
+function nativeQuestionReply(items: Map<string, NativeItem>, question: NativeItem): string | null {
   if (
     question.type !== "agentMessage" ||
     question.delivery !== "async" ||
     !Array.isArray(question.questions) ||
     question.questions.length === 0
   ) {
-    return false;
+    return null;
   }
   let afterQuestion = false;
   let titles: ReadonlyMap<number, string> | undefined;
+  let reply: string | null = null;
   for (const item of items.values()) {
     if (item.id === question.id) {
       afterQuestion = true;
@@ -435,17 +436,17 @@ function nativeAnsweredQuestion(items: Map<string, NativeItem>, question: Native
     }
     const binding = nativeReplyBinding(item);
     if (binding === null) {
-      return false;
+      return null;
     }
     if (binding.questionId === question.id) {
       if (!afterQuestion || titles !== undefined) {
-        return false;
+        return null;
       }
       titles = binding.titles;
+      reply = item.id;
     }
   }
-  return (
-    titles?.size === question.questions.length &&
+  return titles?.size === question.questions.length &&
     question.questions.every(
       (rendered: unknown, index) =>
         isRecord(rendered) &&
@@ -457,7 +458,103 @@ function nativeAnsweredQuestion(items: Map<string, NativeItem>, question: Native
           (Array.isArray(rendered.options) &&
             rendered.options.every((option: unknown) => typeof option === "string"))),
     )
-  );
+    ? reply
+    : null;
+}
+
+async function ownerHead(client: RpcClient, recipient: string) {
+  const read = await client.call("thread/read", { includeTurns: false, threadId: recipient });
+  const thread = isRecord(read) ? read.thread : null;
+  if (
+    !isRecord(thread) ||
+    thread.id !== recipient ||
+    thread.parentThreadId != null ||
+    (thread.source !== "cli" && thread.source !== "vscode") ||
+    thread.canAcceptDirectInput !== true ||
+    !isRecord(thread.status)
+  ) {
+    return null;
+  }
+  const { activeFlags, type } = thread.status;
+  const active = type === "active";
+  if (
+    (type !== "idle" && !active) ||
+    ((active || activeFlags !== undefined) &&
+      (!Array.isArray(activeFlags) || activeFlags.length !== 0))
+  ) {
+    return null;
+  }
+  const listed = await client.call("thread/turns/list", {
+    itemsView: "notLoaded",
+    limit: 1,
+    sortDirection: "desc",
+    threadId: recipient,
+  });
+  const rows = isRecord(listed) && !listed.truncated && !listed.hasMore ? listed.data : null;
+  const head: unknown = Array.isArray(rows) && rows.length === 1 ? rows[0] : null;
+  return isRecord(head) &&
+    typeof head.id === "string" &&
+    head.id !== "" &&
+    (head.threadId === undefined || head.threadId === recipient) &&
+    head.error == null &&
+    head.status === (active ? "inProgress" : "completed")
+    ? { active, id: head.id }
+    : null;
+}
+
+/** A writer can record one exact same-turn reply while proving the current root is question-free. */
+export async function proveOwnerResolution(
+  client: RpcClient,
+  recipient: string,
+  resolution: Resolution,
+): Promise<boolean> {
+  if (resolution.question_turn_id !== resolution.answer_turn_id) {
+    return false;
+  }
+  try {
+    const head = await ownerHead(client, recipient);
+    if (head === null) {
+      return false;
+    }
+    const pages = new Map<string, Map<string, NativeItem>>();
+    const asked = await itemsFor(client, pages, recipient, resolution.question_turn_id);
+    const question = asked.get(resolution.question_item_id);
+    if (
+      question === undefined ||
+      nativeQuestionReply(asked, question) !== resolution.answer_item_id
+    ) {
+      return false;
+    }
+    const current = await itemsFor(client, pages, recipient, head.id);
+    // An active compaction cannot establish completeness. A completed one uses the wake proof.
+    const compacted = [...current.values()].some((item) => item.type === "contextCompaction");
+    if (compacted && head.active) {
+      return false;
+    }
+    const currentId = compacted
+      ? await precedingQuestionTurn(client, pages, recipient, head.id)
+      : head.id;
+    const proof = await itemsFor(client, pages, recipient, currentId);
+    if (
+      proof.size === 0 ||
+      [...proof.values()].some(
+        (item) => questionItem(item) && nativeQuestionReply(proof, item) === null,
+      )
+    ) {
+      return false;
+    }
+    for (const [readTurn, snapshot] of pages) {
+      // The complete native evidence must remain stable before writing.
+      // eslint-disable-next-line no-await-in-loop
+      const rechecked = await nativeItems(client, recipient, readTurn);
+      if (!sameJson([...snapshot.values()], [...rechecked.values()])) {
+        return false;
+      }
+    }
+    return sameJson(head, await ownerHead(client, recipient));
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -511,7 +608,11 @@ export async function nativeQuestionsClear(
     }
     let derived = false;
     for (const item of proof.values()) {
-      if (questionItem(item) && !resolved.has(item.id) && nativeAnsweredQuestion(proof, item)) {
+      if (
+        questionItem(item) &&
+        !resolved.has(item.id) &&
+        nativeQuestionReply(proof, item) !== null
+      ) {
         if (!derived) {
           // The first derived binding requires a completed current head on this connection.
           // eslint-disable-next-line no-await-in-loop

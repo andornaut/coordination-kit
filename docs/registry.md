@@ -89,13 +89,42 @@ The store's [handoff record](store.md#sessions-and-handoffs) orders it: each rol
 `handoff active`, and game-coordinator sets `completed`. The fence admits a target session only
 after select, and select fences out the source sessions.
 
-Recipient decision records (`unblock/decisions/<conversation>.json`) stay keyed by conversation
-ID, because a pending question belongs to one conversation. Their owner writes them; coordination-kit
-only reads them, and a missing or invalid record is never clearance. Each resolution requires
-`question_turn_id`, `question_item_id`, `answer_turn_id` and `answer_item_id` from the same exact
-recipient's native history. Each question turn and item pair appears once. Preserve pending
-decisions and unrelated resolutions when correcting owner evidence. See
-[stored review diagnostics](review.md#stored-brief).
+### Owner decision markers
+
+Recipient decision records (`unblock/decisions/<conversation>.json`) stay keyed by their exact
+Codex conversation. A missing or invalid marker provides no clearance. Each resolution needs
+`question_turn_id`, `question_item_id`, `answer_turn_id` and `answer_item_id` from that conversation's
+native history. Each question turn and item pair appears once. [Stored review diagnostics](review.md#stored-brief)
+list invalid field names without exposing their values.
+
+From the active registry-bound Codex owner, run `decision marker` to read the marker's state,
+SHA-256 of its exact bytes, and registry revision. Use those values to record an exact historical
+resolution in an existing marker.
+
+```sh
+coordination-kit --root "$COORDINATOR_ROOT" decision resolve \
+  --expect "$MARKER_SHA256" --expect-revision "$REGISTRY_REVISION" \
+  --question-turn "$TURN" --question-item "$QUESTION_ITEM" \
+  --answer-turn "$TURN" --answer-item "$ANSWER_ITEM"
+```
+
+The command requires one complete native UI reply to the exact async question item in the same
+turn, plus stable current native question history without unresolved items. It supports an idle
+completed root and an active owner turn without blocking flags. It preserves the marker's
+existing clear or pending state, unrelated entries and other metadata. A legacy row is completed
+only if it matches the exact question item uniquely. Missing or null references can be filled
+from verified proof. Any contradictory non-null reference or invalid unrelated row blocks the
+write.
+An absent marker can be inspected but needs a separate owner initialisation path. Unverifiable,
+partial, conflicting or still-invalid evidence refuses the write.
+
+The command identifies the owner through its Codex session environment and accepts no caller
+override. It checks marker bytes and the exact binding under the registry and marker locks,
+then atomically replaces the marker. Use this command for resolution writes so concurrent
+writers share its lock. If the input fingerprint or binding changed, inspect again before
+retrying. A verified repeat with the current fingerprint returns `unchanged`. If the result
+of a write is unavailable, use `decision marker` to verify its current state before retrying.
+Neither command sends a wake or changes store questions or holds.
 
 ## Readiness probe
 
