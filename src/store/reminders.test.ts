@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -192,12 +192,15 @@ describe("coordinator reminder ledger", () => {
     }
   });
 
-  it.each(["cli", "vscode"])(
-    "qualifies a pinned idle %s root after compaction or a missing marker",
-    async (source) => {
+  it.each([
+    ["cli", "decision-clearance"],
+    ["vscode", "decision-marker-absent"],
+  ])(
+    "qualifies a pinned idle %s root after compaction or a missing marker (%s)",
+    async (source, reason) => {
       const { context, scope, store } = setup(false);
       try {
-        wake(store, "decision-clearance", "guarded", ORIGINAL, ART, "decision-clearance");
+        wake(store, reason, "guarded", ORIGINAL, ART, reason);
         expect(listReminders(store, scope)).toMatchObject([
           { deferredOriginals: [], originals: [ORIGINAL], role: ROLE },
         ]);
@@ -263,6 +266,11 @@ describe("coordinator reminder ledger", () => {
           storeReminderCheck({ ...context, connectReminder: pinned }, {}, receipt.id),
         ).rejects.toThrow("reminder-owner-clearance-required");
         writeFileSync(marker, "{");
+        await expect(
+          storeReminderCheck({ ...context, connectReminder: pinned }, {}, receipt.id),
+        ).rejects.toThrow("reminder-owner-clearance-required");
+        unlinkSync(marker);
+        mkdirSync(marker);
         await expect(
           storeReminderCheck({ ...context, connectReminder: pinned }, {}, receipt.id),
         ).rejects.toThrow("reminder-owner-clearance-required");

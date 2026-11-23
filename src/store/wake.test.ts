@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { readWakeFile, wakeFilePath } from "../adapters/claude/wakeFile.ts";
 import { RpcError } from "../adapters/codex/rpc.ts";
+import { decisionDirectory } from "../adapters/shared/decisions.ts";
 import { writeJsonDurable } from "../durable.ts";
 import { updateRegistry } from "../registry/store.ts";
 import { Store, storeRoot } from "./db.ts";
@@ -368,6 +369,9 @@ describe("Codex wakes", () => {
     });
     expect(await send(ART_ROLE)).toMatchObject({ status: "guarded" });
     expect(connections).toBe(0);
+    expect(store.db.prepare("SELECT detail FROM wakes").get()).toEqual({
+      detail: "decision-marker-absent",
+    });
     expect(wakeState(store, ART_ROLE)).toEqual({ outstanding: null, pending: true });
     clearDecision(layout, ART);
     expect(await send(ART_ROLE)).toMatchObject({ status: "accepted" });
@@ -378,6 +382,48 @@ describe("Codex wakes", () => {
         type: "text",
       },
     ]);
+  });
+
+  it.each([
+    ["malformed JSON", "{", "invalid"],
+    [
+      "legacy resolution without exact references",
+      JSON.stringify({
+        resolutions: [{ question_item_id: "legacy-question" }],
+        state: "clear",
+        thread_id: ART,
+      }),
+      "invalid",
+    ],
+    ["different binding", JSON.stringify({ state: "clear", thread_id: TECH }), "invalid"],
+    ["owner pending", JSON.stringify({ state: "pending", thread_id: ART }), "pending"],
+    ["unreadable path", null, "unreadable"],
+  ])("records %s before connecting", async (_case, value, status) => {
+    const codex = fakeCodex(ART);
+    let connections = 0;
+    const { layout, send, store } = setup({
+      connect: () => {
+        connections++;
+        return Promise.resolve(codex.client);
+      },
+    });
+    const decisions = join(decisionDirectory(layout, ART_ROLE)!, "decisions");
+    mkdirSync(decisions, { recursive: true });
+    const path = join(decisions, `${ART}.json`);
+    if (value === null) {
+      mkdirSync(path);
+    } else {
+      writeFileSync(path, value);
+    }
+
+    expect(await send(ART_ROLE)).toMatchObject({ status: "guarded" });
+    expect(store.db.prepare("SELECT detail FROM wakes").get()).toEqual({
+      detail: `decision-marker-${status}`,
+    });
+    expect(connections).toBe(0);
+    if (value !== null) {
+      expect(readFileSync(path, "utf8")).toBe(value);
+    }
   });
 
   it("rechecks an exact policy hold set while a Codex wake is connecting", async () => {

@@ -14,7 +14,12 @@ import {
 } from "../adapters/codex/queue.ts";
 import { connectControl, type RpcClient } from "../adapters/codex/rpc.ts";
 import { selectTarget } from "../adapters/codex/steer.ts";
-import { decisionClear, decisionDirectory, decisionRecord } from "../adapters/shared/decisions.ts";
+import {
+  decisionClear,
+  decisionDirectory,
+  decisionRecord,
+  inspectDecisionMarker,
+} from "../adapters/shared/decisions.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
 import type { Layout } from "../layout.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
@@ -303,8 +308,13 @@ async function codexWake(
       refused = guard;
       return false;
     }
-    if (directory === null || !decisionClear(directory, recipient)) {
+    if (directory === null) {
       refused = { reason: "decision-clearance", status: "blocked" };
+      return false;
+    }
+    const marker = inspectDecisionMarker(directory, recipient);
+    if (marker.state !== "clear") {
+      refused = { reason: `decision-marker-${marker.state}`, status: "blocked" };
       return false;
     }
     refused = undefined;

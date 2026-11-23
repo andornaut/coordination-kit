@@ -313,6 +313,13 @@ existing review can check the guard again. An identical send returns the origina
 evidence without a native attempt. Claude collection clears the wake file reservation. The review
 can rearm a Claude wake unpulled for 30 minutes and recover confirmed failures at its existing slot.
 
+`msg status` and review report pre-connection Codex marker refusals as
+`decision-marker-absent`, `decision-marker-invalid`, `decision-marker-unreadable` or
+`decision-marker-pending`. Invalid includes a wrong conversation binding or incomplete
+resolution references. The role owner can inspect or correct the marker using verified
+evidence. Marker states and native question evidence are checked independently.
+Existing `decision-clearance` evidence remains readable.
+
 Codex queue dispatch and coordinator fallback share one outstanding reservation for the exact role
 and current native conversation. Pulling the durable inbox leaves that reservation in place. A
 confirmed pre-submission refusal releases it. An uncertain or interrupted queue claim
@@ -372,8 +379,8 @@ eligibility requires fresh native question clearance. For an absent marker or a 
 compaction proof gap, the qualified Codex 0.171.0 path checks the running server's version,
 exact root thread, idle status and completed current head before and after bounded current
 item inspection. Current question items refuse this path. Historical prompt disposition
-remains unknown. `reminder-owner-clearance-required` routes invalid or pending markers back
-to their owner. `reminder-native-clearance-unverified` reports unavailable current evidence.
+remains unknown. `reminder-owner-clearance-required` routes invalid, unreadable or pending
+markers back to their owner. `reminder-native-clearance-unverified` reports unavailable current evidence.
 
 Record `submitted`, `refused` or `uncertain` with `reminder settle` and a bounded reason code.
 `refused` means a definite refusal before submission. It permits another claim only after new

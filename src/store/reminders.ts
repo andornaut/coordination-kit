@@ -193,6 +193,10 @@ function binding(
 const PRE_SUBMIT_GUARDS = new Set([
   "compaction-unproven",
   "decision-clearance",
+  "decision-marker-absent",
+  "decision-marker-invalid",
+  "decision-marker-pending",
+  "decision-marker-unreadable",
   "direct-input-not-allowed",
   "input-unavailable",
   "rpc-refusal",
