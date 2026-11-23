@@ -28,9 +28,9 @@ export const REVIEW_SHOW_OPTIONS = {
 class Usage extends Error {}
 
 const RESERVED = {
-  status: "deferred",
-  reason: "compaction-reserved",
   detail: "The journal is reserved for compaction. Retry after the reservation ends.",
+  reason: "compaction-reserved",
+  status: "deferred",
 } as const;
 
 /** An ISO 8601 instant with an explicit offset. */
