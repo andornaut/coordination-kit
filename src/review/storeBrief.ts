@@ -561,25 +561,28 @@ export async function storeReview(
     return route;
   }
   const { recipient } = route;
-  const store = Store.forLayout(
-    context.layout,
-    context.now === undefined ? {} : { now: context.now },
-  );
+  const options = context.now === undefined ? {} : { now: context.now };
+  const beforeSurvey = Store.forLayout(context.layout, options);
   try {
-    const earlier = recordedBrief(store, game.id, slot);
+    const earlier = recordedBrief(beforeSurvey, game.id, slot);
     if (earlier !== undefined) {
       return earlier.result;
     }
-    // The native checks run before the transaction: no native call runs inside one.
-    const native = await surveyNative(
-      {
-        env: context.env,
-        layout: context.layout,
-        ...(context.collect === undefined ? {} : { collect: context.collect }),
-        ...(context.ports?.connect === undefined ? {} : { connect: context.ports.connect }),
-      },
-      slot,
-    );
+  } finally {
+    beforeSurvey.close();
+  }
+  // Native checks run outside the transaction. Select the current store after they finish.
+  const native = await surveyNative(
+    {
+      env: context.env,
+      layout: context.layout,
+      ...(context.collect === undefined ? {} : { collect: context.collect }),
+      ...(context.ports?.connect === undefined ? {} : { connect: context.ports.connect }),
+    },
+    slot,
+  );
+  const store = Store.forLayout(context.layout, options);
+  try {
     const outcome = store.transaction((): { result: ReviewResult; fresh: boolean } => {
       const recorded = recordedBrief(store, game.id, slot);
       if (recorded !== undefined) {

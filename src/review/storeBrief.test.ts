@@ -1,4 +1,5 @@
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { cpSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
@@ -8,6 +9,12 @@ import type { Collected, CollectRequest } from "../adapters/types.ts";
 import { EXIT_OK, main } from "../cli.ts";
 import { gameLayout, type Layout } from "../layout.ts";
 import { Store } from "../store/db.ts";
+import {
+  prepareFileCheckpoint,
+  selectFileCheckpoint,
+} from "../store/files/compactionGeneration.ts";
+import { activateMigration, prepareMigration } from "../store/files/migration.ts";
+import { recordSession } from "../store/handoffs.ts";
 import { messageStatus, retainMessage } from "../store/messages.ts";
 import { derivedId } from "../store/notices.ts";
 import { setPolicyHold } from "../store/policyHolds.ts";
@@ -24,7 +31,13 @@ import {
 import { blockWork, finishWork, readyWork, startWork } from "../store/work.ts";
 import { deliverReview, reviewResultsDir } from "./deliver.ts";
 import { coordinationEmit } from "./emit.ts";
-import { BRIEF_MAX_BYTES, BRIEF_MAX_LINES, showBrief, STALE_WAKE_MS } from "./storeBrief.ts";
+import {
+  BRIEF_MAX_BYTES,
+  BRIEF_MAX_LINES,
+  showBrief,
+  STALE_WAKE_MS,
+  storeReview,
+} from "./storeBrief.ts";
 
 const TECH_ROLE = `${GAME}/tech`;
 const SLOT = Date.parse("2026-11-18T15:30:00Z") / 1000;
@@ -76,6 +89,75 @@ function briefs(
     store.close();
   }
 }
+
+it("reopens selected authority when compaction activates during the native survey", async () => {
+  const { base, layout, root } = await storeModeFixture();
+  execFileSync("git", ["-C", root, "init", "-q", "--initial-branch=main"]);
+  writeFileSync(join(root, ".gitignore"), "/var/\n");
+  writeFileSync(
+    join(layout.varDir, "work-protocol.json"),
+    JSON.stringify({ schema: 2, stateRoot: join(base, "prior-state") }),
+  );
+  const actor = { nativeId: COORDINATOR, role: "game-coordinator" };
+  const source = Store.forLayout(layout);
+  const start = (store: Store, key: string) =>
+    recordSession(store, actor, { cwd: "/fixture", harness: "claude", key, version: "4.1.0" });
+  start(source, "anchor");
+  source.close();
+  const { receipt: cutover } = prepareMigration(
+    layout,
+    join(base, "backup.db"),
+    join(base, "restore.db"),
+  );
+  activateMigration(layout, cutover.id);
+
+  const old = Store.forLayout(layout);
+  try {
+    const expired = old.transaction(() => {
+      const first = start(old, "historical");
+      for (let index = 0; index < 100; index++) {
+        start(old, `recent-${index}`);
+      }
+      return first;
+    });
+    const target = join(layout.varDir, "coordination");
+    const restored = join(base, "restored-journal");
+    cpSync(target, restored, { recursive: true });
+    const scope = {
+      registeredGames: new Set([GAME]),
+      registeredRoles: new Set([actor.role]),
+      registryRevision: 1,
+      verifiedEvidence: {
+        head: old.head(),
+        messageIds: new Set<string>(),
+        registryRevision: 1,
+        routineEventSequences: new Set([expired.seq]),
+      },
+    };
+    const prepared = prepareFileCheckpoint(target, restored, scope, cutover.head);
+    const collect = vi.fn(async (request: CollectRequest) => {
+      await Promise.resolve();
+      selectFileCheckpoint(target, restored, prepared, () => scope, cutover.head);
+      expect(() => old.transaction(() => {})).toThrow("journal-corrupt");
+      return collectedFor(request);
+    });
+
+    const game = gameLayout(layout, GAME);
+    const context = { collect, env: {}, layout };
+    const result = await storeReview(context, game, SLOT);
+    expect(result.status).toBe("delivered");
+    expect(await storeReview(context, game, SLOT)).toEqual(result);
+    expect(collect).toHaveBeenCalledTimes(1);
+    const id = derivedId("review-brief", GAME, SLOT);
+    expect(showBrief(layout, { game: GAME, slot: SLOT })).toMatchObject({
+      messageId: id,
+      result,
+    });
+    expect(briefs(layout)).toEqual([expect.objectContaining({ id })]);
+  } finally {
+    old.close();
+  }
+});
 
 describe("stored review brief", () => {
   it("stores one brief per (game, slot) and a repeated call returns the recorded result", async () => {
