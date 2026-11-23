@@ -40,3 +40,4 @@ Reference: [review](../review.md#scheduled-review-seam), [libraries](../librarie
 | ck-0036 | Release collected accepted notices beyond native history   | [ck-0036.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0036.md) |
 | ck-0037 | Recognize complete replies to multi-question Codex prompts | [ck-0037.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0037.md) |
 | ck-0038 | Diagnose owner clearance failures for idle recipients      | [ck-0038.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0038.md) |
+| ck-0039 | Hold the journal head for manual compaction approval       | [ck-0039.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0039.md) |
