@@ -15,10 +15,10 @@ import {
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { isRecord } from "../adapters/shared/pyjson.ts";
-import { writeJsonDurable } from "../durable.ts";
-import type { Layout } from "../layout.ts";
-import { stateRoot } from "../stateRoot.ts";
+import { writeJsonDurable } from "../core/durable.ts";
+import type { Layout } from "../core/layout.ts";
+import { isRecord } from "../core/pyjson.ts";
+import { stateRoot } from "../core/stateRoot.ts";
 import { Store } from "./db.ts";
 import { type CallerOptions, resolveCaller } from "./identity.ts";
 import { importRequest, type RequestImport } from "./requests.ts";

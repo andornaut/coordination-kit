@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
-import { stateRootFixture } from "../testFixtures.ts";
+import { stateRootFixture } from "../core/testFixtures.ts";
 import { Store } from "./db.ts";
 import { readRequests } from "./requests.ts";
 import { COORDINATOR, GAME, storeFixture, TECH } from "./testStore.ts";

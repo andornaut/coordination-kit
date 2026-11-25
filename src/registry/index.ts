@@ -10,14 +10,14 @@ export {
   roleKeys,
   UnknownGame,
   validateGameCoordinatorConfig,
-} from "../layout.ts";
+} from "../core/layout.ts";
 // CLEANUP (added 2026-11-13): Retain old public symbols until registry readers use the canonical names.
 export {
   type GameCoordinatorConfig as GameDevConfig,
   validateGameCoordinatorConfig as validateGameDevConfig,
-} from "../layout.ts";
-export { LockBusy, LockError } from "../lock.ts";
-export { ValidationError } from "../validate.ts";
+} from "../core/layout.ts";
+export { LockBusy, LockError } from "../core/lock.ts";
+export { ValidationError } from "../core/validate.ts";
 export { resolveConversation, resolveHarness, resolveRole, UnknownRole } from "./resolve.ts";
 export {
   type Activation,

@@ -1,10 +1,10 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-import { readJsonIfExists, writeJsonDurable } from "../../durable.ts";
-import { holdLockAsync } from "../../lock.ts";
-import { isCanonicalUuid } from "../shared/ids.ts";
-import { isRecord } from "../shared/pyjson.ts";
+import { readJsonIfExists, writeJsonDurable } from "../../core/durable.ts";
+import { isCanonicalUuid } from "../../core/ids.ts";
+import { holdLockAsync } from "../../core/lock.ts";
+import { isRecord } from "../../core/pyjson.ts";
 import { type DeliveryDiagnostic, safeDeliveryDiagnostic } from "../types.ts";
 import { acknowledgeEntry, queueEntries, type QueueEntry } from "./inventory.ts";
 import { type RpcClient, RpcError } from "./rpc.ts";

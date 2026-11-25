@@ -3,9 +3,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "./cli.ts";
-import { loadLayout } from "./layout.ts";
+import { loadLayout } from "./core/layout.ts";
+import { makeFixture, registryInput } from "./core/testFixtures.ts";
 import { createRegistry, type Registry } from "./registry/index.ts";
-import { makeFixture, registryInput } from "./testFixtures.ts";
 
 async function run(
   root: string,

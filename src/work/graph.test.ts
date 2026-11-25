@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../io.ts";
-import { loadLayout } from "../layout.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
+import { loadLayout } from "../core/layout.ts";
 import { Store } from "../store/db.ts";
 import { activateMigration, prepareMigration } from "../store/files/migration.ts";
 import { answerQuestion, openQuestion } from "../store/questions.ts";

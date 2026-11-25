@@ -5,7 +5,8 @@
 import type { SQLInputValue } from "node:sqlite";
 
 import { readRoleRoute, RouteError, routeRecipient } from "../adapters/shared/route.ts";
-import type { GameLayout, Layout } from "../layout.ts";
+import type { GameLayout, Layout } from "../core/layout.ts";
+import type { ReviewResult } from "../core/outcome.ts";
 import { resolveRole } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
@@ -29,7 +30,6 @@ import {
   wakeRecipient,
   wakeState,
 } from "../store/wake.ts";
-import type { ReviewResult } from "./outcome.ts";
 import { readReadyHandoffs, type ReadyHandoff } from "./ready.ts";
 import { type RecordedDecisions, recordedDecisions } from "./recordedDecisions.ts";
 import {

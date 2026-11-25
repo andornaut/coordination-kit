@@ -1,4 +1,4 @@
-import { isRecord } from "../../adapters/shared/pyjson.ts";
+import { isRecord } from "../../core/pyjson.ts";
 import { canonicalJson } from "../eventCodec.ts";
 import { GENESIS, type Json, type StoredEvent, StoreError } from "../types.ts";
 

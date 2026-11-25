@@ -1,8 +1,8 @@
 // Doctor reports capabilities without sending, activating or changing registry state.
 import { parseArgs } from "node:util";
 
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../io.ts";
-import { loadLayout } from "../layout.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../core/io.ts";
+import { loadLayout } from "../core/layout.ts";
 import { readRegistry } from "../registry/store.ts";
 import { diagnoseHarness } from "../review/diagnostics.ts";
 

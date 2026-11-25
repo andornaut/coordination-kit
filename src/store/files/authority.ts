@@ -3,11 +3,11 @@ import { lstatSync, mkdirSync, realpathSync, type Stats } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { isRecord } from "../../adapters/shared/pyjson.ts";
-import { fsyncDirectory, readJson, writeJsonDurable } from "../../durable.ts";
-import type { Layout } from "../../layout.ts";
-import { withLock } from "../../lock.ts";
-import { systemGit } from "../../status/git.ts";
+import { fsyncDirectory, readJson, writeJsonDurable } from "../../core/durable.ts";
+import { systemGit } from "../../core/git.ts";
+import type { Layout } from "../../core/layout.ts";
+import { withLock } from "../../core/lock.ts";
+import { isRecord } from "../../core/pyjson.ts";
 import { GENESIS, StoreError } from "../types.ts";
 
 const MARKER = "coordination-authority.json";

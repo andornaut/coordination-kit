@@ -1,10 +1,10 @@
 // The writer fence: a caller is the registry role whose effective harness conversation ID equals
 // the caller's native ID. An opt-in proof port can bind a Codex child from its environment
 // beneath an exact registered parent. `--worker` is attribution only.
-import { isCanonicalUuid } from "../adapters/shared/ids.ts";
+import { isCanonicalUuid } from "../core/ids.ts";
+import { CONVERSATION_ID_PATTERN } from "../core/validate.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Harness, Registry } from "../registry/schema.ts";
-import { CONVERSATION_ID_PATTERN } from "../validate.ts";
 import { type Actor, StoreError } from "./types.ts";
 
 /** The environment variable each harness sets to the running conversation's native ID. */

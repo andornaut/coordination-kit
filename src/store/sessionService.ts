@@ -6,11 +6,11 @@
 // binding, which `harness select` makes effective. `handoff show` takes no caller.
 import { randomUUID } from "node:crypto";
 
+import { CONVERSATION_ID_PATTERN } from "../core/validate.ts";
 import { claudeProjectsDir, clearPredecessor } from "../registry/claudeLineage.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Harness, Registry } from "../registry/schema.ts";
 import { RevisionConflict, updateRegistry } from "../registry/store.ts";
-import { CONVERSATION_ID_PATTERN } from "../validate.ts";
 import type { Store } from "./db.ts";
 import {
   activeHandoff,

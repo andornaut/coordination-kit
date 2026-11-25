@@ -4,14 +4,20 @@
 // stdout and one `coordination-kit:` line on stderr.
 import { parseArgs } from "node:util";
 
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
-import { type GameLayout, gameLayout, type Layout, loadLayout, UnknownGame } from "../layout.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
+import {
+  type GameLayout,
+  gameLayout,
+  type Layout,
+  loadLayout,
+  UnknownGame,
+} from "../core/layout.ts";
+import { type CliIdentity, cliMember } from "../core/outcome.ts";
+import { cliIdentity } from "../core/version.ts";
 import { deliverReview, reviewDeliverLine } from "../review/deliver.ts";
-import { type CliIdentity, cliMember } from "../review/outcome.ts";
 import { showBrief } from "../review/storeBrief.ts";
 import { ingestEvents, type IngestResult } from "../store/ingest.ts";
 import { StoreError } from "../store/types.ts";
-import { cliIdentity } from "../version.ts";
 
 export const REVIEW_DELIVER_OPTIONS = {
   game: { type: "string" },

@@ -1,6 +1,6 @@
 import type { SQLInputValue } from "node:sqlite";
 
-import { isCanonicalUuid } from "../adapters/shared/ids.ts";
+import { isCanonicalUuid } from "../core/ids.ts";
 import type { Store } from "./db.ts";
 import {
   type Actor,

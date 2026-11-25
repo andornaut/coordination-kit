@@ -7,11 +7,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { channelStatusPath, readChannelStatus } from "../adapters/claude/channelStatus.ts";
 import { wakeFilePath, writeWakeFile } from "../adapters/claude/wakeFile.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Io } from "../io.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Io } from "../core/io.ts";
+import { projectConfig, writeFixtureJson } from "../core/testFixtures.ts";
 import { updateRegistry } from "../registry/store.ts";
 import { channelServer } from "../review/diagnostics.ts";
 import { claudeFixture, RECIPIENT } from "../review/fixtures.ts";
-import { projectConfig, writeFixtureJson } from "../testFixtures.ts";
 import { LINEAGE_SCAN_MS, runChannel } from "./channel.ts";
 
 function io(): Io & { errors: string[] } {

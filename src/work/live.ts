@@ -3,12 +3,12 @@
 // through the registry fence, then apply one store write. Only the owner may write.
 import { realpathSync } from "node:fs";
 
-import { type Layout, loadLayout } from "../layout.ts";
+import { type GitRunner, repositoryRoot } from "../core/git.ts";
+import { type Layout, loadLayout } from "../core/layout.ts";
+import { StateRootError } from "../core/stateRoot.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
-import { StateRootError } from "../stateRoot.ts";
 import { repositories, type Repository } from "../status/collect.ts";
-import { type GitRunner, repositoryRoot } from "../status/git.ts";
 import { dependentQuestions } from "../store/codexQuestions.ts";
 import { MEMORY, Store } from "../store/db.ts";
 import { fileWorkerCaller } from "../store/files/workerAccess.ts";
@@ -38,14 +38,14 @@ import {
   type WorkStage,
   type WorkWrite,
 } from "../store/work.ts";
-import { parseDecisions } from "./decisions.ts";
+import { parseDecisions } from "../workfiles/decisions.ts";
 import {
   CONVENTION_FILE,
   fieldIds,
   type FrontMatterValue,
   parseFrontMatter,
   readWorkFiles,
-} from "./files.ts";
+} from "../workfiles/files.ts";
 
 export interface Coordinator {
   readonly layout: Layout;

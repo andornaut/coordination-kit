@@ -7,9 +7,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
-import { loadLayout } from "../layout.ts";
-import { systemGit } from "../status/git.ts";
+import { systemGit } from "../core/git.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
+import { loadLayout } from "../core/layout.ts";
+import type { Options } from "../core/usage.ts";
 import { Store } from "../store/db.ts";
 import { planFileCompaction } from "../store/files/compactionPlan.ts";
 import type { CallerOptions } from "../store/identity.ts";
@@ -30,7 +31,6 @@ import {
 } from "../store/service.ts";
 import { type MessageLink, StoreError } from "../store/types.ts";
 import { importApprovalLedger } from "../work/approvals.ts";
-import type { Options } from "./usage.ts";
 
 const CALLER = {
   "native-id": { type: "string" },

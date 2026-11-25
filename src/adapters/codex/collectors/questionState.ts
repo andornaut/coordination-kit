@@ -5,9 +5,9 @@
 // clears guards, answers or reissues questions.
 import { performance } from "node:perf_hooks";
 
-import { isCanonicalUuid } from "../../shared/ids.ts";
-import { utcStamp } from "../../shared/isoformat.ts";
-import { isRecord, sameJson } from "../../shared/pyjson.ts";
+import { isCanonicalUuid } from "../../../core/ids.ts";
+import { utcStamp } from "../../../core/isoformat.ts";
+import { isRecord, sameJson } from "../../../core/pyjson.ts";
 import { NativeTimeout, type RpcClient } from "../rpc.ts";
 
 const MAX_CALLS = 256;

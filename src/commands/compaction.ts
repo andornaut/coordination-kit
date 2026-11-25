@@ -9,11 +9,11 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
-import { isCanonicalUuid, uuid5 } from "../adapters/shared/ids.ts";
-import { isRecord } from "../adapters/shared/pyjson.ts";
-import { fsyncDirectory, readJson } from "../durable.ts";
-import type { Handler } from "../io.ts";
-import { withLock } from "../lock.ts";
+import { fsyncDirectory, readJson } from "../core/durable.ts";
+import { isCanonicalUuid, uuid5 } from "../core/ids.ts";
+import type { Handler } from "../core/io.ts";
+import { withLock } from "../core/lock.ts";
+import { isRecord } from "../core/pyjson.ts";
 import { storePath, storeRoot } from "../store/db.ts";
 import { canonicalJson, REF, sha256 } from "../store/eventCodec.ts";
 import { fileAuthority } from "../store/files/authority.ts";

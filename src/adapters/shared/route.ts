@@ -3,12 +3,17 @@
 // recipient is the host game's reports.recipient.
 import { existsSync } from "node:fs";
 
-import { loadReportsConfig } from "../../config.ts";
-import { readJson } from "../../durable.ts";
-import { type GameCoordinatorConfig, gameLayout, type Layout, roleKeys } from "../../layout.ts";
+import { loadReportsConfig } from "../../core/config.ts";
+import { readJson } from "../../core/durable.ts";
+import {
+  type GameCoordinatorConfig,
+  gameLayout,
+  type Layout,
+  roleKeys,
+} from "../../core/layout.ts";
+import { isRecord } from "../../core/pyjson.ts";
 import { resolveConversation, resolveHarness, UnknownRole } from "../../registry/resolve.ts";
 import type { Harness, Registry } from "../../registry/schema.ts";
-import { isRecord } from "./pyjson.ts";
 
 export interface RoleRoute {
   readonly schema: 2;

@@ -2,9 +2,9 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { loadLayout, roleKeys } from "../layout.ts";
-import { holdLock, LockBusy } from "../lock.ts";
-import { makeFixture, registryInput, writeFixtureJson } from "../testFixtures.ts";
+import { loadLayout, roleKeys } from "../core/layout.ts";
+import { holdLock, LockBusy } from "../core/lock.ts";
+import { makeFixture, registryInput, writeFixtureJson } from "../core/testFixtures.ts";
 import {
   createRegistry,
   readRegistry,

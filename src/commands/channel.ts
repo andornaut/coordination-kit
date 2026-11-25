@@ -10,15 +10,15 @@ import { parseArgs } from "node:util";
 import { type LineWriter, serve } from "../adapters/claude/channel.ts";
 import { writeChannelStatus } from "../adapters/claude/channelStatus.ts";
 import { wakeFilePath, WakeWatcher } from "../adapters/claude/wakeFile.ts";
-import { isCanonicalUuid } from "../adapters/shared/ids.ts";
-import { gameRecipients } from "../config.ts";
-import { EXIT_INVALID, EXIT_USAGE, type Handler, type Io } from "../io.ts";
-import { gameLayout, type Layout, loadLayout } from "../layout.ts";
+import { gameRecipients } from "../core/config.ts";
+import { isCanonicalUuid } from "../core/ids.ts";
+import { EXIT_INVALID, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
+import { gameLayout, type Layout, loadLayout } from "../core/layout.ts";
+import { cliIdentity } from "../core/version.ts";
 import { claudeProjectsDir, clearSuccessor } from "../registry/claudeLineage.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry, RegistryMissing } from "../registry/store.ts";
-import { cliIdentity } from "../version.ts";
 import { SPECS } from "./spec.ts";
 
 export interface ChannelStreams {

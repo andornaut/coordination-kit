@@ -16,20 +16,25 @@ import { dirname, join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
-import { loadLayout } from "../layout.ts";
+import { type GitRunner, systemGit } from "../core/git.ts";
+import { loadLayout } from "../core/layout.ts";
+import {
+  CLAUDE_COORDINATOR,
+  CLAUDE_TECH,
+  CODEX_TECH,
+  stateRootFixture,
+} from "../core/testFixtures.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
 import { Store } from "../store/db.ts";
 import { sendMessage } from "../store/messages.ts";
 import { openQuestion, setHold } from "../store/questions.ts";
 import { importRequest, type RequestImport } from "../store/requests.ts";
-import { CLAUDE_COORDINATOR, CLAUDE_TECH, CODEX_TECH, stateRootFixture } from "../testFixtures.ts";
 import {
   collectStatus,
   type StatusItem,
   type StatusOptions,
   type StatusReport,
 } from "./collect.ts";
-import { type GitRunner, systemGit } from "./git.ts";
 import { DIGEST_HEADINGS } from "./markdown.ts";
 
 const GAME = "sample-game";

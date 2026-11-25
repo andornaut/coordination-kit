@@ -4,14 +4,19 @@
 // decision and question records.
 import type { DatabaseSync } from "node:sqlite";
 
+import { type GitRunner, readMainFiles } from "../core/git.ts";
 import type { Repository } from "../status/collect.ts";
-import { type GitRunner, readMainFiles } from "../status/git.ts";
 import type { Store } from "../store/db.ts";
 import { listQuestions } from "../store/questions.ts";
 import { StoreError } from "../store/types.ts";
 import { readWorkRecords } from "../store/work.ts";
-import { parseDecisions } from "./decisions.ts";
-import { CONVENTION_FILE, fieldIds, type FrontMatterValue, parseFrontMatter } from "./files.ts";
+import { parseDecisions } from "../workfiles/decisions.ts";
+import {
+  CONVENTION_FILE,
+  fieldIds,
+  type FrontMatterValue,
+  parseFrontMatter,
+} from "../workfiles/files.ts";
 import { type Coordinator, storeDecisions, workOwner } from "./live.ts";
 
 export const EDGE_KINDS = [

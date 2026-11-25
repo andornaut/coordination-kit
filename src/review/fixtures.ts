@@ -9,9 +9,14 @@ import {
   routeRecipient,
   routeScope,
 } from "../adapters/shared/route.ts";
-import { type GameLayout, gameLayout, type Layout, loadLayout } from "../layout.ts";
+import { type GameLayout, gameLayout, type Layout, loadLayout } from "../core/layout.ts";
+import {
+  CLAUDE_COORDINATOR,
+  CLAUDE_TECH,
+  makeFixture,
+  registryInput,
+} from "../core/testFixtures.ts";
 import { createRegistry, readRegistry, type Registry } from "../registry/index.ts";
-import { CLAUDE_COORDINATOR, CLAUDE_TECH, makeFixture, registryInput } from "../testFixtures.ts";
 
 export const RECIPIENT = CLAUDE_COORDINATOR;
 export const TECH = CLAUDE_TECH;

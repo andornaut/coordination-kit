@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
-import { loadLayout } from "../layout.ts";
+import { loadLayout } from "../core/layout.ts";
 import { Store, storePath } from "../store/db.ts";
 import { openFileJournal } from "../store/files/journal.ts";
 import { activateMigration, prepareMigration } from "../store/files/migration.ts";

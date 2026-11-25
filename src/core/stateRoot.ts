@@ -5,9 +5,9 @@
 import { lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-import { isRecord } from "./adapters/shared/pyjson.ts";
 import { readJsonIfExists } from "./durable.ts";
 import type { Layout } from "./layout.ts";
+import { isRecord } from "./pyjson.ts";
 
 export const STATE_ROOT_SCHEMA = 2;
 

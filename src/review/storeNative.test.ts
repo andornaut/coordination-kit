@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 
 import { decisionDirectory } from "../adapters/shared/decisions.ts";
-import { gameLayout, type Layout } from "../layout.ts";
+import { gameLayout, type Layout } from "../core/layout.ts";
+import { writeFixtureJson } from "../core/testFixtures.ts";
 import { ART, GAME, storeFixture } from "../store/testStore.ts";
-import { writeFixtureJson } from "../testFixtures.ts";
 import { type NativeCollect, surveyNative } from "./storeNative.ts";
 
 const CHIBI = "chibis-way-home";

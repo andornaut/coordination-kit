@@ -1,4 +1,4 @@
-import { isRecord } from "../../adapters/shared/pyjson.ts";
+import { isRecord } from "../../core/pyjson.ts";
 import { canonicalJson, eventHash, normalizeLinks, sha256 } from "../eventCodec.ts";
 import {
   GENESIS,

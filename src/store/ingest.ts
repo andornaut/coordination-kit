@@ -17,10 +17,10 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 
-import { writeDurable } from "../durable.ts";
-import type { GameLayout, Layout } from "../layout.ts";
-import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
-import type { ReasonToken, SeamStatus } from "../review/outcome.ts";
+import { writeDurable } from "../core/durable.ts";
+import type { GameLayout, Layout } from "../core/layout.ts";
+import { holdLock, LockBusy, type LockHandle } from "../core/lock.ts";
+import type { ReasonToken, SeamStatus } from "../core/outcome.ts";
 import { Store } from "./db.ts";
 import { REF } from "./eventCodec.ts";
 import { DELIVERY_KIT_ACTOR } from "./identity.ts";

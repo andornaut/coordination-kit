@@ -1,4 +1,4 @@
-import type { Handler } from "../io.ts";
+import type { Handler } from "../core/io.ts";
 import { storePath } from "../store/db.ts";
 import { inspectFileAuthority } from "../store/files/authority.ts";
 import { activateMigration, prepareMigration } from "../store/files/migration.ts";

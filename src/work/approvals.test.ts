@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
-import { EXIT_INVALID, EXIT_OK } from "../io.ts";
-import { loadLayout } from "../layout.ts";
+import { EXIT_INVALID, EXIT_OK } from "../core/io.ts";
+import { loadLayout } from "../core/layout.ts";
 import { Store, storePath } from "../store/db.ts";
 import { StoreError } from "../store/types.ts";
 import { importApprovalLedger } from "./approvals.ts";

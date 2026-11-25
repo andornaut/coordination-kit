@@ -1,6 +1,6 @@
 // `request close`: the owner of an imported ledger request closes it, optionally naming the work
 // item that now carries it. Prints one JSON object; a refusal prints `coordination-kit: CODE`.
-import type { Handler } from "../io.ts";
+import type { Handler } from "../core/io.ts";
 import { resolveCaller } from "../store/identity.ts";
 import { closeRequest } from "../store/requests.ts";
 import { registry, withStore } from "../store/service.ts";

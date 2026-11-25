@@ -1,9 +1,9 @@
 // Readiness probes send nothing and change no registry or activation state.
 import { parseArgs } from "node:util";
 
-import { pyJsonDumps } from "../adapters/shared/pyjson.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
-import { type Layout, loadLayout } from "../layout.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
+import { type Layout, loadLayout } from "../core/layout.ts";
+import { pyJsonDumps } from "../core/pyjson.ts";
 import type { Harness, Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 import { effectiveReadiness, harnessReadiness, type ReadinessScope } from "../review/readiness.ts";

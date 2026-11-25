@@ -1,9 +1,9 @@
 // Messages this kit stores on the runner's behalf: runner events, COMPLETE, review briefs and
 // review health. The sender is `delivery-kit`, the runner's registry role; IDs derive from what
 // the message is about, so a repeated call stores nothing new.
-import { NAMESPACE_URL, uuid5 } from "../adapters/shared/ids.ts";
-import { loadReportsConfig } from "../config.ts";
-import type { GameLayout, Layout } from "../layout.ts";
+import { loadReportsConfig } from "../core/config.ts";
+import { NAMESPACE_URL, uuid5 } from "../core/ids.ts";
+import type { GameLayout, Layout } from "../core/layout.ts";
 import { resolveRole } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
 import type { Store } from "./db.ts";

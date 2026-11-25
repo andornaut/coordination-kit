@@ -2,10 +2,10 @@
 // a Markdown digest. --root names the coordinator, as for every non-work command.
 import { parseArgs } from "node:util";
 
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../io.ts";
+import { systemGit } from "../core/git.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../core/io.ts";
 import { collectStatus, incomplete, StatusUsageError } from "../status/collect.ts";
 import { DEFAULT_VERIFY_SINCE, STATE_FILTERS, type StateFilter } from "../status/derive.ts";
-import { systemGit } from "../status/git.ts";
 import { renderMarkdown } from "../status/markdown.ts";
 
 export const STATUS_OPTIONS = {

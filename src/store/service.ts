@@ -3,8 +3,8 @@
 // var/registry.json; nothing is cached across calls.
 import { randomUUID } from "node:crypto";
 
-import { isCanonicalUuid } from "../adapters/shared/ids.ts";
-import type { Layout } from "../layout.ts";
+import { isCanonicalUuid } from "../core/ids.ts";
+import type { Layout } from "../core/layout.ts";
 import { resolveRole } from "../registry/resolve.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";

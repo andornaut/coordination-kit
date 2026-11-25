@@ -6,9 +6,9 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-import { StateRootError } from "../stateRoot.ts";
+import { type GitRunner, readMainFiles } from "../core/git.ts";
+import { StateRootError } from "../core/stateRoot.ts";
 import type { Repository } from "../status/collect.ts";
-import { type GitRunner, readMainFiles } from "../status/git.ts";
 import { MEMORY, Store } from "../store/db.ts";
 import { type CallerOptions, resolveCaller } from "../store/identity.ts";
 import { holdOpen } from "../store/projections/questions.ts";
@@ -24,7 +24,7 @@ import {
   type WorkStage,
   workText,
 } from "../store/work.ts";
-import { CONVENTION_FILE, parseFrontMatter } from "./files.ts";
+import { CONVENTION_FILE, parseFrontMatter } from "../workfiles/files.ts";
 import { type Coordinator, openCoordinator } from "./live.ts";
 
 export const APPROVAL_LEDGER_SOURCE = "approval-ledger";

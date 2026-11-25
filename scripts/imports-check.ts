@@ -1,5 +1,6 @@
-// The src/ import graph has no cycles, type-only imports included. Reads the sources with the
-// TypeScript parser and follows relative specifiers only. Runs in lint.
+// The src/ import graph: no cycles, type-only imports included, and every module outside the tests
+// imports only its own layer or a lower one. Reads the sources with the TypeScript parser and
+// follows relative specifiers only. Runs in lint.
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +8,28 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 import { isMain } from "./check.ts";
+
+/**
+ * The layers of src/, lowest first, each a list of top-level directories. `""` is the files
+ * directly in src/: the CLI entry points and the public build barrels.
+ */
+export const LAYERS: readonly (readonly string[])[] = [
+  ["core"],
+  ["registry"],
+  ["workfiles"],
+  ["adapters"],
+  ["store"],
+  ["review", "status", "work"],
+  ["commands"],
+  [""],
+];
+
+/** The index in LAYERS of a path under src/, or -1. */
+export function layerOf(path: string): number {
+  const [, directory = "", ...rest] = path.split("/");
+  const name = rest.length === 0 ? "" : directory;
+  return LAYERS.findIndex((layer) => layer.includes(name));
+}
 
 /** Each module's relative imports, keyed and valued by path relative to the root. */
 export type Graph = ReadonlyMap<string, readonly string[]>;
@@ -65,9 +88,28 @@ export function cycles(graph: Graph): string[][] {
   return found;
 }
 
+/** Each import from a higher layer, and each module in no layer. Tests are exempt. */
+export function layerFindings(graph: Graph): string[] {
+  const findings: string[] = [];
+  for (const [path, targets] of graph) {
+    if (path.endsWith(".test.ts")) continue;
+    const layer = layerOf(path);
+    if (layer < 0) {
+      findings.push(`${path} is in no layer`);
+      continue;
+    }
+    for (const target of targets)
+      if (layerOf(target) > layer) findings.push(`${path} imports ${target} from a higher layer`);
+  }
+  return findings;
+}
+
 /** One message per finding. */
 export function importFindings(graph: Graph): string[] {
-  return cycles(graph).map((component) => `import cycle: ${component.join(" -> ")}`);
+  return [
+    ...cycles(graph).map((component) => `import cycle: ${component.join(" -> ")}`),
+    ...layerFindings(graph),
+  ];
 }
 
 if (isMain(import.meta.url)) {

@@ -1,6 +1,6 @@
 // Immutable role-owned views of the verified event stream. The journal remains complete when
 // ownership is unavailable. A projection never assigns a worker from an attribution label.
-import { isCanonicalUuid } from "../../adapters/shared/ids.ts";
+import { isCanonicalUuid } from "../../core/ids.ts";
 import { payloadText as text } from "../eventCodec.ts";
 import { handoffHoldId } from "../projections/handoffs.ts";
 import { WORK_KINDS } from "../projections/work.ts";

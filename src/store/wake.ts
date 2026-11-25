@@ -15,8 +15,8 @@ import {
 } from "../adapters/codex/queue.ts";
 import { connectControl, type RpcClient } from "../adapters/codex/rpc.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
-import { isRecord } from "../adapters/shared/pyjson.ts";
-import type { Layout } from "../layout.ts";
+import type { Layout } from "../core/layout.ts";
+import { isRecord } from "../core/pyjson.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Harness } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";

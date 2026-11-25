@@ -2,7 +2,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-import type { CliIdentity } from "./review/outcome.ts";
+import type { CliIdentity } from "./outcome.ts";
 
 declare const __CK_VERSION__: string;
 

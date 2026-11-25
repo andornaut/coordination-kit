@@ -5,8 +5,8 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
-import type { Layout } from "../layout.ts";
-import { stateRoot } from "../stateRoot.ts";
+import type { Layout } from "../core/layout.ts";
+import { stateRoot } from "../core/stateRoot.ts";
 import { canonicalJson, eventHash, rowEvent, sha256 } from "./eventCodec.ts";
 import type { FileProjection } from "./fileProjection.ts";
 import { fileAuthority } from "./files/authority.ts";

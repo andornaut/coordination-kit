@@ -16,11 +16,11 @@ import { dirname, join, resolve } from "node:path";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 
 import { readRoleRoute } from "../../adapters/shared/route.ts";
-import { loadProjectConfig } from "../../config.ts";
-import { fsyncDirectory } from "../../durable.ts";
-import { gameLayout, type Layout, loadLayout, PROJECT_CONFIG_FILE } from "../../layout.ts";
+import { loadProjectConfig } from "../../core/config.ts";
+import { fsyncDirectory } from "../../core/durable.ts";
+import { gameLayout, type Layout, loadLayout, PROJECT_CONFIG_FILE } from "../../core/layout.ts";
+import { configuredStateRoot, stateRootConfigPath } from "../../core/stateRoot.ts";
 import { readRegistry } from "../../registry/store.ts";
-import { configuredStateRoot, stateRootConfigPath } from "../../stateRoot.ts";
 import { Store, STORE_FILE, storeRoot } from "../db.ts";
 import { canonicalJson, eventHash } from "../eventCodec.ts";
 import { CURSOR_FILE, LOG_FILE, QUARANTINE_FILE, readCursor } from "../ingest.ts";

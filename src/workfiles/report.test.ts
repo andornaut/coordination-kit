@@ -6,9 +6,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, main } from "../cli.ts";
-import { loadLayout } from "../layout.ts";
+import { loadLayout } from "../core/layout.ts";
+import { makeFixture, registryInput } from "../core/testFixtures.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
-import { makeFixture, registryInput } from "../testFixtures.ts";
 import { reportWork } from "./report.ts";
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "delivery-kit");

@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
+import { REASON_TOKENS, reasonToken } from "../core/outcome.ts";
 import { reviewResultsDir } from "../review/deliver.ts";
 import { type ClaudeFixture, claudeFixture, GAME, SLOT } from "../review/fixtures.ts";
-import { REASON_TOKENS, reasonToken } from "../review/outcome.ts";
 
 const VERSION = "0.0.0-test";
 const ISO = new Date(SLOT * 1000).toISOString();

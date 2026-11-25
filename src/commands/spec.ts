@@ -1,5 +1,6 @@
 // Every command's options: the one source for argument parsing and for the help text, so a flag a
 // command accepts always appears in `coordination-kit --help`.
+import { type CommandSpec, formSynopsis, usageText } from "../core/usage.ts";
 import {
   COMPACTION_ACTIVATE_OPTIONS,
   COMPACTION_CANCEL_OPTIONS,
@@ -51,7 +52,6 @@ import {
   STORE_REBUILD_OPTIONS,
   STORE_RETIRE_OPTIONS,
 } from "./store.ts";
-import { type CommandSpec, formSynopsis, usageText } from "./usage.ts";
 import {
   WORK_BLOCK_OPTIONS,
   WORK_CHECK_OPTIONS,
@@ -61,7 +61,7 @@ import {
   WORK_START_OPTIONS,
   WORK_WRITE_OPTIONS,
 } from "./work.ts";
-export type { CommandSpec, Options } from "./usage.ts";
+export type { CommandSpec, Options } from "../core/usage.ts";
 export const BINARY = "coordination-kit";
 /** The placeholder each string option shows in help. */
 const VALUES: Readonly<Record<string, string>> = {

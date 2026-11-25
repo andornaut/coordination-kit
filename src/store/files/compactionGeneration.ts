@@ -2,9 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
-import { isCanonicalUuid } from "../../adapters/shared/ids.ts";
-import { isRecord } from "../../adapters/shared/pyjson.ts";
-import { readJson, writeDurable } from "../../durable.ts";
+import { readJson, writeDurable } from "../../core/durable.ts";
+import { isCanonicalUuid } from "../../core/ids.ts";
+import { isRecord } from "../../core/pyjson.ts";
 import { canonicalJson } from "../eventCodec.ts";
 import type { FileProjection } from "../fileProjection.ts";
 import { StoreError } from "../types.ts";

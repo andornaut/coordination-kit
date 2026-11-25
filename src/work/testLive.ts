@@ -5,10 +5,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import type { Io } from "../io.ts";
-import { loadLayout } from "../layout.ts";
+import { systemGit } from "../core/git.ts";
+import type { Io } from "../core/io.ts";
+import { loadLayout } from "../core/layout.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
-import { systemGit } from "../status/git.ts";
 import type { LiveContext } from "./live.ts";
 
 export const GAME = "sample-game";

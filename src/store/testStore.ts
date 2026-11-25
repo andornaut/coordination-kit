@@ -1,8 +1,8 @@
 // Scratch coordinator trees with a registry for the store tests. Synthetic IDs only.
 import type { RpcClient } from "../adapters/codex/rpc.ts";
-import { type Layout, loadLayout } from "../layout.ts";
+import { type Layout, loadLayout } from "../core/layout.ts";
+import { makeFixture } from "../core/testFixtures.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
-import { makeFixture } from "../testFixtures.ts";
 
 export const COORDINATOR = "00000000-0000-4000-8000-0000000000c1";
 export const TECH = "00000000-0000-4000-8000-0000000000c2";

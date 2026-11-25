@@ -4,8 +4,8 @@
 // onto the caller's main work file, left unstaged.
 import { readFileSync } from "node:fs";
 
+import { systemGit } from "../core/git.ts";
 import { resolveHarness } from "../registry/resolve.ts";
-import { systemGit } from "../status/git.ts";
 import { type QuestionEvidence, readCodexQuestionEvidence } from "./codexQuestionEvidence.ts";
 import { nativeQuestionIdentity, type NativeQuestionProof } from "./codexQuestions.ts";
 import type { Store } from "./db.ts";

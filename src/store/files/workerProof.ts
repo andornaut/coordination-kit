@@ -1,5 +1,5 @@
-import { isCanonicalUuid } from "../../adapters/shared/ids.ts";
-import { isRecord } from "../../adapters/shared/pyjson.ts";
+import { isCanonicalUuid } from "../../core/ids.ts";
+import { isRecord } from "../../core/pyjson.ts";
 import type { Registry } from "../../registry/schema.ts";
 import {
   DELIVERY_KIT_ROLE,

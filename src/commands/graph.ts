@@ -3,8 +3,8 @@
 // `coordination-kit: CODE` and exits 1, a usage error exits 2.
 import { parseArgs } from "node:util";
 
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
-import { type GitRunner, systemGit } from "../status/git.ts";
+import { type GitRunner, systemGit } from "../core/git.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
 import { Store } from "../store/db.ts";
 import { StoreError } from "../store/types.ts";
 import {

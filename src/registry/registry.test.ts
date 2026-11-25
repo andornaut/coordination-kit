@@ -5,10 +5,15 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { type Layout, loadLayout } from "../layout.ts";
-import { holdLock, LockBusy, LockError, lockIsFree } from "../lock.ts";
-import { CLAUDE_COORDINATOR, CODEX_TECH, makeFixture, registryInput } from "../testFixtures.ts";
-import { ValidationError } from "../validate.ts";
+import { type Layout, loadLayout } from "../core/layout.ts";
+import { holdLock, LockBusy, LockError, lockIsFree } from "../core/lock.ts";
+import {
+  CLAUDE_COORDINATOR,
+  CODEX_TECH,
+  makeFixture,
+  registryInput,
+} from "../core/testFixtures.ts";
+import { ValidationError } from "../core/validate.ts";
 import {
   createRegistry,
   readRegistry,

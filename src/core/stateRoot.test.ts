@@ -3,9 +3,9 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { storePath } from "../store/db.ts";
 import { loadLayout } from "./layout.ts";
 import { stateRoot, StateRootError } from "./stateRoot.ts";
-import { storePath } from "./store/db.ts";
 import { makeFixture, stateRootFixture } from "./testFixtures.ts";
 
 function layout() {

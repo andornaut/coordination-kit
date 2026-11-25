@@ -4,11 +4,9 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { isRecord } from "../adapters/shared/pyjson.ts";
-import { readJsonIfExists, writeJsonDurable } from "../durable.ts";
-import type { GameLayout, Layout } from "../layout.ts";
-import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
-import type { WakePorts } from "../store/wake.ts";
+import { readJsonIfExists, writeJsonDurable } from "../core/durable.ts";
+import type { GameLayout, Layout } from "../core/layout.ts";
+import { holdLock, LockBusy, type LockHandle } from "../core/lock.ts";
 import {
   type CliIdentity,
   cliMember,
@@ -16,7 +14,9 @@ import {
   type ReasonToken,
   type ReviewResult,
   type SeamStatus,
-} from "./outcome.ts";
+} from "../core/outcome.ts";
+import { isRecord } from "../core/pyjson.ts";
+import type { WakePorts } from "../store/wake.ts";
 import { storeReview } from "./storeBrief.ts";
 import type { NativeCollect } from "./storeNative.ts";
 

@@ -1,6 +1,6 @@
 // Native queue inventory (thread/queue/list) and the native half of an explicit acknowledgement
 // (thread/queue/delete).
-import { dumpsJson, isRecord, type PyJson, sameJson } from "../shared/pyjson.ts";
+import { dumpsJson, isRecord, type PyJson, sameJson } from "../../core/pyjson.ts";
 import type { RpcClient } from "./rpc.ts";
 
 export interface QueueEntry {

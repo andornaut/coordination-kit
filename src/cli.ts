@@ -67,10 +67,24 @@ import {
   workStart,
   workUnblock,
 } from "./commands/work.ts";
-import { coordinatorRoot, EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "./io.ts";
-import { cliIdentity, VERSION } from "./version.ts";
-export { EXIT_INVALID, EXIT_OK, EXIT_REFUSED, EXIT_USAGE, type Handler, type Io } from "./io.ts";
-export { SOURCE_DIGEST, VERSION } from "./version.ts";
+import {
+  coordinatorRoot,
+  EXIT_INVALID,
+  EXIT_OK,
+  EXIT_USAGE,
+  type Handler,
+  type Io,
+} from "./core/io.ts";
+import { cliIdentity, VERSION } from "./core/version.ts";
+export {
+  EXIT_INVALID,
+  EXIT_OK,
+  EXIT_REFUSED,
+  EXIT_USAGE,
+  type Handler,
+  type Io,
+} from "./core/io.ts";
+export { SOURCE_DIGEST, VERSION } from "./core/version.ts";
 export const COMMANDS: readonly Command[] = Object.keys(SPECS) as Command[];
 export type { Command };
 /** Help text, generated from each command's parser options and grouped by audience. */

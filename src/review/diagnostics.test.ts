@@ -5,9 +5,9 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { writeChannelStatus } from "../adapters/claude/channelStatus.ts";
 import { type FakeControl, startFakeControl } from "../adapters/codex/testControlSocket.ts";
-import { loadLayout } from "../layout.ts";
+import { loadLayout } from "../core/layout.ts";
+import { CLAUDE_TECH, CODEX_TECH, makeFixture, registryInput } from "../core/testFixtures.ts";
 import { createRegistry, readRegistry, type Registry } from "../registry/index.ts";
-import { CLAUDE_TECH, CODEX_TECH, makeFixture, registryInput } from "../testFixtures.ts";
 import { diagnoseHarness, stableChannelCommand } from "./diagnostics.ts";
 
 const ROLE = "archies-dog-walks/tech";

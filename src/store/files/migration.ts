@@ -2,10 +2,10 @@ import { createHash } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-import { isRecord } from "../../adapters/shared/pyjson.ts";
-import { readJson, writeJsonDurable } from "../../durable.ts";
-import type { Layout } from "../../layout.ts";
-import { withLock } from "../../lock.ts";
+import { readJson, writeJsonDurable } from "../../core/durable.ts";
+import type { Layout } from "../../core/layout.ts";
+import { withLock } from "../../core/lock.ts";
+import { isRecord } from "../../core/pyjson.ts";
 import { readRegistry } from "../../registry/store.ts";
 import { Store, storePath } from "../db.ts";
 import { canonicalJson } from "../eventCodec.ts";

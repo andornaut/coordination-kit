@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
-import { gameLayout } from "../layout.ts";
+import { gameLayout } from "../core/layout.ts";
 import { updateRegistry } from "../registry/store.ts";
 import { showBrief, storeReview } from "../review/storeBrief.ts";
 import { Store } from "../store/db.ts";

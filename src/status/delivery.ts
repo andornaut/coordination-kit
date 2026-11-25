@@ -4,7 +4,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { Commit, CommitRef, History } from "./git.ts";
+import type { Commit, CommitRef, History } from "../core/git.ts";
 
 const WORK_PREFIX = "docs/work/";
 const DESIGN_PREFIX = "docs/design/";

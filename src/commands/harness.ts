@@ -1,9 +1,9 @@
 // Scoped selection is a revision-checked registry mutation, separate from provider activation.
 import { parseArgs } from "node:util";
 
-import { dumpsJson } from "../adapters/shared/pyjson.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../io.ts";
-import { loadLayout } from "../layout.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../core/io.ts";
+import { loadLayout } from "../core/layout.ts";
+import { dumpsJson } from "../core/pyjson.ts";
 import { selectHarness } from "../registry/selection.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 

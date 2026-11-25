@@ -4,8 +4,8 @@ import { collectQuestionState } from "../adapters/codex/collectors/questionState
 import { connectControl } from "../adapters/codex/rpc.ts";
 import { decisionDirectory, decisionRecord } from "../adapters/shared/decisions.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
-import { isRecord } from "../adapters/shared/pyjson.ts";
-import type { Layout } from "../layout.ts";
+import type { Layout } from "../core/layout.ts";
+import { isRecord } from "../core/pyjson.ts";
 import type { NativeQuestionProof } from "./codexQuestions.ts";
 import type { QuestionView } from "./questions.ts";
 import type { NativeQuestionIdentity } from "./types.ts";

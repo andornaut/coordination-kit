@@ -4,8 +4,9 @@
 import { realpathSync } from "node:fs";
 import { basename, resolve } from "node:path";
 
-import type { Io } from "../io.ts";
-import { gameLayout, type Layout, loadLayout } from "../layout.ts";
+import { type GitRunner, readHistory, readMainFiles, repositoryRoot } from "../core/git.ts";
+import type { Io } from "../core/io.ts";
+import { gameLayout, type Layout, loadLayout } from "../core/layout.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 import type { HoldView } from "../store/policyHolds.ts";
@@ -13,7 +14,7 @@ import type { QuestionView } from "../store/questions.ts";
 import type { RequestRecord } from "../store/requests.ts";
 import type { UnreadMessage } from "../store/types.ts";
 import type { WorkRecord } from "../store/work.ts";
-import { CONVENTION_FILE, fieldIds, parseFrontMatter } from "../work/files.ts";
+import { CONVENTION_FILE, fieldIds, parseFrontMatter } from "../workfiles/files.ts";
 import {
   deploymentMarks,
   type DeployPoint,
@@ -32,7 +33,6 @@ import {
   deriveWorkFile,
   type StateFilter,
 } from "./derive.ts";
-import { type GitRunner, readHistory, readMainFiles, repositoryRoot } from "./git.ts";
 import { readStoreWork, type StoreWorkSnapshot } from "./sources.ts";
 
 export const STATUS_SCHEMA = 2;

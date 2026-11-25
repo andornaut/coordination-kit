@@ -1,7 +1,8 @@
 // `session start` and `handoff open|ready|state|active|show`. Writers identify the caller through
 // the registry fence. Each prints one JSON object on stdout; a refusal prints
 // `coordination-kit: CODE` on stderr and exits 1, and a usage error exits 2.
-import type { Handler } from "../io.ts";
+import type { Handler } from "../core/io.ts";
+import { VERSION } from "../core/version.ts";
 import { type Harness, HARNESSES } from "../registry/schema.ts";
 import type { HandoffState } from "../store/handoffs.ts";
 import {
@@ -12,7 +13,6 @@ import {
   storeHandoffState,
   storeSessionStart,
 } from "../store/sessionService.ts";
-import { VERSION } from "../version.ts";
 import { callerOf, required, run, text, Usage } from "./store.ts";
 
 const CALLER = {

@@ -1,7 +1,7 @@
 // var/registry.json schema version 1, shared by coordination-kit, delivery-kit and the game-sessions skills.
 // The skills own every field except operations.*.lastAdoption, reserved for supported resident-adoption recording.
 // Registry state records ownership; it never proves activation on its own.
-import { type GameCoordinatorConfig, roleKeys } from "../layout.ts";
+import { type GameCoordinatorConfig, roleKeys } from "../core/layout.ts";
 import {
   checkArray,
   checkEnum,
@@ -13,7 +13,7 @@ import {
   checkString,
   CONVERSATION_ID_PATTERN,
   Issues,
-} from "../validate.ts";
+} from "../core/validate.ts";
 
 export const HARNESSES = ["claude", "codex"] as const;
 export type Harness = (typeof HARNESSES)[number];

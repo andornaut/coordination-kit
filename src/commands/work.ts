@@ -3,6 +3,7 @@
 // finish|show|history`. The coordinator root for live state comes only from the environment.
 import { parseArgs } from "node:util";
 
+import { systemGit } from "../core/git.ts";
 import {
   coordinatorRoot,
   EXIT_INVALID,
@@ -10,12 +11,10 @@ import {
   EXIT_USAGE,
   type Handler,
   type Io,
-} from "../io.ts";
-import { systemGit } from "../status/git.ts";
+} from "../core/io.ts";
 import type { CallerOptions } from "../store/identity.ts";
 import { StoreError } from "../store/types.ts";
 import { WORK_STAGES, type WorkStage } from "../store/work.ts";
-import { checkWork, type Finding, type FindingCode } from "../work/check.ts";
 import {
   type LiveContext,
   unrecordedDecisions,
@@ -28,7 +27,8 @@ import {
   workStart as startService,
   workUnblock as unblockService,
 } from "../work/live.ts";
-import { reportWork } from "../work/report.ts";
+import { checkWork, type Finding, type FindingCode } from "../workfiles/check.ts";
+import { reportWork } from "../workfiles/report.ts";
 
 export const WORK_OPTIONS = {} as const;
 export const WORK_CHECK_OPTIONS = { decisions: { type: "boolean" } } as const;

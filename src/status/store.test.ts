@@ -3,7 +3,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { loadLayout } from "../layout.ts";
+import { systemGit } from "../core/git.ts";
+import { loadLayout } from "../core/layout.ts";
 import { Store, storePath } from "../store/db.ts";
 import {
   workBlock,
@@ -15,7 +16,6 @@ import {
 } from "../work/live.ts";
 import { commit, GAME, IDS, KIT, live, liveFixture, workFile } from "../work/testLive.ts";
 import { collectStatus, type StatusItem } from "./collect.ts";
-import { systemGit } from "./git.ts";
 
 const SHA = "abcdef0123456789abcdef0123456789abcdef01";
 

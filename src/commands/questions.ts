@@ -3,7 +3,7 @@
 // fence and refuse any other owner's record. Each prints one JSON object on stdout; a refusal
 // prints `coordination-kit: CODE` on stderr and exits 1, and a usage error exits 2.
 
-import type { Handler } from "../io.ts";
+import type { Handler } from "../core/io.ts";
 import { HOLD_STATES, type HoldState } from "../store/policyHolds.ts";
 import { normalizeOptions, QUESTION_STATES, type QuestionState } from "../store/questions.ts";
 import {

@@ -9,15 +9,15 @@ export {
   routeRecipient,
   validateRoleRoute,
 } from "./adapters/shared/route.ts";
-export { deliverReview, type ReviewOptions } from "./review/deliver.ts";
-export { coordinationEmit, coordinationNotice } from "./review/emit.ts";
 export {
   type CliIdentity,
   REASON_TOKENS,
   type ReasonToken,
   type ReviewResult,
   type SeamStatus,
-} from "./review/outcome.ts";
+} from "./core/outcome.ts";
+export { deliverReview, type ReviewOptions } from "./review/deliver.ts";
+export { coordinationEmit, coordinationNotice } from "./review/emit.ts";
 export {
   BRIEF_MAX_BYTES,
   BRIEF_MAX_LINES,

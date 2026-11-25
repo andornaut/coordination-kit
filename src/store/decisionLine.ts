@@ -5,10 +5,10 @@
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { writeDurable } from "../durable.ts";
-import type { Layout } from "../layout.ts";
+import { writeDurable } from "../core/durable.ts";
+import { type GitRunner, repositoryRoot } from "../core/git.ts";
+import type { Layout } from "../core/layout.ts";
 import type { Registry } from "../registry/schema.ts";
-import { type GitRunner, repositoryRoot } from "../status/git.ts";
 import { StoreError } from "./types.ts";
 
 export interface WorkFileTarget {

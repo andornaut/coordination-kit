@@ -4,7 +4,14 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { cycles, importFindings, readGraph, specifiers } from "./imports-check.ts";
+import {
+  cycles,
+  importFindings,
+  layerFindings,
+  layerOf,
+  readGraph,
+  specifiers,
+} from "./imports-check.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -53,8 +60,31 @@ describe("cycles", () => {
   });
 });
 
+describe("layers", () => {
+  it("places directories and the top-level files", () => {
+    expect(layerOf("src/core/ids.ts")).toBe(0);
+    expect(layerOf("src/store/projections/work.ts")).toBe(4);
+    expect(layerOf("src/status/collect.ts")).toBe(layerOf("src/work/live.ts"));
+    expect(layerOf("src/cli.ts")).toBe(7);
+    expect(layerOf("src/unknown/module.ts")).toBe(-1);
+  });
+
+  it("refuses imports from a higher layer and modules in no layer, but not in tests", () => {
+    const graph = new Map([
+      ["src/store/db.ts", ["src/core/ids.ts", "src/commands/store.ts"]],
+      ["src/store/db.test.ts", ["src/cli.ts"]],
+      ["src/status/collect.ts", ["src/work/live.ts", "src/store/db.ts"]],
+      ["src/extra/module.ts", []],
+    ]);
+    expect(layerFindings(graph)).toEqual([
+      "src/store/db.ts imports src/commands/store.ts from a higher layer",
+      "src/extra/module.ts is in no layer",
+    ]);
+  });
+});
+
 describe("this repository", () => {
-  it("has no import cycles in src/", () => {
+  it("has no import cycles or layer violations in src/", () => {
     expect(importFindings(readGraph(root, "src"))).toEqual([]);
   });
 });

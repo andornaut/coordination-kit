@@ -5,7 +5,14 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { type FakeControl, startFakeControl } from "../adapters/codex/testControlSocket.ts";
 import { main } from "../cli.ts";
-import { loadLayout } from "../layout.ts";
+import { loadLayout } from "../core/layout.ts";
+import {
+  coordinatorConfig,
+  makeFixture,
+  projectConfig,
+  registryInput,
+  writeFixtureJson,
+} from "../core/testFixtures.ts";
 import {
   createRegistry,
   readRegistry,
@@ -13,13 +20,6 @@ import {
   type RegistryDraft,
   type RoleRecord,
 } from "../registry/index.ts";
-import {
-  coordinatorConfig,
-  makeFixture,
-  projectConfig,
-  registryInput,
-  writeFixtureJson,
-} from "../testFixtures.ts";
 
 const ARCHIE = "archies-dog-walks";
 const CHIBI = "chibis-way-home";

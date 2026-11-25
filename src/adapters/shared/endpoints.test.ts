@@ -3,10 +3,10 @@ import { homedir } from "node:os";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Layout } from "../../layout.ts";
+import type { Layout } from "../../core/layout.ts";
+import { coordinatorConfig, registryInput } from "../../core/testFixtures.ts";
 import type { Registry } from "../../registry/schema.ts";
 import { effectiveReadiness, harnessReadiness } from "../../review/readiness.ts";
-import { coordinatorConfig, registryInput } from "../../testFixtures.ts";
 import { connectControl } from "../codex/rpc.ts";
 import { resolveCodexControlSocket } from "./endpoints.ts";
 

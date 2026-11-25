@@ -1,6 +1,6 @@
 // Small structural validation helpers shared by the config, layout and registry schemas.
 // Each check records a JSON-pointer-style issue and returns whether the value passed.
-import { CANONICAL_UUID } from "./adapters/shared/ids.ts";
+import { CANONICAL_UUID } from "./ids.ts";
 
 export class ValidationError extends Error {
   readonly issues: readonly string[];

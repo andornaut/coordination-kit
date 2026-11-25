@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { readWakeFile, wakeFilePath } from "../adapters/claude/wakeFile.ts";
 import type { Collected, CollectRequest } from "../adapters/types.ts";
 import { EXIT_OK, main } from "../cli.ts";
-import { gameLayout, type Layout } from "../layout.ts";
+import { gameLayout, type Layout } from "../core/layout.ts";
 import { Store } from "../store/db.ts";
 import {
   prepareFileCheckpoint,

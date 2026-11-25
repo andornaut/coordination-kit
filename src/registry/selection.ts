@@ -1,6 +1,6 @@
 // Scoped transport selection changes no activation or ownership evidence.
-import type { Layout } from "../layout.ts";
-import { checkArray, checkEnum, checkObject, checkString, Issues } from "../validate.ts";
+import type { Layout } from "../core/layout.ts";
+import { checkArray, checkEnum, checkObject, checkString, Issues } from "../core/validate.ts";
 import { resolveRole } from "./resolve.ts";
 import { type Harness, HARNESSES, type Registry } from "./schema.ts";
 import { type UpdateOptions, updateRegistry } from "./store.ts";

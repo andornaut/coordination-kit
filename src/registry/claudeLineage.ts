@@ -5,7 +5,7 @@
 import { closeSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 
-import { CONVERSATION_ID_PATTERN } from "../validate.ts";
+import { CONVERSATION_ID_PATTERN } from "../core/validate.ts";
 
 /** The most transcript bytes read for the header. */
 export const HEADER_LIMIT = 64 * 1024;

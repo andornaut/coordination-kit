@@ -3,8 +3,8 @@
 // persistence, scheduling or lifecycle mutation.
 import { performance } from "node:perf_hooks";
 
-import { isCanonicalUuid } from "../../shared/ids.ts";
-import { isRecord, sameJson } from "../../shared/pyjson.ts";
+import { isCanonicalUuid } from "../../../core/ids.ts";
+import { isRecord, sameJson } from "../../../core/pyjson.ts";
 import { NativeTimeout, type RpcClient } from "../rpc.ts";
 
 export const ERROR_CLASSES: Readonly<Record<string, string>> = {

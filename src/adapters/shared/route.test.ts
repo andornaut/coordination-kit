@@ -2,13 +2,7 @@ import { writeFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { gameLayout, type Layout, loadLayout } from "../../layout.ts";
-import {
-  createRegistry,
-  readRegistry,
-  type Registry,
-  updateRegistry,
-} from "../../registry/index.ts";
+import { gameLayout, type Layout, loadLayout } from "../../core/layout.ts";
 import {
   CLAUDE_COORDINATOR,
   CLAUDE_TECH,
@@ -17,7 +11,13 @@ import {
   projectConfig,
   registryInput,
   writeFixtureJson,
-} from "../../testFixtures.ts";
+} from "../../core/testFixtures.ts";
+import {
+  createRegistry,
+  readRegistry,
+  type Registry,
+  updateRegistry,
+} from "../../registry/index.ts";
 import { readRoleRoute, RouteError, routeRecipient, routeScope, sendRoute } from "./route.ts";
 
 const CODEX_COORDINATOR = "00000000-0000-4000-8000-000000000004";

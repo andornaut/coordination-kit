@@ -1,7 +1,7 @@
 // Events this kit produces itself, such as review health (`review-stuck`). Each goes straight to the
 // store as a message from delivery-kit to the game's reports.recipient; it is never written to
 // the runner's events.jsonl. The recipient is woken by the next send to it or the next review.
-import type { GameLayout, Layout } from "../layout.ts";
+import type { GameLayout, Layout } from "../core/layout.ts";
 import { Store } from "../store/db.ts";
 import { clean, derivedId, type Notice, reportsRecipient, storeNotice } from "../store/notices.ts";
 export type HealthEmit = (kind: string, key: string, message: string) => void;

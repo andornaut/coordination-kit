@@ -1,8 +1,8 @@
 // Read the coordinator's status projections in one consistent, read-only snapshot.
 import type { DatabaseSync } from "node:sqlite";
 
-import type { Layout } from "../layout.ts";
-import { StateRootError } from "../stateRoot.ts";
+import type { Layout } from "../core/layout.ts";
+import { StateRootError } from "../core/stateRoot.ts";
 import { Store } from "../store/db.ts";
 import { unreadMessages } from "../store/messageWake.ts";
 import type { HoldView } from "../store/policyHolds.ts";

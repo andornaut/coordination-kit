@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { loadLayout } from "../layout.ts";
+import { loadLayout } from "../core/layout.ts";
+import { makeFixture, registryInput } from "../core/testFixtures.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
-import { makeFixture, registryInput } from "../testFixtures.ts";
 import { harnessDoctor } from "./doctor.ts";
 import { synopsis } from "./spec.ts";
 

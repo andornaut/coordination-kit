@@ -10,10 +10,10 @@ import {
   inspectDecisionMarker,
 } from "../adapters/shared/decisions.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
-import { isCanonicalUuid } from "../adapters/shared/ids.ts";
-import { isRecord } from "../adapters/shared/pyjson.ts";
 import type { Collected, CollectRequest } from "../adapters/types.ts";
-import type { Layout } from "../layout.ts";
+import { isCanonicalUuid } from "../core/ids.ts";
+import type { Layout } from "../core/layout.ts";
+import { isRecord } from "../core/pyjson.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Harness, RoleRecord } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
