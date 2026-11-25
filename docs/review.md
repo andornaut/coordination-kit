@@ -222,8 +222,8 @@ same across kit releases, so an upgrade needs `npm ci` at the root and a reconne
 relaunch.
 
 After `notifications/initialized` the server polls its role's wake file. With
-`--conversation UUID` the role is the one whose effective Claude conversation is that ID at the
-first poll that finds one; it stays fixed when `session start` later rebinds the role after
+`--conversation UUID` the role is the one whose effective Claude conversation is that ID at
+start, else at the first poll that finds one; it stays fixed when `session start` later rebinds the role after
 `/clear`, so the running channel keeps announcing the role's wakes. Each seq increase
 emits one channel notification with the fixed text
 `N new messages for ROLE: run coordination-kit inbox` and `meta` `{"kind":"wake","seq":"N"}`.
@@ -237,14 +237,17 @@ payload: the recipient reads its messages with `coordination-kit inbox`.
 
 ## Channel status file
 
-`claude channel` writes `<stateRoot>/channel/<conversation>.json` (`var/channel/` without a configured
-state root) once at start, for the conversation bound to its role then:
+`claude channel` writes `<stateRoot>/channel/roles/<role>.json` (`var/channel/roles/` without a
+configured state root) once, when it knows its role, with the conversation bound to the role then.
+A game role's file is `<game>/<role>.json` there. Like the wake file it is keyed by role, so
+`harness doctor` still finds it after `session start` rebinds the role after `/clear`:
 
 ```json
 {
-  "schema": 1,
+  "schema": 2,
+  "role": "game-coordinator",
   "conversation": "UUID",
-  "version": "2.0.0",
+  "version": "6.0.0",
   "distSha256": "HEX",
   "pid": 4242,
   "startedAt": "ISO",

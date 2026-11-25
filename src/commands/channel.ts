@@ -1,8 +1,9 @@
 // `coordination-kit claude channel`: the stdio MCP server that the recipient Claude session launches
 // from game-coordinator's node_modules. It watches its role's wake file and emits one notification
 // per seq increase. The role is the one whose Claude conversation is `--conversation UUID`, else
-// the one reports.recipient that every game (or each `--game`) names. The wake file is keyed by
-// role, so the channel keeps serving the role after `session start` rebinds it after /clear.
+// the one reports.recipient that every game (or each `--game`) names. The wake file and the
+// channel status file are keyed by role, so the channel keeps serving the role, and the doctor
+// keeps finding its status, after `session start` rebinds it after /clear.
 import { writeSync } from "node:fs";
 import { parseArgs } from "node:util";
 
@@ -109,28 +110,42 @@ export async function runChannel(
       ? EXIT_USAGE
       : EXIT_INVALID;
   }
-  try {
-    const layout = loadLayout(root);
-    const identity = cliIdentity(io.entry);
-    writeChannelStatus(layout, {
-      argv: process.argv,
-      conversation: conversation ?? (resolveConversation(readRegistry(layout), role!) as string),
-      distSha256: identity.distSha256,
-      pid: process.pid,
-      schema: 1,
-      startedAt: new Date().toISOString(),
-      version: identity.version,
-    });
-  } catch {
-    // The status file is diagnostic only; the channel serves without it.
-  }
-  // `--conversation` names the role by its binding at the first poll that finds it; the role then
-  // stays fixed while its binding rotates.
+  let reported = false;
+  // Written once, when the role is known; diagnostic only, so a failure never stops the channel.
+  const report = (layout: Layout, known: string): void => {
+    if (reported) {
+      return;
+    }
+    reported = true;
+    try {
+      const identity = cliIdentity(io.entry);
+      writeChannelStatus(layout, {
+        argv: process.argv,
+        conversation: conversation ?? (resolveConversation(readRegistry(layout), known) as string),
+        distSha256: identity.distSha256,
+        pid: process.pid,
+        role: known,
+        schema: 2,
+        startedAt: new Date().toISOString(),
+        version: identity.version,
+      });
+    } catch {
+      // The channel serves without its status file.
+    }
+  };
+  // `--conversation` names the role by its binding at start, else at the first poll that finds
+  // it; the role then stays fixed while its binding rotates.
   const locate = (): string => {
     const layout = loadLayout(root);
     role ??= conversationRole(layout, conversation!);
+    report(layout, role);
     return wakeFilePath(layout, role);
   };
+  try {
+    locate();
+  } catch {
+    // The registry may not bind the conversation yet; each poll tries again.
+  }
   return serve(
     { pollMs: pollSeconds * 1000, wake: new WakeWatcher(locate) },
     streams.input,

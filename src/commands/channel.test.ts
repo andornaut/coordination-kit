@@ -4,9 +4,11 @@ import { PassThrough } from "node:stream";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { readChannelStatus } from "../adapters/claude/channelStatus.ts";
 import { wakeFilePath, writeWakeFile } from "../adapters/claude/wakeFile.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Io } from "../io.ts";
 import { updateRegistry } from "../registry/store.ts";
+import { channelServer } from "../review/diagnostics.ts";
 import { claudeFixture, RECIPIENT } from "../review/fixtures.ts";
 import { projectConfig, writeFixtureJson } from "../testFixtures.ts";
 import { runChannel } from "./channel.ts";
@@ -185,5 +187,35 @@ describe("claude channel options", () => {
         meta: { kind: "wake", seq: "2" },
       },
     ]);
+  });
+
+  it("keys its status file by role, so the doctor still finds it after a /clear rebind", async () => {
+    const fixture = claudeFixture();
+    const input = new PassThrough();
+    const done = runChannel({ input, write: () => undefined }, io(), fixture.layout.root, [
+      "--conversation",
+      RECIPIENT,
+    ]);
+    input.end();
+    expect(await done).toBe(EXIT_OK);
+    expect(readChannelStatus(fixture.layout, "game-coordinator")).toMatchObject({
+      conversation: RECIPIENT,
+      pid: process.pid,
+      role: "game-coordinator",
+      schema: 2,
+    });
+    updateRegistry(fixture.layout, 1, (draft) => {
+      draft.roles["game-coordinator"]!.conversations.claude =
+        "00000000-0000-4000-8000-0000000000f1";
+    });
+    expect(channelServer(fixture.layout, "game-coordinator")).toMatchObject({
+      code: "status_file_read",
+      pid: process.pid,
+      status: "reported",
+    });
+    expect(channelServer(fixture.layout, "archies-dog-walks/tech")).toMatchObject({
+      code: "status_file_missing",
+      status: "unknown",
+    });
   });
 });

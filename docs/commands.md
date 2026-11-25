@@ -76,7 +76,7 @@ Reserve, prepare, activate and cancel require the active game-coordinator bindin
   `--game`) names, and requires that role's effective harness to be `claude`. Games that name
   different recipients stop it with exit 1; select games with one recipient or pass
   `--conversation`. With `--conversation UUID` it serves the one role whose effective Claude
-  conversation is that ID at its first poll. `--poll-seconds` defaults to 5. Without
+  conversation is that ID at start, else at its first poll that finds one. `--poll-seconds` defaults to 5. Without
   `--conversation`, an absent registry stops it with exit 1. It watches its role's
   [wake file](review.md#wake-files) and emits one notification per seq increase, so it keeps
   serving the role after `session start` rebinds it after `/clear`. The server identifies itself

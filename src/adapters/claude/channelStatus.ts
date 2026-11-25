@@ -1,18 +1,23 @@
-// The channel server's status file: `<stateRoot>/channel/<conversation>.json` (or
-// `var/channel/` without a configured state root), written once when `claude channel` starts. It
-// names the CLI version and dist digest the server loaded and its launch command, so
-// `harness doctor` can report what a session is running without contacting it.
+// The channel server's status file: `<stateRoot>/channel/roles/<role>.json` (or
+// `var/channel/roles/` without a configured state root), written once when `claude channel` knows
+// its role. It is keyed by role like the wake files, so `harness doctor` finds it after a /clear
+// rebind. It names the CLI version and dist digest the server loaded and its launch command, so
+// the doctor can report what a session is running without contacting it.
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { readJsonIfExists, writeJsonDurable } from "../../durable.ts";
 import type { Layout } from "../../layout.ts";
 import { stateRoot } from "../../stateRoot.ts";
-import { canonicalUuid } from "../shared/ids.ts";
+import { isCanonicalUuid } from "../shared/ids.ts";
 import { isRecord } from "../shared/pyjson.ts";
 
+const ROLE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$/;
+
 export interface ChannelStatus {
-  readonly schema: 1;
+  readonly schema: 2;
+  readonly role: string;
+  /** The role's Claude conversation when the channel wrote the file. */
   readonly conversation: string;
   readonly version: string;
   readonly distSha256: string;
@@ -22,15 +27,17 @@ export interface ChannelStatus {
   readonly argv: readonly string[];
 }
 
-export function channelStatusPath(layout: Layout, conversation: string): string {
-  const root = stateRoot(layout);
-  return join(root, "channel", `${canonicalUuid(conversation)}.json`);
+export function channelStatusPath(layout: Layout, role: string): string {
+  if (!ROLE.test(role)) {
+    throw new Error("channel status needs a role name");
+  }
+  return join(stateRoot(layout), "channel", "roles", `${role}.json`);
 }
 
 /** Write the status atomically; a failure never stops the channel. */
 export function writeChannelStatus(layout: Layout, status: ChannelStatus): boolean {
   try {
-    const path = channelStatusPath(layout, status.conversation);
+    const path = channelStatusPath(layout, status.role);
     mkdirSync(dirname(path), { mode: 0o700, recursive: true });
     writeJsonDurable(path, status);
     return true;
@@ -40,13 +47,14 @@ export function writeChannelStatus(layout: Layout, status: ChannelStatus): boole
 }
 
 /** The recorded status, or null when it is absent, unreadable or malformed. */
-export function readChannelStatus(layout: Layout, conversation: string): ChannelStatus | null {
+export function readChannelStatus(layout: Layout, role: string): ChannelStatus | null {
   try {
-    const value = readJsonIfExists(channelStatusPath(layout, conversation));
+    const value = readJsonIfExists(channelStatusPath(layout, role));
     if (
       !isRecord(value) ||
-      value.schema !== 1 ||
-      value.conversation !== conversation ||
+      value.schema !== 2 ||
+      value.role !== role ||
+      !isCanonicalUuid(value.conversation) ||
       typeof value.version !== "string" ||
       typeof value.distSha256 !== "string" ||
       !Number.isSafeInteger(value.pid) ||

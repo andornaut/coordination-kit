@@ -234,7 +234,8 @@ describe("scoped harness diagnostics", () => {
       conversation: CLAUDE_TECH,
       distSha256: "a".repeat(64),
       pid: 4242,
-      schema: 1,
+      role: ROLE,
+      schema: 2,
       startedAt: "2026-11-18T15:00:00.000Z",
       version: "2.0.0",
     });

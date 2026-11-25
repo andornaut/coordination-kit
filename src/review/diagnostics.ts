@@ -137,8 +137,8 @@ export function channelCommand(layout: Layout): ChannelCommand {
 }
 
 /** The channel server's own report, or unknown when it wrote none. Never clearance. */
-export function channelServer(layout: Layout, conversation: string | null): ChannelServer {
-  const status = conversation === null ? null : readChannelStatus(layout, conversation);
+export function channelServer(layout: Layout, role: string): ChannelServer {
+  const status = readChannelStatus(layout, role);
   return status === null
     ? {
         argv: null,
@@ -177,7 +177,7 @@ function initial(layout: Layout, registry: Registry, role: string): RoleDiagnosi
     channel_command: harness === "claude" ? channelCommand(layout) : null,
     channel_reference:
       harness === "claude" ? { path: wakeFilePath(layout, role), source: "wake_file" } : null,
-    channel_server: harness === "claude" ? channelServer(layout, id) : null,
+    channel_server: harness === "claude" ? channelServer(layout, role) : null,
     config_reference: { path: layout.registryFile, source: "registry" },
     effective_harness: harness,
     endpoint: { path: null, source: "skipped" },

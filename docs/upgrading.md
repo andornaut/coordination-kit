@@ -1,18 +1,36 @@
 # Upgrading
 
-## Coordination Kit 5.3
+## Coordination Kit 6.0
 
-1. Retire the coordinator's guarded inbox reminder executor before or with the pin change. The
-   `reminder list`, `reminder claim`, `reminder check` and `reminder settle` verbs are removed:
-   the scheduled review now wakes every recipient with unread originals once per slot. `msg send`
-   no longer creates coordinator attention notices or prints `attention`.
-2. Stop calling `decision marker` and `decision resolve`; both are removed. No wake reads a
-   decision marker. The review still reports an existing marker's structure read-only.
-3. Claude wake files move from `wake/<conversation>.json` to `wake/roles/<role>.json` under the
-   state root. After `npm ci` at the coordinator root, reconnect each Claude role's channel with
-   `/mcp` so it runs the new code; the channel configuration is unchanged. Old per-conversation
-   wake files are no longer read and can be removed once every channel is reconnected.
-4. Journals and SQLite stores written by earlier versions open and rebuild as before.
+6.0.0 is a coordinated cutover. Upgrade Delivery Kit first, then game-coordinator and its pin
+together.
+
+1. Delivery Kit: widen `COORDINATOR_CLI_RANGE` in `src/bus/pin.ts` to include 6.x, such as
+   `>=3.0.0 <7.0.0`, and release it on the existing drained adoption path. The runner seam is
+   unchanged: `review deliver`, `events ingest` and `--version --json` keep their arguments,
+   schema 1 replies, reason tokens and exit codes.
+2. game-coordinator, in the same change as the 6.0.0 pin:
+   - Widen the kit version check in `scripts/role-tools.mjs` from `^[345]\.` to include 6.
+   - Delete `scripts/inbox-reminders.mjs`, `tests/inbox-reminders.test.mjs` and the guarded
+     reminder and coordinator attention text in its README, `docs/game-policies.md`,
+     `roles.json` and the generated `docs/roles.md`. The scheduled review now wakes every
+     recipient with unread originals once per slot.
+   - Run `npm ci` at the root, then reconnect each running Claude role's channel with `/mcp`.
+     The channel configuration is unchanged; the reconnect loads code that reads the new wake
+     and channel status file locations.
+3. Breaking changes:
+   - The `reminder list`, `reminder claim`, `reminder check`, `reminder settle`,
+     `decision marker` and `decision resolve` verbs are removed. No wake reads a decision
+     marker; the review still reports an existing marker's structure read-only.
+   - `msg send` no longer creates coordinator attention notices and its output has no
+     `attention` field.
+   - Claude wake files move from `wake/<conversation>.json` to `wake/roles/<role>.json`, and
+     channel status files from `channel/<conversation>.json` to `channel/roles/<role>.json`
+     (schema 2, with `role`), both under the state root.
+   - `cancelQuestion(store, actor, id, reason)` in `build/store` takes no fourth argument.
+4. Old `wake/<uuid>.json` and `channel/<uuid>.json` files are no longer read and are safe to
+   remove once every channel is reconnected. Journals and SQLite stores written by earlier
+   versions open and rebuild as before.
 
 ## Coordination Kit 4.0
 
