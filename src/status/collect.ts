@@ -4,7 +4,14 @@
 import { realpathSync } from "node:fs";
 import { basename, resolve } from "node:path";
 
-import { type GitRunner, readHistory, readMainFiles, repositoryRoot } from "../core/git.ts";
+import {
+  type GitRunner,
+  type History,
+  type MainFiles,
+  readHistory,
+  readMainFiles,
+  repositoryRoot,
+} from "../core/git.ts";
 import type { Io } from "../core/io.ts";
 import { gameLayout, type Layout, loadLayout } from "../core/layout.ts";
 import type { Registry } from "../registry/schema.ts";
@@ -325,76 +332,18 @@ interface RepositoryItems {
   readonly linked: Set<string>;
 }
 
-function readRepository(
-  context: StatusContext,
-  layout: Layout,
-  repository: Repository,
-  storeWork: StoreWorkSnapshot,
-  verifySince: string,
-): RepositoryItems {
-  const channel: DeploymentChannel =
-    repository.kind === "game" ? "bus" : repository.kind === "kit" ? "release-tag" : "none";
-  const base: RepositoryStatus = {
-    deployment: {
-      channel,
-      status: channel === "none" ? "not-applicable" : "unavailable",
-      unreadable: 0,
-    },
-    kind: repository.kind,
-    main: null,
-    name: repository.name,
-    originMain: null,
-    path: repository.path,
-    reason: repository.reason,
-    roles: repository.roles,
-    status: "unavailable",
-  };
-  const linked = new Set<string>();
-  if (repository.reason !== null) {
-    return { items: [], linked, status: base };
-  }
-  let history;
-  let files;
-  let doneAt;
-  let statusAt;
-  try {
-    history = readHistory(context.git, repository.path);
-    ({ doneAt, files, statusAt } = readMainFiles(context.git, repository.path, WORK_DIRECTORY));
-  } catch (error) {
-    return {
-      items: [],
-      linked,
-      status: { ...base, reason: error instanceof Error ? error.message : String(error) },
-    };
-  }
-  const onMain = reachable(history, history.main);
-  const onOrigin = history.originMain === null ? null : reachable(history, history.originMain);
-  let points: readonly DeployPoint[] = [];
-  let deployment: RepositoryStatus["deployment"] = base.deployment;
-  if (channel === "bus") {
-    const stored = storeWork.deployments.get(repository.name) ?? [];
-    points = stored;
-    try {
-      const bus = readBusDeployments(gameLayout(layout, repository.name).busDir);
-      points = [...stored, ...bus.points];
-      deployment = {
-        channel,
-        status: stored.length > 0 ? "available" : bus.status,
-        unreadable: bus.unreadable,
-      };
-    } catch {
-      deployment = { channel, status: "unavailable", unreadable: 0 };
-    }
-  } else if (channel === "release-tag") {
-    points = releasePoints(history);
-    deployment = { channel, status: "available", unreadable: 0 };
-  }
-  const reachablePoints = points.filter(
-    ({ sha }) => onMain.has(sha) || onOrigin?.has(sha) === true,
-  );
-  const marks = deploymentMarks(history, reachablePoints);
-  const listed = workListings(reachablePoints);
-  const workFiles = [...files.values()]
+/** What one repository's history, work files and deployment points show. */
+interface RepositoryEvidence {
+  readonly repository: string;
+  readonly channel: DeploymentChannel;
+  readonly history: History;
+  readonly mainFiles: MainFiles;
+  readonly points: readonly DeployPoint[];
+}
+
+/** Each work file's front matter, in path order, skipping the convention file and subdirectories. */
+function workFileEntries(files: MainFiles["files"]) {
+  return [...files.values()]
     .filter((file) => {
       const name = file.path.slice(WORK_DIRECTORY.length + 1);
       return !name.includes("/") && name.endsWith(".md") && name !== CONVENTION_FILE;
@@ -412,6 +361,25 @@ function readRepository(
         title: text(fields.title),
       };
     });
+}
+
+/** One status item per work file and the imported requests they name. Pure. */
+function repositoryItems(
+  evidence: RepositoryEvidence,
+  storeWork: StoreWorkSnapshot,
+  verifySince: string,
+): Pick<RepositoryItems, "items" | "linked"> {
+  const { channel, history, points } = evidence;
+  const { doneAt, files, statusAt } = evidence.mainFiles;
+  const linked = new Set<string>();
+  const onMain = reachable(history, history.main);
+  const onOrigin = history.originMain === null ? null : reachable(history, history.originMain);
+  const reachablePoints = points.filter(
+    ({ sha }) => onMain.has(sha) || onOrigin?.has(sha) === true,
+  );
+  const marks = deploymentMarks(history, reachablePoints);
+  const listed = workListings(reachablePoints);
+  const workFiles = workFileEntries(files);
   const { addedIn, landing } = findLandings(
     history,
     onMain,
@@ -450,7 +418,7 @@ function readRepository(
           : gitDeployment(confirmedCoverage, "landing");
     const heuristicDeployment =
       confirmedLanding || covering === undefined ? null : gitDeployment(covering, "landing");
-    const record = storeWork.records.get(`${repository.name}\n${work.id}`) ?? null;
+    const record = storeWork.records.get(`${evidence.repository}\n${work.id}`) ?? null;
     const storeLanded = record?.evidence.some((item) => item.stage === "merged") === true;
     const storeDeployed =
       record?.evidence.some(
@@ -511,7 +479,7 @@ function readRepository(
         ...linkedRequests.map((request) => request.closed?.at ?? request.updatedAt),
       ]),
       replacement: derived.replacement,
-      repository: repository.name,
+      repository: evidence.repository,
       requests,
       status: derived.status,
       store: record,
@@ -532,6 +500,73 @@ function readRepository(
       },
     });
   }
+  return { items, linked };
+}
+
+function readRepository(
+  context: StatusContext,
+  layout: Layout,
+  repository: Repository,
+  storeWork: StoreWorkSnapshot,
+  verifySince: string,
+): RepositoryItems {
+  const channel: DeploymentChannel =
+    repository.kind === "game" ? "bus" : repository.kind === "kit" ? "release-tag" : "none";
+  const base: RepositoryStatus = {
+    deployment: {
+      channel,
+      status: channel === "none" ? "not-applicable" : "unavailable",
+      unreadable: 0,
+    },
+    kind: repository.kind,
+    main: null,
+    name: repository.name,
+    originMain: null,
+    path: repository.path,
+    reason: repository.reason,
+    roles: repository.roles,
+    status: "unavailable",
+  };
+  if (repository.reason !== null) {
+    return { items: [], linked: new Set(), status: base };
+  }
+  let history: History;
+  let mainFiles: MainFiles;
+  try {
+    history = readHistory(context.git, repository.path);
+    mainFiles = readMainFiles(context.git, repository.path, WORK_DIRECTORY);
+  } catch (error) {
+    return {
+      items: [],
+      linked: new Set(),
+      status: { ...base, reason: error instanceof Error ? error.message : String(error) },
+    };
+  }
+  let points: readonly DeployPoint[] = [];
+  let deployment: RepositoryStatus["deployment"] = base.deployment;
+  if (channel === "bus") {
+    const stored = storeWork.deployments.get(repository.name) ?? [];
+    points = stored;
+    try {
+      const bus = readBusDeployments(gameLayout(layout, repository.name).busDir);
+      points = [...stored, ...bus.points];
+      deployment = {
+        channel,
+        status: stored.length > 0 ? "available" : bus.status,
+        unreadable: bus.unreadable,
+      };
+    } catch {
+      deployment = { channel, status: "unavailable", unreadable: 0 };
+    }
+  } else if (channel === "release-tag") {
+    points = releasePoints(history);
+    deployment = { channel, status: "available", unreadable: 0 };
+  }
+  const { items, linked } = repositoryItems(
+    { channel, history, mainFiles, points, repository: repository.name },
+    storeWork,
+    verifySince,
+  );
   return {
     items,
     linked,

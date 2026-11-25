@@ -353,26 +353,28 @@ interface ApprovalImportContext {
   readonly now?: () => string;
 }
 
+/** Each ledger entry's work item and outcome, and the events it proves. */
+interface ImportPlan {
+  readonly entries: number;
+  readonly outcomes: Record<ImportOutcome, number>;
+  readonly evidence: readonly EvidenceInput[];
+  readonly retained: readonly RetainedInput[];
+  readonly holds: ReadonlyMap<string, HoldPlan>;
+  readonly mapped: ApprovalImportReport["mapped"][number][];
+  readonly unmapped: ApprovalImportReport["unmapped"][number][];
+  readonly stubs: ApprovalImportReport["stubs"][number][];
+  readonly skipped: ApprovalImportReport["skipped"];
+}
+
 /**
- * Map and import the ledger. A dry run takes no caller and writes nothing; it reads the store when
- * one exists (else an in-memory store) to report which events are already recorded. A real import
- * requires the caller to be game-coordinator.
+ * Map every ledger entry to a work item of its owner's repository. Reads nothing itself: `workOf`
+ * supplies each repository's work files.
  */
-export function importApprovalLedger(
-  context: ApprovalImportContext,
-  options: CallerOptions,
-  selection: { readonly file: string; readonly dryRun: boolean },
-): ApprovalImportReport {
-  const coordinator = openCoordinator(context.git, context.coordinatorRoot);
-  let actor: Actor = { nativeId: null, role: null };
-  if (!selection.dryRun) {
-    actor = resolveCaller(coordinator.registry, context.env, options);
-    if (actor.role !== IMPORTER) {
-      throw new StoreError("not-coordinator");
-    }
-  }
-  const ledger = readApprovalLedger(selection.file);
-  const work = new Map<string, RepositoryWork | null>();
+function planImport(
+  coordinator: Coordinator,
+  workOf: (repository: Repository) => RepositoryWork | null,
+  ledger: Raw,
+): ImportPlan {
   const outcomes = Object.fromEntries(IMPORT_OUTCOMES.map((outcome) => [outcome, 0])) as Record<
     ImportOutcome,
     number
@@ -431,11 +433,8 @@ export function importApprovalLedger(
       if (repository === undefined) {
         return { outcome: "repository-unavailable", owner, ref: null };
       }
-      if (!work.has(repository.name)) {
-        work.set(repository.name, repositoryWork(context.git, repository));
-      }
-      const available = work.get(repository.name);
-      if (available === null || available === undefined) {
+      const available = workOf(repository);
+      if (available === null) {
         return { outcome: "repository-unavailable", owner, ref: null };
       }
       const found = match(entry, raw, available);
@@ -489,7 +488,31 @@ export function importApprovalLedger(
     evidence.push(...proven.evidence);
     retained.push(...retainedOf(coordinator, entry, raw, outcome.ref, outcome.owner!));
   });
+  return {
+    entries: entries.length,
+    evidence,
+    holds,
+    mapped,
+    outcomes,
+    retained,
+    skipped,
+    stubs: [...stubs.values()].sort((left, right) =>
+      `${left.owner}\n${left.repository}`.localeCompare(
+        `${right.owner}\n${right.repository}`,
+        "en",
+      ),
+    ),
+    unmapped,
+  };
+}
 
+/** Append the plan's events not yet stored, or only count them in a dry run. */
+function applyImport(
+  store: Store,
+  actor: Actor,
+  plan: ImportPlan,
+  dryRun: boolean,
+): ApprovalImportReport["events"] {
   const counts = {
     evidence: { insert: 0, unchanged: 0 },
     holds: { insert: 0, unchanged: 0 },
@@ -498,6 +521,81 @@ export function importApprovalLedger(
   const tally = (bucket: Counts, exists: boolean) => {
     bucket[exists ? "unchanged" : "insert"] += 1;
   };
+  const planned = new Set<string>();
+  const fresh = (key: string): boolean => {
+    const seen = planned.has(key) || store.eventByKey(key) !== undefined;
+    planned.add(key);
+    return !seen;
+  };
+  for (const input of plan.evidence) {
+    const isNew = fresh(evidenceKey(input));
+    tally(counts.evidence, !isNew);
+    if (isNew && !dryRun) {
+      recordEvidence(store, actor, input);
+    }
+  }
+  for (const input of plan.retained) {
+    const isNew = fresh(retainedKey(input));
+    tally(counts.retained, !isNew);
+    if (isNew && !dryRun) {
+      retainWorkItem(store, actor, input);
+    }
+  }
+  for (const hold of plan.holds.values()) {
+    const key = holdKey(hold.id);
+    const isNew = fresh(key);
+    tally(counts.holds, !isNew);
+    if (isNew && !dryRun) {
+      store.append({
+        actor,
+        key,
+        kind: "hold.imported",
+        payload: {
+          entries: hold.entries,
+          id: hold.id,
+          owner: hold.owner,
+          reason: hold.reason,
+          source: APPROVAL_LEDGER_SOURCE,
+          state: hold.state,
+          work: hold.work as unknown as Json,
+        },
+      });
+    }
+  }
+  return counts;
+}
+
+/**
+ * Map and import the ledger. A dry run takes no caller and writes nothing; it reads the store when
+ * one exists (else an in-memory store) to report which events are already recorded. A real import
+ * requires the caller to be game-coordinator.
+ */
+export function importApprovalLedger(
+  context: ApprovalImportContext,
+  options: CallerOptions,
+  selection: { readonly file: string; readonly dryRun: boolean },
+): ApprovalImportReport {
+  const coordinator = openCoordinator(context.git, context.coordinatorRoot);
+  let actor: Actor = { nativeId: null, role: null };
+  if (!selection.dryRun) {
+    actor = resolveCaller(coordinator.registry, context.env, options);
+    if (actor.role !== IMPORTER) {
+      throw new StoreError("not-coordinator");
+    }
+  }
+  const ledger = readApprovalLedger(selection.file);
+  const work = new Map<string, RepositoryWork | null>();
+  const plan = planImport(
+    coordinator,
+    (repository) => {
+      if (!work.has(repository.name)) {
+        work.set(repository.name, repositoryWork(context.git, repository));
+      }
+      return work.get(repository.name)!;
+    },
+    ledger,
+  );
+  let events: ApprovalImportReport["events"];
   let store: Store;
   try {
     store = selection.dryRun
@@ -510,79 +608,28 @@ export function importApprovalLedger(
     throw error;
   }
   try {
-    const apply = () => {
-      const planned = new Set<string>();
-      const fresh = (key: string): boolean => {
-        const seen = planned.has(key) || store.eventByKey(key) !== undefined;
-        planned.add(key);
-        return !seen;
-      };
-      for (const input of evidence) {
-        const isNew = fresh(evidenceKey(input));
-        tally(counts.evidence, !isNew);
-        if (isNew && !selection.dryRun) {
-          recordEvidence(store, actor, input);
-        }
-      }
-      for (const input of retained) {
-        const isNew = fresh(retainedKey(input));
-        tally(counts.retained, !isNew);
-        if (isNew && !selection.dryRun) {
-          retainWorkItem(store, actor, input);
-        }
-      }
-      for (const plan of holds.values()) {
-        const key = holdKey(plan.id);
-        const isNew = fresh(key);
-        tally(counts.holds, !isNew);
-        if (isNew && !selection.dryRun) {
-          store.append({
-            actor,
-            key,
-            kind: "hold.imported",
-            payload: {
-              entries: plan.entries,
-              id: plan.id,
-              owner: plan.owner,
-              reason: plan.reason,
-              source: APPROVAL_LEDGER_SOURCE,
-              state: plan.state,
-              work: plan.work as unknown as Json,
-            },
-          });
-        }
-      }
-    };
-    if (selection.dryRun) {
-      apply();
-    } else {
-      store.transaction(apply);
-    }
+    const apply = () => applyImport(store, actor, plan, selection.dryRun);
+    events = selection.dryRun ? apply() : store.transaction(apply);
   } finally {
     store.close();
   }
-  const holdList = [...holds.values()];
+  const holdList = [...plan.holds.values()];
   return {
     dryRun: selection.dryRun,
-    entries: entries.length,
-    events: counts,
+    entries: plan.entries,
+    events,
     holds: {
-      closed: holdList.filter((plan) => !holdOpen(plan.state)).length,
-      ownerUnknown: holdList.filter((plan) => plan.owner === null).length,
+      closed: holdList.filter((hold) => !holdOpen(hold.state)).length,
+      ownerUnknown: holdList.filter((hold) => hold.owner === null).length,
       total: holdList.length,
-      uncovered: holdList.filter((plan) => plan.work.length === 0).length,
+      uncovered: holdList.filter((hold) => hold.work.length === 0).length,
     },
     kind: "approval-ledger-import",
-    mapped,
-    outcomes,
+    mapped: plan.mapped,
+    outcomes: plan.outcomes,
     schema: 1,
-    skipped,
-    stubs: [...stubs.values()].sort((left, right) =>
-      `${left.owner}\n${left.repository}`.localeCompare(
-        `${right.owner}\n${right.repository}`,
-        "en",
-      ),
-    ),
-    unmapped,
+    skipped: plan.skipped,
+    stubs: plan.stubs,
+    unmapped: plan.unmapped,
   };
 }

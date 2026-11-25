@@ -182,7 +182,7 @@ export interface CommitRef {
   readonly at: string;
 }
 
-interface MainFiles {
+export interface MainFiles {
   readonly files: ReadonlyMap<string, MainFile>;
   /** The latest first-parent status transition for each current path. */
   readonly statusAt: ReadonlyMap<string, CommitRef>;
