@@ -7,7 +7,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import type { Layout } from "../layout.ts";
 import { stateRoot } from "../stateRoot.ts";
-import { canonicalJson, eventHash, rowEvent } from "./eventCodec.ts";
+import { canonicalJson, eventHash, rowEvent, sha256 } from "./eventCodec.ts";
 import type { FileProjection } from "./fileProjection.ts";
 import { fileAuthority } from "./files/authority.ts";
 import {
@@ -15,14 +15,13 @@ import {
   verifyCompactionCheckpoint,
 } from "./files/compactionCheckpoint.ts";
 import { fileLayoutProjection } from "./files/runtime.ts";
-import { sha256 } from "./messages.ts";
-import { type Projection, PROJECTIONS, RETIRED_TABLES } from "./projections.ts";
+import { PROJECTIONS, RETIRED_TABLES } from "./projections.ts";
 import {
   type Actor,
   type EventInput,
   GENESIS,
-  type Json,
   type JsonObject,
+  type Projection,
   STORE_SCHEMA,
   type StoredEvent,
   StoreError,
@@ -514,6 +513,3 @@ export class Store {
     });
   }
 }
-
-export { canonicalJson, eventHash } from "./eventCodec.ts";
-export type { Json };

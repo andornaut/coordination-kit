@@ -57,8 +57,9 @@
     "check": "tsc && npm --prefix tests/contract run check",
     "contract": "node scripts/contract.ts",
     "format": "prettier --write . && eslint --fix .",
-    "lint": "npm run lint:node && npm run lint:markdown && npm run lint:docs && npm run lint:work && npm run lint:shell",
+    "lint": "npm run lint:node && npm run lint:imports && npm run lint:markdown && npm run lint:docs && npm run lint:work && npm run lint:shell",
     "lint:docs": "node scripts/docs-check.ts",
+    "lint:imports": "node scripts/imports-check.ts",
     "lint:markdown": "markdownlint-cli2",
     "lint:node": "prettier --check . && eslint --max-warnings 0 .",
     "lint:shell": "shellcheck -x -P SCRIPTDIR scripts/*.sh tests/contract/run.sh",
@@ -73,7 +74,6 @@
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.19.2",
     "eslint": "^10.14.0",
-    "eslint-plugin-import-x": "4.17.1",
     "eslint-plugin-simple-import-sort": "^14.0.0",
     "eslint-plugin-sort-destructure-keys": "^3.0.0",
     "globals": "^17.13.0",
@@ -99,9 +99,6 @@
       "minimatch": "11.0.3"
     },
     "eslint": {
-      "minimatch": "11.0.3"
-    },
-    "eslint-plugin-import-x": {
       "minimatch": "11.0.3"
     },
     "markdownlint-cli2@0.24.1": {

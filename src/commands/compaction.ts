@@ -15,7 +15,7 @@ import { fsyncDirectory, readJson } from "../durable.ts";
 import type { Handler } from "../io.ts";
 import { withLock } from "../lock.ts";
 import { storePath, storeRoot } from "../store/db.ts";
-import { canonicalJson } from "../store/eventCodec.ts";
+import { canonicalJson, REF, sha256 } from "../store/eventCodec.ts";
 import { fileAuthority } from "../store/files/authority.ts";
 import { type CheckpointHead } from "../store/files/compactionCheckpoint.ts";
 import {
@@ -37,7 +37,7 @@ import {
   reserveFileJournal,
 } from "../store/files/journal.ts";
 import { resolveCaller } from "../store/identity.ts";
-import { MESSAGE_ID, REF, ROLE, sha256 } from "../store/messages.ts";
+import { MESSAGE_ID, ROLE } from "../store/messages.ts";
 import { registry, type StoreServiceContext } from "../store/service.ts";
 import { type StoredEvent, StoreError } from "../store/types.ts";
 import { callerOf, required, run, text, type Values } from "./store.ts";

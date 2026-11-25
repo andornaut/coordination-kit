@@ -13,17 +13,20 @@ import { dependentQuestions } from "../store/codexQuestions.ts";
 import { MEMORY, Store } from "../store/db.ts";
 import { fileWorkerCaller } from "../store/files/workerAccess.ts";
 import { type CallerOptions, resolveCaller } from "../store/identity.ts";
-import { listDecisions, storeHolds } from "../store/questions.ts";
-import { type Actor, StoreError } from "../store/types.ts";
+import {
+  type CoveringHold,
+  type HoldCover,
+  type HoldLookup,
+  listDecisions,
+  storeHolds,
+} from "../store/questions.ts";
+import { type Actor, StoreError, type WorkRef } from "../store/types.ts";
 import {
   blockWork,
   checkRef,
-  type CoveringHold,
   FINISH_STATUSES,
   type FinishStatus,
   finishWork,
-  type HoldCover,
-  type HoldLookup,
   readWorkRecord,
   readyWork,
   recordEvidence,
@@ -32,7 +35,6 @@ import {
   workHistory,
   type WorkHistoryEntry,
   type WorkRecord,
-  type WorkRef,
   type WorkStage,
   type WorkWrite,
 } from "../store/work.ts";

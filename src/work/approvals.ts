@@ -11,17 +11,16 @@ import type { Repository } from "../status/collect.ts";
 import { type GitRunner, readMainFiles } from "../status/git.ts";
 import { MEMORY, Store } from "../store/db.ts";
 import { type CallerOptions, resolveCaller } from "../store/identity.ts";
-import { type Actor, type Json, StoreError } from "../store/types.ts";
+import { holdOpen } from "../store/projections/questions.ts";
+import { type Actor, type Json, StoreError, type WorkRef } from "../store/types.ts";
 import {
   type EvidenceInput,
   evidenceKey,
-  holdOpen,
   recordEvidence,
   type RetainedInput,
   retainedKey,
   retainWorkItem,
   SHA,
-  type WorkRef,
   type WorkStage,
   workText,
 } from "../store/work.ts";

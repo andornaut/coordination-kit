@@ -1,8 +1,11 @@
 import { isCanonicalUuid } from "../../adapters/shared/ids.ts";
 import { isRecord } from "../../adapters/shared/pyjson.ts";
 import type { Registry } from "../../registry/schema.ts";
-import { matchesVerifiedWorker, type VerifiedWorkerCaller } from "../identity.ts";
-import { DELIVERY_KIT_ROLE } from "../notices.ts";
+import {
+  DELIVERY_KIT_ROLE,
+  matchesVerifiedWorker,
+  type VerifiedWorkerCaller,
+} from "../identity.ts";
 import type { StoredEvent } from "../types.ts";
 
 const REVIEW_INTERVAL_MS = 60 * 60 * 1000;

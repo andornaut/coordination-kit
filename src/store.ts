@@ -3,21 +3,11 @@
 // records, and questions, holds and decisions.
 export {
   type CodexQuestion,
-  type CodexQuestionInput,
   dependentQuestions,
-  type NativeQuestionIdentity,
   type NativeQuestionProof,
 } from "./store/codexQuestions.ts";
 export type { AppendResult, VerifyResult } from "./store/db.ts";
-export {
-  canonicalJson,
-  eventHash,
-  type OpenOptions,
-  Store,
-  STORE_FILE,
-  storePath,
-  storeRoot,
-} from "./store/db.ts";
+export { type OpenOptions, Store, STORE_FILE, storePath, storeRoot } from "./store/db.ts";
 export {
   appendDecisionLine,
   decisionLine,
@@ -26,15 +16,14 @@ export {
   mainWorkFile,
   type WorkFileTarget,
 } from "./store/decisionLine.ts";
+export { canonicalJson, eventHash } from "./store/eventCodec.ts";
 export {
   activeHandoff,
   HANDOFF_STATES,
   HANDOFF_TRANSITIONS,
-  handoffHoldId,
   handoffHolds,
   type HandoffResult,
   type HandoffRoleView,
-  HANDOFFS_PROJECTION,
   type HandoffState,
   type HandoffView,
   latestHandoff,
@@ -46,7 +35,13 @@ export {
   recordSession,
   setHandoffState,
 } from "./store/handoffs.ts";
-export { type CallerOptions, NATIVE_ID_VARIABLES, resolveCaller } from "./store/identity.ts";
+export {
+  type CallerOptions,
+  DELIVERY_KIT_ACTOR,
+  DELIVERY_KIT_ROLE,
+  NATIVE_ID_VARIABLES,
+  resolveCaller,
+} from "./store/identity.ts";
 export {
   busEventId,
   type BusLine,
@@ -82,16 +77,12 @@ export {
   type SendResult,
   type WriteResult,
 } from "./store/messages.ts";
-export {
-  DELIVERY_KIT_ACTOR,
-  DELIVERY_KIT_ROLE,
-  derivedId,
-  type Notice,
-  reportsRecipient,
-  storeNotice,
-} from "./store/notices.ts";
+export { derivedId, type Notice, reportsRecipient, storeNotice } from "./store/notices.ts";
 export {
   activePolicyHoldsForRole,
+  HOLD_STATES,
+  type HoldState,
+  type HoldView,
   type PolicyHoldInput,
   type PolicyHoldTarget,
   policyHoldTarget,
@@ -100,23 +91,25 @@ export {
   releasePolicyHold,
   setPolicyHold,
 } from "./store/policyHolds.ts";
-export {
-  DELIVERY_PROJECTION,
-  MESSAGES_PROJECTION,
-  type Projection,
-  PROJECTIONS,
-} from "./store/projections.ts";
+export { PROJECTIONS } from "./store/projections.ts";
+export { DELIVERY_PROJECTION } from "./store/projections/delivery.ts";
+export { handoffHoldId, HANDOFFS_PROJECTION } from "./store/projections/handoffs.ts";
+export { MESSAGES_PROJECTION } from "./store/projections/messages.ts";
+export { QUESTIONS_PROJECTION } from "./store/projections/questions.ts";
+export { REQUESTS_PROJECTION } from "./store/projections/requests.ts";
+export { WORK_KINDS, WORK_PROJECTION } from "./store/projections/work.ts";
 export {
   type AnswerInput,
   answerQuestion,
   type AnswerResult,
   cancelQuestion,
+  type CoveringHold,
   type DecisionRow,
-  HOLD_STATES,
+  type HoldCover,
+  type HoldLookup,
   type HoldResult,
   holdScope,
-  type HoldState,
-  type HoldView,
+  importedHolds,
   linkNativeQuestion,
   listDecisions,
   listHolds,
@@ -129,7 +122,6 @@ export {
   questionHoldGuard,
   type QuestionOption,
   type QuestionResult,
-  QUESTIONS_PROJECTION,
   type QuestionState,
   type QuestionView,
   reaskNativeQuestion,
@@ -164,7 +156,6 @@ export {
   readRequests,
   type RequestImport,
   type RequestRecord,
-  REQUESTS_PROJECTION,
 } from "./store/requests.ts";
 export {
   COORDINATOR_ROLE,
@@ -199,6 +190,7 @@ export {
 } from "./store/sessionService.ts";
 export {
   type Actor,
+  type CodexQuestionInput,
   type EventInput,
   GENESIS,
   type Json,
@@ -209,11 +201,15 @@ export {
   type MessageLink,
   type MessageState,
   type MessageView,
+  type NativeQuestionIdentity,
+  type Projection,
   type Retention,
   STORE_SCHEMA,
   type StoredEvent,
   StoreError,
+  type WakeGuard,
   type WakeOutcome,
+  type WorkRef,
 } from "./store/types.ts";
 export {
   NO_STORE_GUARD,
@@ -221,7 +217,6 @@ export {
   rearmWake,
   type StoreWakeGuard,
   type WakeContext,
-  type WakeGuard,
   type WakePorts,
   wakeRecipient,
   type WakeResult,
@@ -230,14 +225,10 @@ export {
 } from "./store/wake.ts";
 export {
   blockWork,
-  type CoveringHold,
   FINISH_STATUSES,
   type FinishInput,
   type FinishStatus,
   finishWork,
-  type HoldCover,
-  type HoldLookup,
-  importedHolds,
   readWorkRecord,
   readWorkRecords,
   readyWork,
@@ -245,13 +236,10 @@ export {
   retainWorkItem,
   startWork,
   unblockWork,
-  WORK_KINDS,
-  WORK_PROJECTION,
   WORK_STAGES,
   type WorkEvidence,
   workHistory,
   type WorkRecord,
-  type WorkRef,
   type WorkStage,
   type WorkState,
 } from "./store/work.ts";

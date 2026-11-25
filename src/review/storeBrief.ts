@@ -9,8 +9,9 @@ import type { GameLayout, Layout } from "../layout.ts";
 import { resolveRole } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
+import { DELIVERY_KIT_ACTOR } from "../store/identity.ts";
 import { unreadMessages } from "../store/messageWake.ts";
-import { DELIVERY_KIT_ACTOR, derivedId, storeNotice } from "../store/notices.ts";
+import { derivedId, storeNotice } from "../store/notices.ts";
 import { policyHoldEntries, type PolicyHoldView } from "../store/policyHolds.ts";
 import { holdGuard } from "../store/questions.ts";
 import { NEXT_REVIEW_BOUNDARY, retentionInstant } from "../store/retention.ts";
@@ -28,7 +29,7 @@ import {
   wakeRecipient,
   wakeState,
 } from "../store/wake.ts";
-import type { ReviewResult } from "./deliver.ts";
+import type { ReviewResult } from "./outcome.ts";
 import { readReadyHandoffs, type ReadyHandoff } from "./ready.ts";
 import { type RecordedDecisions, recordedDecisions } from "./recordedDecisions.ts";
 import {

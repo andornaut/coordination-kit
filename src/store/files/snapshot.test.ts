@@ -5,7 +5,8 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 
 import { gameLayout } from "../../layout.ts";
-import { canonicalJson, Store, storePath } from "../db.ts";
+import { Store, storePath } from "../db.ts";
+import { canonicalJson } from "../eventCodec.ts";
 import { sendMessage } from "../messages.ts";
 import { answerQuestion, openQuestion, recordQuestionAnswer, setHold } from "../questions.ts";
 import { COORDINATOR, GAME, storeFixture, TECH } from "../testStore.ts";

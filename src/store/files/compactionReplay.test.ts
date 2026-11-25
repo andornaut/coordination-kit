@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { canonicalJson, MEMORY, Store } from "../db.ts";
+import { MEMORY, Store } from "../db.ts";
+import { canonicalJson, sha256 } from "../eventCodec.ts";
 import type { FileJournalWriter, FileProjection } from "../fileProjection.ts";
 import { recordSession } from "../handoffs.ts";
 import {
@@ -11,7 +12,6 @@ import {
   messageWithBody,
   recipientMessages,
   sendMessage,
-  sha256,
 } from "../messages.ts";
 import type { StoredEvent } from "../types.ts";
 import { prepareCompactionCheckpoint, verifyCompactionSource } from "./compactionCheckpoint.ts";

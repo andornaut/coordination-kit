@@ -1,4 +1,6 @@
 // Shared store types and errors.
+import type { DatabaseSync } from "node:sqlite";
+
 export const STORE_SCHEMA = 1;
 /** The `prev_hash` of the first event. */
 export const GENESIS = "0".repeat(64);
@@ -14,6 +16,12 @@ export class StoreError extends Error {
     super(detail === undefined ? `store: ${code}` : `store: ${code}: ${detail}`);
     this.code = code;
     this.name = "StoreError";
+  }
+}
+
+export function ensure(condition: unknown, code: string): asserts condition {
+  if (!condition) {
+    throw new StoreError(code);
   }
 }
 
@@ -36,6 +44,16 @@ export interface EventInput {
   readonly payload: JsonObject;
   /** Defaults to the store clock. */
   readonly at?: string;
+}
+
+/**
+ * A table set derived from the events, updated in the append transaction and rebuilt by
+ * `Store.rebuild`: its tables, their DDL and one applier per event kind.
+ */
+export interface Projection {
+  readonly tables: readonly string[];
+  readonly ddl: string;
+  readonly apply: Readonly<Record<string, (db: DatabaseSync, event: StoredEvent) => void>>;
 }
 
 export interface StoredEvent {
@@ -105,12 +123,34 @@ export interface MessageView {
 
 export type WakeOutcome = "accepted" | "guarded" | "failed" | "ambiguous";
 
+export interface WorkRef {
+  readonly repository: string;
+  readonly id: string;
+}
+
+export interface NativeQuestionIdentity {
+  readonly turn: string;
+  readonly item: string;
+  readonly index: number;
+}
+
+export interface CodexQuestionInput {
+  readonly thread: string;
+  readonly dependsOn: readonly WorkRef[];
+}
+
 /** Safe links to an exact blocker, or the wake event carrying unresolved evidence. */
 export interface WakeBlocker {
   readonly kind: "question" | "hold" | "policy-hold" | "registry" | "wake" | "native-question";
   readonly id: string;
   readonly owner: string;
   readonly native?: { readonly turnId: string; readonly itemId: string };
+}
+
+export interface WakeGuard {
+  readonly status: "clear" | "blocked";
+  readonly reason?: string;
+  readonly blocker?: WakeBlocker;
 }
 
 export interface MessageWakeView {

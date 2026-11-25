@@ -7,11 +7,7 @@ import { readFileSync } from "node:fs";
 import { resolveHarness } from "../registry/resolve.ts";
 import { systemGit } from "../status/git.ts";
 import { type QuestionEvidence, readCodexQuestionEvidence } from "./codexQuestionEvidence.ts";
-import {
-  type NativeQuestionIdentity,
-  nativeQuestionIdentity,
-  type NativeQuestionProof,
-} from "./codexQuestions.ts";
+import { nativeQuestionIdentity, type NativeQuestionProof } from "./codexQuestions.ts";
 import type { Store } from "./db.ts";
 import {
   appendDecisionLine,
@@ -22,6 +18,8 @@ import {
 } from "./decisionLine.ts";
 import { type CallerOptions, resolveCaller } from "./identity.ts";
 import {
+  type HoldState,
+  type HoldView,
   type PolicyHoldInput,
   policyHoldTarget,
   policyTargetCoversRole,
@@ -34,8 +32,6 @@ import {
   closeLegacyQuestion,
   type DecisionRow,
   getQuestionDecision,
-  type HoldState,
-  type HoldView,
   linkNativeQuestion,
   listDecisions,
   listHolds,
@@ -54,9 +50,8 @@ import {
   setHold,
 } from "./questions.ts";
 import { registry, type StoreServiceContext, withStore } from "./service.ts";
-import { type Actor, StoreError } from "./types.ts";
+import { type Actor, type NativeQuestionIdentity, StoreError, type WorkRef } from "./types.ts";
 import { wakeRecipient, type WakeStatus } from "./wake.ts";
-import type { WorkRef } from "./work.ts";
 
 interface QuestionContext extends StoreServiceContext {
   readonly questionEvidence?: QuestionEvidence;

@@ -3,14 +3,11 @@
 // set it and only that role releases it. Every writer trusts its `actor`: the CLI resolves it
 // through the registry fence first, and these functions refuse any other owner's record.
 import { hostname } from "node:os";
-import type { DatabaseSync, SQLInputValue } from "node:sqlite";
+import type { SQLInputValue } from "node:sqlite";
 
 import type { Harness } from "../registry/schema.ts";
-import { ID_PATTERN as WORK_ID } from "../work/check.ts";
 import {
   type CodexQuestion,
-  type CodexQuestionInput,
-  type NativeQuestionIdentity,
   nativeQuestionIdentity,
   type NativeQuestionProof,
   nativeQuestionUnused,
@@ -20,17 +17,29 @@ import {
   sameNativeQuestion,
 } from "./codexQuestions.ts";
 import type { Store } from "./db.ts";
+import { payloadText as text } from "./eventCodec.ts";
 import {
+  HOLD_STATES,
+  type HoldState,
+  type HoldView,
   policyHoldEntries,
   policyHoldIdExists,
   type PolicyHoldView,
   policyTargetCoversRole,
 } from "./policyHolds.ts";
-import type { Projection } from "./projections.ts";
+import { holdOpen } from "./projections/questions.ts";
 import { secretShape } from "./secrets.ts";
-import { type Actor, type Json, type JsonObject, type StoredEvent, StoreError } from "./types.ts";
-import type { WakeGuard } from "./wake.ts";
-import { type CoveringHold, type HoldLookup, holdOpen } from "./work.ts";
+import {
+  type Actor,
+  type CodexQuestionInput,
+  ensure,
+  type Json,
+  type JsonObject,
+  type NativeQuestionIdentity,
+  type WakeGuard,
+  type WorkRef,
+} from "./types.ts";
+import { WORK_ID } from "./work.ts";
 
 /**
  * Question and hold IDs: role-scoped `q-<role>-<n>` when generated, else lower-case letters, digits
@@ -50,8 +59,6 @@ const MAX_OPTIONS = 8;
 
 export type QuestionState = "pending" | "answered" | "cancelled";
 export const QUESTION_STATES: readonly QuestionState[] = ["pending", "answered", "cancelled"];
-export type HoldState = "active" | "released";
-export const HOLD_STATES: readonly HoldState[] = ["active", "released"];
 
 export interface QuestionOption {
   readonly label: string;
@@ -103,198 +110,7 @@ export interface RecordedAnswer {
   };
 }
 
-export interface HoldView {
-  readonly id: string;
-  /** The owner; null for an imported hold whose ledger names no registered owner. */
-  readonly role: string | null;
-  /**
-   * `work:<id>`, `role` (the owner itself) or `game:<id>`. An imported hold is `work:` and its
-   * `<repository>:<id>` items joined by `,`.
-   */
-  readonly scope: string;
-  /** `approval-ledger` for an imported hold, `user-policy` for a policy hold, else null. */
-  readonly source: string | null;
-  readonly policy?: PolicyHoldView["policy"];
-  readonly reason: string;
-  readonly state: HoldState;
-  readonly setAt: string;
-  readonly releasedAt: string | null;
-}
-
 type Row = Record<string, SQLInputValue>;
-
-function ensure(condition: unknown, code: string): asserts condition {
-  if (!condition) {
-    throw new StoreError(code);
-  }
-}
-
-function text(payload: JsonObject, key: string): string | null {
-  const value = payload[key];
-  return typeof value === "string" ? value : null;
-}
-
-const QUESTIONS_DDL = `
-CREATE TABLE IF NOT EXISTS questions (
-  id TEXT PRIMARY KEY,
-  role TEXT NOT NULL,
-  title TEXT NOT NULL,
-  work TEXT,
-  options TEXT,
-  state TEXT NOT NULL CHECK (state IN ('pending', 'answered', 'cancelled')),
-  opened_at TEXT NOT NULL,
-  opened_seq INTEGER NOT NULL,
-  closed_at TEXT,
-  decision TEXT,
-  reason TEXT
-);
-CREATE INDEX IF NOT EXISTS questions_role ON questions (role, state, opened_seq);
-CREATE TABLE IF NOT EXISTS decisions (
-  id TEXT PRIMARY KEY,
-  work TEXT NOT NULL,
-  n INTEGER NOT NULL,
-  question TEXT NOT NULL,
-  by TEXT NOT NULL,
-  at TEXT NOT NULL,
-  role TEXT NOT NULL,
-  supersedes TEXT,
-  text TEXT NOT NULL,
-  seq INTEGER NOT NULL,
-  UNIQUE (work, n)
-);
-CREATE INDEX IF NOT EXISTS decisions_role ON decisions (role, seq);
-CREATE TABLE IF NOT EXISTS holds (
-  id TEXT PRIMARY KEY,
-  role TEXT,
-  scope TEXT NOT NULL,
-  work TEXT NOT NULL DEFAULT '[]',
-  source TEXT,
-  ledger_state TEXT,
-  reason TEXT NOT NULL,
-  state TEXT NOT NULL CHECK (state IN ('active', 'released')),
-  set_at TEXT NOT NULL,
-  set_seq INTEGER NOT NULL,
-  released_at TEXT
-);
-CREATE INDEX IF NOT EXISTS holds_role ON holds (role, state, set_seq);
-`;
-
-const opened = (db: DatabaseSync, event: StoredEvent): void => {
-  const p = event.payload;
-  db.prepare(
-    `INSERT INTO questions (id, role, title, work, options, state, opened_at, opened_seq)
-     VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`,
-  ).run(
-    text(p, "id"),
-    text(p, "role"),
-    text(p, "title"),
-    text(p, "work"),
-    p.options === null || p.options === undefined ? null : JSON.stringify(p.options),
-    event.at,
-    event.seq,
-  );
-};
-
-const answered = (db: DatabaseSync, event: StoredEvent): void => {
-  const p = event.payload;
-  const decision = `${text(p, "work")}/D${Number(p.n)}`;
-  const answeredAt = text(p, "answeredAt") ?? event.at;
-  db.prepare(
-    `UPDATE questions SET state = 'answered', closed_at = ?, decision = ? WHERE id = ?`,
-  ).run(answeredAt, decision, text(p, "id"));
-  db.prepare(
-    `INSERT INTO decisions (id, work, n, question, by, at, role, supersedes, text, seq)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    decision,
-    text(p, "work"),
-    Number(p.n),
-    text(p, "id"),
-    text(p, "by"),
-    answeredAt,
-    text(p, "role"),
-    text(p, "supersedes"),
-    text(p, "text"),
-    event.seq,
-  );
-};
-
-const cancelled = (db: DatabaseSync, event: StoredEvent): void => {
-  const p = event.payload;
-  db.prepare(
-    `UPDATE questions SET state = 'cancelled', closed_at = ?, reason = ? WHERE id = ?`,
-  ).run(event.at, text(p, "reason"), text(p, "id"));
-};
-
-const holdSet = (db: DatabaseSync, event: StoredEvent): void => {
-  const p = event.payload;
-  const scope = text(p, "scope")!;
-  const work = scope.startsWith("work:") ? [{ id: scope.slice(5), repository: null }] : [];
-  db.prepare(
-    `INSERT INTO holds (id, role, scope, work, reason, state, set_at, set_seq)
-     VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
-  ).run(
-    text(p, "id"),
-    text(p, "role"),
-    scope,
-    JSON.stringify(work),
-    text(p, "reason"),
-    event.at,
-    event.seq,
-  );
-};
-
-/**
- * An approval-ledger hold (`store import --approval-ledger`): its recorded owner, or none, and the
- * work items it names. An open ledger state is `active`; a closed one is history, `released` with
- * no release time. Import never releases a hold; only its owner's `hold release` does.
- */
-const holdImported = (db: DatabaseSync, event: StoredEvent): void => {
-  const p = event.payload;
-  const work = (Array.isArray(p.work) ? (p.work as readonly JsonObject[]) : []).flatMap((item) =>
-    typeof item.repository === "string" && typeof item.id === "string"
-      ? [{ id: item.id, repository: item.repository }]
-      : [],
-  );
-  const state = text(p, "state");
-  db.prepare(
-    `INSERT OR IGNORE INTO holds (id, role, scope, work, source, ledger_state, reason, state, set_at,
-       set_seq)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    text(p, "id") ?? event.key,
-    text(p, "owner"),
-    `work:${work.map((item) => `${item.repository}:${item.id}`).join(",")}`,
-    JSON.stringify(work),
-    text(p, "source"),
-    state,
-    text(p, "reason") ?? "",
-    holdOpen(state) ? "active" : "released",
-    event.at,
-    event.seq,
-  );
-};
-
-const holdReleased = (db: DatabaseSync, event: StoredEvent): void => {
-  db.prepare(`UPDATE holds SET state = 'released', released_at = ? WHERE id = ?`).run(
-    event.at,
-    text(event.payload, "id"),
-  );
-};
-
-/** Questions, their decisions and holds. */
-export const QUESTIONS_PROJECTION: Projection = {
-  apply: {
-    "hold.imported": holdImported,
-    "hold.released": holdReleased,
-    "hold.set": holdSet,
-    "question.answered": answered,
-    "question.cancelled": cancelled,
-    "question.opened": opened,
-  },
-  ddl: QUESTIONS_DDL,
-  tables: ["questions", "decisions", "holds"],
-};
 
 function ownerOf(actor: Actor): string {
   ensure(actor.role !== null && ROLE.test(actor.role), "invalid-actor");
@@ -578,53 +394,6 @@ export function reaskNativeQuestion(
     return { duplicate: false, question: requireOwnQuestion(store, actor, id) };
   });
 }
-
-/** Independent projection so existing schema-1 stores acquire it without rewriting their events. */
-export const QUESTION_ANSWERS_PROJECTION: Projection = {
-  apply: {
-    "question.answer-recorded": (db, event) => {
-      const p = event.payload;
-      const answeredAt = text(p, "answeredAt") ?? event.at;
-      db.prepare(
-        `INSERT INTO question_answers (id, work, text, by, supersedes, at, seq, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
-      ).run(
-        text(p, "id"),
-        text(p, "work"),
-        text(p, "text"),
-        text(p, "by"),
-        text(p, "supersedes"),
-        answeredAt,
-        event.seq,
-      );
-      db.prepare("UPDATE questions SET state = 'answered', closed_at = ? WHERE id = ?").run(
-        answeredAt,
-        text(p, "id"),
-      );
-    },
-    "question.projection": (db, event) => {
-      const p = event.payload;
-      db.prepare("UPDATE question_answers SET status = ?, reason = ? WHERE id = ?").run(
-        text(p, "status"),
-        text(p, "reason"),
-        text(p, "id"),
-      );
-    },
-  },
-  ddl: `CREATE TABLE IF NOT EXISTS question_answers (
-    id TEXT PRIMARY KEY,
-    work TEXT NOT NULL,
-    text TEXT NOT NULL,
-    by TEXT NOT NULL,
-    supersedes TEXT,
-    at TEXT NOT NULL,
-    seq INTEGER NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('pending', 'failed', 'applied')),
-    reason TEXT
-  );
-  CREATE INDEX IF NOT EXISTS question_answers_work ON question_answers (work, seq);`,
-  tables: ["question_answers"],
-};
 
 function decisionRow(row: Row): DecisionRow {
   return {
@@ -1190,3 +959,43 @@ export const storeHolds: HoldLookup = (store, ref, cover) => {
     }));
   return [...local, ...policy].sort((a, b) => a.seq - b.seq).map(({ hold }): CoveringHold => hold);
 };
+
+/** An open hold that covers a work item, as `work start` sees it. */
+export interface CoveringHold {
+  readonly id: string;
+  readonly owner: string | null;
+  readonly policy?: PolicyHoldView["policy"];
+  readonly reason: string | null;
+}
+
+/** What else a hold may cover besides the item itself: its owner role and its game. */
+export interface HoldCover {
+  readonly owner: string | null;
+  /** The item's repository when it is a game, else null. */
+  readonly game: string | null;
+}
+
+/**
+ * The hold seam of `work start` and `work show`. The default is the hold records' `storeHolds`
+ * `importedHolds` reads only the imported events.
+ */
+export type HoldLookup = (
+  store: Pick<Store, "db" | "events">,
+  ref: WorkRef,
+  cover?: HoldCover,
+) => readonly CoveringHold[];
+
+export const importedHolds: HoldLookup = (store, ref) =>
+  store
+    .events({ kinds: ["hold.imported"] })
+    .filter((event) => holdOpen(text(event.payload, "state")))
+    .filter((event) =>
+      (Array.isArray(event.payload.work) ? (event.payload.work as readonly JsonObject[]) : []).some(
+        (item) => item.repository === ref.repository && item.id === ref.id,
+      ),
+    )
+    .map((event) => ({
+      id: text(event.payload, "id") ?? event.key,
+      owner: text(event.payload, "owner"),
+      reason: text(event.payload, "reason"),
+    }));

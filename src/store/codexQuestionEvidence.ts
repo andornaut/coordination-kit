@@ -6,8 +6,9 @@ import { decisionDirectory, decisionRecord } from "../adapters/shared/decisions.
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
 import { isRecord } from "../adapters/shared/pyjson.ts";
 import type { Layout } from "../layout.ts";
-import type { NativeQuestionIdentity, NativeQuestionProof } from "./codexQuestions.ts";
+import type { NativeQuestionProof } from "./codexQuestions.ts";
 import type { QuestionView } from "./questions.ts";
+import type { NativeQuestionIdentity } from "./types.ts";
 
 interface EvidenceContext {
   readonly env: NodeJS.ProcessEnv;

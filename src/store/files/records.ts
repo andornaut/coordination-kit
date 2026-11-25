@@ -1,9 +1,10 @@
 // Immutable role-owned views of the verified event stream. The journal remains complete when
 // ownership is unavailable. A projection never assigns a worker from an attribution label.
 import { isCanonicalUuid } from "../../adapters/shared/ids.ts";
-import { handoffHoldId } from "../handoffs.ts";
+import { payloadText as text } from "../eventCodec.ts";
+import { handoffHoldId } from "../projections/handoffs.ts";
+import { WORK_KINDS } from "../projections/work.ts";
 import { type Json, type JsonObject, type StoredEvent, StoreError } from "../types.ts";
-import { WORK_KINDS } from "../work.ts";
 
 export interface FileRecord {
   readonly path: string;
@@ -61,11 +62,6 @@ const WAKE_EVENTS = new Set([
   "wake.guarded",
   "wake.rearmed",
 ]);
-
-function text(payload: JsonObject, key: string): string | null {
-  const value = payload[key];
-  return typeof value === "string" ? value : null;
-}
 
 /** Encode record IDs losslessly and keep every filename below the filesystem name limit. */
 function recordId(id: string | null): string | null {

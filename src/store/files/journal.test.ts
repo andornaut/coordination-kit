@@ -14,7 +14,7 @@ import { promisify } from "node:util";
 
 import { expect, it } from "vitest";
 
-import { eventHash } from "../db.ts";
+import { eventHash } from "../eventCodec.ts";
 import { GENESIS, type StoredEvent } from "../types.ts";
 import {
   cancelFileJournalReservation,

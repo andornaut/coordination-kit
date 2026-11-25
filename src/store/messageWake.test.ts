@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { Store } from "./db.ts";
 import { sendMessage } from "./messages.ts";
-import { messageWake, safeWakeBlocker } from "./messageWake.ts";
+import { messageWake } from "./messageWake.ts";
+import { safeWakeBlocker } from "./projections/messageWake.ts";
 import { storeDone, storeInbox, storeInboxPeek, storeSend, storeStatus } from "./service.ts";
 import { ART, COORDINATOR, fakeCodex, storeFixture, TECH } from "./testStore.ts";
 

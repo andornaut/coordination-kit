@@ -4,13 +4,8 @@
 // prints `coordination-kit: CODE` on stderr and exits 1, and a usage error exits 2.
 
 import type { Handler } from "../io.ts";
-import {
-  HOLD_STATES,
-  type HoldState,
-  normalizeOptions,
-  QUESTION_STATES,
-  type QuestionState,
-} from "../store/questions.ts";
+import { HOLD_STATES, type HoldState } from "../store/policyHolds.ts";
+import { normalizeOptions, QUESTION_STATES, type QuestionState } from "../store/questions.ts";
 import {
   storeDecisionList,
   storeHoldList,

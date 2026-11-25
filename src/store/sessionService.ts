@@ -27,8 +27,8 @@ import {
   setHandoffState,
 } from "./handoffs.ts";
 import { type CallerOptions, NATIVE_ID_VARIABLES, resolveCaller } from "./identity.ts";
-import { activePolicyHoldsForRole } from "./policyHolds.ts";
-import { type HoldView, listQuestions, type QuestionView } from "./questions.ts";
+import { activePolicyHoldsForRole, type HoldView } from "./policyHolds.ts";
+import { listQuestions, type QuestionView } from "./questions.ts";
 import { wakeOwner } from "./questionService.ts";
 import { COORDINATOR_ROLE } from "./retire.ts";
 import { registry, type StoreServiceContext, withStore } from "./service.ts";

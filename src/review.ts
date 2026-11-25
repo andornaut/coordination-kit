@@ -9,12 +9,13 @@ export {
   routeRecipient,
   validateRoleRoute,
 } from "./adapters/shared/route.ts";
-export { deliverReview, type ReviewOptions, type ReviewResult } from "./review/deliver.ts";
+export { deliverReview, type ReviewOptions } from "./review/deliver.ts";
 export { coordinationEmit, coordinationNotice } from "./review/emit.ts";
 export {
   type CliIdentity,
   REASON_TOKENS,
   type ReasonToken,
+  type ReviewResult,
   type SeamStatus,
 } from "./review/outcome.ts";
 export {

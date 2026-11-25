@@ -13,6 +13,10 @@ export const NATIVE_ID_VARIABLES: Readonly<Record<Harness, string>> = {
   codex: "CODEX_THREAD_ID",
 };
 
+/** The runner's role in the registry, the sender of every message the kit stores for it. */
+export const DELIVERY_KIT_ROLE = "delivery-kit";
+export const DELIVERY_KIT_ACTOR: Actor = { nativeId: null, role: DELIVERY_KIT_ROLE };
+
 const WORKER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 

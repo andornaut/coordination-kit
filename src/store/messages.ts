@@ -1,14 +1,14 @@
 // Message lifecycle over the store: sent, delivered on the recipient's own read, then handled,
 // superseded or retained by the recipient. Every function trusts its `actor`; the CLI resolves it
 // through the registry fence first. Native wakes are separate (`wake.ts`) and never change state.
-import { createHash } from "node:crypto";
 import type { SQLInputValue } from "node:sqlite";
 
 import type { Store } from "./db.ts";
-import { canonicalJson } from "./eventCodec.ts";
+import { canonicalJson, normalizeLinks, REF, sha256 } from "./eventCodec.ts";
 import { secretShape } from "./secrets.ts";
 import {
   type Actor,
+  ensure,
   type Json,
   type JsonObject,
   type LegacyOrigin,
@@ -18,28 +18,15 @@ import {
   type MessageView,
   type Retention,
   type StoredEvent,
-  StoreError,
 } from "./types.ts";
 
 /** Legacy message IDs keep their exact form; new sends use canonical UUIDs. */
 export const MESSAGE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 export const ROLE = /^[a-z0-9][a-z0-9-]{0,63}(?:\/[a-z0-9][a-z0-9-]{0,63})?$/;
-export const REF = /^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{0,511}$/;
-const LINK_KIND = /^[a-z][a-z0-9-]{0,31}$/;
 export const MAX_BODY_BYTES = 1024 * 1024;
 const OPEN: readonly MessageState[] = ["sent", "delivered", "retained"];
 
 type Row = Record<string, SQLInputValue>;
-
-function ensure(condition: unknown, code: string): asserts condition {
-  if (!condition) {
-    throw new StoreError(code);
-  }
-}
-
-export function sha256(text: string): string {
-  return createHash("sha256").update(text, "utf8").digest("hex");
-}
 
 function parse<T>(value: SQLInputValue | undefined): T {
   return JSON.parse((value as string | undefined) ?? "null") as T;
@@ -84,18 +71,6 @@ function rowView(store: Pick<Store, "db">, row: Row, includeBody: boolean): Mess
 
 function messageRow(store: Pick<Store, "db">, id: string): Row | undefined {
   return store.db.prepare("SELECT * FROM messages WHERE id = ?").get(id) as Row | undefined;
-}
-
-/** Links sorted by kind then ref, without duplicates, so equal sets compare equal. */
-export function normalizeLinks(links: readonly MessageLink[]): MessageLink[] {
-  const seen = new Map<string, MessageLink>();
-  for (const link of links) {
-    ensure(LINK_KIND.test(link.kind) && REF.test(link.ref), "invalid-link");
-    seen.set(`${link.kind}=${link.ref}`, { kind: link.kind, ref: link.ref });
-  }
-  return [...seen.entries()]
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([, link]) => link);
 }
 
 export interface SendInput {

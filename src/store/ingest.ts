@@ -22,10 +22,10 @@ import type { GameLayout, Layout } from "../layout.ts";
 import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
 import type { ReasonToken, SeamStatus } from "../review/outcome.ts";
 import { Store } from "./db.ts";
-import { REF } from "./messages.ts";
+import { REF } from "./eventCodec.ts";
+import { DELIVERY_KIT_ACTOR } from "./identity.ts";
 import {
   clean,
-  DELIVERY_KIT_ACTOR,
   derivedId,
   INTERMEDIATE_TYPES,
   type Notice,

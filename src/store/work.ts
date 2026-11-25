@@ -2,14 +2,13 @@
 // work item, keyed by (repository, work ID). Approval, owner and scope stay in the work file on the
 // repository's `main`; the store holds only live progress. Every function trusts its `actor`: the
 // CLI applies the registry fence and the repository owner check first (src/work/live.ts).
-import { createHash } from "node:crypto";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
 import type { Store } from "./db.ts";
-import type { PolicyHoldView } from "./policyHolds.ts";
-import type { Projection } from "./projections.ts";
+import { payloadText as text, sha256 } from "./eventCodec.ts";
+import { WORK_KINDS } from "./projections/work.ts";
 import { secretShape } from "./secrets.ts";
-import { type Actor, type JsonObject, type StoredEvent, StoreError } from "./types.ts";
+import { type Actor, ensure, type JsonObject, type WorkRef } from "./types.ts";
 
 export const WORK_STAGES = ["implemented", "merged", "verified", "published", "deployed"] as const;
 export type WorkStage = (typeof WORK_STAGES)[number];
@@ -17,31 +16,12 @@ export type WorkState = "recorded" | "started" | "blocked" | "ready" | "finished
 /** The work file statuses `work finish` accepts; a finish without a recorded status is `done`. */
 export const FINISH_STATUSES = ["done", "superseded", "cancelled"] as const;
 export type FinishStatus = (typeof FINISH_STATUSES)[number];
-export const WORK_KINDS = [
-  "work.started",
-  "work.evidence",
-  "work.blocked",
-  "work.unblocked",
-  "work.ready",
-  "work.finished",
-  "work.retained",
-] as const;
-
 /** `<prefix>-` and a zero-padded sequence, as in the work-file convention. */
 export const WORK_ID = /^[a-z][a-z0-9]*-\d{4,}$/;
 export const REPOSITORY_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 /** A Git object name: abbreviated (7 or more) up to a full SHA-1 or SHA-256, lower case. */
 export const SHA = /^[0-9a-f]{7,64}$/;
 const MAX_TEXT = 2000;
-
-function sha256(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-export interface WorkRef {
-  readonly repository: string;
-  readonly id: string;
-}
 
 export interface WorkEvidence {
   readonly stage: WorkStage;
@@ -91,17 +71,6 @@ export interface WorkRecord extends WorkRef {
 
 type Row = Record<string, SQLInputValue>;
 
-function ensure(condition: unknown, code: string): asserts condition {
-  if (!condition) {
-    throw new StoreError(code);
-  }
-}
-
-function text(payload: JsonObject, key: string): string | null {
-  const value = payload[key];
-  return typeof value === "string" ? value : null;
-}
-
 /** One line of free text: non-empty, bounded and not secret-shaped. */
 export function workText(value: string, code: string): string {
   ensure(value.trim() !== "" && value.length <= MAX_TEXT && !/[\r\n]/.test(value), code);
@@ -114,177 +83,6 @@ export function checkRef(ref: WorkRef): WorkRef {
   ensure(WORK_ID.test(ref.id), "invalid-work-id");
   return { id: ref.id, repository: ref.repository };
 }
-
-const WORK_DDL = `
-CREATE TABLE IF NOT EXISTS work (
-  repository TEXT NOT NULL,
-  id TEXT NOT NULL,
-  owner TEXT,
-  state TEXT NOT NULL CHECK (state IN ('recorded', 'started', 'blocked', 'ready', 'finished')),
-  parent_repository TEXT,
-  parent_id TEXT,
-  started_at TEXT,
-  ready_at TEXT,
-  finished_at TEXT,
-  block TEXT,
-  updated_seq INTEGER NOT NULL,
-  updated_at TEXT NOT NULL,
-  PRIMARY KEY (repository, id)
-);
-CREATE INDEX IF NOT EXISTS work_parent ON work (parent_repository, parent_id);
-CREATE TABLE IF NOT EXISTS work_evidence (
-  seq INTEGER PRIMARY KEY,
-  repository TEXT NOT NULL,
-  id TEXT NOT NULL,
-  stage TEXT NOT NULL,
-  sha TEXT NOT NULL,
-  ref TEXT,
-  source TEXT,
-  entry TEXT,
-  actor TEXT,
-  at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS work_evidence_work ON work_evidence (repository, id, seq);
-CREATE INDEX IF NOT EXISTS work_evidence_sha ON work_evidence (sha);
-CREATE TABLE IF NOT EXISTS work_retained (
-  seq INTEGER PRIMARY KEY,
-  repository TEXT NOT NULL,
-  id TEXT NOT NULL,
-  owner TEXT,
-  reason TEXT NOT NULL,
-  next_boundary TEXT NOT NULL,
-  source TEXT,
-  entry TEXT,
-  at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS work_retained_work ON work_retained (repository, id, seq);
-`;
-
-/** Insert the row if missing, apply `set`, then derive the state from the timestamps. */
-function touch(
-  db: DatabaseSync,
-  event: StoredEvent,
-  set: string,
-  values: readonly SQLInputValue[],
-): void {
-  const repository = text(event.payload, "repository");
-  const id = text(event.payload, "id");
-  db.prepare(
-    `INSERT INTO work (repository, id, state, updated_seq, updated_at) VALUES (?, ?, 'recorded', ?, ?)
-     ON CONFLICT (repository, id) DO NOTHING`,
-  ).run(repository, id, event.seq, event.at);
-  db.prepare(
-    `UPDATE work SET ${set}${set === "" ? "" : ", "}updated_seq = ?, updated_at = ?
-     WHERE repository = ? AND id = ?`,
-  ).run(...values, event.seq, event.at, repository, id);
-  db.prepare(
-    `UPDATE work SET state = CASE
-       WHEN finished_at IS NOT NULL THEN 'finished'
-       WHEN block IS NOT NULL THEN 'blocked'
-       WHEN ready_at IS NOT NULL THEN 'ready'
-       WHEN started_at IS NOT NULL THEN 'started'
-       ELSE 'recorded' END
-     WHERE repository = ? AND id = ?`,
-  ).run(repository, id);
-}
-
-function parentOf(payload: JsonObject): { repository: string | null; id: string | null } {
-  const parent = payload.parent;
-  if (parent === null || typeof parent !== "object" || Array.isArray(parent)) {
-    return { id: null, repository: null };
-  }
-  const value = parent as JsonObject;
-  return { id: text(value, "id"), repository: text(value, "repository") };
-}
-
-const started = (db: DatabaseSync, event: StoredEvent): void => {
-  const parent = parentOf(event.payload);
-  touch(db, event, "owner = ?, started_at = ?, parent_repository = ?, parent_id = ?", [
-    text(event.payload, "owner"),
-    event.at,
-    parent.repository,
-    parent.id,
-  ]);
-};
-
-const evidence = (db: DatabaseSync, event: StoredEvent): void => {
-  const p = event.payload;
-  db.prepare(
-    `INSERT INTO work_evidence (seq, repository, id, stage, sha, ref, source, entry, actor, at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    event.seq,
-    text(p, "repository"),
-    text(p, "id"),
-    text(p, "stage"),
-    text(p, "sha"),
-    text(p, "ref"),
-    text(p, "source"),
-    text(p, "entry"),
-    event.actor.role,
-    event.at,
-  );
-  touch(db, event, "", []);
-};
-
-const blocked = (db: DatabaseSync, event: StoredEvent): void => {
-  touch(db, event, "block = ?", [
-    JSON.stringify({
-      at: event.at,
-      owner: text(event.payload, "blockOwner"),
-      reason: text(event.payload, "reason"),
-    }),
-  ]);
-};
-
-const unblocked = (db: DatabaseSync, event: StoredEvent): void => {
-  touch(db, event, "block = NULL", []);
-};
-
-const ready = (db: DatabaseSync, event: StoredEvent): void => {
-  touch(db, event, "ready_at = ?", [event.at]);
-};
-
-const finished = (db: DatabaseSync, event: StoredEvent): void => {
-  touch(db, event, "owner = COALESCE(?, owner), finished_at = ?, block = NULL", [
-    text(event.payload, "owner"),
-    event.at,
-  ]);
-};
-
-const retainedItem = (db: DatabaseSync, event: StoredEvent): void => {
-  const p = event.payload;
-  db.prepare(
-    `INSERT INTO work_retained (seq, repository, id, owner, reason, next_boundary, source, entry, at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    event.seq,
-    text(p, "repository"),
-    text(p, "id"),
-    text(p, "owner"),
-    text(p, "reason"),
-    text(p, "nextBoundary"),
-    text(p, "source"),
-    text(p, "entry"),
-    event.at,
-  );
-  touch(db, event, "", []);
-};
-
-/** Work records, their stage evidence and their retained items. */
-export const WORK_PROJECTION: Projection = {
-  apply: {
-    "work.blocked": blocked,
-    "work.evidence": evidence,
-    "work.finished": finished,
-    "work.ready": ready,
-    "work.retained": retainedItem,
-    "work.started": started,
-    "work.unblocked": unblocked,
-  },
-  ddl: WORK_DDL,
-  tables: ["work", "work_evidence", "work_retained"],
-};
 
 function workRow(db: DatabaseSync, ref: WorkRef): Row | undefined {
   return db
@@ -676,58 +474,3 @@ export function workHistory(store: Store, ref: WorkRef): WorkHistoryEntry[] {
       worker: event.actor.worker ?? null,
     }));
 }
-
-/** An open hold that covers a work item, as `work start` sees it. */
-export interface CoveringHold {
-  readonly id: string;
-  readonly owner: string | null;
-  readonly policy?: PolicyHoldView["policy"];
-  readonly reason: string | null;
-}
-
-/** What else a hold may cover besides the item itself: its owner role and its game. */
-export interface HoldCover {
-  readonly owner: string | null;
-  /** The item's repository when it is a game, else null. */
-  readonly game: string | null;
-}
-
-/**
- * The hold seam of `work start` and `work show`. The default is the hold records' `storeHolds`
- * (`questions.ts`); `importedHolds` reads only the imported events.
- */
-export type HoldLookup = (
-  store: Pick<Store, "db" | "events">,
-  ref: WorkRef,
-  cover?: HoldCover,
-) => readonly CoveringHold[];
-
-/** Ledger hold states that no longer hold anything; an imported hold in one is history only. */
-export const CLOSED_HOLD_STATES: readonly string[] = [
-  "answered",
-  "cancelled",
-  "cleared",
-  "closed",
-  "released",
-  "superseded",
-];
-
-/** An imported hold is open unless its recorded state is a closed one. */
-export function holdOpen(state: string | null): boolean {
-  return state === null || !CLOSED_HOLD_STATES.includes(state);
-}
-
-export const importedHolds: HoldLookup = (store, ref) =>
-  store
-    .events({ kinds: ["hold.imported"] })
-    .filter((event) => holdOpen(text(event.payload, "state")))
-    .filter((event) =>
-      (Array.isArray(event.payload.work) ? (event.payload.work as readonly JsonObject[]) : []).some(
-        (item) => item.repository === ref.repository && item.id === ref.id,
-      ),
-    )
-    .map((event) => ({
-      id: text(event.payload, "id") ?? event.key,
-      owner: text(event.payload, "owner"),
-      reason: text(event.payload, "reason"),
-    }));

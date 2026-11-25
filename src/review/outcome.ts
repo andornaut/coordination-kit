@@ -23,6 +23,13 @@ export type ReasonToken = (typeof REASON_TOKENS)[number];
 
 export type SeamStatus = "delivered" | "deferred" | "skipped";
 
+/** One slot's typed `review deliver` result. */
+export interface ReviewResult {
+  readonly status: SeamStatus;
+  readonly reason: ReasonToken | null;
+  readonly detail: string;
+}
+
 /** The running CLI's identity: its package version and the sha256 of its dist/cli.js bytes. */
 export interface CliIdentity {
   readonly version: string;

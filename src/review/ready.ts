@@ -1,5 +1,5 @@
 import type { Store } from "../store/db.ts";
-import type { WorkRef } from "../store/work.ts";
+import type { WorkRef } from "../store/types.ts";
 
 export interface ReadyHandoff extends WorkRef {
   readonly owner: string | null;

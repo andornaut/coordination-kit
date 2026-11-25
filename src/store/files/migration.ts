@@ -7,7 +7,8 @@ import { readJson, writeJsonDurable } from "../../durable.ts";
 import type { Layout } from "../../layout.ts";
 import { withLock } from "../../lock.ts";
 import { readRegistry } from "../../registry/store.ts";
-import { canonicalJson, Store, storePath } from "../db.ts";
+import { Store, storePath } from "../db.ts";
+import { canonicalJson } from "../eventCodec.ts";
 import { type StoredEvent, StoreError } from "../types.ts";
 import {
   activateFileAuthority,

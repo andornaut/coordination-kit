@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { canonicalJson, eventHash } from "../eventCodec.ts";
-import { sha256 } from "../messages.ts";
+import { canonicalJson, eventHash, sha256 } from "../eventCodec.ts";
 import { type EventInput, GENESIS, type StoredEvent } from "../types.ts";
 import {
   prepareCompactionCheckpoint,

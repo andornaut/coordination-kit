@@ -21,20 +21,16 @@ import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Harness } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 import { type Store, storeRoot } from "./db.ts";
-import {
-  blockerPayload,
-  coalescedMessages,
-  safeWakeBlocker,
-  safeWakeReason,
-} from "./messageWake.ts";
+import { coalescedMessages } from "./messageWake.ts";
+import { blockerPayload, safeWakeBlocker, safeWakeReason } from "./projections/messageWake.ts";
 import { questionHoldGuard } from "./questions.ts";
-import { type Actor, StoreError, type WakeBlocker, type WakeOutcome } from "./types.ts";
-
-export interface WakeGuard {
-  readonly status: "clear" | "blocked";
-  readonly reason?: string;
-  readonly blocker?: WakeBlocker;
-}
+import {
+  type Actor,
+  StoreError,
+  type WakeBlocker,
+  type WakeGuard,
+  type WakeOutcome,
+} from "./types.ts";
 
 /**
  * The store question and hold check, run after the registry checks. The default,

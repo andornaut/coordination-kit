@@ -7,9 +7,10 @@ import type { GameLayout, Layout } from "../layout.ts";
 import { resolveRole } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
 import type { Store } from "./db.ts";
+import { DELIVERY_KIT_ACTOR } from "./identity.ts";
 import { sendMessage } from "./messages.ts";
 import { secretShape } from "./secrets.ts";
-import type { Actor, MessageLink } from "./types.ts";
+import type { MessageLink } from "./types.ts";
 
 /** Intermediate CI and deploy events never count as successful outcomes. */
 export const INTERMEDIATE_TYPES: ReadonlySet<string> = new Set([
@@ -51,10 +52,6 @@ export function clean(value: string): string {
     .slice(0, CLEAN_LIMIT)
     .join("");
 }
-
-/** The runner's role in the registry, the sender of every message this module stores. */
-export const DELIVERY_KIT_ROLE = "delivery-kit";
-export const DELIVERY_KIT_ACTOR: Actor = { nativeId: null, role: DELIVERY_KIT_ROLE };
 
 /** A UUID derived from its parts, stable across processes and releases. */
 export function derivedId(...parts: readonly (string | number)[]): string {

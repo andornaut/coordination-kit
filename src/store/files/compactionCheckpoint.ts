@@ -1,6 +1,5 @@
 import { isRecord } from "../../adapters/shared/pyjson.ts";
-import { canonicalJson, eventHash } from "../eventCodec.ts";
-import { normalizeLinks, sha256 } from "../messages.ts";
+import { canonicalJson, eventHash, normalizeLinks, sha256 } from "../eventCodec.ts";
 import {
   GENESIS,
   type JsonObject,

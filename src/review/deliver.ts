@@ -14,16 +14,11 @@ import {
   cliMember,
   REASON_TOKENS,
   type ReasonToken,
+  type ReviewResult,
   type SeamStatus,
 } from "./outcome.ts";
 import { storeReview } from "./storeBrief.ts";
 import type { NativeCollect } from "./storeNative.ts";
-
-export interface ReviewResult {
-  readonly status: SeamStatus;
-  readonly reason: ReasonToken | null;
-  readonly detail: string;
-}
 
 export interface ReviewOptions {
   /** The environment and wake ports for the brief's wakes, and the store clock. */

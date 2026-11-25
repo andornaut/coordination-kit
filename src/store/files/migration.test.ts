@@ -4,7 +4,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { canonicalJson, Store, storePath } from "../db.ts";
+import { Store, storePath } from "../db.ts";
+import { canonicalJson } from "../eventCodec.ts";
 import { messageStatus, readInbox, sendMessage } from "../messages.ts";
 import { openQuestion, setHold } from "../questions.ts";
 import { COORDINATOR, GAME, storeFixture, TECH } from "../testStore.ts";

@@ -5,7 +5,8 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
-import { canonicalJson, Store, storePath } from "./db.ts";
+import { Store, storePath } from "./db.ts";
+import { canonicalJson } from "./eventCodec.ts";
 import { closeMessage, readInbox, retainMessage, sendMessage } from "./messages.ts";
 import { storeFixture } from "./testStore.ts";
 import { GENESIS } from "./types.ts";

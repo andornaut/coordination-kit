@@ -1,11 +1,9 @@
 import type { SQLInputValue } from "node:sqlite";
 
 import type { Store } from "./db.ts";
-import type { Projection } from "./projections.ts";
-import type { HoldState, HoldView } from "./questions.ts";
 import { secretShape } from "./secrets.ts";
-import { type Actor, StoreError } from "./types.ts";
-import { checkRef, type WorkRef } from "./work.ts";
+import { type Actor, StoreError, type WorkRef } from "./types.ts";
+import { checkRef } from "./work.ts";
 
 const ISSUER = "game-coordinator";
 const POLICY_ID = /^policy-[a-z0-9][a-z0-9-]{0,120}$/;
@@ -14,6 +12,27 @@ const ROLE = /^[a-z0-9][a-z0-9-]{0,63}(?:\/[a-z0-9][a-z0-9-]{0,63})?$/;
 
 type Row = Record<string, SQLInputValue>;
 type Reader = Pick<Store, "db">;
+
+export type HoldState = "active" | "released";
+export const HOLD_STATES: readonly HoldState[] = ["active", "released"];
+
+export interface HoldView {
+  readonly id: string;
+  /** The owner; null for an imported hold whose ledger names no registered owner. */
+  readonly role: string | null;
+  /**
+   * `work:<id>`, `role` (the owner itself) or `game:<id>`. An imported hold is `work:` and its
+   * `<repository>:<id>` items joined by `,`.
+   */
+  readonly scope: string;
+  /** `approval-ledger` for an imported hold, `user-policy` for a policy hold, else null. */
+  readonly source: string | null;
+  readonly policy?: PolicyHoldView["policy"];
+  readonly reason: string;
+  readonly state: HoldState;
+  readonly setAt: string;
+  readonly releasedAt: string | null;
+}
 
 export type PolicyHoldTarget =
   | { readonly kind: "role"; readonly role: string }
@@ -82,47 +101,6 @@ export function policyTargetCoversRole(target: PolicyHoldTarget, role: string): 
     (target.kind === "game" && role.startsWith(`${target.game}/`))
   );
 }
-
-export const POLICY_HOLDS_PROJECTION: Projection = {
-  apply: {
-    "hold.policy-released": (db, event) => {
-      const { approval, id } = event.payload;
-      db.prepare(
-        `UPDATE policy_holds SET state = 'released', released_at = ?, release_approval = ?
-         WHERE id = ?`,
-      ).run(event.at, approval as string, id as string);
-    },
-    "hold.policy-set": (db, event) => {
-      const { approval, id, issuer, reason, scope } = event.payload;
-      db.prepare(
-        `INSERT INTO policy_holds (id, issuer, scope, reason, approval, state, set_at, set_seq)
-         VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
-      ).run(
-        id as string,
-        issuer as string,
-        scope as string,
-        reason as string,
-        approval as string,
-        event.at,
-        event.seq,
-      );
-    },
-  },
-  ddl: `CREATE TABLE IF NOT EXISTS policy_holds (
-    id TEXT PRIMARY KEY,
-    issuer TEXT NOT NULL,
-    scope TEXT NOT NULL,
-    reason TEXT NOT NULL,
-    approval TEXT NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('active', 'released')),
-    set_at TEXT NOT NULL,
-    set_seq INTEGER NOT NULL,
-    released_at TEXT,
-    release_approval TEXT
-  );
-  CREATE INDEX IF NOT EXISTS policy_holds_scope ON policy_holds (scope, state, set_seq);`,
-  tables: ["policy_holds"],
-};
 
 function policyView(row: Row): PolicyHoldView {
   const scope = row.scope as string;
