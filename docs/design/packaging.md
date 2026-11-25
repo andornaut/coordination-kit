@@ -16,8 +16,11 @@ Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
 
 ## Work items
 
-| ID      | Title                                                 | Link                                                                                       |
-| ------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| ck-0011 | Check packaged docs on docs-only changes              | [ck-0011.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0011.md) |
-| ck-0012 | Link packaged docs to unpackaged work files on GitHub | [ck-0012.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0012.md) |
-| ck-0047 | Refactor for structure, encapsulation and simplicity  | [ck-0047.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0047.md) |
+| ID      | Title                                                            | Link                                                                                       |
+| ------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| ck-0011 | Check packaged docs on docs-only changes                         | [ck-0011.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0011.md) |
+| ck-0012 | Link packaged docs to unpackaged work files on GitHub            | [ck-0012.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0012.md) |
+| ck-0047 | Refactor for structure, encapsulation and simplicity             | [ck-0047.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0047.md) |
+| ck-0048 | Check import cycles in scripts and tests                         | [ck-0048.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0048.md) |
+| ck-0049 | Test internals through their module interfaces                   | [ck-0049.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0049.md) |
+| ck-0050 | One command wrapper and explicit clock, environment and hostname | [ck-0050.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0050.md) |
