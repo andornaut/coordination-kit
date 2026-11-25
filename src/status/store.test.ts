@@ -5,7 +5,14 @@ import { describe, expect, it } from "vitest";
 
 import { loadLayout } from "../layout.ts";
 import { Store, storePath } from "../store/db.ts";
-import { workBlock, workEvidence, workStart, workUnblock } from "../work/live.ts";
+import {
+  workBlock,
+  workEvidence,
+  workFinish,
+  workReady,
+  workStart,
+  workUnblock,
+} from "../work/live.ts";
 import { commit, GAME, IDS, KIT, live, liveFixture, workFile } from "../work/testLive.ts";
 import { collectStatus, type StatusItem } from "./collect.ts";
 import { systemGit } from "./git.ts";
@@ -156,6 +163,34 @@ describe("status with store work records", () => {
       id,
       status: "in-progress",
       store: { state: "started" },
+      workFile: null,
+    });
+  });
+
+  it("closes a finished superseded item and keeps its status without the work file", () => {
+    const fixture = liveFixture({
+      kit: {
+        "sk-0001": workFile("sk-0001", "Replaced item", "approved"),
+        "sk-0002": workFile("sk-0002", "Successor", "approved", { supersedes: "sk-0001" }),
+      },
+    });
+    const kit = live(fixture, IDS.kit);
+    const input = { id: "sk-0001", worktree: fixture.kit };
+    workStart(kit, {}, input);
+    workReady(kit, {}, input);
+    commit(fixture.kit, "Supersede sk-0001", {
+      "docs/work/sk-0001.md": workFile("sk-0001", "Replaced item", "superseded"),
+    });
+    workFinish(kit, {}, input);
+    expect(item(fixture.root, "sk-0001")).toMatchObject({
+      replacement: "sk-0002",
+      status: "superseded",
+      store: { finishedStatus: "superseded", state: "finished", successors: ["sk-0002"] },
+    });
+    commit(fixture.kit, "Remove sk-0001", { "docs/work/sk-0001.md": null });
+    expect(item(fixture.root, "sk-0001")).toMatchObject({
+      replacement: "sk-0002",
+      status: "superseded",
       workFile: null,
     });
   });

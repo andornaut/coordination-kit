@@ -71,10 +71,14 @@ export function commit(
 export interface WorkFileOptions {
   readonly design?: string;
   readonly owner?: string;
-  readonly supersedes?: string;
+  readonly supersedes?: string | readonly string[];
   readonly related?: readonly string[];
   readonly decisions?: readonly string[];
   readonly approved?: string;
+}
+
+function listField(value: string | readonly string[]): string {
+  return typeof value === "string" ? value : `[${value.join(", ")}]`;
 }
 
 export function workFile(
@@ -92,7 +96,7 @@ export function workFile(
     `design: ${options.design ?? "tech"}`,
     ...(options.owner === undefined ? [] : [`owner: ${options.owner}`]),
     ...(options.related === undefined ? [] : [`related: [${options.related.join(", ")}]`]),
-    ...(options.supersedes === undefined ? [] : [`supersedes: ${options.supersedes}`]),
+    ...(options.supersedes === undefined ? [] : [`supersedes: ${listField(options.supersedes)}`]),
     "---",
     "",
     "## Scope",

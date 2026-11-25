@@ -38,7 +38,7 @@ every form and flag.
 | `status [--scope all\|GAME\|KIT\|ROLE] [--since ISO_TIMESTAMP] [--state STATE]... [--audit] [--verify-since ISO_TIMESTAMP] [--format json\|markdown]`                                                                                                                                  | Read-only status of every registered repository's work items; see [status](#status).                                               |
 | `work check [--decisions] [--root DIR]`, `work report [--root DIR]`                                                                                                                                                                                                                    | Validate a repository's work files and report their state; see [work files](work-files.md).                                        |
 | `work start ID [--parent REPOSITORY:WORK_ID]`, `work evidence ID --stage STAGE --sha SHA [--ref REF]`                                                                                                                                                                                  | Start your approved item, or record a stage commit; see [work records](store.md#work-records).                                     |
-| `work block ID --reason TEXT [--owner ROLE]`, `work unblock ID`, `work ready ID`, `work finish ID`                                                                                                                                                                                     | Record your item blocked, unblocked, ready, or finished once its work file is `done` on `main`.                                    |
+| `work block ID --reason TEXT [--owner ROLE]`, `work unblock ID`, `work ready ID`, `work finish ID`                                                                                                                                                                                     | Record your item blocked, unblocked, ready, or finished once its work file is `done`, `superseded` or `cancelled` on `main`.       |
 | `work show ID`, `work history ID`                                                                                                                                                                                                                                                      | Read an item's owner, store record and covering holds, or its work events.                                                         |
 | `graph [--work [REPOSITORY:]ID] [--depth N] [--format json\|dot]`, `graph why --decision ID`                                                                                                                                                                                           | The live decision graph and supersedes chains; see [decision graph](store.md#decision-graph).                                      |
 | `help`, `--help`, `--version`, `--version --json`                                                                                                                                                                                                                                      | Usage, the version, and the version with the `dist/cli.js` sha256 as one JSON line.                                                |
@@ -144,6 +144,10 @@ Reserve, prepare, activate and cancel require the active game-coordinator bindin
   [registry fence](store.md#writer-fence) and accept only the item's owner. Each prints one JSON
   object with `duplicate` and the `record`; a refusal prints `coordination-kit: CODE` on stderr and
   exits 1, and a usage error exits 2.
+- `work finish` accepts a work file whose status on `main` is `done`, `superseded` or `cancelled`
+  (`work-not-done` otherwise). A `superseded` item needs a work file on `main` whose `supersedes`
+  names it (`successor-missing` otherwise); the record cites each successor. See
+  [finish](store.md#finish).
 - `graph`: `--root` names the coordinator. `graph --format dot` prints DOT instead of JSON.
 
 ## status
@@ -245,6 +249,10 @@ A work-file item takes the first that applies:
 7. `approved`: front matter `approved`.
 8. `proposed`: front matter `proposed` or any other value.
 
+A store record whose repository or work file cannot be read keeps its own item: a finished record
+reads as its `finishedStatus` (`replacement` is its first successor), else `deployed`, `landed`,
+`in-progress` or `requested` from its evidence and start.
+
 A request item is `requested`. An open item is `blocked` when a linked request is `blocked` or
 `waiting` (`blocker` is its reason, `owner` its required owner); an open store block takes precedence (its reason and the role
 that can clear it). Otherwise `blocker` and `owner` are null. `waitingOnUser` is
@@ -279,7 +287,8 @@ items         [{repository, id, title, status, replacement, blocked, blocker, ow
                 requests: [{id, kind, state, owner, question, requiredOwner, reason,
                             updatedAt, userSource}],
                 store: {repository, id, owner, state, parent, children, startedAt, readyAt,
-                        finishedAt, block, evidence, retained, updatedAt} | null,
+                        finishedAt, finishedStatus, successors, block, evidence,
+                        retained, updatedAt} | null,
                 deliverySource: {landing: store | git | null, deployment: store | git | null},
                 delivery: {landing: {sha, at, rule: done-flip | id | title} | null,
                            onOrigin, deployed and heuristicDeployment:

@@ -599,12 +599,12 @@ function recordOnlyItem(record: WorkRecord): StatusItem {
     id: record.id,
     latestEvidenceAt: latest([record.updatedAt]),
     owner: block?.owner ?? null,
-    replacement: null,
+    replacement: record.successors[0] ?? null,
     repository: record.repository,
     requests: [],
     status:
       record.state === "finished"
-        ? "done"
+        ? (record.finishedStatus ?? "done")
         : deployed
           ? "deployed"
           : merged

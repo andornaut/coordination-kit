@@ -215,7 +215,8 @@ Projections, updated in the same transaction as their event:
 - `review_briefs`: one row per (game, slot) stored review brief with its recipient and message ID.
 
 - `work`: one row per (repository, work ID) with its owner, state, parent, start, ready and finish
-  times and open block ([work records](#work-records)).
+  times and open block ([work records](#work-records)). A record's finish status and successors
+  are read from its `work.finished` event.
 - `work_evidence`: one row per stage record: stage, commit, reference, source and actor.
 - `work_retained`: one row per retained item of a work item: owner, reason and next boundary.
 - `questions`: one row per question with its owning role, title, work ID, options, state
@@ -742,7 +743,7 @@ read from the local `refs/heads/main`, never the working tree (`work-file-missin
 | `work block ID --reason TEXT [--owner ROLE]`           | `work.blocked`   | Not finished. `--owner` names the registered role that can clear it. The same open block again is a duplicate.                                                |
 | `work unblock ID`                                      | `work.unblocked` | Clears the open block; none open is a duplicate.                                                                                                              |
 | `work ready ID`                                        | `work.ready`     | Started (`work-not-started`), not blocked (`work-blocked`), not finished.                                                                                     |
-| `work finish ID`                                       | `work.finished`  | `status: done` on `main` (`work-not-done`). Once per item; it closes an open block.                                                                           |
+| `work finish ID`                                       | `work.finished`  | `status: done`, `superseded` or `cancelled` on `main` (`work-not-done`); see [finish](#finish). Once per item; it closes an open block.                       |
 
 Stages are `implemented`, `merged`, `verified`, `published` and `deployed`; a SHA is 7 to 64
 lower-case hex digits (upper case is folded). Reasons and references are one line of at most
@@ -752,10 +753,23 @@ lower-case hex digits (upper case is folded). Reasons and references are one lin
 be registered (`repository-unregistered`) and hold the parent's work file on its `main`
 (`parent-missing`). The child stays owned by its own role.
 
+### Finish
+
+`work finish` records the work file's terminal status. A `superseded` item finishes only when a
+work file on the repository's `main` names it in `supersedes` (one ID or a list);
+`successor-missing` refuses it otherwise. The `work.finished` payload is
+`{repository, id, owner}` for `done`, adds `status` for `cancelled`, and adds `status` and
+`successors` (the superseding IDs in ID order) for `superseded`. A payload without `status` reads
+as `done`. Compaction never reduces work events, so the extra fields replay and rebuild like the
+rest of the payload. A finished record leaves the review's ready handoffs and the open items of
+[`status`](commands.md#status), whatever its status.
+
 A record's `state` is `finished`, else `blocked`, else `ready`, else `started`, else `recorded` (a
-record made only by evidence or import). `work show ID` prints the owner, the work file's status
-and title, the record (with its evidence, retained items, parent and children) or null, and the
-holds covering the item. `work history ID` prints the item's work events in order.
+record made only by evidence or import). A finished record carries `finishedStatus` (`done`,
+`superseded` or `cancelled`; null until finished) and `successors` (empty unless superseded).
+`work show ID` prints the owner, the work file's status and title, the record (with its evidence,
+retained items, parent and children) or null, and the holds covering the item. `work history ID`
+prints the item's work events in order.
 
 ### Hold seam
 

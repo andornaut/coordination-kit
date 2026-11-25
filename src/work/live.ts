@@ -19,6 +19,8 @@ import {
   blockWork,
   checkRef,
   type CoveringHold,
+  FINISH_STATUSES,
+  type FinishStatus,
   finishWork,
   type HoldCover,
   type HoldLookup,
@@ -35,7 +37,13 @@ import {
   type WorkWrite,
 } from "../store/work.ts";
 import { parseDecisions } from "./decisions.ts";
-import { type FrontMatterValue, parseFrontMatter, readWorkFiles } from "./files.ts";
+import {
+  CONVENTION_FILE,
+  fieldIds,
+  type FrontMatterValue,
+  parseFrontMatter,
+  readWorkFiles,
+} from "./files.ts";
 
 export interface Coordinator {
   readonly layout: Layout;
@@ -123,6 +131,46 @@ export function readMainWorkFile(
     return null;
   }
   return { fields, path, status: value("status"), text, title: value("title") };
+}
+
+/**
+ * The work files on the repository's local `main` whose `supersedes` (one ID or a list) names
+ * `id`, in ID order. One `git grep` for the ID narrows the candidates, which are then parsed. The
+ * item's own file always matches, so a failing grep is a repository error.
+ */
+export function mainSuccessors(git: GitRunner, repository: Repository, id: string): string[] {
+  const prefix = "refs/heads/main:";
+  let listing: string;
+  try {
+    listing = git(repository.path, [
+      "grep",
+      "-z",
+      "-l",
+      "-F",
+      "-e",
+      id,
+      "refs/heads/main",
+      "--",
+      "docs/work/",
+    ]);
+  } catch {
+    throw new StoreError("repository-unavailable");
+  }
+  const stems = listing
+    .split("\0")
+    .filter((name) => name.startsWith(prefix))
+    .map((name) => name.slice(prefix.length))
+    .filter(
+      (path) => /^docs\/work\/[^/]+\.md$/.test(path) && path !== `docs/work/${CONVENTION_FILE}`,
+    )
+    .map((path) => path.slice("docs/work/".length, -".md".length))
+    .filter((stem) => stem !== id);
+  return stems
+    .filter((stem) => {
+      const file = readMainWorkFile(git, repository, stem);
+      return file !== null && fieldIds(file.fields.supersedes).includes(id);
+    })
+    .sort();
 }
 
 /**
@@ -395,11 +443,20 @@ export function workFinish(
 ): WorkOutput {
   const at = target(context, input.worktree, input.id);
   const actor = ownerActor(context, at, options);
-  requireStatus(at, ["done"], "work-not-done");
+  requireStatus(at, FINISH_STATUSES, "work-not-done");
+  const status = at.file.status as FinishStatus;
+  const successors =
+    status === "superseded" ? mainSuccessors(context.git, at.repository, at.ref.id) : [];
+  if (status === "superseded" && successors.length === 0) {
+    throw new StoreError("successor-missing");
+  }
   return withStore(context, at.coordinator.layout, (store) =>
     store.transaction(() => {
       requireAnsweredDependencies(store, at.ref);
-      return output(at, finishWork(store, actor, { owner: at.owner, ref: at.ref }));
+      return output(
+        at,
+        finishWork(store, actor, { owner: at.owner, ref: at.ref, status, successors }),
+      );
     }),
   );
 }

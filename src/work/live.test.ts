@@ -1,3 +1,6 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
@@ -301,6 +304,87 @@ describe("work verbs", () => {
     expect(
       workFinish(kit, {}, { id: "sk-0003", worktree: fixture.kit }).record.startedAt,
     ).toBeNull();
+  });
+
+  it.each([
+    {
+      expected: { finishedStatus: "superseded", successors: ["sk-0012"] },
+      files: { "sk-0012": workFile("sk-0012", "Successor", "approved", { supersedes: "sk-0011" }) },
+      name: "superseded by one successor",
+      payload: { status: "superseded", successors: ["sk-0012"] },
+      status: "superseded",
+    },
+    {
+      expected: { finishedStatus: "superseded", successors: ["sk-0012", "sk-0013"] },
+      files: {
+        "sk-0012": workFile("sk-0012", "First", "done", { supersedes: ["sk-0009", "sk-0011"] }),
+        "sk-0013": workFile("sk-0013", "Second", "approved", { supersedes: ["sk-0011"] }),
+        // Names the ID only in its body, and supersedes a longer ID that shares the prefix.
+        "sk-0014": workFile("sk-0014", "Mentions sk-0011", "approved", { supersedes: "sk-00111" }),
+      },
+      name: "superseded by a list",
+      payload: { status: "superseded", successors: ["sk-0012", "sk-0013"] },
+      status: "superseded",
+    },
+    {
+      expected: { finishedStatus: "cancelled", successors: [] },
+      files: {},
+      name: "cancelled",
+      payload: { status: "cancelled" },
+      status: "cancelled",
+    },
+    {
+      expected: { finishedStatus: "done", successors: [] },
+      files: {},
+      name: "done",
+      payload: {},
+      status: "done",
+    },
+  ])("finishes a ready item whose work file is $name", ({ expected, files, payload, status }) => {
+    const fixture = liveFixture({
+      kit: { "sk-0011": workFile("sk-0011", "Replaced item", "approved"), ...files },
+    });
+    const kit = live(fixture, IDS.kit);
+    const input = { id: "sk-0011", worktree: fixture.kit };
+    workStart(kit, {}, input);
+    workReady(kit, {}, input);
+    commit(fixture.kit, "Close sk-0011", {
+      "docs/work/sk-0011.md": workFile("sk-0011", "Replaced item", status),
+    });
+    const finished = workFinish(kit, {}, input);
+    expect(finished.workFile.status).toBe(status);
+    expect(finished.record).toMatchObject({ state: "finished", ...expected });
+    expect(workFinish(kit, {}, input).duplicate).toBe(true);
+    const event = workHistoryOf(live(fixture), input).events.at(-1)!;
+    expect(event.kind).toBe("work.finished");
+    // A done finish keeps the payload written before finish recorded a status.
+    expect(event.payload).toEqual({ id: "sk-0011", owner: KIT, repository: KIT, ...payload });
+    expect(workShow(live(fixture), input).record).toMatchObject(expected);
+  });
+
+  it("refuses a superseded item that no work file on main supersedes", () => {
+    const fixture = liveFixture({
+      kit: {
+        "sk-0011": workFile("sk-0011", "Replaced item", "superseded"),
+        "sk-0012": workFile("sk-0012", "Related", "approved", { related: ["sk-0011"] }),
+      },
+    });
+    const kit = live(fixture, IDS.kit);
+    const input = { id: "sk-0011", worktree: fixture.kit };
+    // A successor only in the working tree does not count: finish reads `main`.
+    writeFileSync(
+      join(fixture.kit, "docs/work/sk-0013.md"),
+      workFile("sk-0013", "Uncommitted", "approved", { supersedes: "sk-0011" }),
+    );
+    expect(code(() => workFinish(kit, {}, input))).toBe("successor-missing");
+    expect(workShow(live(fixture), input).record).toBeNull();
+  });
+
+  it.each(["proposed", "approved", "declined"])("refuses to finish a %s item", (status) => {
+    const fixture = liveFixture({ kit: { "sk-0011": workFile("sk-0011", "Open item", status) } });
+    expect(
+      code(() => workFinish(live(fixture, IDS.kit), {}, { id: "sk-0011", worktree: fixture.kit })),
+    ).toBe("work-not-done");
   });
 
   it("links a cross-role child to its parent as a parent edge", () => {

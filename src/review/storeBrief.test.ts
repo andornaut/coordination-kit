@@ -671,10 +671,12 @@ it("shows ready work under its exact recorded parent without reopening finished 
   const started = { id: "work-0105", repository: "art-kit" };
   const finished = { id: "work-0106", repository: "art-kit" };
   const blocked = { id: "work-0107", repository: "art-kit" };
+  const superseded = { id: "work-0108", repository: "art-kit" };
+  const cancelled = { id: "work-0109", repository: "art-kit" };
   const owner = "art-kit";
   try {
     startWork(store, ACTOR, { owner: TECH_ROLE, parent: null, ref: parent });
-    for (const ref of [ready, finished, blocked]) {
+    for (const ref of [ready, finished, blocked, superseded, cancelled]) {
       startWork(store, ACTOR, { owner, parent, ref });
       readyWork(store, ACTOR, { ref });
     }
@@ -682,6 +684,13 @@ it("shows ready work under its exact recorded parent without reopening finished 
     readyWork(store, ACTOR, { ref: unknownParent });
     startWork(store, ACTOR, { owner, parent: null, ref: started });
     finishWork(store, ACTOR, { owner, ref: finished });
+    finishWork(store, ACTOR, {
+      owner,
+      ref: superseded,
+      status: "superseded",
+      successors: ["work-0110"],
+    });
+    finishWork(store, ACTOR, { owner, ref: cancelled, status: "cancelled" });
     blockWork(store, ACTOR, { owner, reason: "Awaiting dependency", ref: blocked });
   } finally {
     store.close();

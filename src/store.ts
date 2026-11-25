@@ -231,6 +231,9 @@ export {
 export {
   blockWork,
   type CoveringHold,
+  FINISH_STATUSES,
+  type FinishInput,
+  type FinishStatus,
   finishWork,
   type HoldCover,
   type HoldLookup,

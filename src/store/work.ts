@@ -14,6 +14,9 @@ import { type Actor, type JsonObject, type StoredEvent, StoreError } from "./typ
 export const WORK_STAGES = ["implemented", "merged", "verified", "published", "deployed"] as const;
 export type WorkStage = (typeof WORK_STAGES)[number];
 export type WorkState = "recorded" | "started" | "blocked" | "ready" | "finished";
+/** The work file statuses `work finish` accepts; a finish without a recorded status is `done`. */
+export const FINISH_STATUSES = ["done", "superseded", "cancelled"] as const;
+export type FinishStatus = (typeof FINISH_STATUSES)[number];
 export const WORK_KINDS = [
   "work.started",
   "work.evidence",
@@ -76,6 +79,10 @@ export interface WorkRecord extends WorkRef {
   readonly startedAt: string | null;
   readonly readyAt: string | null;
   readonly finishedAt: string | null;
+  /** The work file status the finish recorded; null until finished. */
+  readonly finishedStatus: FinishStatus | null;
+  /** The successor IDs a superseded finish cites, in ID order; empty otherwise. */
+  readonly successors: readonly string[];
   readonly block: WorkBlock | null;
   readonly evidence: readonly WorkEvidence[];
   readonly retained: readonly WorkRetained[];
@@ -287,6 +294,31 @@ function workRow(db: DatabaseSync, ref: WorkRef): Row | undefined {
 
 const nullable = (row: Row, key: string): string | null => (row[key] as string | null) ?? null;
 
+function finishKey(ref: WorkRef): string {
+  return `work.finished:${ref.repository}:${ref.id}`;
+}
+
+/** The status and successors a finish event records; a payload without `status` is `done`. */
+function finishOutcome(
+  db: DatabaseSync,
+  ref: WorkRef,
+): Pick<WorkRecord, "finishedStatus" | "successors"> {
+  const row = db.prepare("SELECT payload FROM events WHERE key = ?").get(finishKey(ref)) as
+    Row | undefined;
+  if (row === undefined) {
+    return { finishedStatus: "done", successors: [] };
+  }
+  const payload = JSON.parse(row.payload as string) as JsonObject;
+  const status = text(payload, "status") ?? "done";
+  const successors = Array.isArray(payload.successors) ? payload.successors : [];
+  return {
+    finishedStatus: (FINISH_STATUSES as readonly string[]).includes(status)
+      ? (status as FinishStatus)
+      : "done",
+    successors: successors.filter((id): id is string => typeof id === "string"),
+  };
+}
+
 /** The record of one work item from an open database (the store's, or a read-only one). */
 export function readWorkRecord(db: DatabaseSync, ref: WorkRef): WorkRecord | null {
   const row = workRow(db, ref);
@@ -307,6 +339,7 @@ export function readWorkRecord(db: DatabaseSync, ref: WorkRef): WorkRecord | nul
     .all(ref.repository, ref.id) as Row[];
   const parentRepository = nullable(row, "parent_repository");
   const parentId = nullable(row, "parent_id");
+  const finishedAt = nullable(row, "finished_at");
   return {
     block: row.block == null ? null : (JSON.parse(row.block as string) as WorkBlock),
     children: children.map((child) => ({
@@ -322,7 +355,8 @@ export function readWorkRecord(db: DatabaseSync, ref: WorkRef): WorkRecord | nul
       source: nullable(item, "source"),
       stage: item.stage as WorkStage,
     })),
-    finishedAt: nullable(row, "finished_at"),
+    finishedAt,
+    ...(finishedAt === null ? { finishedStatus: null, successors: [] } : finishOutcome(db, ref)),
     id: ref.id,
     owner: nullable(row, "owner"),
     parent:
@@ -527,19 +561,45 @@ export function readyWork(store: Store, actor: Actor, input: { readonly ref: Wor
   });
 }
 
-/** `work.finished`, once per item; it closes any open block. */
-export function finishWork(
-  store: Store,
-  actor: Actor,
-  input: { readonly ref: WorkRef; readonly owner: string },
-): WorkWrite {
+export interface FinishInput {
+  readonly ref: WorkRef;
+  readonly owner: string;
+  /** The work file status; `done` when omitted. */
+  readonly status?: FinishStatus;
+  /** The work items that supersede this one; required, and only allowed, for `superseded`. */
+  readonly successors?: readonly string[];
+}
+
+/**
+ * `work.finished`, once per item; it closes any open block. A `done` finish records
+ * `{repository, id, owner}`; `superseded` adds `status` and the sorted `successors`, and
+ * `cancelled` adds `status`.
+ */
+export function finishWork(store: Store, actor: Actor, input: FinishInput): WorkWrite {
   const ref = checkRef(input.ref);
+  const status = input.status ?? "done";
+  ensure((FINISH_STATUSES as readonly string[]).includes(status), "invalid-finish-status");
+  const successors = [...new Set(input.successors ?? [])].sort();
+  if (status === "superseded") {
+    ensure(successors.length > 0, "successor-missing");
+  } else {
+    ensure(successors.length === 0, "invalid-successor");
+  }
+  ensure(
+    successors.every((id) => WORK_ID.test(id) && id !== ref.id),
+    "invalid-successor",
+  );
   return store.transaction(() => {
     const appended = store.append({
       actor,
-      key: `work.finished:${ref.repository}:${ref.id}`,
+      key: finishKey(ref),
       kind: "work.finished",
-      payload: { ...ref, owner: input.owner },
+      payload: {
+        ...ref,
+        owner: input.owner,
+        ...(status === "done" ? {} : { status }),
+        ...(status === "superseded" ? { successors } : {}),
+      },
     });
     return result(store, ref, appended.duplicate);
   });
