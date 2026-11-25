@@ -433,21 +433,13 @@ Before opening a Codex form in the owning conversation, use `question open` to r
 wording, ordered options and every dependent `--depends-on REPOSITORY:WORK_ID`. Repeated
 `--option LABEL` takes ordered labels. Repeated `--option-json JSON` takes objects with a
 `label` and optional `description`. `--work` separately names the decision Markdown target.
-The durable record includes the thread that opened it, which native evidence is read from.
-The owning role can reconcile from any binding. Reconcile is optional evidence: it never gates
-answer, cancel or close.
+The durable record includes the thread that opened it.
 
-- `question reconcile --id Q` reads bounded native history for a native identity that the store
-  records and reports the exact observation, or an explicit unknown such as
-  `native-question-unlinked` when it records none. No command records a native identity; replay
-  keeps one that an existing store or journal holds. The installed client provides no
-  original-form resurfacing operation. Its blocking `item/tool/requestUserInput` server request is distinct from an
-  asynchronous `agentMessage.questions` history projection. A history observation gives no
-  live UI visibility. A `serverRequest/resolved` notification records lifecycle cleanup or
-  response bookkeeping and supplies no answer or cancellation classification.
 - `question answer` records the user's explicit answer, and `question cancel` the owner's reason,
   with or without a recorded native identity. The caller supplies the public decision text
   explicitly, and the answer of a question with a Codex record is `--by user`.
+- No command records a native identity. Replay keeps one that an existing store or journal holds
+  on the question's `codex.native` and `codex.attempt` and on the pending-question wake blocker.
 
 `question list`, session startup and reviews expose the recorded question independently of
 native prompt visibility. Session startup includes the owning role's unread count. Messages
@@ -881,7 +873,7 @@ layout)`, `storePath(layout)` and `storeRoot(layout)`. `clock` times the events 
 - Projections: `DELIVERY_PROJECTION`, `QUESTIONS_PROJECTION` and `WORK_PROJECTION` beside
   `MESSAGES_PROJECTION`.
 - Questions, holds and decisions: `openQuestion`, `answerQuestion`, `cancelQuestion`,
-  `requireOwnQuestion`, `listQuestions`, `setHold`, `releaseHold`, `listHolds`, `listDecisions`
+  `listQuestions`, `setHold`, `releaseHold`, `listHolds`, `listDecisions`
   (the `DecisionRow` records `graph` and `work check --decisions` read), `storeHolds` (the
   default `HoldLookup`), `questionHoldGuard`, `publicText(hostname, value)`, `holdScope` and
   `normalizeOptions`; the work-file half `mainWorkFile`, `fileDecisionNumbers`, `decisionLine` and

@@ -294,12 +294,6 @@ export const SPECS = {
     options: QUESTION_OPEN_OPTIONS,
     summary: "record a pending prompt owned by your role; the ID defaults to q-<role>-<n>",
   },
-  "question reconcile": {
-    forms: [["id", "native-id?"]],
-    group: "decisions",
-    options: QUESTION_PROJECT_OPTIONS,
-    summary: "read exact Codex question evidence and native form capability",
-  },
   "question answer": {
     forms: [["id", "work", "text", "by?", "supersedes?", "native-id?", "worker?"]],
     group: "decisions",

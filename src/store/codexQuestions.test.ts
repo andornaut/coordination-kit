@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import { TEST_CLOCK, TEST_HOST } from "../core/testFixtures.ts";
-import { nativeQuestionObservation } from "./codexQuestionObservation.ts";
 import { dependentQuestions } from "./codexQuestions.ts";
 import { MEMORY, Store } from "./db.ts";
 import type { FileProjection } from "./fileProjection.ts";
@@ -11,6 +10,7 @@ import {
   closeLegacyQuestion,
   listQuestions,
   openQuestion,
+  questionHoldGuard,
   recordQuestionAnswer,
 } from "./questions.ts";
 import { ART, COORDINATOR, GAME } from "./testStore.ts";
@@ -136,6 +136,12 @@ describe("Codex question lifecycle", () => {
     };
     const replayed = Store.openFileProjection(TEST_CLOCK, MEMORY, journal);
     expect(listQuestions(replayed)).toEqual(before);
+    expect(questionHoldGuard(replayed, actor.role).blocker).toEqual({
+      id: "q-palette",
+      kind: "question",
+      native: { itemId: next.item, turnId: next.turn },
+      owner: actor.role,
+    });
     expect(replayed.verify()).toEqual(store.verify());
     replayed.close();
 
@@ -184,46 +190,6 @@ describe("Codex question lifecycle", () => {
     const before = listQuestions(store);
     store.rebuild();
     expect(listQuestions(store)).toEqual(before);
-    store.close();
-  });
-
-  it("distinguishes complete rendered reply evidence from incomplete and ambiguous history", () => {
-    const { question, store } = fixture();
-    const row = {
-      item_id: native.item,
-      kind: "rendered_prompt",
-      options: ["Warm", "Cool"],
-      proof_refs: [
-        {
-          answer_item_id: "reply",
-          answer_turn_id: "later",
-          question_item_id: native.item,
-          question_turn_id: native.turn,
-          recipient: ART,
-        },
-      ],
-      question_index: native.index,
-      state: "answered",
-      title: wording,
-      turn_id: native.turn,
-    };
-    const read = (questions: unknown[], complete = true) =>
-      nativeQuestionObservation(question, native, { complete, questions });
-    expect(read([row])).toMatchObject({
-      native,
-      reply: { item: "reply", turn: "later" },
-      status: "answered",
-      thread: ART,
-    });
-    expect(read([row], false)).toMatchObject({ status: "unknown" });
-    expect(read([{ ...row, kind: "question_tool" }])).toMatchObject({ status: "unknown" });
-    expect(read([{ ...row, state: "cancelled" }])).toMatchObject({ status: "observed" });
-    expect(read([{ ...row, proof_refs: [] }])).toMatchObject({ status: "observed" });
-    expect(read([row, { ...row, question_index: 1 }])).toMatchObject({ status: "observed" });
-    expect(read([{ ...row, options: ["Cool", "Warm"] }])).toMatchObject({ status: "unknown" });
-    expect(read([{ ...row, proof_complete: true, state: "pending" }])).toMatchObject({
-      status: "pending",
-    });
     store.close();
   });
 });

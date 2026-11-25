@@ -1,6 +1,6 @@
 // Read-only recipient decision markers. The scheduled review reports a Codex role's marker
-// structure and passes its resolutions to the native question collectors, and question reconcile
-// reads them the same way. No wake depends on a marker.
+// structure and passes its resolutions to the native question collectors. No wake depends on a
+// marker.
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -107,11 +107,6 @@ function inspectDecisionRecord(marker: unknown, recipient: string): DecisionMark
   return state === "clear" || state === "pending"
     ? { record, state }
     : { reason: "state", record, state: "invalid" };
-}
-
-/** The validated marker in `<unblock>/decisions/<recipient>.json`, or null. */
-export function decisionRecord(unblockDir: string, recipient: string): DecisionRecord | null {
-  return inspectDecisionMarker(unblockDir, recipient).record;
 }
 
 /** The bus `unblock` directory holding a role's local decision markers, or null. */

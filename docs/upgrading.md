@@ -1,5 +1,16 @@
 # Upgrading
 
+## Coordination Kit 7.2
+
+7.2.0 removes `question reconcile`. Since 7.1.0 no command records a native question identity, so
+it always reported `native-question-unlinked` unless an older store held a link. It now exits 2 as
+an unknown command instead of printing that observation. No other command, option, output or exit
+code changes, and existing stores and journals rebuild unchanged, with any recorded native
+identity still on `question list` output and the pending-question wake blocker.
+
+- `build/store` no longer exports `storeQuestionReconcile`, `requireOwnQuestion` or the
+  `NativeQuestionProof` type.
+
 ## Coordination Kit 7.1
 
 7.1.0 removes `question attach` and `question reask`. Neither ever completed: `attach` failed

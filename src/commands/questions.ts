@@ -21,7 +21,6 @@ import {
   storeQuestionList,
   storeQuestionOpen,
   storeQuestionProject,
-  storeQuestionReconcile,
 } from "../store/questionService.ts";
 import { parseWorkRef } from "../work/live.ts";
 import { CALLER, callerOf, required, text, Usage, type Values } from "./args.ts";
@@ -163,12 +162,6 @@ export const questionProject: Handler = storeVerb(
       callerOf(values),
       required(values, "id"),
     ),
-);
-
-export const questionReconcile: Handler = storeVerb(
-  "question reconcile",
-  QUESTION_PROJECT_OPTIONS,
-  (context, values) => storeQuestionReconcile(context, callerOf(values), required(values, "id")),
 );
 
 export const questionCancel: Handler = storeVerb(

@@ -1,11 +1,7 @@
 // @andornaut/coordination-kit/build/store: the SQLite coordination store, its message lifecycle,
 // wakes, the registry writer fence, runner event ingest, the retirement, imported requests, work
 // records, and questions, holds and decisions.
-export {
-  type CodexQuestion,
-  dependentQuestions,
-  type NativeQuestionProof,
-} from "./store/codexQuestions.ts";
+export { type CodexQuestion, dependentQuestions } from "./store/codexQuestions.ts";
 export type { AppendResult, VerifyResult } from "./store/db.ts";
 export { Store, STORE_FILE, type StoreContext, storePath, storeRoot } from "./store/db.ts";
 export {
@@ -125,7 +121,6 @@ export {
   type QuestionView,
   RECORD_ID,
   releaseHold,
-  requireOwnQuestion,
   setHold,
   storeHolds,
 } from "./store/questions.ts";
@@ -144,7 +139,6 @@ export {
   storeQuestionCancel,
   storeQuestionList,
   storeQuestionOpen,
-  storeQuestionReconcile,
 } from "./store/questionService.ts";
 export {
   closeRequest,

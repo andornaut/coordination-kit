@@ -155,7 +155,7 @@ describe("question commands", () => {
     );
   });
 
-  it("persists a Codex prompt before presentation and shows unresolved evidence on resume", async () => {
+  it("persists a Codex prompt before presentation and shows it on resume", async () => {
     const { art, coordinator, reader } = setup();
     const title = "Choose the palette.\nWhich option should ship?";
     const opts = [
@@ -186,14 +186,6 @@ describe("question commands", () => {
         title,
       },
     });
-    expect((await coordinator("question", "reconcile", "--id", "q-codex")).err).toContain(
-      "not-owner",
-    );
-    expect((await art("question", "reconcile", "--id", "q-codex")).json).toMatchObject({
-      form: "unsupported",
-      observation: { reason: "native-question-unlinked", status: "unknown" },
-      question: { state: "pending" },
-    });
     await coordinator("msg", "send", "--to", ART_ROLE, "--body", "Independent work.");
     expect((await art("session", "start")).json).toMatchObject({
       questionRecovery: { pending: [{ id: "q-codex", title }], unread: 1 },
@@ -203,7 +195,7 @@ describe("question commands", () => {
     });
   });
 
-  it("rejects question attach and question reask as unknown commands", async () => {
+  it("rejects question attach, reask and reconcile as unknown commands", async () => {
     const { art } = setup();
     expect((await art("question", "open", "--id", "q-gone", "--title", "Gone?")).code).toBe(
       EXIT_OK,
@@ -211,6 +203,7 @@ describe("question commands", () => {
     for (const argv of [
       ["attach", "--id", "q-gone", "--turn", "t", "--item", "i", "--index", "0"],
       ["reask", "--id", "q-gone"],
+      ["reconcile", "--id", "q-gone"],
     ]) {
       // eslint-disable-next-line no-await-in-loop
       const result = await art("question", ...argv);

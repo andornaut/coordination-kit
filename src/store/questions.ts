@@ -309,14 +309,6 @@ function ownQuestion(store: Store, actor: Actor, id: string): Row {
   return row;
 }
 
-/**
- * The caller's own question. Refuses `missing` and `not-owner`, so a caller can check ownership
- * before it reads anything else the write needs.
- */
-export function requireOwnQuestion(store: Store, actor: Actor, id: string): QuestionView {
-  return questionView(store, ownQuestion(store, actor, id));
-}
-
 function decisionRow(row: Row): DecisionRow {
   return {
     at: row.at as string,

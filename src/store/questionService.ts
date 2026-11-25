@@ -6,8 +6,6 @@ import { readFileSync } from "node:fs";
 
 import { systemGit } from "../core/git.ts";
 import { resolveHarness } from "../registry/resolve.ts";
-import { type QuestionEvidence, readCodexQuestionEvidence } from "./codexQuestionEvidence.ts";
-import type { NativeQuestionProof } from "./codexQuestions.ts";
 import type { Store } from "./db.ts";
 import {
   appendDecisionLine,
@@ -44,20 +42,15 @@ import {
   recordQuestionAnswer,
   recordQuestionProjection,
   releaseHold,
-  requireOwnQuestion,
   setHold,
 } from "./questions.ts";
 import { registry, type StoreServiceContext, withStore } from "./service.ts";
-import { type Actor, type NativeQuestionIdentity, StoreError, type WorkRef } from "./types.ts";
+import { type Actor, StoreError, type WorkRef } from "./types.ts";
 import { wakeRecipient, type WakeStatus } from "./wake.ts";
 
 /** The answer verbs' context: the host name decision text must not contain. */
 export interface AnswerContext extends StoreServiceContext {
   readonly hostname: string;
-}
-
-interface QuestionContext extends StoreServiceContext {
-  readonly questionEvidence?: QuestionEvidence;
 }
 
 export interface QuestionOutput {
@@ -128,49 +121,6 @@ export async function storeQuestionOpen(
         }
       : { ...request, harness };
   return withStore(context, (store) => ({ ...openQuestion(store, actor, input), schema: 1 }));
-}
-
-function evidence(
-  context: QuestionContext,
-  question: QuestionView,
-  native?: NativeQuestionIdentity | null,
-): Promise<NativeQuestionProof> {
-  if (native == null) {
-    return Promise.resolve({ reason: "native-question-unlinked", status: "unknown" });
-  }
-  return (
-    context.questionEvidence?.(question, native) ??
-    readCodexQuestionEvidence(context, question, native)
-  );
-}
-
-export async function storeQuestionReconcile(
-  context: QuestionContext,
-  options: CallerOptions,
-  id: string,
-): Promise<{
-  readonly schema: 1;
-  readonly question: QuestionView;
-  readonly observation: NativeQuestionProof;
-  readonly form: "unsupported";
-}> {
-  const actor = resolveCaller(registry(context), context.env, options);
-  return withStore(
-    context,
-    async (store) => {
-      const question = requireOwnQuestion(store, actor, id);
-      if (question.codex === undefined) {
-        throw new StoreError("codex-question-required");
-      }
-      return {
-        form: "unsupported",
-        observation: await evidence(context, question, question.codex.native),
-        question,
-        schema: 1,
-      };
-    },
-    { createMissing: false },
-  );
 }
 
 function fileResult<T>(operation: () => T): { value: T } | { reason: string } {

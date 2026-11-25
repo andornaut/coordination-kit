@@ -127,8 +127,7 @@ Reserve, prepare, activate and cancel require the active game-coordinator bindin
   Codex period.
 - For Codex, record exact prompt wording, ordered `--option LABEL` or `--option-json JSON`,
   and repeated `--depends-on REPOSITORY:WORK_ID` through `question open` before presentation.
-  `question reconcile --id ID` shows exact evidence and capability; it is optional evidence and
-  never gates answer, cancel or close. See [Codex question recovery](store.md#codex-question-recovery).
+  See [Codex question recovery](store.md#codex-question-recovery).
 - `hold policy-set` and `hold policy-release` require the active game-coordinator binding and the
   exact user approval reference for the action. Policy IDs start with `policy-`. Set names one
   target as `role:ROLE`, `game:GAME` or `work:REPOSITORY:WORK_ID`. Release names its exact policy

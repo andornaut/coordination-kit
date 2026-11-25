@@ -23,20 +23,6 @@ export interface CodexQuestion extends CodexQuestionInput {
   } | null;
 }
 
-export type NativeQuestionProof =
-  | { readonly status: "unknown"; readonly reason: string }
-  | {
-      readonly status: "observed" | "pending" | "cancelled";
-      readonly thread: string;
-      readonly native: NativeQuestionIdentity;
-    }
-  | {
-      readonly status: "answered";
-      readonly thread: string;
-      readonly native: NativeQuestionIdentity;
-      readonly reply: { readonly turn: string; readonly item: string };
-    };
-
 export function normalizeCodexQuestion(
   actor: Actor,
   input: CodexQuestionInput,

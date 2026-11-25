@@ -98,7 +98,7 @@ A Codex role's decision record (`unblock/decisions/<conversation>.json` on its g
 review host's bus for a shared role) stays keyed by its exact Codex conversation. No wake depends
 on it: the [store question guard](store.md#wakes) gates wakes. The scheduled review reads it
 read-only to report its structure in `review show` and to pass its resolutions to the native
-question collectors, and `question reconcile` reads it the same way. Each resolution has
+question collectors. Each resolution has
 `question_turn_id`, `question_item_id`, `answer_turn_id` and `answer_item_id`, and each question
 turn and item pair appears once. [Stored review diagnostics](review.md#stored-brief) list invalid
 field names without exposing their values. The kit does not write it.
