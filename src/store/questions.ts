@@ -856,13 +856,15 @@ export function recordQuestionProjection(
 
 /**
  * Cancel the caller's own pending question with a reason. The owning role cancels from any
- * binding; native evidence never gates it. Repeating the same cancel is a no-op.
+ * binding; native evidence never gates it. Repeating the same cancel is a no-op. `_proof` is
+ * accepted and ignored so the 5.x signature stays compatible; remove it at the next major.
  */
 export function cancelQuestion(
   store: Store,
   actor: Actor,
   id: string,
   reason: string,
+  _proof?: NativeQuestionProof,
 ): QuestionResult {
   const why = storeText(reason, 1000, "invalid-reason");
   return store.transaction(() => {
