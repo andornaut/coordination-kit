@@ -14,10 +14,11 @@ Reference: [messages](../messages.md), [store wakes](../store.md#wakes),
 
 ## Work items
 
-| ID      | Title                                                 | Link                                                                                       |
-| ------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| ck-0004 | Scale the message store                               | [ck-0004.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0004.md) |
-| ck-0005 | Retry a busy transport                                | [ck-0005.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0005.md) |
-| ck-0009 | Fix the recipient status binding conflict             | [ck-0009.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0009.md) |
-| ck-0024 | Read exact messages and clarify retention             | [ck-0024.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0024.md) |
-| ck-0045 | One wake path that follows the role on both harnesses | [ck-0045.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0045.md) |
+| ID      | Title                                                                  | Link                                                                                       |
+| ------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| ck-0004 | Scale the message store                                                | [ck-0004.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0004.md) |
+| ck-0005 | Retry a busy transport                                                 | [ck-0005.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0005.md) |
+| ck-0009 | Fix the recipient status binding conflict                              | [ck-0009.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0009.md) |
+| ck-0024 | Read exact messages and clarify retention                              | [ck-0024.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0024.md) |
+| ck-0045 | One wake path that follows the role on both harnesses                  | [ck-0045.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0045.md) |
+| ck-0051 | Resolve channels across project directories and report unresolved ones | [ck-0051.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0051.md) |
