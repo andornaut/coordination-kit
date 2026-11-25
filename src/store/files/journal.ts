@@ -21,12 +21,12 @@ import { isRecord } from "../../core/pyjson.ts";
 import { canonicalJson, eventHash, sha256 } from "../eventCodec.ts";
 import { ensure, GENESIS, type Json, type StoredEvent, StoreError } from "../types.ts";
 
-export interface FileRecord {
+interface FileRecord {
   readonly path: string;
   readonly data: Json;
 }
 
-export interface JournalWriter {
+interface JournalWriter {
   events(afterSeq?: number): StoredEvent[];
   commit(events: readonly StoredEvent[], records?: readonly FileRecord[]): void;
 }

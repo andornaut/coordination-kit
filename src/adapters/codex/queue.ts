@@ -10,7 +10,7 @@ import { queueEntries, type QueueEntry } from "./inventory.ts";
 import { type RpcClient, RpcError } from "./rpc.ts";
 
 /** The service resolves ownership and parent hops before selecting a transport. */
-export interface NativeMessage {
+interface NativeMessage {
   readonly requestId: string;
   readonly recipient: string;
   readonly text: string;
@@ -38,7 +38,7 @@ export type QueueClearance = {
   readonly diagnostic?: DeliveryDiagnostic;
   readonly status: "clear" | "blocked" | "unavailable";
 };
-export interface QueueGuards {
+interface QueueGuards {
   /** Must check the store guard and `inputUnavailable` on this same connection. */
   readonly beforeAdd: (client: RpcClient, message: NativeMessage) => Promise<QueueClearance>;
 }
@@ -374,7 +374,7 @@ async function operate(
   }
 }
 
-export function queueMessage(
+function queueMessage(
   client: RpcClient | null,
   path: string,
   message: NativeMessage,

@@ -3,7 +3,7 @@
 import type { StatusItem, StatusReport } from "./collect.ts";
 import type { DerivedStatus } from "./derive.ts";
 
-export const DIGEST_HEADINGS = [
+const DIGEST_HEADINGS = [
   "Done",
   "In progress",
   "New",

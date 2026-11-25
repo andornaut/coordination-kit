@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { claudeFixture } from "../../review/fixtures.ts";
-import { readWakeFile, wakeFilePath, wakeText, WakeWatcher, writeWakeFile } from "./wakeFile.ts";
+import { wakeFilePath, wakeText, WakeWatcher, writeWakeFile } from "./wakeFile.ts";
 
 const WAKE = { count: 2, role: "game-coordinator" };
 const ROLE = WAKE.role;
@@ -17,10 +17,14 @@ describe("wake files", () => {
     expect(wakeFilePath(layout, "archies-dog-walks/tech")).toBe(
       join(layout.varDir, "wake", "roles", "archies-dog-walks", "tech.json"),
     );
-    expect(readWakeFile(path)).toBe("absent");
+    expect(existsSync(path)).toBe(false);
     expect(writeWakeFile(layout, WAKE)).toBe(1);
     expect(writeWakeFile(layout, { ...WAKE, count: 3 })).toBe(2);
-    expect(readWakeFile(path)).toEqual({ count: 3, role: "game-coordinator", seq: 2 });
+    expect(new WakeWatcher(() => path).poll()).toEqual({
+      count: 3,
+      role: "game-coordinator",
+      seq: 2,
+    });
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
       count: 3,
       role: "game-coordinator",
@@ -40,7 +44,7 @@ describe("wake files", () => {
     const path = wakeFilePath(layout, ROLE);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, '{"schema":1,"seq":');
-    expect(readWakeFile(path)).toBe("invalid");
+    expect(new WakeWatcher(() => path).poll()).toBeUndefined();
     expect(() => writeWakeFile(layout, WAKE)).toThrow(/unreadable/);
     for (const value of [
       { count: 1, role: "game-coordinator", schema: 1, seq: 0 },
@@ -49,7 +53,8 @@ describe("wake files", () => {
       { count: 1.5, role: "game-coordinator", schema: 1, seq: 1 },
     ]) {
       writeFileSync(path, JSON.stringify(value));
-      expect(readWakeFile(path)).toBe("invalid");
+      expect(new WakeWatcher(() => path).poll(), JSON.stringify(value)).toBeUndefined();
+      expect(() => writeWakeFile(layout, WAKE), JSON.stringify(value)).toThrow(/unreadable/);
     }
   });
 });

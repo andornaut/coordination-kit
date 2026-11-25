@@ -5,13 +5,20 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import * as durable from "../../core/durable.ts";
-import {
-  codexQueueTransport,
-  type NativeMessage,
-  type QueueGuards,
-  queueMessage,
-} from "./queue.ts";
+import { codexQueueTransport } from "./queue.ts";
 import { type RpcClient, RpcError } from "./rpc.ts";
+
+type NativeMessage = Parameters<ReturnType<typeof codexQueueTransport>["send"]>[1];
+type QueueGuards = NonNullable<Parameters<typeof codexQueueTransport>[0]["guards"]>;
+
+/** Send through a transport connected to `client`; without guards it keeps the message local. */
+function send(client: RpcClient, path: string, value: NativeMessage, guards?: QueueGuards) {
+  return codexQueueTransport(
+    guards === undefined
+      ? { connect: async () => client }
+      : { canConnect: () => true, connect: async () => client, guards },
+  ).send(path, value);
+}
 
 const message: NativeMessage = {
   requestId: "stable-request",
@@ -72,7 +79,7 @@ describe("guarded native queue transport", () => {
       throw new Error("prewrite failed");
     });
     try {
-      expect((await queueMessage(f.client, f.path, message, clear)).status).toBe("unavailable");
+      expect((await send(f.client, f.path, message, clear)).status).toBe("unavailable");
       expect(f.calls).not.toContain("thread/queue/add");
     } finally {
       spy.mockRestore();
@@ -82,7 +89,7 @@ describe("guarded native queue transport", () => {
   it("preserves uncertainty for a corrupt previous receipt without native input", async () => {
     const f = fixture();
     writeFileSync(f.path, "invalid JSON");
-    expect((await queueMessage(f.client, f.path, message, clear)).status).toBe("ambiguous");
+    expect((await send(f.client, f.path, message, clear)).status).toBe("ambiguous");
     expect(f.calls).toEqual([]);
   });
 
@@ -110,12 +117,12 @@ describe("guarded native queue transport", () => {
       ).status,
     ).toBe("blocked");
     expect(connections).toBe(0);
-    expect((await queueMessage(f.client, f.path, message)).status).toBe("blocked");
+    expect((await send(f.client, f.path, message)).status).toBe("blocked");
     expect(f.calls).toEqual([]);
     let guards = 0;
     expect(
       (
-        await queueMessage(f.client, f.path, message, {
+        await send(f.client, f.path, message, {
           beforeAdd: async () => ({ status: ++guards === 1 ? "clear" : "blocked" }),
         })
       ).status,
@@ -138,14 +145,14 @@ describe("guarded native queue transport", () => {
         },
       };
     });
-    expect(await queueMessage(f.client, f.path, message, clear)).toMatchObject({
+    expect(await send(f.client, f.path, message, clear)).toMatchObject({
       status: "accepted",
       queueId: "q",
     });
-    expect(
-      (await queueMessage(f.client, f.path, { ...message, text: "changed" }, clear)).status,
-    ).toBe("blocked");
-    expect((await queueMessage(f.client, f.path, message, clear)).status).toBe("accepted");
+    expect((await send(f.client, f.path, { ...message, text: "changed" }, clear)).status).toBe(
+      "blocked",
+    );
+    expect((await send(f.client, f.path, message, clear)).status).toBe("accepted");
     expect(f.calls).toEqual(["thread/read", "thread/queue/add"]);
   });
 
@@ -153,8 +160,8 @@ describe("guarded native queue transport", () => {
     const f = fixture(() => {
       throw new Error("lost reply");
     });
-    expect((await queueMessage(f.client, f.path, message, clear)).status).toBe("ambiguous");
-    expect((await queueMessage(f.client, f.path, message, clear)).status).toBe("accepted");
+    expect((await send(f.client, f.path, message, clear)).status).toBe("ambiguous");
+    expect((await send(f.client, f.path, message, clear)).status).toBe("accepted");
     expect(f.calls.filter((method) => method === "thread/queue/add")).toHaveLength(1);
   });
 
@@ -164,7 +171,7 @@ describe("guarded native queue transport", () => {
       const f = fixture(() => {
         throw new Error("lost reply");
       });
-      expect((await queueMessage(f.client, f.path, message, clear)).status).toBe("ambiguous");
+      expect((await send(f.client, f.path, message, clear)).status).toBe("ambiguous");
       if (mode === "sending") {
         const state = JSON.parse(readFileSync(f.path, "utf8"));
         writeFileSync(f.path, JSON.stringify({ ...state, status: "sending" }));
@@ -176,7 +183,7 @@ describe("guarded native queue transport", () => {
           : {
               beforeAdd: async () => ({ status: mode === "blocked" ? "blocked" : "unavailable" }),
             };
-      expect((await queueMessage(f.client, f.path, message, guards)).status).toBe("ambiguous");
+      expect((await send(f.client, f.path, message, guards)).status).toBe("ambiguous");
       expect(JSON.parse(readFileSync(f.path, "utf8")).status).toBe("ambiguous");
       let connections = 0;
       const transport = codexQueueTransport({
@@ -212,9 +219,9 @@ describe("guarded native queue transport", () => {
     const f = fixture(() => {
       throw new Error("lost reply");
     });
-    await queueMessage(f.client, f.path, message, clear);
+    await send(f.client, f.path, message, clear);
     f.entries([]);
-    expect((await queueMessage(f.client, f.path, message, clear)).status).toBe("ambiguous");
+    expect((await send(f.client, f.path, message, clear)).status).toBe("ambiguous");
     f.entries([
       {
         id: "q",
@@ -222,11 +229,11 @@ describe("guarded native queue transport", () => {
         input: [{ type: "text", text: "changed" }],
       },
     ]);
-    expect((await queueMessage(f.client, f.path, message, clear)).status).toBe("ambiguous");
+    expect((await send(f.client, f.path, message, clear)).status).toBe("ambiguous");
     expect(f.calls.filter((method) => method === "thread/queue/add")).toHaveLength(1);
     const worker = fixture();
     worker.child();
-    expect((await queueMessage(worker.client, worker.path, message, clear)).status).toBe("blocked");
+    expect((await send(worker.client, worker.path, message, clear)).status).toBe("blocked");
     expect(worker.calls).toEqual(["thread/read"]);
   });
 
@@ -236,7 +243,7 @@ describe("guarded native queue transport", () => {
       const f = fixture(() => {
         throw new RpcError({ code, message: "private diagnostic" });
       });
-      const outcome = await queueMessage(f.client, f.path, message, clear);
+      const outcome = await send(f.client, f.path, message, clear);
       expect(outcome.status).toBe(code === -32601 ? "unsupported" : "rejected");
       expect(outcome.diagnostic).toMatchObject({
         stage: "native-send",
@@ -246,7 +253,7 @@ describe("guarded native queue transport", () => {
         rpcCode: code,
       });
       expect(JSON.stringify(outcome)).not.toContain("private diagnostic");
-      await queueMessage(f.client, f.path, message, clear);
+      await send(f.client, f.path, message, clear);
       expect(f.calls.filter((method) => method === "thread/queue/add")).toHaveLength(1);
     },
   );
@@ -263,7 +270,7 @@ it("distinguishes a rejected read-only native guard RPC from an input submission
       throw new Error("must not add");
     },
   };
-  const outcome = await queueMessage(client, f.path, message, clear);
+  const outcome = await send(client, f.path, message, clear);
   expect(outcome).toMatchObject({
     status: "unavailable",
     diagnostic: {

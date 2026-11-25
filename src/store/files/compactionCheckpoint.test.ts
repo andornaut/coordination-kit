@@ -6,7 +6,6 @@ import {
   prepareCompactionCheckpoint,
   verifyCompactionCheckpoint,
   verifyCompactionSource,
-  verifyCompactionTail,
 } from "./compactionCheckpoint.ts";
 import type { CompactionScope } from "./compactionPlan.ts";
 
@@ -121,16 +120,40 @@ describe("filesystem compaction checkpoint", () => {
     const reloaded = JSON.parse(canonicalJson(checkpoint)) as unknown;
     expect(verifyCompactionSource(reloaded, receipt, events, evidence, anchor)).toEqual(checkpoint);
     expect(verifyCompactionCheckpoint(reloaded, receipt)).toEqual(checkpoint);
-    const tail = next(checkpoint.head, session("tail"));
-    expect(verifyCompactionTail(checkpoint, [tail])).toEqual({ hash: tail.hash, seq: tail.seq });
-    expect(() =>
-      verifyCompactionTail(checkpoint, [next(checkpoint.head, message("expired"))]),
-    ).toThrow("checkpoint-source-chain");
-    expect(() =>
-      verifyCompactionTail(checkpoint, [
-        next({ hash: checkpoint.head.hash, seq: checkpoint.head.seq + 1 }, session("skip")),
-      ]),
-    ).toThrow("checkpoint-source-chain");
+  });
+
+  it("chains a checkpoint onto its predecessor and verifies the appended tail", () => {
+    const { anchor, events } = messages();
+    const evidence = scope(events, ["expired"]);
+    const { checkpoint, receipt } = prepareCompactionCheckpoint(events, evidence, anchor);
+    const previous = { checkpoint, selection: { ...receipt, id: "checkpoint-1" } };
+    // One more closed message makes recent-0 the oldest beyond the 100 kept.
+    const sent = next(checkpoint.head, message("recent-100", "recent-100 kept"));
+    const closed = next(sent, {
+      actor: RECIPIENT,
+      key: "msg.closed:recent-100",
+      kind: "msg.closed",
+      payload: { id: "recent-100", state: "handled" },
+    });
+    const chained = prepareCompactionCheckpoint(
+      [sent, closed],
+      scope([...events, sent, closed], ["recent-0"]),
+      undefined,
+      previous,
+    );
+    expect(chained.checkpoint.head).toEqual({ hash: closed.hash, seq: closed.seq });
+    expect(chained.checkpoint.predecessor).toEqual(previous.selection);
+    expect(chained.checkpoint.entries.slice(0, 2)).toEqual(checkpoint.entries.slice(0, 2));
+    for (const tail of [
+      // A key the checkpoint already holds.
+      next(checkpoint.head, message("expired")),
+      // A gap after the checkpoint head.
+      next({ hash: checkpoint.head.hash, seq: checkpoint.head.seq + 1 }, session("skip")),
+    ]) {
+      expect(() => prepareCompactionCheckpoint([tail], evidence, undefined, previous)).toThrow(
+        "checkpoint-source-chain",
+      );
+    }
   });
 
   it("reduces only the approved routine payload fields", () => {

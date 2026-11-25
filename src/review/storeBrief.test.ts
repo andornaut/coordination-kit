@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { readWakeFile, wakeFilePath } from "../adapters/claude/wakeFile.ts";
+import { wakeFilePath } from "../adapters/claude/wakeFile.ts";
 import type { Collected, CollectRequest } from "../adapters/types.ts";
 import { main } from "../cli.ts";
 import { EXIT_OK } from "../core/io.ts";
@@ -23,7 +23,7 @@ import { openQuestion, releaseHold, setHold } from "../store/questions.ts";
 import { storeSend } from "../store/service.ts";
 import { ART, COORDINATOR, fakeCodex, GAME, storeFixture, TECH } from "../store/testStore.ts";
 import { blockWork, finishWork, readyWork, startWork } from "../store/work.ts";
-import { deliverReview, reviewResultsDir } from "./deliver.ts";
+import { deliverReview } from "./deliver.ts";
 import { coordinationEmit } from "./emit.ts";
 import {
   BRIEF_MAX_BYTES,
@@ -40,6 +40,18 @@ const NEXT = SLOT + 3600;
 const LATER = NEXT + 3600;
 const SENDER = { CLAUDE_CODE_SESSION_ID: COORDINATOR };
 const ACTOR = { nativeId: null, role: "game-coordinator" };
+
+/** The seq of the wake file at `path`, or "absent". */
+function wakeSeq(path: string): number | "absent" {
+  return existsSync(path)
+    ? (JSON.parse(readFileSync(path, "utf8")) as { seq: number }).seq
+    : "absent";
+}
+
+/** The per-slot result `review deliver` records under the game's bus. */
+function deliverRecord(game: { readonly busDir: string }, slot: number): string {
+  return join(game.busDir, "unblock", "review-deliver", `${slot}.json`);
+}
 
 function uuid(n: number): string {
   return `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -172,9 +184,9 @@ describe("stored review brief", () => {
     expect(briefs(layout)[0]!.body).toContain("Open messages: 2 (sent 2, delivered 0, retained 0)");
     expect(await deliverReview(layout, game, SLOT, undefined, { env: {} })).toEqual(result);
     // Without the per-slot receipt the store still answers: no second message.
-    rmSync(join(reviewResultsDir(game), `${SLOT}.json`));
+    rmSync(deliverRecord(game, SLOT));
     expect(await deliverReview(layout, game, SLOT, undefined, { env: {} })).toEqual(result);
-    expect(existsSync(join(reviewResultsDir(game), `${SLOT}.json`))).toBe(true);
+    expect(existsSync(deliverRecord(game, SLOT))).toBe(true);
     expect(briefs(layout)).toHaveLength(1);
   });
 
@@ -221,10 +233,7 @@ describe("stored review brief", () => {
       {},
       { body: "Held.", id: uuid(900), to: `${GAME}/gameplay` },
     );
-    const seq = (role: string): number | string => {
-      const wake = readWakeFile(wakeFilePath(layout, role));
-      return typeof wake === "string" ? wake : wake.seq;
-    };
+    const seq = (role: string) => wakeSeq(wakeFilePath(layout, role));
     expect([seq(TECH_ROLE), codex.adds().length]).toEqual([1, 1]);
     await deliverReview(layout, game, SLOT, undefined, { env: {}, wakePorts: ports });
     // Exactly one more wake each, the brief's recipient included; the held role gets none.
@@ -244,7 +253,7 @@ describe("stored review brief", () => {
     setHold(store, owner, { id: "h-paused", reason: "Paused.", scope: "role" });
     store.close();
     await send(layout, 1);
-    const wake = () => readWakeFile(wakeFilePath(layout, TECH_ROLE));
+    const wake = () => wakeSeq(wakeFilePath(layout, TECH_ROLE));
     expect(wake()).toBe("absent");
     await deliverReview(layout, game, SLOT, undefined, { env: {} });
     expect(wake()).toBe("absent");
@@ -252,7 +261,7 @@ describe("stored review brief", () => {
     releaseHold(again, owner, "h-paused");
     again.close();
     await deliverReview(layout, game, NEXT, undefined, { env: {} });
-    expect(wake()).toMatchObject({ seq: 1 });
+    expect(wake()).toBe(1);
   });
 
   it("stores one bounded brief per slot with the new stall count and exact details", async () => {

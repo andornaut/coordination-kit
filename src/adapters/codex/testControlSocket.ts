@@ -4,7 +4,7 @@
 import { createServer, type Server, type Socket } from "node:net";
 import { join } from "node:path";
 
-import { acceptKey, decodeFrames, encodeFrame, MessageAssembler, OPCODE } from "./rpc.ts";
+import { acceptKey, decodeFrames, encodeFrame, MessageAssembler, OPCODE } from "./websocket.ts";
 
 type FakeReply =
   | { readonly result: unknown }

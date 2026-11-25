@@ -5,14 +5,14 @@ import { PassThrough } from "node:stream";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { channelStatusPath, readChannelStatus } from "../adapters/claude/channelStatus.ts";
+import { readChannelStatus } from "../adapters/claude/channelStatus.ts";
 import { wakeFilePath, writeWakeFile } from "../adapters/claude/wakeFile.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Io } from "../core/io.ts";
 import { projectConfig, writeFixtureJson } from "../core/testFixtures.ts";
-import { updateRegistry } from "../registry/store.ts";
-import { channelServer } from "../review/diagnostics.ts";
+import { readRegistry, updateRegistry } from "../registry/store.ts";
+import { diagnoseHarness } from "../review/diagnostics.ts";
 import { claudeFixture, RECIPIENT } from "../review/fixtures.ts";
-import { LINEAGE_SCAN_MS, runChannel } from "./channel.ts";
+import { channel } from "./channel.ts";
 
 function io(): Io & { errors: string[] } {
   const errors: string[] = [];
@@ -28,12 +28,10 @@ describe("claude channel options", () => {
     });
     const input = new PassThrough();
     const lines: string[] = [];
-    const done = runChannel(
-      { input, write: (line) => void lines.push(line) },
-      io(),
-      fixture.layout.root,
-      [],
-    );
+    const done = channel(io(), fixture.layout.root, [], {
+      input,
+      write: (line) => void lines.push(line),
+    });
     input.write(`${JSON.stringify({ id: 1, jsonrpc: "2.0", method: "ping" })}\n`);
     input.end();
     expect(await done).toBe(EXIT_OK);
@@ -50,12 +48,10 @@ describe("claude channel options", () => {
     });
     const errors = io();
     expect(
-      await runChannel(
-        { input: new PassThrough(), write: () => undefined },
-        errors,
-        fixture.layout.root,
-        [],
-      ),
+      await channel(errors, fixture.layout.root, [], {
+        input: new PassThrough(),
+        write: () => undefined,
+      }),
     ).toBe(EXIT_INVALID);
     expect(errors.errors.join("")).toContain("claude harness for the recipient game-coordinator");
   });
@@ -71,7 +67,7 @@ describe("claude channel options", () => {
       ["--unknown"],
     ]) {
       // eslint-disable-next-line no-await-in-loop
-      expect(await runChannel(streams, io(), fixture.layout.root, args), args.join(" ")).toBe(
+      expect(await channel(io(), fixture.layout.root, args, streams), args.join(" ")).toBe(
         EXIT_USAGE,
       );
     }
@@ -84,15 +80,15 @@ describe("claude channel options", () => {
     writeFixtureJson(join(fixture.base, "chibis-way-home/delivery-kit.json"), config);
     const errors = io();
     const streams = { input: new PassThrough(), write: () => undefined };
-    expect(await runChannel(streams, errors, fixture.layout.root, [])).toBe(EXIT_INVALID);
+    expect(await channel(errors, fixture.layout.root, [], streams)).toBe(EXIT_INVALID);
     expect(errors.errors.join("")).toContain(
       "the selected games name different reports.recipient roles",
     );
     const input = new PassThrough();
-    const done = runChannel({ input, write: () => undefined }, io(), fixture.layout.root, [
-      "--game",
-      "archies-dog-walks",
-    ]);
+    const done = channel(io(), fixture.layout.root, ["--game", "archies-dog-walks"], {
+      input,
+      write: () => undefined,
+    });
     input.end();
     expect(await done).toBe(EXIT_OK);
   });
@@ -101,11 +97,11 @@ describe("claude channel options", () => {
     const fixture = claudeFixture();
     const input = new PassThrough();
     const lines: string[] = [];
-    const done = runChannel(
-      { input, write: (line) => void lines.push(line) },
+    const done = channel(
       io(),
       fixture.layout.root,
       ["--conversation", RECIPIENT, "--poll-seconds", "3600"],
+      { input, write: (line) => void lines.push(line) },
     );
     const poll = async (count: number) => {
       input.write('{"method":"notifications/initialized"}\n');
@@ -147,11 +143,11 @@ describe("claude channel options", () => {
     const fixture = claudeFixture();
     const input = new PassThrough();
     const lines: string[] = [];
-    const done = runChannel(
-      { input, write: (line) => void lines.push(line) },
+    const done = channel(
       io(),
       fixture.layout.root,
       ["--conversation", RECIPIENT, "--poll-seconds", "3600"],
+      { input, write: (line) => void lines.push(line) },
     );
     const drain = async (count: number) => {
       input.write('{"method":"notifications/initialized"}\n');
@@ -193,10 +189,10 @@ describe("claude channel options", () => {
   it("keys its status file by role, so the doctor still finds it after a /clear rebind", async () => {
     const fixture = claudeFixture();
     const input = new PassThrough();
-    const done = runChannel({ input, write: () => undefined }, io(), fixture.layout.root, [
-      "--conversation",
-      RECIPIENT,
-    ]);
+    const done = channel(io(), fixture.layout.root, ["--conversation", RECIPIENT], {
+      input,
+      write: () => undefined,
+    });
     input.end();
     expect(await done).toBe(EXIT_OK);
     expect(readChannelStatus(fixture.layout, "game-coordinator")).toMatchObject({
@@ -209,14 +205,16 @@ describe("claude channel options", () => {
       draft.roles["game-coordinator"]!.conversations.claude =
         "00000000-0000-4000-8000-0000000000f1";
     });
-    expect(channelServer(fixture.layout, "game-coordinator")).toMatchObject({
-      code: "status_file_read",
-      pid: process.pid,
-      status: "reported",
-    });
-    expect(channelServer(fixture.layout, "archies-dog-walks/tech")).toMatchObject({
-      code: "status_file_missing",
-      status: "unknown",
+    // The doctor reads each Claude role's status file, keyed by role, not by conversation.
+    const { roles } = await diagnoseHarness(
+      fixture.env,
+      fixture.layout,
+      readRegistry(fixture.layout),
+      { roles: ["game-coordinator", "archies-dog-walks/tech"] },
+    );
+    expect(Object.fromEntries(roles.map((row) => [row.role, row.channel_server]))).toMatchObject({
+      "archies-dog-walks/tech": { code: "status_file_missing", status: "unknown" },
+      "game-coordinator": { code: "status_file_read", pid: process.pid, status: "reported" },
     });
   });
 });
@@ -225,6 +223,9 @@ describe("claude channel launched with a rotated conversation", () => {
   const OLD = RECIPIENT;
   const id = (n: number) => `00000000-0000-4000-8000-0000000000${n.toString(16).padStart(2, "0")}`;
   const ROLE = "game-coordinator";
+  /** The role's channel status file without a configured state root. */
+  const statusFile = (layout: { readonly varDir: string }) =>
+    join(layout.varDir, "channel", "roles", `${ROLE}.json`);
 
   /** A projects directory with OLD's transcript and each `[id, predecessor, via]` header. */
   function transcripts(links: readonly (readonly [string, string, string])[]): {
@@ -257,12 +258,11 @@ describe("claude channel launched with a rotated conversation", () => {
     });
     const input = new PassThrough();
     const lines: string[] = [];
-    const done = runChannel(
-      { input, write: (line) => void lines.push(line) },
+    const done = channel(
       io(),
       fixture.layout.root,
       ["--conversation", OLD, "--poll-seconds", "3600"],
-      { now, projectsDir },
+      { input, now, projectsDir, write: (line) => void lines.push(line) },
     );
     const poll = async () => {
       input.write('{"method":"notifications/initialized"}\n');
@@ -289,20 +289,20 @@ describe("claude channel launched with a rotated conversation", () => {
     ],
   ] as const)("follows %s to the role's current binding", async (_, links, bound) => {
     const { dir } = transcripts(links);
-    const channel = await launch(bound, dir);
+    const served = await launch(bound, dir);
     try {
-      await channel.poll();
-      expect(readChannelStatus(channel.layout, ROLE)).toMatchObject({
+      await served.poll();
+      expect(readChannelStatus(served.layout, ROLE)).toMatchObject({
         conversation: bound,
         role: ROLE,
       });
-      writeWakeFile(channel.layout, { count: 2, role: ROLE });
+      writeWakeFile(served.layout, { count: 2, role: ROLE });
       await vi.waitFor(async () => {
-        await channel.poll();
-        expect(channel.lines).toHaveLength(1);
+        await served.poll();
+        expect(served.lines).toHaveLength(1);
       });
     } finally {
-      await channel.stop();
+      await served.stop();
     }
   });
 
@@ -317,33 +317,33 @@ describe("claude channel launched with a rotated conversation", () => {
     ["a fork", [[id(0xe1), OLD, "fork"]]],
   ] as const)("stays unresolved for %s", async (_, links) => {
     const { dir } = transcripts(links);
-    const channel = await launch(id(0xe1), dir);
+    const served = await launch(id(0xe1), dir);
     try {
-      writeWakeFile(channel.layout, { count: 1, role: ROLE });
-      await channel.poll();
-      await channel.poll();
-      expect(channel.lines).toEqual([]);
-      expect(existsSync(channelStatusPath(channel.layout, ROLE))).toBe(false);
+      writeWakeFile(served.layout, { count: 1, role: ROLE });
+      await served.poll();
+      await served.poll();
+      expect(served.lines).toEqual([]);
+      expect(existsSync(statusFile(served.layout))).toBe(false);
     } finally {
-      await channel.stop();
+      await served.stop();
     }
   });
 
   it("scans the lineage at most once per interval while unresolved", async () => {
     const lineage = transcripts([]);
     let clock = 1_000_000;
-    const channel = await launch(id(0xe1), lineage.dir, () => clock);
+    const served = await launch(id(0xe1), lineage.dir, () => clock);
     try {
       // The successor appears after the scan at start; the next scan waits for the interval.
       lineage.add([id(0xe1), OLD, "clear"]);
-      clock += LINEAGE_SCAN_MS - 1;
-      await channel.poll();
-      expect(existsSync(channelStatusPath(channel.layout, ROLE))).toBe(false);
+      clock += 60_000 - 1;
+      await served.poll();
+      expect(existsSync(statusFile(served.layout))).toBe(false);
       clock += 1;
-      await channel.poll();
-      expect(readChannelStatus(channel.layout, ROLE)).toMatchObject({ conversation: id(0xe1) });
+      await served.poll();
+      expect(readChannelStatus(served.layout, ROLE)).toMatchObject({ conversation: id(0xe1) });
     } finally {
-      await channel.stop();
+      await served.stop();
     }
   });
 });

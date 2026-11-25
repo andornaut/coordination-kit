@@ -14,8 +14,8 @@ const REPORTED = /^[a-z_]{1,32}$/;
 const LIVE_STATUSES = ["idle", "busy", "shell", "waiting"] as const;
 type LiveStatus = (typeof LIVE_STATUSES)[number];
 
-export const MISSING_REASON = "recipient session missing from claude agents listing";
-export const BLOCKED_REASON = "recipient session blocked";
+const MISSING_REASON = "recipient session missing from claude agents listing";
+const BLOCKED_REASON = "recipient session blocked";
 
 type Availability =
   | { readonly status: LiveStatus; readonly reason?: undefined }

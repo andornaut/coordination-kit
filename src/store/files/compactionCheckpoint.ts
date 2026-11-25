@@ -254,7 +254,7 @@ export function verifyCompactionCheckpoint(
 }
 
 /** Verify the ordinary append-only tail against a previously verified checkpoint. */
-export function verifyCompactionTail(
+function verifyCompactionTail(
   checkpoint: CompactionCheckpoint,
   tail: readonly StoredEvent[],
 ): CheckpointHead {

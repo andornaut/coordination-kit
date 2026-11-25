@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { readWakeFile, wakeFilePath } from "../adapters/claude/wakeFile.ts";
+import { wakeFilePath } from "../adapters/claude/wakeFile.ts";
 import { RpcError } from "../adapters/codex/rpc.ts";
 import { updateRegistry } from "../registry/store.ts";
 import { Store } from "./db.ts";
@@ -16,6 +16,11 @@ const SENDER = { nativeId: "00000000-0000-4000-8000-0000000000c1", role: "game-c
 const TECH_ROLE = "archies-dog-walks/tech";
 const ART_ROLE = "archies-dog-walks/art";
 const SECRET_BODY = "Private body that must never reach a native transport.\n";
+
+/** The wake file's parsed contents. */
+function onDisk(path: string): unknown {
+  return JSON.parse(readFileSync(path, "utf8"));
+}
 
 function uuid(n: number): string {
   return `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -40,20 +45,14 @@ describe("Claude wakes", () => {
     const { layout, send, store, wakes } = setup();
     expect(await send(TECH_ROLE)).toMatchObject({ status: "accepted" });
     const path = wakeFilePath(layout, TECH_ROLE);
-    expect(readWakeFile(path)).toEqual({ count: 1, role: TECH_ROLE, seq: 1 });
-    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
-      count: 1,
-      role: TECH_ROLE,
-      schema: 1,
-      seq: 1,
-    });
+    expect(onDisk(path)).toEqual({ count: 1, role: TECH_ROLE, schema: 1, seq: 1 });
     expect(readFileSync(path, "utf8")).not.toContain("Private body");
     expect(await send(TECH_ROLE)).toMatchObject({ status: "coalesced" });
-    expect(readWakeFile(path)).toEqual({ count: 1, role: TECH_ROLE, seq: 1 });
+    expect(onDisk(path)).toEqual({ count: 1, role: TECH_ROLE, schema: 1, seq: 1 });
     readInbox(store, { nativeId: TECH, role: TECH_ROLE });
     expect(wakeState(store, TECH_ROLE)).toEqual({ outstanding: null, pending: false });
     expect(await send(TECH_ROLE)).toMatchObject({ status: "accepted" });
-    expect(readWakeFile(path)).toEqual({ count: 1, role: TECH_ROLE, seq: 2 });
+    expect(onDisk(path)).toEqual({ count: 1, role: TECH_ROLE, schema: 1, seq: 2 });
     expect(wakes()).toEqual([
       { count: 1, detail: null, harness: "claude", outcome: "accepted", role: TECH_ROLE },
       { count: 1, detail: null, harness: "claude", outcome: "accepted", role: TECH_ROLE },
@@ -81,7 +80,7 @@ describe("Claude wakes", () => {
       delete draft.roles["archies-dog-walks/gameplay"]!.phase;
     });
     expect(await send("archies-dog-walks/gameplay")).toMatchObject({ status: "accepted" });
-    expect(readWakeFile(wakeFilePath(layout, "archies-dog-walks/gameplay"))).toMatchObject({
+    expect(onDisk(wakeFilePath(layout, "archies-dog-walks/gameplay"))).toMatchObject({
       count: 2,
       seq: 1,
     });
@@ -97,9 +96,9 @@ describe("Claude wakes", () => {
     });
     // The outstanding wake belongs to the earlier binding, so the next send wakes the new one.
     expect(await send(TECH_ROLE)).toMatchObject({ status: "accepted" });
-    expect(readWakeFile(path)).toEqual({ count: 2, role: TECH_ROLE, seq: 2 });
+    expect(onDisk(path)).toEqual({ count: 2, role: TECH_ROLE, schema: 1, seq: 2 });
     expect(await send(TECH_ROLE)).toMatchObject({ status: "coalesced" });
-    expect(readWakeFile(path)).toEqual({ count: 2, role: TECH_ROLE, seq: 2 });
+    expect(onDisk(path)).toEqual({ count: 2, role: TECH_ROLE, schema: 1, seq: 2 });
     expect(
       store.db
         .prepare("SELECT conversation FROM wakes WHERE outcome = 'accepted' ORDER BY seq")

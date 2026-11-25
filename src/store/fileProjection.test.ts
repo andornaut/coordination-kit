@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { MEMORY, Store } from "./db.ts";
-import type { FileJournalWriter, FileProjection, FileRecord } from "./fileProjection.ts";
+import type { FileProjection } from "./fileProjection.ts";
 import { messageStatus, sendMessage } from "./messages.ts";
 import type { StoredEvent } from "./types.ts";
+
+type FileRecord = ReturnType<FileProjection["records"]>[number];
 
 const ID = "ac4e9456-137f-4f1c-832c-5b7ff64a5d5e";
 const ACTOR = { nativeId: null, role: "archies-dog-walks/tech" };
@@ -13,23 +15,26 @@ function journal() {
   const records: FileRecord[] = [];
   let interrupt: "before" | "after" | null = null;
   const read = (after = 0) => events.filter(({ seq }) => seq > after);
-  const writer: FileJournalWriter = {
-    commit(committed, files = []) {
-      const phase = interrupt;
-      interrupt = null;
-      if (phase === "before") {
-        throw new Error("interrupted before publication");
-      }
-      events.push(...committed);
-      records.push(...files);
-      if (phase === "after") {
-        throw new Error("interrupted after publication");
-      }
-    },
-    events: read,
-  };
   const projection: FileProjection = {
-    journal: { events: read, withWriter: (body) => body(writer) },
+    journal: {
+      events: read,
+      withWriter: (body) =>
+        body({
+          commit(committed, files = []) {
+            const phase = interrupt;
+            interrupt = null;
+            if (phase === "before") {
+              throw new Error("interrupted before publication");
+            }
+            events.push(...committed);
+            records.push(...files);
+            if (phase === "after") {
+              throw new Error("interrupted after publication");
+            }
+          },
+          events: read,
+        }),
+    },
     records: (_index, _previousSeq, batch) =>
       batch.map(({ key, seq }) => ({ data: key, path: `roles/shared/${seq}.json` })),
   };

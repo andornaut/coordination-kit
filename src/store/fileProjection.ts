@@ -3,7 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { CheckpointReceipt } from "./files/compactionCheckpoint.ts";
 import type { Json, StoredEvent } from "./types.ts";
 
-export interface FileRecord {
+interface FileRecord {
   readonly path: string;
   readonly data: Json;
 }
@@ -12,7 +12,7 @@ interface FileJournalReader {
   events(afterSeq?: number): StoredEvent[];
 }
 
-export interface FileJournalWriter extends FileJournalReader {
+interface FileJournalWriter extends FileJournalReader {
   commit(events: readonly StoredEvent[], records?: readonly FileRecord[]): void;
 }
 

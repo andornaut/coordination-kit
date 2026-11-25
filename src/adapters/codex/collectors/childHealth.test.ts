@@ -3,7 +3,7 @@ import { performance } from "node:perf_hooks";
 import { describe, expect, it } from "vitest";
 
 import { NativeTimeout, type RpcClient } from "../rpc.ts";
-import { collectChildHealth, ERROR_CLASSES } from "./childHealth.ts";
+import { workerHealth } from "./childHealth.ts";
 
 type Row = Record<string, unknown>;
 type Call = [string, Row];
@@ -28,6 +28,19 @@ const T = uuid("0000", 3);
 const N = uuid("0000", 4);
 const PRIVATE = "PRIVATE_NATIVE_BODY";
 const SOURCE_KINDS = '["subAgentThreadSpawn"]';
+/** Every typed native failure code and the classification it reports. */
+const ERROR_CLASSES: Readonly<Record<string, string>> = {
+  contextWindowExceeded: "context_exhaustion",
+  flexUnavailable: "flex_capacity",
+  modelNotFound: "model_unavailable",
+  policyCapacityUnavailable: "model_capacity",
+  rateLimitExceeded: "rate_limit",
+  serverOverloaded: "server_capacity",
+  sessionBudgetExceeded: "session_budget_exhaustion",
+  usageLimitExceeded: "usage_limit",
+};
+/** The call budget shared by every parent. */
+const MAX_CALLS = 256;
 
 function row(child = C, parent = P): Row {
   return {
@@ -120,7 +133,8 @@ class ScopedNative implements RpcClient {
   readonly rows: Record<string, Row> = {};
   readonly turns: Record<string, Row> = {};
 
-  constructor(sizes: number[], failures = 0) {
+  /** `sizes[i]` children for parent i; every child of a parent index in `failing` failed. */
+  constructor(sizes: number[], failing: ReadonlySet<number> = new Set()) {
     this.parents = sizes.map((_, n) => uuid("0001", n));
     sizes.forEach((size, i) => {
       const parent = this.parents[i] ?? "";
@@ -128,7 +142,7 @@ class ScopedNative implements RpcClient {
       this.children[parent] = children;
       children.forEach((child, n) => {
         this.rows[child] = row(child, parent);
-        const failed = i === 0 && n < failures;
+        const failed = failing.has(i);
         this.turns[child] = turn(
           failed ? "failed" : "completed",
           failed ? "serverOverloaded" : null,
@@ -181,18 +195,12 @@ class ScopedNative implements RpcClient {
 async function collect(
   client: RpcClient,
   parents: readonly string[],
-  maxPages?: number,
-  maxCalls?: number,
 ): Promise<Record<string, Health>> {
-  return (await collectChildHealth(client, parents, maxPages, maxCalls)) as Record<string, Health>;
+  return (await workerHealth(client, parents)) as Record<string, Health>;
 }
 
-async function snapshot(
-  native: RpcClient = new Native(),
-  maxPages?: number,
-  maxCalls?: number,
-): Promise<Health> {
-  const result = (await collect(native, [P], maxPages, maxCalls))[P];
+async function snapshot(native: RpcClient = new Native()): Promise<Health> {
+  const result = (await collect(native, [P]))[P];
   if (result === undefined) {
     throw new Error("parent missing");
   }
@@ -211,7 +219,7 @@ function json(value: unknown): string {
   return JSON.stringify(value);
 }
 
-describe("collectChildHealth", () => {
+describe("workerHealth", () => {
   it("classifies every typed failure code and discards private fields", async () => {
     for (const [code, classification] of Object.entries(ERROR_CLASSES)) {
       const native = new Native();
@@ -414,15 +422,18 @@ describe("collectChildHealth", () => {
     const results = await collect(many, [P, N]);
     expect(calls.slice(0, 4).map(([method]) => method)).toEqual(Array(4).fill("thread/list"));
     expect(Object.values(results).some((result) => result.complete)).toBe(false);
-    const native = new Native();
-    const result = await snapshot(native, 10, 3);
-    expect(native.calls).toHaveLength(3);
+    // 100 parents with one child each take 200 inventory calls, then one turn read per child.
+    // Parent 55's failed child takes the last call, so its confirming reread is never made.
+    const native = new ScopedNative(Array<number>(100).fill(1), new Set([55]));
+    const capped = await collect(native, native.parents);
+    expect(native.calls).toHaveLength(MAX_CALLS);
+    const result = capped[native.parents[55]!]!;
     const child = result.children[0];
     expect(child?.lineage_verified).toBe(true);
     expect(child?.status).toBe("partial");
     expect(child?.requires_parent_action).toBe(false);
     expect(result.diagnostics).toContain("native_call_budget_exhausted");
-    expect(result.budget.max_calls).toBe(3);
+    expect(result.budget.max_calls).toBe(MAX_CALLS);
     expect(result.counts).toEqual({ discovered: 1, observed: 1, validated: 0, omitted: 0 });
   });
 
@@ -459,15 +470,27 @@ describe("collectChildHealth", () => {
   });
 
   it("observes children round-robin under the call bound", async () => {
-    const native = new ScopedNative([3, 3, 3]);
-    const results = await collect(native, native.parents, 10, 9);
-    expect(native.calls.slice(6).map(([, params]) => params.threadId)).toEqual(
-      native.parents.map((parent) => native.children[parent]?.[0]),
+    // Three parents with 100 children each take nine inventory calls (two active pages and one
+    // archived page each), leaving 247 turn reads: 83 for the first parent and 82 for the others.
+    const native = new ScopedNative([100, 100, 100]);
+    const results = await collect(native, native.parents);
+    const rounds = Array.from({ length: 100 }, (_, n) =>
+      native.parents.map((parent) => native.children[parent]?.[n]),
+    ).flat();
+    expect(native.calls).toHaveLength(MAX_CALLS);
+    expect(native.calls.slice(9).map(([, params]) => params.threadId)).toEqual(
+      rounds.slice(0, MAX_CALLS - 9),
     );
-    for (const result of Object.values(results)) {
-      expect(result.counts).toEqual({ discovered: 3, observed: 1, validated: 0, omitted: 2 });
-      expect(result.complete).toBe(false);
-    }
+    native.parents.forEach((parent, n) => {
+      const observed = n === 0 ? 83 : 82;
+      expect(results[parent]?.counts).toEqual({
+        discovered: 100,
+        observed,
+        validated: 0,
+        omitted: 100 - observed,
+      });
+      expect(results[parent]?.complete).toBe(false);
+    });
   });
 
   it("never validates a failure from invalid inventory metadata", async () => {

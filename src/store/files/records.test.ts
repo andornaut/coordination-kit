@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { type JsonObject, type StoredEvent } from "../types.ts";
-import { type FileRecordContext, fileRecords } from "./records.ts";
+import { fileRecords } from "./records.ts";
+
+type FileRecordContext = NonNullable<Parameters<typeof fileRecords>[1]>;
 
 const ART = "archies-dog-walks/art";
 const TECH = "chibis-way-home/tech";

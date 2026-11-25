@@ -26,7 +26,7 @@ const SHA256 = /^[a-f0-9]{64}$/;
 const ID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const WAIT_SECONDS = 5;
 
-export interface CutoverEvidence {
+interface CutoverEvidence {
   readonly head: { readonly hash: string; readonly seq: number };
   /** Digest of the qualified state comparison and independent backup/restore evidence. */
   readonly proof: string;

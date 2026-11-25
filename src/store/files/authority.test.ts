@@ -19,7 +19,6 @@ import { Store } from "../db.ts";
 import { GENESIS } from "../types.ts";
 import {
   activateFileAuthority,
-  type CutoverEvidence,
   fileAuthority,
   fileAuthorityTarget,
   inspectFileAuthority,
@@ -35,7 +34,7 @@ const CONFIG = {
   wakeMinutes: [],
 };
 const PROOF = "a".repeat(64);
-const EVIDENCE: CutoverEvidence = { head: { hash: GENESIS, seq: 0 }, proof: PROOF };
+const EVIDENCE = { head: { hash: GENESIS, seq: 0 }, proof: PROOF };
 
 function git(root: string, ...args: string[]): void {
   execFileSync("git", ["-C", root, ...args], { stdio: "pipe" });

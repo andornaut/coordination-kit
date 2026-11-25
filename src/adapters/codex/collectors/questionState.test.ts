@@ -2,7 +2,9 @@
 import { describe, expect, it } from "vitest";
 
 import { NativeTimeout, type RpcClient } from "../rpc.ts";
-import { collectQuestionState, type QuestionStateOptions } from "./questionState.ts";
+import { collectQuestionState } from "./questionState.ts";
+
+type QuestionStateOptions = NonNullable<Parameters<typeof collectQuestionState>[4]>;
 
 const P = "00000000-0000-0000-0000-000000000001";
 const OTHER = "00000000-0000-0000-0000-000000000002";

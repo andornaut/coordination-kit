@@ -52,7 +52,7 @@ export class StatusUsageError extends Error {
   }
 }
 
-export interface StatusOptions {
+interface StatusOptions {
   /** `all`, a game ID, a kit ID or a registry role key. */
   readonly scope: string;
   readonly since: string | null;

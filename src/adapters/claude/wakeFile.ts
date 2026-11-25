@@ -34,7 +34,7 @@ function positive(value: unknown): value is number {
 }
 
 /** The wake at `path`; "absent" when there is no file, "invalid" when it is torn or malformed. */
-export function readWakeFile(path: string): Wake | "absent" | "invalid" {
+function readWakeFile(path: string): Wake | "absent" | "invalid" {
   let value: unknown;
   try {
     value = readJsonIfExists(path);

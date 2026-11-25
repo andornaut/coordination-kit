@@ -78,7 +78,7 @@ interface ChannelServer {
 const CHANNEL_CONFIG = join("var", "claude-channel.mcp.json");
 
 /** `node <root>/node_modules/@andornaut/coordination-kit/dist/cli.js --root <root> claude channel`. */
-export function stableChannelCommand(root: string): string[] {
+function stableChannelCommand(root: string): string[] {
   return [
     "node",
     join(root, "node_modules", "@andornaut", "coordination-kit", "dist", "cli.js"),
@@ -137,7 +137,7 @@ function channelCommand(layout: Layout): ChannelCommand {
 }
 
 /** The channel server's own report, or unknown when it wrote none. Never clearance. */
-export function channelServer(layout: Layout, role: string): ChannelServer {
+function channelServer(layout: Layout, role: string): ChannelServer {
   const status = readChannelStatus(layout, role);
   return status === null
     ? {

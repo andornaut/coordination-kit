@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { RECIPIENT } from "../../review/fixtures.ts";
-import { BLOCKED_REASON, MISSING_REASON, recipientAvailability } from "./agents.ts";
+import { recipientAvailability } from "./agents.ts";
 
 const interactive = (status: unknown) => ({ kind: "interactive", sessionId: RECIPIENT, status });
 
@@ -32,12 +32,15 @@ describe("recipientAvailability", () => {
   });
 
   it("keeps the missing and blocked reasons", () => {
-    expect(recipientAvailability([], RECIPIENT)).toEqual({ reason: MISSING_REASON, status: null });
+    expect(recipientAvailability([], RECIPIENT)).toEqual({
+      reason: "recipient session missing from claude agents listing",
+      status: null,
+    });
     expect(
       recipientAvailability(
         [interactive("idle"), { kind: "background", sessionId: RECIPIENT, state: "blocked" }],
         RECIPIENT,
       ),
-    ).toEqual({ reason: BLOCKED_REASON, status: null });
+    ).toEqual({ reason: "recipient session blocked", status: null });
   });
 });

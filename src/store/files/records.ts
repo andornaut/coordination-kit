@@ -24,7 +24,7 @@ interface VerifiedWorkerBinding {
   readonly evidenceSha256?: string;
 }
 
-export interface FileRecordContext {
+interface FileRecordContext {
   readonly registeredRoles: ReadonlySet<string>;
   /** Lookups supply ownership from preceding committed events when projecting a batch. */
   readonly messageOwner?: (id: string) => MessageOwnership | null;

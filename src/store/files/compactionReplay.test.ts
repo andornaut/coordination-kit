@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { MEMORY, Store } from "../db.ts";
 import { canonicalJson, sha256 } from "../eventCodec.ts";
-import type { FileJournalWriter, FileProjection } from "../fileProjection.ts";
+import type { FileProjection } from "../fileProjection.ts";
 import { recordSession } from "../handoffs.ts";
 import {
   closeMessage,
@@ -119,13 +119,19 @@ function fixture(store: Store) {
 
 function journal(tail: StoredEvent[]): FileProjection {
   const events = (afterSeq = 0) => tail.filter(({ seq }) => seq > afterSeq);
-  const writer: FileJournalWriter = {
-    commit: (batch) => {
-      tail.push(...batch);
+  return {
+    journal: {
+      events,
+      withWriter: (body) =>
+        body({
+          commit: (batch) => {
+            tail.push(...batch);
+          },
+          events,
+        }),
     },
-    events,
+    records: () => [],
   };
-  return { journal: { events, withWriter: (body) => body(writer) }, records: () => [] };
 }
 
 function operationalState(store: Store) {

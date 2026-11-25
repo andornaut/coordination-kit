@@ -27,7 +27,7 @@ interface ChannelStatus {
   readonly argv: readonly string[];
 }
 
-export function channelStatusPath(layout: Layout, role: string): string {
+function channelStatusPath(layout: Layout, role: string): string {
   if (!ROLE.test(role)) {
     throw new Error("channel status needs a role name");
   }

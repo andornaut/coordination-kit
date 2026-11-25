@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { nativeQuestionObservation } from "./codexQuestionEvidence.ts";
+import { nativeQuestionObservation } from "./codexQuestionObservation.ts";
 import { dependentQuestions, type NativeQuestionProof } from "./codexQuestions.ts";
 import { Store } from "./db.ts";
 import {

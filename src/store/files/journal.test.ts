@@ -19,8 +19,6 @@ import { GENESIS, type StoredEvent } from "../types.ts";
 import {
   cancelFileJournalReservation,
   fenceFileJournal,
-  type FileRecord,
-  type JournalWriter,
   openFileJournal,
   reserveFileJournal,
 } from "./journal.ts";
@@ -28,7 +26,7 @@ import {
 const exec = promisify(execFile);
 const journalModule = new URL("./journal.ts", import.meta.url).href;
 const codecModule = new URL("../eventCodec.ts", import.meta.url).href;
-const record: FileRecord = {
+const record = {
   data: { message: "Original" },
   path: "roles/archie%2Ftech/sent/1.json",
 };
@@ -247,7 +245,7 @@ it("rejects paths outside the namespaces and symbolic links in a companion path"
 
 it("refuses a writer retained past its lock boundary", () => {
   const journal = openFileJournal(scratch());
-  const writer: JournalWriter = journal.withWriter((value) => value);
+  const writer = journal.withWriter((value) => value);
   expect(() => writer.events()).toThrow("journal-writer-closed");
   expect(() => writer.commit([event("first")])).toThrow("journal-writer-closed");
 });

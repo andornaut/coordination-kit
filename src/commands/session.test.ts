@@ -7,9 +7,8 @@ import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
 import { readRegistry, updateRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
-import { checkpointPath, rebindAfterClear } from "../store/sessionService.ts";
+import { checkpointPath, storeSessionStart } from "../store/sessionService.ts";
 import { COORDINATOR, GAMEPLAY, storeFixture, TECH, TECH_CODEX } from "../store/testStore.ts";
-import { StoreError } from "../store/types.ts";
 
 const KIT = "art-kit";
 const KIT_CLAUDE = "00000000-0000-4000-8000-0000000000c7";
@@ -242,11 +241,12 @@ describe("session start after /clear", () => {
   it("refuses rotation-conflict when the registry changed after the read", async () => {
     const { env, layout, transcript } = clearSetup();
     transcript(KIT_CLAUDE);
-    const stale = readRegistry(layout);
-    updateRegistry(layout, stale.revision, () => {});
-    await expect(
-      rebindAfterClear({ env, layout }, {}, stale, new StoreError("caller-unbound")),
-    ).rejects.toMatchObject({ code: "rotation-conflict" });
+    const { revision } = readRegistry(layout);
+    // The start reads the registry before its first await and rebinds after it, so this write
+    // lands between the read and the rebind.
+    const started = storeSessionStart({ env, layout }, {}, { cwd: "/", version: "0.0.0-test" });
+    updateRegistry(layout, revision, () => {});
+    await expect(started).rejects.toMatchObject({ code: "rotation-conflict" });
     expect(readRegistry(layout).roles[KIT]!.conversations.claude).toBe(KIT_CLAUDE);
   });
 });

@@ -8,9 +8,21 @@ import { type FakeControl, startFakeControl } from "../adapters/codex/testContro
 import { loadLayout } from "../core/layout.ts";
 import { CLAUDE_TECH, CODEX_TECH, makeFixture, registryInput } from "../core/testFixtures.ts";
 import { createRegistry, readRegistry, type Registry } from "../registry/index.ts";
-import { diagnoseHarness, stableChannelCommand } from "./diagnostics.ts";
+import { diagnoseHarness } from "./diagnostics.ts";
 
 const ROLE = "archies-dog-walks/tech";
+
+/** The stable channel launch command: the coordinator's installed bundle. */
+function stableChannelCommand(root: string): string[] {
+  return [
+    "node",
+    join(root, "node_modules", "@andornaut", "coordination-kit", "dist", "cli.js"),
+    "--root",
+    root,
+    "claude",
+    "channel",
+  ];
+}
 const controls: FakeControl[] = [];
 afterEach(async () => {
   await Promise.all(controls.splice(0).map((control) => control.close()));

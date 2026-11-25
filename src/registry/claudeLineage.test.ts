@@ -4,10 +4,12 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { claudeProjectsDir, clearPredecessor, HEADER_LIMIT } from "./claudeLineage.ts";
+import { claudeProjectsDir, clearPredecessor } from "./claudeLineage.ts";
 
 const OLD = "00000000-0000-4000-8000-0000000000a1";
 const NEW = "00000000-0000-4000-8000-0000000000a2";
+/** The most transcript bytes read for the header. */
+const HEADER_LIMIT = 64 * 1024;
 
 type Entry = { type: string; id: string; via: string };
 

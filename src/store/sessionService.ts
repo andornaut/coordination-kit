@@ -106,7 +106,7 @@ type Caller = ReturnType<typeof resolveCaller>;
  * (`session-held`) or in an open handoff. The write uses the revision of `roles` and refuses
  * `rotation-conflict` when it changed. Any other failure rethrows `refusal`.
  */
-export async function rebindAfterClear(
+async function rebindAfterClear(
   context: StoreServiceContext,
   options: CallerOptions,
   roles: Registry,

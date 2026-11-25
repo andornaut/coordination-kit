@@ -8,7 +8,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { CONVERSATION_ID_PATTERN } from "../core/validate.ts";
 
 /** The most transcript bytes read for the header. */
-export const HEADER_LIMIT = 64 * 1024;
+const HEADER_LIMIT = 64 * 1024;
 
 /**
  * `$CLAUDE_CONFIG_DIR/projects`, else `$HOME/.claude/projects`; null when the chosen variable is

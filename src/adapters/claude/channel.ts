@@ -16,7 +16,7 @@ interface Message {
 }
 
 /** Answer requests; returns true once the client reports initialization. */
-export function handle(write: LineWriter, message: Message): boolean {
+function handle(write: LineWriter, message: Message): boolean {
   if (!Object.hasOwn(message, "id")) {
     return message.method === "notifications/initialized";
   }

@@ -7,7 +7,7 @@ import { isCanonicalUuid } from "../../../core/ids.ts";
 import { isRecord, sameJson } from "../../../core/pyjson.ts";
 import { NativeTimeout, type RpcClient } from "../rpc.ts";
 
-export const ERROR_CLASSES: Readonly<Record<string, string>> = {
+const ERROR_CLASSES: Readonly<Record<string, string>> = {
   contextWindowExceeded: "context_exhaustion",
   flexUnavailable: "flex_capacity",
   modelNotFound: "model_unavailable",
@@ -31,6 +31,7 @@ const TURN_STATUSES: ReadonlySet<string> = new Set([
 ]);
 const HEALTH_STATUSES: readonly unknown[] = ["complete", "partial", "unavailable"];
 const PAGE_SIZE = 50;
+const MAX_PAGES = 10;
 const MAX_CHILDREN = 100;
 const MAX_CALLS = 256;
 
@@ -402,8 +403,8 @@ function applyPage(stream: Stream, page: unknown): boolean {
  * Round-robin inventory pages cover active and archived direct children only. Validated inventory
  * metadata supplies each child's initial observation. One newest-turn read observes a child; only
  * typed failed candidates receive a fresh metadata read and newest-turn reread before becoming
- * actionable. Round-robin child visits inspect at most 100 children per parent. maxPages bounds
- * each inventory stream (50 rows/page), with maxCalls (256) calls overall and the client's optional
+ * actionable. Round-robin child visits inspect at most 100 children per parent. Each inventory
+ * stream reads at most 10 pages (50 rows/page), with 256 calls overall and the client's optional
  * deadline. The caller bounds transport time.
  *
  * counts.discovered counts unique verified listed IDs, excluding conflicting lineage; it never
@@ -413,25 +414,15 @@ function applyPage(stream: Stream, page: unknown): boolean {
  * turns, decision clearance, recovery or handling. The caller owns slot/delivery dedup by
  * parent_id, child_id, turn_id and error_code. No state is persisted here.
  */
-export async function collectChildHealth(
+async function collectChildHealth(
   client: RpcClient,
   parents: readonly string[],
-  maxPages = 10,
-  maxCalls = MAX_CALLS,
 ): Promise<Record<string, Record<string, unknown>>> {
-  if (
-    typeof maxPages !== "number" ||
-    !Number.isInteger(maxPages) ||
-    maxPages < 1 ||
-    maxPages > 100
-  ) {
-    throw new Error("invalid_max_pages");
-  }
   if (!Array.isArray(parents) || !parents.every((parent) => isCanonicalUuid(parent))) {
     throw new Error("invalid_parent_scope");
   }
   const observed = isoformat(new Date());
-  const budget = new Budget(client, maxCalls);
+  const budget = new Budget(client, MAX_CALLS);
   const states: ParentState[] = [...new Set(parents)].map((parent) => ({
     children: new Map(),
     health: {
@@ -467,7 +458,7 @@ export async function collectChildHealth(
       // eslint-disable-next-line no-await-in-loop
       const page = await requestPage(budget, stream);
       if (applyPage(stream, page)) {
-        if (stream.inventory.pages < maxPages) {
+        if (stream.inventory.pages < MAX_PAGES) {
           streams.push(stream);
         } else {
           stream.inventory.diagnostics.push("page_bound_reached");

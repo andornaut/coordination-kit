@@ -60,7 +60,7 @@ const PAGE_DIAGNOSTICS: ReadonlySet<string> = new Set([
   "pagination_invalid",
 ]);
 
-export interface QuestionStateOptions {
+interface QuestionStateOptions {
   /** Shared native call budget; defaults to 256. */
   readonly maxCalls?: number;
   /** Clock compared with `client.deadline`, a performance.now() value as rpc.ts sets it. */

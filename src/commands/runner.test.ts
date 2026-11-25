@@ -1,13 +1,12 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
 import { REASON_TOKENS } from "../core/outcome.ts";
-import { reviewResultsDir } from "../review/deliver.ts";
 import { type ClaudeFixture, claudeFixture, GAME, SLOT } from "../review/fixtures.ts";
 
 const VERSION = "0.0.0-test";
@@ -135,8 +134,9 @@ describe("review deliver", () => {
       ISO,
     ]);
     expect(missing).toMatchObject({ code: EXIT_INVALID, out: "" });
-    mkdirSync(reviewResultsDir(fixture.game), { recursive: true });
-    writeFileSync(join(reviewResultsDir(fixture.game), `${SLOT}.json`), "{");
+    const record = join(fixture.game.busDir, "unblock", "review-deliver", `${SLOT}.json`);
+    mkdirSync(dirname(record), { recursive: true });
+    writeFileSync(record, "{");
     const corrupt = await deliver(fixture);
     expect(corrupt).toMatchObject({ code: EXIT_INVALID, out: "" });
     expect(corrupt.err).toMatch(/^coordination-kit: review deliver failed: /);
@@ -152,7 +152,9 @@ describe("review deliver", () => {
     );
     expect(aborted).toMatchObject({ code: EXIT_INVALID, out: "" });
     expect(aborted.err).toContain("no delivery claimed");
-    expect(existsSync(join(reviewResultsDir(fixture.game), `${SLOT}.json`))).toBe(false);
+    expect(existsSync(join(fixture.game.busDir, "unblock", "review-deliver", `${SLOT}.json`))).toBe(
+      false,
+    );
     const listeners = process.listenerCount("SIGTERM");
     const pending = deliver(fixture);
     expect(process.listenerCount("SIGTERM")).toBe(listeners + 1);

@@ -30,13 +30,9 @@ import { Store } from "../store/db.ts";
 import { sendMessage } from "../store/messages.ts";
 import { openQuestion, setHold } from "../store/questions.ts";
 import { importRequest, type RequestImport } from "../store/requests.ts";
-import {
-  collectStatus,
-  type StatusItem,
-  type StatusOptions,
-  type StatusReport,
-} from "./collect.ts";
-import { DIGEST_HEADINGS } from "./markdown.ts";
+import { collectStatus, type StatusItem, type StatusReport } from "./collect.ts";
+
+type StatusOptions = Parameters<typeof collectStatus>[2];
 
 const GAME = "sample-game";
 const KIT = "sample-kit";
@@ -669,7 +665,13 @@ describe("status", () => {
     expect(digest.out).toContain("## Unread originals (1)");
     expect(digest.out).toContain(`- ${UNREAD} (${TECH_ROLE}) unknown`);
     const section = digest.out.split(`## ${GAME}\n`)[1]!.split("\n## ")[0]!;
-    expect(section.match(/^### .*$/gm)).toEqual(DIGEST_HEADINGS.map((heading) => `### ${heading}`));
+    expect(section.match(/^### .*$/gm)).toEqual([
+      "### Done",
+      "### In progress",
+      "### New",
+      "### Outstanding",
+      "### Waiting on the user",
+    ]);
     const under = (heading: string) =>
       section
         .split(`### ${heading}\n`)[1]!

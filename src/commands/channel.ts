@@ -12,7 +12,7 @@ import { writeChannelStatus } from "../adapters/claude/channelStatus.ts";
 import { wakeFilePath, WakeWatcher } from "../adapters/claude/wakeFile.ts";
 import { gameRecipients } from "../core/config.ts";
 import { isCanonicalUuid } from "../core/ids.ts";
-import { EXIT_INVALID, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
+import { EXIT_INVALID, EXIT_USAGE, type Io } from "../core/io.ts";
 import { gameLayout, type Layout, loadLayout } from "../core/layout.ts";
 import { cliIdentity } from "../core/version.ts";
 import { claudeProjectsDir, clearSuccessor } from "../registry/claudeLineage.ts";
@@ -21,11 +21,6 @@ import type { Registry } from "../registry/schema.ts";
 import { readRegistry, RegistryMissing } from "../registry/store.ts";
 import { errorMessage } from "./args.ts";
 import { SPECS } from "./spec.ts";
-
-interface ChannelStreams {
-  readonly input: NodeJS.ReadableStream;
-  readonly write: LineWriter;
-}
 
 const DEFAULT_POLL_SECONDS = 5;
 
@@ -73,7 +68,7 @@ function boundRole(registry: Registry, conversation: string): string | null {
 /** The most /clear steps followed from a launch conversation to a bound one. */
 const LINEAGE_DEPTH = 16;
 /** While unresolved, the transcript lineage is scanned at most this often. */
-export const LINEAGE_SCAN_MS = 60_000;
+const LINEAGE_SCAN_MS = 60_000;
 
 /**
  * The role bound to `conversation`, or to the conversation its /clear lineage leads to. Claude
@@ -103,20 +98,44 @@ function lineageRole(
   return null;
 }
 
+const PAUSE = new Int32Array(new SharedArrayBuffer(4));
+
+/** stdout carries only protocol lines. A synchronous write surfaces a closed channel at once. */
+function writeStdoutLine(line: string): void {
+  const bytes = Buffer.from(line, "utf8");
+  let offset = 0;
+  while (offset < bytes.length) {
+    try {
+      offset += writeSync(1, bytes, offset);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EAGAIN") {
+        throw error;
+      }
+      Atomics.wait(PAUSE, 0, 0, 10);
+    }
+  }
+}
+
 interface ChannelOptions {
+  /** The MCP client's messages; defaults to stdin. */
+  readonly input?: NodeJS.ReadableStream;
+  /** Writes one protocol line; defaults to a synchronous write to stdout. */
+  readonly write?: LineWriter;
   /** Claude's transcript directory; defaults to `claudeProjectsDir` of the environment. */
   readonly projectsDir?: string | null;
   /** Milliseconds since the epoch; defaults to `Date.now`. */
   readonly now?: () => number;
 }
 
-export async function runChannel(
-  streams: ChannelStreams,
+/** The `claude channel` handler; serves until its input ends. */
+export async function channel(
   io: Io,
   root: string,
   args: string[],
   options: ChannelOptions = {},
 ): Promise<number> {
+  const input = options.input ?? process.stdin;
+  const write = options.write ?? writeStdoutLine;
   let conversation: string | undefined;
   let role: string | undefined;
   let pollSeconds: number;
@@ -203,30 +222,5 @@ export async function runChannel(
   } catch {
     // The registry may not bind the conversation yet; each poll tries again.
   }
-  return serve(
-    { pollMs: pollSeconds * 1000, wake: new WakeWatcher(locate) },
-    streams.input,
-    streams.write,
-  );
+  return serve({ pollMs: pollSeconds * 1000, wake: new WakeWatcher(locate) }, input, write);
 }
-
-const PAUSE = new Int32Array(new SharedArrayBuffer(4));
-
-/** stdout carries only protocol lines. A synchronous write surfaces a closed channel at once. */
-function writeStdoutLine(line: string): void {
-  const bytes = Buffer.from(line, "utf8");
-  let offset = 0;
-  while (offset < bytes.length) {
-    try {
-      offset += writeSync(1, bytes, offset);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EAGAIN") {
-        throw error;
-      }
-      Atomics.wait(PAUSE, 0, 0, 10);
-    }
-  }
-}
-
-export const channel: Handler = (io, root, args) =>
-  runChannel({ input: process.stdin, write: writeStdoutLine }, io, root, args);

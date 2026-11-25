@@ -32,7 +32,7 @@ export interface ReviewOptions {
 const STATUSES: ReadonlySet<string> = new Set(["delivered", "deferred", "skipped"]);
 
 /** `<bus>/unblock/review-deliver/`: one recorded result per slot and the per-game call lock. */
-export function reviewResultsDir(game: GameLayout): string {
+function reviewResultsDir(game: GameLayout): string {
   return join(game.busDir, "unblock", "review-deliver");
 }
 
