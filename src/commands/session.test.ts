@@ -4,15 +4,18 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
-import { readRegistry } from "../registry/store.ts";
+import { readRegistry, updateRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
-import { checkpointPath } from "../store/sessionService.ts";
+import { checkpointPath, rebindAfterClear } from "../store/sessionService.ts";
 import { COORDINATOR, GAMEPLAY, storeFixture, TECH, TECH_CODEX } from "../store/testStore.ts";
+import { StoreError } from "../store/types.ts";
 
 const KIT = "art-kit";
 const KIT_CLAUDE = "00000000-0000-4000-8000-0000000000c7";
 const KIT_CODEX = "00000000-0000-4000-8000-0000000000d7";
 const TECH_ROLE = "archies-dog-walks/tech";
+const STRANGER = "00000000-0000-4000-8000-0000000000e9";
+const CLEARED = "00000000-0000-4000-8000-0000000000f1";
 
 function cli(root: string, cwd: string, env: NodeJS.ProcessEnv) {
   return async (...argv: string[]) => {
@@ -53,7 +56,7 @@ function setup() {
     kit: claude(KIT_CLAUDE),
     kitTarget: codex(KIT_CODEX),
     reader: cli(fixture.root, fixture.base, { PATH: process.env.PATH }),
-    stranger: claude("00000000-0000-4000-8000-0000000000e9"),
+    stranger: claude(STRANGER),
     tech: claude(TECH),
     techTarget: codex(TECH_CODEX),
     async select(...roles: string[]) {
@@ -117,6 +120,133 @@ describe("session start", () => {
     const held = await gameplay("session", "start");
     expect(held.code).toBe(EXIT_INVALID);
     expect(held.err).toBe("coordination-kit: session-held: phase held\n");
+  });
+});
+
+/** The session setup plus a Claude caller CLEARED whose config directory is in the fixture. */
+function clearSetup() {
+  const fixture = setup();
+  const config = join(fixture.base, "claude-config");
+  const env = { CLAUDE_CODE_SESSION_ID: CLEARED, CLAUDE_CONFIG_DIR: config };
+  return {
+    ...fixture,
+    cleared: cli(fixture.root, fixture.base, { ...env, PATH: process.env.PATH }),
+    env,
+    /** Write CLEARED's transcript in `project`, derived from `from`. */
+    transcript(from: string, project = "project-a", via = "clear") {
+      const dir = join(config, "projects", project);
+      mkdirSync(dir, { recursive: true });
+      const header = {
+        sessionId: CLEARED,
+        sessions: [{ id: from, type: "claude_code_session", via }],
+        type: "derived-from",
+        v: 1,
+      };
+      writeFileSync(
+        join(dir, `${CLEARED}.jsonl`),
+        `${JSON.stringify(header)}\n${JSON.stringify({ type: "user" })}\n`,
+      );
+    },
+  };
+}
+
+type ClearSetup = ReturnType<typeof clearSetup>;
+
+describe("session start after /clear", () => {
+  it("rebinds the cleared Claude role and names the rotation once", async () => {
+    const { cleared, kit, layout, transcript } = clearSetup();
+    transcript(KIT_CLAUDE);
+    const revision = readRegistry(layout).revision + 1;
+    const started = await cleared("session", "start");
+    expect(started.code, started.err).toBe(EXIT_OK);
+    expect(started.json).toMatchObject({
+      conversation: CLEARED,
+      harness: "claude",
+      registry: { revision },
+      role: KIT,
+      rotation: { from: KIT_CLAUDE, revision },
+    });
+    expect(readRegistry(layout).roles[KIT]!.conversations).toEqual({
+      claude: CLEARED,
+      codex: KIT_CODEX,
+    });
+    expect((await kit("session", "start")).err).toBe("coordination-kit: caller-unbound\n");
+    const again = await cleared("session", "start");
+    expect(again.code, again.err).toBe(EXIT_OK);
+    expect(again.json).not.toHaveProperty("rotation");
+  });
+
+  it.each<{
+    name: string;
+    prepare: (setup: ClearSetup) => Promise<void> | void;
+    args?: readonly string[];
+    err: string;
+  }>([
+    { err: "caller-unbound", name: "a missing transcript", prepare: () => {} },
+    {
+      err: "caller-unbound",
+      name: "a fork",
+      prepare: ({ transcript }) => transcript(KIT_CLAUDE, "project-a", "fork"),
+    },
+    {
+      err: "caller-unbound",
+      name: "a predecessor that is not a current binding",
+      prepare: ({ transcript }) => transcript(STRANGER),
+    },
+    {
+      err: "caller-unbound",
+      name: "two transcripts for the ID",
+      prepare: ({ transcript }) => {
+        transcript(KIT_CLAUDE);
+        transcript(KIT_CLAUDE, "project-b");
+      },
+    },
+    {
+      args: ["--native-id", CLEARED],
+      err: "caller-unbound",
+      name: "an explicit --native-id",
+      prepare: ({ transcript }) => transcript(KIT_CLAUDE),
+    },
+    {
+      err: "session-held: phase held",
+      name: "a held role",
+      prepare: ({ transcript }) => transcript(GAMEPLAY),
+    },
+    {
+      err: "caller-unbound",
+      name: "a role in an open handoff",
+      prepare: async ({ coordinator, transcript }) => {
+        transcript(KIT_CLAUDE);
+        await coordinator("handoff", "open", "--scope", KIT, "--to", "codex");
+      },
+    },
+    {
+      err: "caller-unbound",
+      name: "a Codex-harness role with that Claude ID",
+      prepare: async ({ select, transcript }) => {
+        transcript(TECH);
+        await select(TECH_ROLE);
+      },
+    },
+  ])("refuses $name and leaves the registry unchanged", async ({ args = [], err, prepare }) => {
+    const fixture = clearSetup();
+    await prepare(fixture);
+    const before = readRegistry(fixture.layout);
+    const refused = await fixture.cleared("session", "start", ...args);
+    expect(refused.code).toBe(EXIT_INVALID);
+    expect(refused.err).toBe(`coordination-kit: ${err}\n`);
+    expect(readRegistry(fixture.layout)).toEqual(before);
+  });
+
+  it("refuses rotation-conflict when the registry changed after the read", async () => {
+    const { env, layout, transcript } = clearSetup();
+    transcript(KIT_CLAUDE);
+    const stale = readRegistry(layout);
+    updateRegistry(layout, stale.revision, () => {});
+    await expect(
+      rebindAfterClear({ env, layout }, {}, stale, new StoreError("caller-unbound")),
+    ).rejects.toMatchObject({ code: "rotation-conflict" });
+    expect(readRegistry(layout).roles[KIT]!.conversations.claude).toBe(KIT_CLAUDE);
   });
 });
 

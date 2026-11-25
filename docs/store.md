@@ -307,7 +307,9 @@ role, the variable of that role's effective harness: `CLAUDE_CODE_SESSION_ID` fo
 | `invalid-native-id`   | `--native-id` is not a canonical UUID.                                          |
 
 `harness select` rotates the binding, so the fence follows it with no other step. There are no
-epochs, claims or enrollment. Every send reads `var/registry.json`; nothing is cached.
+epochs, claims or enrollment. Every send reads `var/registry.json`; nothing is cached. The one
+exception that writes a binding is `session start`, which may
+[rebind a Claude role after /clear](#rebind-after-clear) before the fence admits the caller.
 
 A worker writes under its parent's binding. `--worker NAME` records an attribution beside the
 role on the event and the message. It is not verified: any caller bound to the role may name any
@@ -572,7 +574,31 @@ role, harness and bound conversation, the registry revision, phase and ownership
 counts of pending questions, active holds (including user policy holds for the role or game),
 and open inbox messages (`sent`, `delivered` and `retained`), and each open handoff that
 includes the role. A role whose phase is `held` or `source-held` is refused `session-held` with
-the phase; an unbound caller gets the fence refusal. Repeating it appends another event.
+the phase; an unbound caller gets the fence refusal unless the rebind below applies. Repeating it
+appends another event.
+
+### Rebind after /clear
+
+A Claude `/clear` starts a new conversation ID, which the fence refuses as `caller-unbound`.
+`session start` then rebinds the role, and only when every condition holds:
+
+- No `--native-id` was given, and `CLAUDE_CODE_SESSION_ID` is a canonical UUID.
+- Exactly one transcript `<projects>/*/<id>.jsonl` exists, where `<projects>` is
+  `$CLAUDE_CONFIG_DIR/projects`, or `$HOME/.claude/projects` without that variable.
+- The transcript header (records before the first `user` or `assistant` record, within 64 KiB)
+  holds exactly one `derived-from` record whose `sessionId` is the caller and whose single
+  `sessions` entry has `type` `claude_code_session`, `via` `clear` and a valid `id`. Fork and
+  resume lineage do not count.
+- That `id` is the effective Claude conversation of exactly one role whose effective harness is
+  Claude. The role's phase is not `held` or `source-held` (`session-held`), and no open handoff
+  includes it.
+
+The rebind writes `roles.<role>.conversations.claude` under the registry revision `session start`
+read; a changed revision refuses `rotation-conflict`. The session then starts with the new
+binding, and its output adds `rotation` with the old ID (`from`) and the new registry `revision`.
+Any other failed condition keeps `caller-unbound`. The registry revision and that output are the
+record of the rebind; `session.started` keeps its existing payload. Codex callers and every other
+verb are unchanged.
 
 A handoff moves a scope of roles from their current harness to `--to`:
 

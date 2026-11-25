@@ -24,6 +24,9 @@ own: `transfers` carries the hold, acceptance and activation markers.
 - The skills own every field except `operations.*.lastAdoption`, which is reserved for
   supported resident-adoption recording. The harness-selection CLI changes only selected roles' `harness` overrides and
   registry revision metadata; it preserves all other fields, including `operations`.
+- `session start` writes one field: after a proved Claude `/clear`, it replaces the cleared
+  role's `conversations.claude` with the new ID under the revision it read, refusing
+  `rotation-conflict` when the revision changed. See [rebind after /clear](store.md#rebind-after-clear).
 
 ## Create and extend a registry
 
