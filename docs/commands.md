@@ -127,10 +127,10 @@ Reserve, prepare, activate and cancel require the active game-coordinator bindin
   Codex period.
 - For Codex, record exact prompt wording, ordered `--option LABEL` or `--option-json JSON`,
   and repeated `--depends-on REPOSITORY:WORK_ID` through `question open` before presentation.
-  `question attach --id ID --turn TURN --item ITEM --index N` links a verified rendered identity.
-  `question reconcile --id ID` shows exact evidence and capability. Both are optional evidence
-  and never gate answer, cancel or close. `question reask --id ID` requires verified closure
-  without an answer. See [Codex question recovery](store.md#codex-question-recovery).
+  `question reconcile --id ID` shows exact evidence and capability; it is optional evidence and
+  never gates answer, cancel or close. `question attach` and `question reask` are deprecated and
+  are removed in the next major release: `attach` cannot record (it opens the store read-only)
+  and `reask` cannot observe a closure without an answer. See [Codex question recovery](store.md#codex-question-recovery).
 - `hold policy-set` and `hold policy-release` require the active game-coordinator binding and the
   exact user approval reference for the action. Policy IDs start with `policy-`. Set names one
   target as `role:ROLE`, `game:GAME` or `work:REPOSITORY:WORK_ID`. Release names its exact policy

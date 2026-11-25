@@ -45,3 +45,4 @@ Reference: [review](../review.md#scheduled-review-seam), [libraries](../librarie
 | ck-0041 | Extend manual compaction to the selected generation        | [ck-0041.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0041.md) |
 | ck-0042 | Diagnose and prevent incomplete decision marker writes     | [ck-0042.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0042.md) |
 | ck-0044 | Own questions by role on both harnesses                    | [ck-0044.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0044.md) |
+| ck-0052 | Remove question attach and reask                           | [ck-0052.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0052.md) |
