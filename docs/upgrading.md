@@ -1,5 +1,16 @@
 # Upgrading
 
+## Coordination Kit 7.1
+
+7.1.0 removes `question attach` and `question reask`. Neither ever completed: `attach` failed
+with `store-read-only`, and `reask` with `native-question-unlinked` or
+`native-question-unverified`. Either now exits 2 as an unknown command instead of 1. No other
+command, option, output or exit code changes, and existing stores and journals rebuild unchanged.
+
+- `build/store` no longer exports `linkNativeQuestion`, `reaskNativeQuestion`,
+  `storeQuestionAttach` or `storeQuestionReask`. `NativeQuestionProof` no longer has the
+  `closed-without-answer` status, which no observation produced.
+
 ## Coordination Kit 7.0
 
 7.0.0 parses every command's options by one rule and takes the clock, environment and host name

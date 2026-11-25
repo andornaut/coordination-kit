@@ -434,25 +434,20 @@ wording, ordered options and every dependent `--depends-on REPOSITORY:WORK_ID`. 
 `--option LABEL` takes ordered labels. Repeated `--option-json JSON` takes objects with a
 `label` and optional `description`. `--work` separately names the decision Markdown target.
 The durable record includes the thread that opened it, which native evidence is read from.
-The owning role can attach or reconcile its native identity from any binding. Attach and
-reconcile are optional evidence: they never gate answer, cancel or close.
+The owning role can reconcile from any binding. Reconcile is optional evidence: it never gates
+answer, cancel or close.
 
-- `question attach --id Q --turn TURN --item ITEM --index N` attaches the matching rendered
-  history identity. It requires the same thread, turn, item, index, wording and ordered labels.
-  Each attachment is unique across the ledger.
-- `question reconcile --id Q` reads bounded native history and reports the exact attached
-  observation or an explicit unknown. The installed client provides no original-form resurfacing
-  operation. Its blocking `item/tool/requestUserInput` server request is distinct from an
+- `question reconcile --id Q` reads bounded native history for a native identity that the store
+  records and reports the exact observation, or an explicit unknown such as
+  `native-question-unlinked` when it records none. No command records a native identity; replay
+  keeps one that an existing store or journal holds. The installed client provides no
+  original-form resurfacing operation. Its blocking `item/tool/requestUserInput` server request is distinct from an
   asynchronous `agentMessage.questions` history projection. A history observation gives no
   live UI visibility. A `serverRequest/resolved` notification records lifecycle cleanup or
   response bookkeeping and supplies no answer or cancellation classification.
 - `question answer` records the user's explicit answer, and `question cancel` the owner's reason,
-  with or without an attached native identity. The caller supplies the public decision text
+  with or without a recorded native identity. The caller supplies the public decision text
   explicitly, and the answer of a question with a Codex record is `--by user`.
-- `question reask` requires verified exact native closure without an answer. The current native
-  observer cannot verify that outcome. A supported closure proof would let the owner reserve
-  another attempt under the same ID, then attach its new request. The command itself never
-  presents a form.
 
 `question list`, session startup and reviews expose the recorded question independently of
 native prompt visibility. Session startup includes the owning role's unread count. Messages

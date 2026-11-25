@@ -198,12 +198,24 @@ describe("question commands", () => {
     expect((await art("session", "start")).json).toMatchObject({
       questionRecovery: { pending: [{ id: "q-codex", title }], unread: 1 },
     });
-    expect((await art("question", "reask", "--id", "q-codex")).err).toContain(
-      "native-question-unlinked",
-    );
     expect((await reader("question", "list", "--state", "pending")).json).toMatchObject({
       questions: [{ id: "q-codex", state: "pending" }],
     });
+  });
+
+  it("rejects question attach and question reask as unknown commands", async () => {
+    const { art } = setup();
+    expect((await art("question", "open", "--id", "q-gone", "--title", "Gone?")).code).toBe(
+      EXIT_OK,
+    );
+    for (const argv of [
+      ["attach", "--id", "q-gone", "--turn", "t", "--item", "i", "--index", "0"],
+      ["reask", "--id", "q-gone"],
+    ]) {
+      // eslint-disable-next-line no-await-in-loop
+      const result = await art("question", ...argv);
+      expect([result.code, result.json], argv[0]).toEqual([EXIT_USAGE, null]);
+    }
   });
 
   it("lets the same role answer, cancel and close its Codex questions after a move to Claude", async () => {

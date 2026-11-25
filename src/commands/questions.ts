@@ -16,13 +16,11 @@ import {
   storePolicyHoldRelease,
   storePolicyHoldSet,
   storeQuestionAnswer,
-  storeQuestionAttach,
   storeQuestionCancel,
   storeQuestionCloseLegacy,
   storeQuestionList,
   storeQuestionOpen,
   storeQuestionProject,
-  storeQuestionReask,
   storeQuestionReconcile,
 } from "../store/questionService.ts";
 import { parseWorkRef } from "../work/live.ts";
@@ -49,12 +47,6 @@ export const QUESTION_ANSWER_OPTIONS = {
 } as const;
 
 export const QUESTION_PROJECT_OPTIONS = { ...CALLER, id: { type: "string" } } as const;
-export const QUESTION_ATTACH_OPTIONS = {
-  ...QUESTION_PROJECT_OPTIONS,
-  index: { type: "string" },
-  item: { type: "string" },
-  turn: { type: "string" },
-} as const;
 
 export const QUESTION_CANCEL_OPTIONS = {
   ...CALLER,
@@ -173,27 +165,10 @@ export const questionProject: Handler = storeVerb(
     ),
 );
 
-export const questionAttach: Handler = storeVerb(
-  "question attach",
-  QUESTION_ATTACH_OPTIONS,
-  (context, values) =>
-    storeQuestionAttach(context, callerOf(values), required(values, "id"), {
-      index: Number(required(values, "index")),
-      item: required(values, "item"),
-      turn: required(values, "turn"),
-    }),
-);
-
 export const questionReconcile: Handler = storeVerb(
   "question reconcile",
   QUESTION_PROJECT_OPTIONS,
   (context, values) => storeQuestionReconcile(context, callerOf(values), required(values, "id")),
-);
-
-export const questionReask: Handler = storeVerb(
-  "question reask",
-  QUESTION_PROJECT_OPTIONS,
-  (context, values) => storeQuestionReask(context, callerOf(values), required(values, "id")),
 );
 
 export const questionCancel: Handler = storeVerb(

@@ -2,24 +2,24 @@ import { describe, expect, it } from "vitest";
 
 import { TEST_CLOCK, TEST_HOST } from "../core/testFixtures.ts";
 import { nativeQuestionObservation } from "./codexQuestionObservation.ts";
-import { dependentQuestions, type NativeQuestionProof } from "./codexQuestions.ts";
-import { Store } from "./db.ts";
+import { dependentQuestions } from "./codexQuestions.ts";
+import { MEMORY, Store } from "./db.ts";
+import type { FileProjection } from "./fileProjection.ts";
+import { fileRecords } from "./files/records.ts";
 import {
   cancelQuestion,
   closeLegacyQuestion,
-  linkNativeQuestion,
   listQuestions,
   openQuestion,
-  reaskNativeQuestion,
   recordQuestionAnswer,
 } from "./questions.ts";
 import { ART, COORDINATOR, GAME } from "./testStore.ts";
+import type { NativeQuestionIdentity } from "./types.ts";
 
 const actor = { nativeId: ART, role: `${GAME}/art` };
 const native = { index: 0, item: "question-item", turn: "question-turn" };
 const next = { index: 0, item: "next-item", turn: "next-turn" };
 const ref = { id: "ag-0001", repository: GAME };
-const unknown = { reason: "exact-native-state-unavailable", status: "unknown" } as const;
 const answer = { text: "Warm.", work: ref.id };
 const wording = "Pick a palette.\nWhich do you prefer?";
 const options = [{ description: "High saturation", label: "Warm" }, { label: "Cool" }];
@@ -36,12 +36,27 @@ function fixture() {
   return { question: opened.question, store };
 }
 
-const observation = (
-  status: "observed" | "closed-without-answer" | "cancelled",
-  identity = native,
-): NativeQuestionProof => ({ native: identity, status, thread: ART });
-
 const ROTATED = "00000000-0000-4000-8000-0000000000f1";
+
+/** Append a `question.native-linked` event in its stored shape; no command writes one. */
+function legacyLink(store: Store, id: string, identity: NativeQuestionIdentity, attempt = 1) {
+  store.append({
+    actor,
+    key: `question.native-linked:${id}:${attempt}`,
+    kind: "question.native-linked",
+    payload: { id, native: { ...identity }, thread: ART },
+  });
+}
+
+/** Append a `question.native-reasked` event in its stored shape; no command writes one. */
+function legacyReask(store: Store, id: string, identity: NativeQuestionIdentity, attempt = 1) {
+  store.append({
+    actor,
+    key: `question.native-reasked:${id}:${attempt}`,
+    kind: "question.native-reasked",
+    payload: { id, native: { ...identity }, thread: ART },
+  });
+}
 
 describe("Codex question lifecycle", () => {
   it("preserves the exact question, options and dependencies through replay", () => {
@@ -54,31 +69,6 @@ describe("Codex question lifecycle", () => {
     });
     expect(dependentQuestions(store, ref)).toEqual(["q-palette"]);
     expect(dependentQuestions(store, { ...ref, repository: "other" })).toEqual([]);
-    expect(() =>
-      linkNativeQuestion(
-        store,
-        { nativeId: COORDINATOR, role: "game-coordinator" },
-        question.id,
-        native,
-        observation("observed"),
-      ),
-    ).toThrow("not-owner");
-    expect(() => linkNativeQuestion(store, actor, question.id, native, unknown)).toThrow(
-      "native-question-unverified",
-    );
-    // A rotated binding of the same role attaches evidence about the original thread.
-    expect(
-      linkNativeQuestion(
-        store,
-        { nativeId: ROTATED, role: actor.role },
-        question.id,
-        native,
-        observation("observed"),
-      ).question,
-    ).toMatchObject({ codex: { native, thread: ART } });
-    expect(
-      linkNativeQuestion(store, actor, question.id, native, observation("observed")).duplicate,
-    ).toBe(true);
     const before = listQuestions(store);
     store.rebuild();
     expect(listQuestions(store)).toEqual(before);
@@ -99,8 +89,8 @@ describe("Codex question lifecycle", () => {
       title: "Other?",
     });
     if (linked) {
-      linkNativeQuestion(store, actor, "q-palette", native, observation("observed"));
-      linkNativeQuestion(store, actor, "q-other", next, observation("observed", next));
+      legacyLink(store, "q-palette", native);
+      legacyLink(store, "q-other", next);
     }
     const stranger = { nativeId: COORDINATOR, role: "game-coordinator" };
     expect(() => recordQuestionAnswer(TEST_HOST, store, stranger, "q-palette", answer)).toThrow(
@@ -121,26 +111,39 @@ describe("Codex question lifecycle", () => {
     store.close();
   });
 
-  it("reuses the durable ID only after exact closure without an answer", () => {
+  it("rebuilds native link and reask events from a store and a file journal", () => {
     const { question, store } = fixture();
-    linkNativeQuestion(store, actor, question.id, native, observation("observed"));
-    expect(() => reaskNativeQuestion(store, actor, question.id, unknown)).toThrow(
-      "native-question-unverified",
+    legacyLink(store, question.id, native);
+    legacyReask(store, question.id, native);
+    legacyLink(store, question.id, next, 2);
+    const expected = { codex: { attempt: 2, native: next, thread: ART }, state: "pending" };
+    expect(listQuestions(store)).toMatchObject([expected]);
+    const before = listQuestions(store);
+    store.rebuild();
+    expect(listQuestions(store)).toEqual(before);
+
+    const events = store.events();
+    expect(events.map(({ kind }) => kind)).toEqual([
+      "question.opened",
+      "question.native-linked",
+      "question.native-reasked",
+      "question.native-linked",
+    ]);
+    const read = (after = 0) => events.filter(({ seq }) => seq > after);
+    const journal: FileProjection = {
+      journal: { events: read, withWriter: (body) => body({ commit: () => {}, events: read }) },
+      records: () => [],
+    };
+    const replayed = Store.openFileProjection(TEST_CLOCK, MEMORY, journal);
+    expect(listQuestions(replayed)).toEqual(before);
+    expect(replayed.verify()).toEqual(store.verify());
+    replayed.close();
+
+    const records = fileRecords(events, { registeredRoles: new Set([actor.role]) });
+    const owner = `roles/${encodeURIComponent(actor.role)}`;
+    expect(records.map(({ path }) => path)).toEqual(
+      [1, 2, 3, 4].map((seq) => `${owner}/questions/q-palette/${seq}.json`),
     );
-    const closed = observation("closed-without-answer");
-    expect(reaskNativeQuestion(store, actor, question.id, closed)).toMatchObject({
-      question: {
-        codex: { attempt: 2, native: null },
-        id: question.id,
-        state: "pending",
-        title: wording,
-      },
-    });
-    expect(reaskNativeQuestion(store, actor, question.id, closed).duplicate).toBe(true);
-    expect(() =>
-      linkNativeQuestion(store, actor, question.id, native, observation("observed")),
-    ).toThrow("native-question-id-conflict");
-    linkNativeQuestion(store, actor, question.id, next, observation("observed", next));
     expect(dependentQuestions(store, ref)).toEqual(["q-palette"]);
     store.close();
   });

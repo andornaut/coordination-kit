@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { systemGit } from "../core/git.ts";
 import { resolveHarness } from "../registry/resolve.ts";
 import { type QuestionEvidence, readCodexQuestionEvidence } from "./codexQuestionEvidence.ts";
-import { nativeQuestionIdentity, type NativeQuestionProof } from "./codexQuestions.ts";
+import type { NativeQuestionProof } from "./codexQuestions.ts";
 import type { Store } from "./db.ts";
 import {
   appendDecisionLine,
@@ -32,7 +32,6 @@ import {
   closeLegacyQuestion,
   type DecisionRow,
   getQuestionDecision,
-  linkNativeQuestion,
   listDecisions,
   listHolds,
   listQuestions,
@@ -41,7 +40,6 @@ import {
   type QuestionOption,
   type QuestionState,
   type QuestionView,
-  reaskNativeQuestion,
   type RecordedAnswer,
   recordQuestionAnswer,
   recordQuestionProjection,
@@ -146,30 +144,6 @@ function evidence(
   );
 }
 
-export async function storeQuestionAttach(
-  context: QuestionContext,
-  options: CallerOptions,
-  id: string,
-  input: NativeQuestionIdentity,
-): Promise<QuestionOutput> {
-  const actor = resolveCaller(registry(context), context.env, options);
-  const native = nativeQuestionIdentity(input);
-  return withStore(
-    context,
-    async (store) => {
-      const question = requireOwnQuestion(store, actor, id);
-      if (question.codex === undefined) {
-        throw new StoreError("codex-question-required");
-      }
-      return {
-        ...linkNativeQuestion(store, actor, id, native, await evidence(context, question, native)),
-        schema: 1,
-      };
-    },
-    { createMissing: false },
-  );
-}
-
 export async function storeQuestionReconcile(
   context: QuestionContext,
   options: CallerOptions,
@@ -192,30 +166,6 @@ export async function storeQuestionReconcile(
         form: "unsupported",
         observation: await evidence(context, question, question.codex.native),
         question,
-        schema: 1,
-      };
-    },
-    { createMissing: false },
-  );
-}
-
-export async function storeQuestionReask(
-  context: QuestionContext,
-  options: CallerOptions,
-  id: string,
-): Promise<QuestionOutput> {
-  const actor = resolveCaller(registry(context), context.env, options);
-  return withStore(
-    context,
-    async (store) => {
-      const question = requireOwnQuestion(store, actor, id);
-      return {
-        ...reaskNativeQuestion(
-          store,
-          actor,
-          id,
-          await evidence(context, question, question.codex?.native),
-        ),
         schema: 1,
       };
     },

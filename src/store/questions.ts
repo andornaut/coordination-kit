@@ -5,16 +5,7 @@
 import type { SQLInputValue } from "node:sqlite";
 
 import type { Harness } from "../registry/schema.ts";
-import {
-  type CodexQuestion,
-  nativeQuestionIdentity,
-  type NativeQuestionProof,
-  nativeQuestionUnused,
-  normalizeCodexQuestion,
-  readCodexQuestion,
-  requireNativeProof,
-  sameNativeQuestion,
-} from "./codexQuestions.ts";
+import { type CodexQuestion, normalizeCodexQuestion, readCodexQuestion } from "./codexQuestions.ts";
 import type { Store } from "./db.ts";
 import { payloadText as text } from "./eventCodec.ts";
 import {
@@ -34,7 +25,6 @@ import {
   ensure,
   type Json,
   type JsonObject,
-  type NativeQuestionIdentity,
   ROLE,
   type WakeGuard,
   type WorkRef,
@@ -325,73 +315,6 @@ function ownQuestion(store: Store, actor: Actor, id: string): Row {
  */
 export function requireOwnQuestion(store: Store, actor: Actor, id: string): QuestionView {
   return questionView(store, ownQuestion(store, actor, id));
-}
-
-function ownCodexQuestion(
-  store: Store,
-  actor: Actor,
-  id: string,
-): QuestionView & {
-  readonly codex: CodexQuestion;
-} {
-  const question = requireOwnQuestion(store, actor, id);
-  ensure(question.codex !== undefined, "codex-question-required");
-  return { ...question, codex: question.codex };
-}
-
-export function linkNativeQuestion(
-  store: Store,
-  actor: Actor,
-  id: string,
-  input: NativeQuestionIdentity,
-  proof: NativeQuestionProof,
-): QuestionResult {
-  const native = nativeQuestionIdentity(input);
-  return store.transaction(() => {
-    const question = ownCodexQuestion(store, actor, id);
-    ensure(question.state === "pending", "already-closed");
-    if (sameNativeQuestion(question.codex.native, native)) {
-      return { duplicate: true, question };
-    }
-    ensure(question.codex.native === null, "native-question-already-linked");
-    requireNativeProof(question.codex, native, proof);
-    ensure(
-      nativeQuestionUnused(store, question.codex.thread, native),
-      "native-question-id-conflict",
-    );
-    store.append({
-      actor,
-      key: `question.native-linked:${id}:${question.codex.attempt}`,
-      kind: "question.native-linked",
-      payload: { id, native: { ...native }, thread: question.codex.thread },
-    });
-    return { duplicate: false, question: requireOwnQuestion(store, actor, id) };
-  });
-}
-
-export function reaskNativeQuestion(
-  store: Store,
-  actor: Actor,
-  id: string,
-  proof: NativeQuestionProof,
-): QuestionResult {
-  return store.transaction(() => {
-    const question = ownCodexQuestion(store, actor, id);
-    ensure(question.state === "pending", "already-closed");
-    const { codex } = question;
-    if (codex.native === null && codex.attempt > 1) {
-      return { duplicate: true, question };
-    }
-    ensure(codex.native !== null, "native-question-unlinked");
-    requireNativeProof(codex, codex.native, proof, "closed-without-answer");
-    store.append({
-      actor,
-      key: `question.native-reasked:${id}:${codex.attempt}`,
-      kind: "question.native-reasked",
-      payload: { id, native: { ...codex.native }, thread: codex.thread },
-    });
-    return { duplicate: false, question: requireOwnQuestion(store, actor, id) };
-  });
 }
 
 function decisionRow(row: Row): DecisionRow {

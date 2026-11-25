@@ -13,7 +13,6 @@ import { checkRef } from "./work.ts";
 
 type Reader = Pick<Store, "db">;
 type Row = Record<string, SQLInputValue>;
-const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 
 export interface CodexQuestion extends CodexQuestionInput {
   readonly attempt: number;
@@ -27,7 +26,7 @@ export interface CodexQuestion extends CodexQuestionInput {
 export type NativeQuestionProof =
   | { readonly status: "unknown"; readonly reason: string }
   | {
-      readonly status: "observed" | "pending" | "cancelled" | "closed-without-answer";
+      readonly status: "observed" | "pending" | "cancelled";
       readonly thread: string;
       readonly native: NativeQuestionIdentity;
     }
@@ -51,21 +50,6 @@ export function normalizeCodexQuestion(
     throw new StoreError("invalid-question-dependencies");
   }
   return { dependsOn, thread: input.thread };
-}
-
-export function nativeQuestionIdentity(input: NativeQuestionIdentity): NativeQuestionIdentity {
-  const { index, item, turn } = input;
-  if (!TOKEN.test(turn) || !TOKEN.test(item) || !Number.isSafeInteger(index) || index < 0) {
-    throw new StoreError("invalid-native-question");
-  }
-  return { index, item, turn };
-}
-
-export function sameNativeQuestion(
-  a: NativeQuestionIdentity | null,
-  b: NativeQuestionIdentity,
-): boolean {
-  return a?.turn === b.turn && a.item === b.item && a.index === b.index;
 }
 
 function hasCodexQuestions(store: Reader): boolean {
@@ -92,47 +76,6 @@ export function readCodexQuestion(store: Reader, id: string): CodexQuestion | un
     resolution: JSON.parse(row.resolution as string) as CodexQuestion["resolution"],
     thread: row.thread as string,
   };
-}
-
-export function requireNativeProof(
-  codex: CodexQuestion,
-  native: NativeQuestionIdentity,
-  proof: NativeQuestionProof | undefined,
-  expected?: "answered" | "cancelled" | "closed-without-answer",
-): Exclude<NativeQuestionProof, { readonly status: "unknown" }> {
-  if (proof === undefined || proof.status === "unknown") {
-    throw new StoreError("native-question-unverified");
-  }
-  if (
-    proof.thread !== codex.thread ||
-    !sameNativeQuestion(proof.native, native) ||
-    (expected !== undefined && proof.status !== expected)
-  ) {
-    throw new StoreError("native-question-proof-mismatch");
-  }
-  if (
-    proof.status === "answered" &&
-    (!TOKEN.test(proof.reply.turn) ||
-      !TOKEN.test(proof.reply.item) ||
-      (native.turn === proof.reply.turn && native.item === proof.reply.item))
-  ) {
-    throw new StoreError("native-question-proof-mismatch");
-  }
-  return proof;
-}
-
-export function nativeQuestionUnused(
-  store: Reader,
-  thread: string,
-  native: NativeQuestionIdentity,
-): boolean {
-  return (
-    store.db
-      .prepare(
-        "SELECT 1 FROM question_native_links WHERE thread = ? AND turn = ? AND item = ? AND idx = ?",
-      )
-      .get(thread, native.turn, native.item, native.index) === undefined
-  );
 }
 
 /** Work fencing uses only explicitly named repository and work pairs, regardless of work owner. */

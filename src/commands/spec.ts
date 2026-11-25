@@ -22,7 +22,6 @@ import {
   POLICY_HOLD_RELEASE_OPTIONS,
   POLICY_HOLD_SET_OPTIONS,
   QUESTION_ANSWER_OPTIONS,
-  QUESTION_ATTACH_OPTIONS,
   QUESTION_CANCEL_OPTIONS,
   QUESTION_CLOSE_LEGACY_OPTIONS,
   QUESTION_LIST_OPTIONS,
@@ -295,24 +294,11 @@ export const SPECS = {
     options: QUESTION_OPEN_OPTIONS,
     summary: "record a pending prompt owned by your role; the ID defaults to q-<role>-<n>",
   },
-  "question attach": {
-    forms: [["id", "turn", "item", "index", "native-id?"]],
-    group: "decisions",
-    options: QUESTION_ATTACH_OPTIONS,
-    summary: "attach exact rendered Codex question identity for your recorded question",
-    values: { index: "N", item: "ID", turn: "ID" },
-  },
   "question reconcile": {
     forms: [["id", "native-id?"]],
     group: "decisions",
     options: QUESTION_PROJECT_OPTIONS,
     summary: "read exact Codex question evidence and native form capability",
-  },
-  "question reask": {
-    forms: [["id", "native-id?"]],
-    group: "decisions",
-    options: QUESTION_PROJECT_OPTIONS,
-    summary: "prepare the same recorded question after verified native closure without an answer",
   },
   "question answer": {
     forms: [["id", "work", "text", "by?", "supersedes?", "native-id?", "worker?"]],

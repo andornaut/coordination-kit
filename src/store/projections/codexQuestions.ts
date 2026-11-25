@@ -1,4 +1,6 @@
-// The Codex thread, dependencies and native identity of each Codex-scoped question.
+// The Codex thread, dependencies and native identity of each Codex-scoped question. No command
+// appends `question.native-linked` or `question.native-reasked`; replay still applies both, so a
+// store or journal that contains them rebuilds the same native identity and attempt.
 import type { CodexQuestionInput, NativeQuestionIdentity, Projection } from "../types.ts";
 
 export const QUESTION_CODEX_PROJECTION: Projection = {

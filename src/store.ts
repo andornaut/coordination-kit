@@ -110,7 +110,6 @@ export {
   type HoldResult,
   holdScope,
   importedHolds,
-  linkNativeQuestion,
   listDecisions,
   listHolds,
   listQuestions,
@@ -124,7 +123,6 @@ export {
   type QuestionResult,
   type QuestionState,
   type QuestionView,
-  reaskNativeQuestion,
   RECORD_ID,
   releaseHold,
   requireOwnQuestion,
@@ -143,11 +141,9 @@ export {
   storePolicyHoldRelease,
   storePolicyHoldSet,
   storeQuestionAnswer,
-  storeQuestionAttach,
   storeQuestionCancel,
   storeQuestionList,
   storeQuestionOpen,
-  storeQuestionReask,
   storeQuestionReconcile,
 } from "./store/questionService.ts";
 export {
