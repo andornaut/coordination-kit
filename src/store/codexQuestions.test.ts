@@ -5,13 +5,14 @@ import { dependentQuestions, type NativeQuestionProof } from "./codexQuestions.t
 import { Store } from "./db.ts";
 import {
   cancelQuestion,
+  closeLegacyQuestion,
   linkNativeQuestion,
   listQuestions,
   openQuestion,
   reaskNativeQuestion,
   recordQuestionAnswer,
 } from "./questions.ts";
-import { ART, COORDINATOR, GAME, TECH } from "./testStore.ts";
+import { ART, COORDINATOR, GAME } from "./testStore.ts";
 
 const actor = { nativeId: ART, role: `${GAME}/art` };
 const native = { index: 0, item: "question-item", turn: "question-turn" };
@@ -39,6 +40,8 @@ const observation = (
   identity = native,
 ): NativeQuestionProof => ({ native: identity, status, thread: ART });
 
+const ROTATED = "00000000-0000-4000-8000-0000000000f1";
+
 describe("Codex question lifecycle", () => {
   it("preserves the exact question, options and dependencies through replay", () => {
     const { question, store } = fixture();
@@ -53,15 +56,6 @@ describe("Codex question lifecycle", () => {
     expect(() =>
       linkNativeQuestion(
         store,
-        { nativeId: TECH, role: actor.role },
-        question.id,
-        native,
-        observation("observed"),
-      ),
-    ).toThrow("question-thread-mismatch");
-    expect(() =>
-      linkNativeQuestion(
-        store,
         { nativeId: COORDINATOR, role: "game-coordinator" },
         question.id,
         native,
@@ -71,8 +65,15 @@ describe("Codex question lifecycle", () => {
     expect(() => linkNativeQuestion(store, actor, question.id, native, unknown)).toThrow(
       "native-question-unverified",
     );
+    // A rotated binding of the same role attaches evidence about the original thread.
     expect(
-      linkNativeQuestion(store, actor, question.id, native, observation("observed")).question,
+      linkNativeQuestion(
+        store,
+        { nativeId: ROTATED, role: actor.role },
+        question.id,
+        native,
+        observation("observed"),
+      ).question,
     ).toMatchObject({ codex: { native, thread: ART } });
     expect(
       linkNativeQuestion(store, actor, question.id, native, observation("observed")).duplicate,
@@ -83,39 +84,44 @@ describe("Codex question lifecycle", () => {
     store.close();
   });
 
-  it("keeps ambiguous and resolution-only prompts open until exact reply evidence", () => {
-    const { question, store } = fixture();
-    linkNativeQuestion(store, actor, question.id, native, observation("observed"));
-    expect(() => recordQuestionAnswer(store, actor, question.id, answer)).toThrow(
-      "native-question-unverified",
-    );
-    expect(() => reaskNativeQuestion(store, actor, question.id, unknown)).toThrow(
-      "native-question-unverified",
-    );
-    expect(() =>
-      cancelQuestion(store, actor, question.id, "Cancelled", observation("observed")),
-    ).toThrow("native-question-proof-mismatch");
-    const proof = {
-      native,
-      reply: { item: "user-reply", turn: "reply-turn" },
-      status: "answered",
-      thread: ART,
-    } as const;
-    expect(() =>
-      recordQuestionAnswer(store, actor, question.id, answer, { ...proof, native: next }),
-    ).toThrow("native-question-proof-mismatch");
-    expect(dependentQuestions(store, ref)).toEqual(["q-palette"]);
-    expect(recordQuestionAnswer(store, actor, question.id, answer, proof).question).toMatchObject({
-      codex: { native, resolution: { outcome: "answered", reply: proof.reply } },
+  it.each([
+    { binding: ART, linked: false, name: "the opening thread, unlinked" },
+    { binding: ART, linked: true, name: "the opening thread, linked" },
+    { binding: ROTATED, linked: false, name: "a rotated binding, unlinked" },
+    { binding: ROTATED, linked: true, name: "a rotated binding, linked" },
+  ])("answers and cancels by role from $name without native proof", ({ binding, linked }) => {
+    const owner = { nativeId: binding, role: actor.role };
+    const { store } = fixture();
+    openQuestion(store, actor, {
+      codex: { dependsOn: [], thread: ART },
+      id: "q-other",
+      title: "Other?",
+    });
+    if (linked) {
+      linkNativeQuestion(store, actor, "q-palette", native, observation("observed"));
+      linkNativeQuestion(store, actor, "q-other", next, observation("observed", next));
+    }
+    const stranger = { nativeId: COORDINATOR, role: "game-coordinator" };
+    expect(() => recordQuestionAnswer(store, stranger, "q-palette", answer)).toThrow("not-owner");
+    expect(() => cancelQuestion(store, stranger, "q-other", "Not needed.")).toThrow("not-owner");
+    expect(recordQuestionAnswer(store, owner, "q-palette", answer).question).toMatchObject({
+      codex: { resolution: null },
       state: "answered",
     });
     expect(dependentQuestions(store, ref)).toEqual([]);
+    expect(cancelQuestion(store, owner, "q-other", "Not needed.").question).toMatchObject({
+      reason: "Not needed.",
+      state: "cancelled",
+    });
     store.close();
   });
 
   it("reuses the durable ID only after exact closure without an answer", () => {
     const { question, store } = fixture();
     linkNativeQuestion(store, actor, question.id, native, observation("observed"));
+    expect(() => reaskNativeQuestion(store, actor, question.id, unknown)).toThrow(
+      "native-question-unverified",
+    );
     const closed = observation("closed-without-answer");
     expect(reaskNativeQuestion(store, actor, question.id, closed)).toMatchObject({
       question: {
@@ -130,32 +136,46 @@ describe("Codex question lifecycle", () => {
       linkNativeQuestion(store, actor, question.id, native, observation("observed")),
     ).toThrow("native-question-id-conflict");
     linkNativeQuestion(store, actor, question.id, next, observation("observed", next));
-    expect(() =>
-      recordQuestionAnswer(store, actor, question.id, answer, {
-        native,
-        reply: { item: "reply", turn: "later" },
-        status: "answered",
-        thread: ART,
-      }),
-    ).toThrow("native-question-proof-mismatch");
     expect(dependentQuestions(store, ref)).toEqual(["q-palette"]);
-    expect(
-      cancelQuestion(store, actor, question.id, "User cancelled.", observation("cancelled", next))
-        .question,
-    ).toMatchObject({
-      codex: { attempt: 2, resolution: { outcome: "cancelled", reply: null } },
-      state: "cancelled",
-    });
-    expect(dependentQuestions(store, ref)).toEqual([]);
     store.close();
   });
 
-  it("records a direct explicit live owner answer when native references were absent", () => {
-    const { question, store } = fixture();
-    expect(recordQuestionAnswer(store, actor, question.id, answer).question).toMatchObject({
-      codex: { native: null, resolution: null },
-      state: "answered",
+  it("closes a pending Codex-period question once with the owner's approval reference", () => {
+    const { store } = fixture();
+    openQuestion(store, actor, { harness: "claude", id: "q-claude", title: "Claude?" });
+    openQuestion(store, actor, {
+      codex: { dependsOn: [ref], thread: ART },
+      harness: "claude",
+      id: "q-claude-depends",
+      title: "Claude with dependencies?",
     });
+    const rotated = { nativeId: ROTATED, role: actor.role };
+    const close = (id: string, who = rotated, approval = "user-2026-11-25") =>
+      closeLegacyQuestion(store, who, { approval, id, reason: "Closed after the move." });
+    for (const [id, who, approval, code] of [
+      ["q-palette", { nativeId: COORDINATOR, role: "game-coordinator" }, "r", "not-owner"],
+      ["q-palette", rotated, " ", "invalid-approval"],
+      ["q-claude", rotated, "r", "legacy-question-required"],
+      ["q-claude-depends", rotated, "r", "legacy-question-required"],
+    ] as const) {
+      expect(() => close(id, who, approval)).toThrow(code);
+    }
+    expect(close("q-palette")).toMatchObject({
+      approval: "user-2026-11-25",
+      duplicate: false,
+      question: { reason: "Closed after the move.", state: "cancelled" },
+    });
+    expect(close("q-palette").duplicate).toBe(true);
+    expect(() => close("q-palette", rotated, "other")).toThrow("already-closed");
+    expect(store.eventByKey("question.cancelled:q-palette")?.payload).toEqual({
+      approval: "user-2026-11-25",
+      id: "q-palette",
+      reason: "Closed after the move.",
+    });
+    expect(dependentQuestions(store, ref)).toEqual(["q-claude-depends"]);
+    const before = listQuestions(store);
+    store.rebuild();
+    expect(listQuestions(store)).toEqual(before);
     store.close();
   });
 

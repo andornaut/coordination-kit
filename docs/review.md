@@ -177,7 +177,8 @@ details.
 
 The existing brief includes the counts of newly stalled originals and newly overdue retention
 boundaries. Continuing cases and exact original IDs stay visible in the detailed review.
-After the commit the review checks wake-pending roles.
+After the commit the review checks wake-pending roles. A pending question does not withhold
+this wake; role holds, policy holds and the Codex native question check still do.
 It can rearm confirmed failures and existing Claude recovery cases. An outstanding Codex wake
 with unknown acceptance stays guarded. A secret-shaped brief omits question titles and
 retention text.

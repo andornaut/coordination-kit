@@ -3,7 +3,7 @@ import type { SQLInputValue } from "node:sqlite";
 import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import type { Store } from "./db.ts";
 import type { Projection } from "./projections.ts";
-import { type Actor, type JsonObject, StoreError } from "./types.ts";
+import { type Actor, StoreError } from "./types.ts";
 import { checkRef, type WorkRef } from "./work.ts";
 
 type Reader = Pick<Store, "db">;
@@ -164,12 +164,6 @@ export const QUESTION_CODEX_PROJECTION: Projection = {
   tables: ["question_codex", "question_native_links"],
 };
 
-export function requireCodexOwner(actor: Actor, codex: CodexQuestion): void {
-  if (actor.nativeId !== codex.thread) {
-    throw new StoreError("question-thread-mismatch");
-  }
-}
-
 export function requireNativeProof(
   codex: CodexQuestion,
   native: NativeQuestionIdentity,
@@ -209,13 +203,6 @@ export function nativeQuestionUnused(
       )
       .get(thread, native.turn, native.item, native.index) === undefined
   );
-}
-
-export function nativeResolution(proof: NativeQuestionProof): JsonObject {
-  if (proof.status !== "answered" && proof.status !== "cancelled") {
-    throw new StoreError("native-question-proof-mismatch");
-  }
-  return { outcome: proof.status, reply: proof.status === "answered" ? { ...proof.reply } : null };
 }
 
 /** Work fencing uses only explicitly named repository and work pairs, regardless of work owner. */

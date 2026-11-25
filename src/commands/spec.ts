@@ -24,6 +24,7 @@ import {
   QUESTION_ANSWER_OPTIONS,
   QUESTION_ATTACH_OPTIONS,
   QUESTION_CANCEL_OPTIONS,
+  QUESTION_CLOSE_LEGACY_OPTIONS,
   QUESTION_LIST_OPTIONS,
   QUESTION_OPEN_OPTIONS,
   QUESTION_PROJECT_OPTIONS,
@@ -339,6 +340,13 @@ export const SPECS = {
     group: "decisions",
     options: QUESTION_CANCEL_OPTIONS,
     summary: "cancel your own pending question",
+  },
+  // CLEANUP (added 2026-11-25): see `closeLegacyQuestion`.
+  "question close-legacy": {
+    forms: [["id", "reason", "approval", "native-id?", "worker?"]],
+    group: "decisions",
+    options: QUESTION_CLOSE_LEGACY_OPTIONS,
+    summary: "close your own pending question opened under Codex, citing the user's approval",
   },
   "question list": {
     forms: [["role?", "state?"]],

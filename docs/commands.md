@@ -21,6 +21,7 @@ every form and flag.
 | `reminder settle --id ID --outcome submitted\|refused\|uncertain --reason CODE`                                                                                                                                                                                                        | Record the attempt disposition without collecting any original.                                                                    |
 | `question open --title TEXT [--id ID] [--work WORK_ID] [--option LABEL]...`, `question answer --id ID --work WORK_ID --text TEXT [--by user\|ROLE] [--supersedes D<N>]`, `question cancel --id ID --reason TEXT`, `question list [--role ROLE] [--state pending\|answered\|cancelled]` | Pending prompts owned by your role and their decisions; see [questions](store.md#questions-holds-and-decisions).                   |
 | `question project --id ID`                                                                                                                                                                                                                                                             | Retry Markdown writeback for your recorded answer.                                                                                 |
+| `question close-legacy --id ID --reason TEXT --approval REF`                                                                                                                                                                                                                           | Close your own pending question opened under Codex, citing the user approval; see [questions](store.md#questions).                 |
 | `hold set --id ID --scope work:WORK_ID\|role\|game:ID --reason TEXT`, `hold release --id ID`, `hold list [--role ROLE] [--state active\|released]`                                                                                                                                     | Holds owned by your role; see [holds](store.md#holds).                                                                             |
 | `hold policy-set --id ID --scope SCOPE --reason TEXT --approval REF`, `hold policy-release --id ID --approval REF`                                                                                                                                                                     | Record or release an exact coordinator-issued user policy hold.                                                                    |
 | `session start`                                                                                                                                                                                                                                                                        | Record your session start, rebind after Claude `/clear`, print binding and counts; see [sessions](store.md#sessions-and-handoffs). |
@@ -94,18 +95,25 @@ Reserve, prepare, activate and cancel require the active game-coordinator bindin
   most `--limit` events (default 1000). `--since` takes an ISO 8601 instant.
 - `msg status ID --include-body` and `msg history --include-body` identify the caller
   through the same registry fence and apply message-body visibility.
-- `question open|answer|project|cancel`, `hold set|release` identify the caller through the same
-  registry fence. Only the owning role answers, projects, cancels or releases its own records (`not-owner`). `question answer` records the answer before Markdown writeback and
+- `question open|answer|project|cancel|close-legacy`, `hold set|release` identify the caller
+  through the same registry fence. Only the owning role answers, projects, cancels or releases its
+  own records (`not-owner`), from whichever binding the registry currently holds for it, on either
+  harness. `question answer` records the answer before Markdown writeback and
   reports its projection status. Use `question project --id ID` to recover a failed or missing
   writeback. A changed work file is left unstaged for the role's next commit. `question cancel`,
-  `question answer` and `hold release` attempt one guarded wake for the caller, since the write may
-  clear its last wake guard. `--option LABEL` is repeatable, 1 to 8 labels. The list verbs take no
-  caller and read an absent store as empty.
+  `question close-legacy`, `question answer` and `hold release` attempt one guarded wake for the
+  caller, since the write may clear its last wake guard. `--option LABEL` is repeatable, 1 to 8
+  labels. Repeated `--depends-on REPOSITORY:WORK_ID` fences those work items until the question
+  closes, on either harness. The list verbs take no caller and read an absent store as empty.
+- `question close-legacy` closes only a pending question opened under a Codex binding and cites
+  the explicit user approval in `--approval`. It is temporary, for questions left pending from the
+  Codex period.
 - For Codex, record exact prompt wording, ordered `--option LABEL` or `--option-json JSON`,
   and repeated `--depends-on REPOSITORY:WORK_ID` through `question open` before presentation.
   `question attach --id ID --turn TURN --item ITEM --index N` links a verified rendered identity.
-  `question reconcile --id ID` shows exact evidence and capability. `question reask --id ID`
-  requires verified closure without an answer. See [Codex question recovery](store.md#codex-question-recovery).
+  `question reconcile --id ID` shows exact evidence and capability. Both are optional evidence
+  and never gate answer, cancel or close. `question reask --id ID` requires verified closure
+  without an answer. See [Codex question recovery](store.md#codex-question-recovery).
 - `hold policy-set` and `hold policy-release` require the active game-coordinator binding and the
   exact user approval reference for the action. Policy IDs start with `policy-`. Set names one
   target as `role:ROLE`, `game:GAME` or `work:REPOSITORY:WORK_ID`. Release names its exact policy
@@ -168,9 +176,9 @@ commands.
 - **Store:** a read-only snapshot of [work records](store.md#work-records), pending questions,
   unread originals, active holds and imported requests from the configured authority. An absent
   store reports `absent`. Each item carries its record as `store` (null without one).
-  `pendingQuestions` reports stored wording, ordered options and the owning Codex thread when
-  available. `unread` lists exact original IDs and wake evidence within the selection. Reading
-  status leaves delivery and native prompts untouched.
+  `pendingQuestions` reports stored wording, ordered options and the opening thread of a question
+  with a Codex record when available. `unread` lists exact original IDs and wake evidence within
+  the selection. Reading status leaves delivery and native prompts untouched.
 - **Scope:** `all` (the default); a game or kit ID selects its repository; a registry role key
   selects its repository and keeps the items that role owns as a request or in the store, or
   whose `design` area is the role's name (a game's `art`, `gameplay` or `tech`).

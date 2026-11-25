@@ -5,6 +5,7 @@
 import { hostname } from "node:os";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
+import type { Harness } from "../registry/schema.ts";
 import { ID_PATTERN as WORK_ID } from "../work/check.ts";
 import {
   type CodexQuestion,
@@ -13,10 +14,8 @@ import {
   nativeQuestionIdentity,
   type NativeQuestionProof,
   nativeQuestionUnused,
-  nativeResolution,
   normalizeCodexQuestion,
   readCodexQuestion,
-  requireCodexOwner,
   requireNativeProof,
   sameNativeQuestion,
 } from "./codexQuestions.ts";
@@ -426,6 +425,8 @@ function nextQuestionId(store: Store, role: string): string {
 
 export interface OpenInput {
   readonly codex?: CodexQuestionInput;
+  /** The opener's effective harness, recorded on the event. */
+  readonly harness?: Harness;
   readonly id?: string;
   readonly title: string;
   readonly work?: string;
@@ -467,11 +468,7 @@ export function openQuestion(store: Store, actor: Actor, input: OpenInput): Ques
       const prior = readCodexQuestion(store, id);
       ensure(
         existing.role === role &&
-          (prior === undefined
-            ? codex === undefined || codex.dependsOn.length === 0
-            : codex !== undefined &&
-              prior.thread === codex.thread &&
-              JSON.stringify(prior.dependsOn) === JSON.stringify(codex.dependsOn)) &&
+          JSON.stringify(prior?.dependsOn ?? []) === JSON.stringify(codex?.dependsOn ?? []) &&
           existing.title === title &&
           ((existing.work as string | null) ?? null) === (input.work ?? null) &&
           optionsKey(parseOptions(existing.options)) === optionsKey(options),
@@ -485,6 +482,7 @@ export function openQuestion(store: Store, actor: Actor, input: OpenInput): Ques
       kind: "question.opened",
       payload: {
         ...(codex === undefined ? {} : { codex: codex as unknown as Json }),
+        ...(input.harness === undefined ? {} : { harness: input.harness }),
         id,
         options: options as unknown as Json,
         role,
@@ -523,7 +521,6 @@ function ownCodexQuestion(
 } {
   const question = requireOwnQuestion(store, actor, id);
   ensure(question.codex !== undefined, "codex-question-required");
-  requireCodexOwner(actor, question.codex);
   return { ...question, codex: question.codex };
 }
 
@@ -580,27 +577,6 @@ export function reaskNativeQuestion(
     });
     return { duplicate: false, question: requireOwnQuestion(store, actor, id) };
   });
-}
-
-function confirmedClosure(
-  store: Store,
-  actor: Actor,
-  id: string,
-  outcome: "answered" | "cancelled",
-  proof: NativeQuestionProof | undefined,
-): JsonObject | undefined {
-  const codex = readCodexQuestion(store, id);
-  if (codex === undefined) {
-    return undefined;
-  }
-  requireCodexOwner(actor, codex);
-  if (codex.native === null && outcome === "answered") {
-    // The owner can still record an explicit answer received in its own conversation.
-    // The receipt carries no native reconciliation proof.
-    return undefined;
-  }
-  ensure(codex.native !== null, "native-question-unlinked");
-  return nativeResolution(requireNativeProof(codex, codex.native, proof, outcome));
 }
 
 /** Independent projection so existing schema-1 stores acquire it without rewriting their events. */
@@ -719,13 +695,15 @@ export function getQuestionDecision(store: Store, actor: Actor, id: string): Dec
   return row === undefined ? null : decisionRow(row);
 }
 
-/** Record the exact answer independently of numbering and filesystem access, or verify a retry. */
+/**
+ * Record the exact answer independently of numbering and filesystem access, or verify a retry.
+ * The owning role answers from any binding; native evidence never gates it.
+ */
 export function recordQuestionAnswer(
   store: Store,
   actor: Actor,
   id: string,
   input?: AnswerInput,
-  proof?: NativeQuestionProof,
 ): QuestionResult {
   return store.transaction(() => {
     const row = ownQuestion(store, actor, id);
@@ -740,9 +718,6 @@ export function recordQuestionAnswer(
     const duplicate = row.state !== "pending";
     ensure(!duplicate || matchesAnswer(previous, answer), "already-closed");
     if (existing === undefined) {
-      const resolution = duplicate
-        ? undefined
-        : confirmedClosure(store, actor, id, "answered", proof);
       ensure(
         duplicate || readCodexQuestion(store, id) === undefined || answer.by === "user",
         "invalid-by",
@@ -755,7 +730,6 @@ export function recordQuestionAnswer(
           ...(previous === undefined ? {} : { answeredAt: previous.at }),
           by: answer.by,
           id,
-          ...(resolution === undefined ? {} : { nativeResolution: resolution }),
           supersedes: answer.supersedes,
           text: answer.text,
           work: answer.work,
@@ -775,8 +749,8 @@ function numberDecision(
 ): AnswerResult {
   const row = ownQuestion(store, actor, id);
   ensure(
-    row.state !== "pending" || readCodexQuestion(store, id) === undefined,
-    "native-question-unverified",
+    row.state !== "pending" || readCodexQuestion(store, id) === undefined || answer.by === "user",
+    "invalid-by",
   );
   ensure(row.work == null || row.work === answer.work, "work-mismatch");
   const receipt = recordedAnswer(row);
@@ -880,13 +854,15 @@ export function recordQuestionProjection(
   });
 }
 
-/** Cancel the caller's own pending question. Repeating the same cancel is a no-op. */
+/**
+ * Cancel the caller's own pending question with a reason. The owning role cancels from any
+ * binding; native evidence never gates it. Repeating the same cancel is a no-op.
+ */
 export function cancelQuestion(
   store: Store,
   actor: Actor,
   id: string,
   reason: string,
-  proof?: NativeQuestionProof,
 ): QuestionResult {
   const why = storeText(reason, 1000, "invalid-reason");
   return store.transaction(() => {
@@ -895,18 +871,56 @@ export function cancelQuestion(
       ensure(row.state === "cancelled" && row.reason === why, "already-closed");
       return { duplicate: true, question: questionView(store, row) };
     }
-    const resolution = confirmedClosure(store, actor, id, "cancelled", proof);
     store.append({
       actor,
       key: `question.cancelled:${id}`,
       kind: "question.cancelled",
-      payload: {
-        id,
-        ...(resolution === undefined ? {} : { nativeResolution: resolution }),
-        reason: why,
-      },
+      payload: { id, reason: why },
     });
     return { duplicate: false, question: questionView(store, questionRow(store, id)!) };
+  });
+}
+
+/**
+ * CLEANUP (added 2026-11-25): remove `question close-legacy` once no pending question opened
+ * under a Codex binding remains in the live store.
+ *
+ * Close the caller's own pending question opened under a Codex binding, citing the explicit user
+ * approval for the close. It appends `question.cancelled` with the reason and the approval
+ * reference. A question opened on Claude is `legacy-question-required`. Repeating the same close
+ * is a no-op.
+ */
+export function closeLegacyQuestion(
+  store: Store,
+  actor: Actor,
+  input: { readonly id: string; readonly reason: string; readonly approval: string },
+): QuestionResult & { readonly approval: string } {
+  const why = storeText(input.reason, 1000, "invalid-reason");
+  const approval = storeText(input.approval, 1000, "invalid-approval");
+  const { id } = input;
+  return store.transaction(() => {
+    const row = ownQuestion(store, actor, id);
+    ensure(
+      readCodexQuestion(store, id) !== undefined &&
+        store.eventByKey(`question.opened:${id}`)?.payload.harness !== "claude",
+      "legacy-question-required",
+    );
+    if (row.state !== "pending") {
+      ensure(
+        row.state === "cancelled" &&
+          row.reason === why &&
+          store.eventByKey(`question.cancelled:${id}`)?.payload.approval === approval,
+        "already-closed",
+      );
+      return { approval, duplicate: true, question: questionView(store, row) };
+    }
+    store.append({
+      actor,
+      key: `question.cancelled:${id}`,
+      kind: "question.cancelled",
+      payload: { approval, id, reason: why },
+    });
+    return { approval, duplicate: false, question: questionView(store, questionRow(store, id)!) };
   });
 }
 
@@ -1058,40 +1072,49 @@ export function listHolds(
     .map(({ hold }) => hold);
 }
 
-/**
- * The store wake guard: a recipient with a pending question or an active `role` hold gets no
- * wake. Policy holds apply to their exact role or game scope. A wake never answers or clears either.
- */
-export function questionHoldGuard(
-  store: Store,
-  role: string,
-  harness?: string | null,
-): WakeGuard & {
+type GuardResult = WakeGuard & {
   readonly blocker?: {
     readonly kind: "question" | "hold" | "policy-hold";
     readonly id: string;
     readonly owner: string;
     readonly native?: { readonly turnId: string; readonly itemId: string };
   };
-} {
+};
+
+/**
+ * The store wake guard for send-time wakes: a recipient with a pending question, an active `role`
+ * hold or a policy hold for its exact role or game gets no wake. A wake never answers or clears
+ * either. The scheduled review wakes with `holdGuard` instead, so a pending question delays a
+ * wake by at most one review slot.
+ */
+export function questionHoldGuard(
+  store: Store,
+  role: string,
+  harness?: string | null,
+): GuardResult {
   const pending = store.db
     .prepare(
       "SELECT id FROM questions WHERE role = ? AND state = 'pending' ORDER BY opened_seq LIMIT 1",
     )
     .get(role) as { id: string } | undefined;
-  if (pending !== undefined) {
-    const native = readCodexQuestion(store, pending.id)?.native;
-    return {
-      blocker: {
-        id: pending.id,
-        kind: "question",
-        owner: role,
-        ...(native == null ? {} : { native: { itemId: native.item, turnId: native.turn } }),
-      },
-      reason: "recipient-question-pending",
-      status: "blocked",
-    };
+  if (pending === undefined) {
+    return holdGuard(store, role, harness);
   }
+  const native = readCodexQuestion(store, pending.id)?.native;
+  return {
+    blocker: {
+      id: pending.id,
+      kind: "question",
+      owner: role,
+      ...(native == null ? {} : { native: { itemId: native.item, turnId: native.turn } }),
+    },
+    reason: "recipient-question-pending",
+    status: "blocked",
+  };
+}
+
+/** The wake guard without the pending-question check: role holds and policy holds only. */
+export function holdGuard(store: Store, role: string, harness?: string | null): GuardResult {
   const policy = policyHoldEntries(store, ["active"]).find(({ hold }) =>
     policyTargetCoversRole(hold.policy.target, role),
   );

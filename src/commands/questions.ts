@@ -1,7 +1,7 @@
-// The question, hold and decision verbs: `question open|answer|project|cancel|list`, `hold set|release|list`
-// and `decision list`. Writes identify the caller through the registry fence and refuse any other
-// owner's record. Each prints one JSON object on stdout; a refusal prints `coordination-kit: CODE`
-// on stderr and exits 1, and a usage error exits 2.
+// The question, hold and decision verbs: `question open|answer|project|cancel|close-legacy|list`,
+// `hold set|release|list` and `decision list`. Writes identify the caller through the registry
+// fence and refuse any other owner's record. Each prints one JSON object on stdout; a refusal
+// prints `coordination-kit: CODE` on stderr and exits 1, and a usage error exits 2.
 
 import type { Handler } from "../io.ts";
 import {
@@ -21,6 +21,7 @@ import {
   storeQuestionAnswer,
   storeQuestionAttach,
   storeQuestionCancel,
+  storeQuestionCloseLegacy,
   storeQuestionList,
   storeQuestionOpen,
   storeQuestionProject,
@@ -66,6 +67,12 @@ export const QUESTION_CANCEL_OPTIONS = {
   ...CALLER,
   id: { type: "string" },
   reason: { type: "string" },
+} as const;
+
+/** CLEANUP (added 2026-11-25): see `closeLegacyQuestion`. */
+export const QUESTION_CLOSE_LEGACY_OPTIONS = {
+  ...QUESTION_CANCEL_OPTIONS,
+  approval: { type: "string" },
 } as const;
 
 export const QUESTION_LIST_OPTIONS = {
@@ -224,6 +231,22 @@ export const questionCancel: Handler = (io, root, args) =>
         required(values, "reason"),
       ),
     QUESTION_CANCEL_OPTIONS,
+  );
+
+/** CLEANUP (added 2026-11-25): see `closeLegacyQuestion`. */
+export const questionCloseLegacy: Handler = (io, root, args) =>
+  run(
+    io,
+    root,
+    "question close-legacy",
+    args,
+    (context, values) =>
+      storeQuestionCloseLegacy(context, callerOf(values), {
+        approval: required(values, "approval"),
+        id: required(values, "id"),
+        reason: required(values, "reason"),
+      }),
+    QUESTION_CLOSE_LEGACY_OPTIONS,
   );
 
 export const questionList: Handler = (io, root, args) =>

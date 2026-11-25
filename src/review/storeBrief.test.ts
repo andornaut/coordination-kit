@@ -18,6 +18,7 @@ import { recordSession } from "../store/handoffs.ts";
 import { messageStatus, retainMessage } from "../store/messages.ts";
 import { derivedId } from "../store/notices.ts";
 import { setPolicyHold } from "../store/policyHolds.ts";
+import { openQuestion, releaseHold, setHold } from "../store/questions.ts";
 import { storeSend } from "../store/service.ts";
 import {
   ART,
@@ -223,6 +224,26 @@ describe("stored review brief", () => {
     // Past it, the review rearms and the recipient's wake file gets the next seq.
     await deliverReview(layout, game, NEXT, undefined, { env: {}, now: at(STALE_WAKE_MS * 2) });
     expect(seq()).toBe(2);
+  });
+
+  it("wakes past a pending question at the review boundary but not past a role hold", async () => {
+    const { layout } = await storeModeFixture();
+    const game = gameLayout(layout, GAME);
+    const owner = { nativeId: TECH, role: TECH_ROLE };
+    const store = Store.forLayout(layout);
+    openQuestion(store, owner, { id: "q-forgotten", title: "Still open?" });
+    setHold(store, owner, { id: "h-paused", reason: "Paused.", scope: "role" });
+    store.close();
+    await send(layout, 1);
+    const wake = () => readWakeFile(wakeFilePath(layout, TECH));
+    expect(wake()).toBe("absent");
+    await deliverReview(layout, game, SLOT, undefined, { env: {} });
+    expect(wake()).toBe("absent");
+    const again = Store.forLayout(layout);
+    releaseHold(again, owner, "h-paused");
+    again.close();
+    await deliverReview(layout, game, NEXT, undefined, { env: {} });
+    expect(wake()).toMatchObject({ seq: 1 });
   });
 
   it("stores one bounded brief per slot with the new stall count and exact details", async () => {

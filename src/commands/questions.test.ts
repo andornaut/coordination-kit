@@ -5,12 +5,16 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { EXIT_INVALID, EXIT_OK, main } from "../cli.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
+import { updateRegistry } from "../registry/index.ts";
+import { dependentQuestions } from "../store/codexQuestions.ts";
+import { Store } from "../store/db.ts";
 import { ART, COORDINATOR, GAME, storeFixture, TECH } from "../store/testStore.ts";
 
 const TECH_ROLE = "archies-dog-walks/tech";
 const ART_ROLE = "archies-dog-walks/art";
 const OTHER = "00000000-0000-4000-8000-0000000000e9";
+const ROTATED = "00000000-0000-4000-8000-0000000000f1";
 
 const WORK_FILE = `---
 id: ag-0001
@@ -198,6 +202,71 @@ describe("question commands", () => {
     expect((await reader("question", "list", "--state", "pending")).json).toMatchObject({
       questions: [{ id: "q-codex", state: "pending" }],
     });
+  });
+
+  it("lets the same role answer, cancel and close its Codex questions after a move to Claude", async () => {
+    const { art, base, coordinator, layout, root } = setup();
+    const open = (id: string) =>
+      art("question", "open", "--id", id, "--title", `${id}?`, "--depends-on", `${GAME}:ag-0001`);
+    const opened = await Promise.all(["q-answer", "q-cancel", "q-legacy"].map(open));
+    expect(opened.map(({ code }) => code)).toEqual([EXIT_OK, EXIT_OK, EXIT_OK]);
+    updateRegistry(layout, 1, (draft) => {
+      draft.roles[ART_ROLE] = {
+        ...draft.roles[ART_ROLE]!,
+        conversations: { claude: ROTATED, codex: ART },
+        harness: "claude",
+      };
+    });
+    const moved = cli(root, base, { CLAUDE_CODE_SESSION_ID: ROTATED, PATH: process.env.PATH });
+    const verbs: readonly (readonly string[])[] = [
+      ["answer", "--id", "q-answer", "--work", "ag-0001", "--text", "Yes."],
+      ["cancel", "--id", "q-cancel", "--reason", "Not needed."],
+      ["close-legacy", "--id", "q-legacy", "--reason", "Closed.", "--approval", "user-1"],
+    ];
+    const refused = await Promise.all(verbs.map((verb) => coordinator("question", ...verb)));
+    expect(refused.map(({ err }) => err)).toEqual(verbs.map(() => "coordination-kit: not-owner\n"));
+    expect(
+      (await moved("question", "close-legacy", "--id", "q-legacy", "--reason", "x")).code,
+    ).toBe(EXIT_USAGE);
+    const results = await Promise.all(verbs.map((verb) => moved("question", ...verb)));
+    expect(results.map(({ code, err }) => [code, err])).toEqual(verbs.map(() => [EXIT_OK, ""]));
+    expect(results.map(({ json }) => (json!.question as { state: string }).state)).toEqual([
+      "answered",
+      "cancelled",
+      "cancelled",
+    ]);
+    expect(results[2]!.json).toMatchObject({ approval: "user-1", duplicate: false });
+  });
+
+  it("records --depends-on on Claude and keeps Claude questions out of the legacy close", async () => {
+    const { layout, tech } = setup();
+    const opened = await tech(
+      "question",
+      "open",
+      "--id",
+      "q-depends",
+      "--title",
+      "Depends?",
+      "--depends-on",
+      `${GAME}:ag-0001`,
+    );
+    expect(opened.code, opened.err).toBe(EXIT_OK);
+    expect(opened.json).toMatchObject({
+      question: { codex: { dependsOn: [{ id: "ag-0001", repository: GAME }], thread: TECH } },
+    });
+    await tech("question", "open", "--id", "q-plain", "--title", "Plain?");
+    const refused = await Promise.all(
+      ["q-depends", "q-plain"].map((id) =>
+        tech("question", "close-legacy", "--id", id, "--reason", "x", "--approval", "r"),
+      ),
+    );
+    expect(refused.map(({ err }) => err)).toEqual([
+      "coordination-kit: legacy-question-required\n",
+      "coordination-kit: legacy-question-required\n",
+    ]);
+    const store = Store.forLayout(layout);
+    expect(dependentQuestions(store, { id: "ag-0001", repository: GAME })).toEqual(["q-depends"]);
+    store.close();
   });
 
   it("appends the decision line to the work file on main, unstaged, and lists the decision", async () => {

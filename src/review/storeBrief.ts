@@ -12,6 +12,7 @@ import { Store } from "../store/db.ts";
 import { unreadMessages } from "../store/messageWake.ts";
 import { clean, DELIVERY_KIT_ACTOR, derivedId, storeNotice } from "../store/notices.ts";
 import { policyHoldEntries, type PolicyHoldView } from "../store/policyHolds.ts";
+import { holdGuard } from "../store/questions.ts";
 import { NEXT_REVIEW_BOUNDARY, retentionInstant } from "../store/retention.ts";
 import {
   type Json,
@@ -632,11 +633,13 @@ export async function storeReview(
       return { fresh: true, result };
     });
     if (outcome.fresh) {
+      // A pending question withholds send-time wakes only up to this boundary: the review wakes
+      // past it, while holds and the Codex native question check still apply.
       const wake = {
         env: context.env,
         layout: context.layout,
+        ports: { ...context.ports, storeGuard: context.ports?.storeGuard ?? holdGuard },
         store,
-        ...(context.ports === undefined ? {} : { ports: context.ports }),
       };
       // A confirmed failed wake can recheck at this scheduled boundary. A Claude channel can
       // recover an old, unpulled wake. A Codex wake with uncertain acceptance remains guarded

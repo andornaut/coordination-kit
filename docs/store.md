@@ -290,7 +290,7 @@ that holds no secret is rephrased:
 ## Writer fence
 
 Every writing verb (`msg send`, `inbox`, `msg done`, `msg retain`, `store import`, the `work`
-writes, `question open|answer|project|cancel`, `hold set|release`, `request close`,
+writes, `question open|answer|project|cancel|close-legacy`, `hold set|release`, `request close`,
 `store retire --apply`, `session start` and `handoff open|ready|state|active`) identifies its
 caller before opening the store. `inbox --peek` identifies the recipient for its read-only view.
 `msg status` and `msg history` also identify the caller when
@@ -387,11 +387,14 @@ with scope `role`; it is logged `guarded` with `recipient-question-pending` or
 `recipient-hold-active`. User policy holds for the exact role or its game withhold wakes with
 `recipient-policy-hold-active`. Work-scoped holds and role-owned game holds apply at work start.
 The guard is checked when claiming a wake and again before native delivery. For Codex the native
-question check still runs after it. One asynchronous reply can prove a completed multi-question
-prompt when it covers every exact rendered index and title once. Partial or mismatched replies
-keep the native guard closed. A wake carries no payload, so it never answers or clears a prompt or
-hold. When the owner answers or cancels its question or releases its hold, that command attempts
-one guarded wake for it, which goes out only if no other guard remains.
+question check still runs after it. A pending question withholds send-time wakes only: the
+scheduled review's wake pass skips the question check and keeps the hold and policy hold checks,
+so a pending question delays a wake by at most one review slot and cannot silence its role.
+One asynchronous reply can prove a completed multi-question prompt when it covers every exact
+rendered index and title once. Partial or mismatched replies keep the native guard closed. A wake
+carries no payload, so it never answers or clears a prompt or hold. When the owner answers or
+cancels its question or releases its hold, that command attempts one guarded wake for it, which
+goes out only if no other guard remains.
 
 ## Coordinator reminders
 
@@ -439,8 +442,10 @@ Other events stay metadata, and a caller the fence refuses gets no output.
 
 ## Questions, holds and decisions
 
-Each record is owned by the role whose binding wrote it, and only that role's binding can answer,
-cancel or release it (`not-owner`); import and reviews never do. Native prompts are never read or
+Each record is owned by the role whose binding wrote it, and only that role can answer, cancel or
+release it (`not-owner`); import and reviews never do. Ownership is by registry role on both
+harnesses: after `harness select`, a `/clear` rebind or a move between harnesses, the role's
+current binding acts on records an earlier binding wrote. Native prompts are never read or
 touched: a question record mirrors a prompt the owner has opened in its own session.
 
 ### Questions
@@ -458,7 +463,14 @@ touched: a question record mirrors a prompt the owner has opened in its own sess
   same `question answer` also retries the writeback. Both use the active owner binding.
 - `question cancel --id Q --reason R` cancels the caller's pending question. Answering or
   cancelling a closed question is a no-op when it repeats the recorded close, else
-  `already-closed`.
+  `already-closed`. Neither requires native evidence.
+- `question close-legacy --id Q --reason R --approval REF` closes the caller's pending question
+  opened under a Codex binding, citing the explicit user approval for the close as policy holds
+  do. It appends `question.cancelled` with the reason and `approval`. A question opened on Claude
+  is `legacy-question-required`; repeating the same close is a no-op. This verb is temporary and
+  is removed once no pending question opened under a Codex binding remains.
+- `--depends-on REPOSITORY:WORK_ID` on `question open` fences that exact work item at start, ready
+  and finish on either harness. New `question.opened` events record the opener's `harness`.
 
 Titles, reasons and options are single lines with no secret shape. Decision text also goes into a
 public work file, so it is one line of at most 1000 characters with no secret shape,
@@ -471,8 +483,9 @@ Before opening a Codex form in the owning conversation, use `question open` to r
 wording, ordered options and every dependent `--depends-on REPOSITORY:WORK_ID`. Repeated
 `--option LABEL` takes ordered labels. Repeated `--option-json JSON` takes objects with a
 `label` and optional `description`. `--work` separately names the decision Markdown target.
-The durable record includes the bound owner thread. The registered owner alone can attach
-or reconcile its native identity.
+The durable record includes the thread that opened it, which native evidence is read from.
+The owning role can attach or reconcile its native identity from any binding. Attach and
+reconcile are optional evidence: they never gate answer, cancel or close.
 
 - `question attach --id Q --turn TURN --item ITEM --index N` attaches the matching rendered
   history identity. It requires the same thread, turn, item, index, wording and ordered labels.
@@ -483,21 +496,19 @@ or reconcile its native identity.
   asynchronous `agentMessage.questions` history projection. A history observation gives no
   live UI visibility. A `serverRequest/resolved` notification records lifecycle cleanup or
   response bookkeeping and supplies no answer or cancellation classification.
-- An explicit live answer may be recorded by the owner from its conversation when native identity
-  was unavailable. Once attached, `question answer` requires the exact existing owner resolution
-  reference and complete native history proving a later user reply for that rendered question.
-  Ambiguous indexes, partial history and compaction keep the ledger open. The caller supplies the
-  public decision text explicitly.
-- `question cancel` and `question reask` require verified exact native cancellation or closure
-  without an answer respectively. The current native observer cannot verify those outcomes.
-  A supported closure proof would let the owner reserve another attempt under the same ID, then
-  attach its new request. The command itself never presents a form.
+- `question answer` records the user's explicit answer, and `question cancel` the owner's reason,
+  with or without an attached native identity. The caller supplies the public decision text
+  explicitly, and the answer of a question with a Codex record is `--by user`.
+- `question reask` requires verified exact native closure without an answer. The current native
+  observer cannot verify that outcome. A supported closure proof would let the owner reserve
+  another attempt under the same ID, then attach its new request. The command itself never
+  presents a form.
 
 `question list`, session startup and reviews expose the recorded question independently of
 native prompt visibility. Session startup includes the owning role's unread count. Messages
 remain eligible for an explicit recipient inbox pull. Existing guarded native wakes still apply.
 Only exact listed work dependencies are fenced at start, ready and finish under the store
-transaction. Independent work and ordinary Claude question handling retain their existing path.
+transaction. Independent work retains its existing path.
 The additional schema-1 question projections rebuild from the same event history.
 
 ### Decision lines
@@ -580,6 +591,7 @@ appends another event.
 ### Rebind after /clear
 
 A Claude `/clear` starts a new conversation ID, which the fence refuses as `caller-unbound`.
+After `/clear`, a Claude role runs `session start` before any other store verb.
 `session start` then rebinds the role, and only when every condition holds:
 
 - No `--native-id` was given, and `CLAUDE_CODE_SESSION_ID` is a canonical UUID.
