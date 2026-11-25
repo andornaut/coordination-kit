@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { expect } from "vitest";
@@ -30,11 +30,6 @@ function configure(ws: Workspace): void {
     schema: 1,
   });
   writeFileSync(join(ws.coordinator, "body.txt"), BODY);
-  mkdirSync(ws.path("unblock", "decisions"), { recursive: true });
-  writeFileSync(
-    ws.path("unblock", "decisions", `${ART}.json`),
-    JSON.stringify({ resolutions: [], state: "clear", thread_id: ART }),
-  );
 }
 
 async function run(ws: Workspace, env: Record<string, string>, words: string[]) {
@@ -171,7 +166,7 @@ suite("store messages", () => {
       ]);
 
       // Each adapter woke its recipient once, with the fixed text and no payload.
-      const wakeFile = join(ws.coordinator, "var", "wake", `${TECH}.json`);
+      const wakeFile = join(ws.coordinator, "var", "wake", "roles", ws.game, "tech.json");
       expect(existsSync(wakeFile)).toBe(true);
       expect(JSON.parse(readFileSync(wakeFile, "utf8"))).toEqual({
         count: 1,

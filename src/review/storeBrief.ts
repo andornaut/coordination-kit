@@ -10,7 +10,7 @@ import { resolveRole } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
 import { unreadMessages } from "../store/messageWake.ts";
-import { clean, DELIVERY_KIT_ACTOR, derivedId, storeNotice } from "../store/notices.ts";
+import { DELIVERY_KIT_ACTOR, derivedId, storeNotice } from "../store/notices.ts";
 import { policyHoldEntries, type PolicyHoldView } from "../store/policyHolds.ts";
 import { holdGuard } from "../store/questions.ts";
 import { NEXT_REVIEW_BOUNDARY, retentionInstant } from "../store/retention.ts";
@@ -40,8 +40,6 @@ import {
 
 export const BRIEF_MAX_LINES = 60;
 export const BRIEF_MAX_BYTES = 4096;
-/** An accepted Claude wake still unpulled after this long is written again at the next review. */
-export const STALE_WAKE_MS = 30 * 60 * 1000;
 
 type Row = Record<string, SQLInputValue>;
 
@@ -126,6 +124,8 @@ export interface BriefException {
   readonly reviewGenerated?: true;
   /** A pending question's title, at most 80 characters; left out of a secret-shaped fallback. */
   readonly title?: string;
+  /** When a stalled or overdue original was created; older briefs omit it. */
+  readonly sentAt?: string;
 }
 
 export interface BriefRecord {
@@ -172,6 +172,15 @@ function recordedBrief(store: Store, game: string, slot: number): BriefRecord | 
   return row === undefined ? undefined : (JSON.parse(row.payload as string) as BriefRecord);
 }
 
+/** Roles the native collector never read: their prompt visibility has no supported survey. */
+const UNSURVEYED: ReadonlySet<string> = new Set([
+  "native_harness_unsupported",
+  "recipient_binding_ambiguous",
+  "recipient_binding_invalid",
+  "recipient_held",
+  "recipient_unbound",
+]);
+
 /**
  * The native exceptions first, so they survive the page cap: each owner-attested pending Codex
  * question, each Codex role whose question state is unreadable, each worker failure no earlier
@@ -187,6 +196,7 @@ function nativeExceptions(
     clear: 0,
     historyComplete: 0,
     pending: 0,
+    surveyed: 0,
     unavailableCapability: 0,
     unknown: 0,
     visibilityUnknown: 0,
@@ -195,6 +205,7 @@ function nativeExceptions(
   const nonActionable = new Set(["recipient_held", "native_harness_unsupported"]);
   for (const question of native.questions) {
     questions[question.status] += 1;
+    questions.surveyed += Number(!UNSURVEYED.has(question.visibilityReason));
     questions.visibilityUnknown += Number(question.visibility === "unknown");
     questions.unavailableCapability += Number(question.visibilityReason === NO_PROMPT_VISIBILITY);
     questions.historyComplete += Number(question.history.status === "complete");
@@ -277,7 +288,7 @@ function survey(
 ): Omit<BriefRecord, "game" | "slot" | "recipient" | "messageId" | "result"> {
   const rows = store.db
     .prepare(
-      `SELECT id, to_role, state, unconfirmed, retention,
+      `SELECT id, to_role, state, unconfirmed, retention, created_at,
          from_role = 'delivery-kit' AND (
            id IN (SELECT message_id FROM review_briefs) OR EXISTS (
              SELECT 1 FROM json_each(links) AS link
@@ -332,6 +343,7 @@ function survey(
       const info = {
         id,
         role,
+        sentAt: row.created_at as string,
         state,
         ...(Number(row.review_generated) === 1 ? { reviewGenerated: true as const } : {}),
       };
@@ -439,26 +451,68 @@ function exceptionLine(exception: BriefException, titles: boolean): string {
       );
     case "work-ready":
       return `- work-ready ${exception.id} from ${exception.role}: ${exception.detail}`;
-    case "stalled":
-      return (
-        `- stalled ${exception.id} to ${exception.role} (${exception.state}, ` +
-        `${exception.newlyStalled === true ? "newly stalled" : "continuing"}, open across two slots)`
-      );
-    case "retention-overdue": {
-      const retention = exception.retention!;
-      const details = titles
-        ? `; ${clean(retention.reason)}; due ${clean(retention.nextBoundary)}`
-        : "";
-      return (
-        `- retention-overdue ${exception.id} to ${exception.role} (owner ${retention.owner})` +
-        `${details}; recipient reconciles the original with its owner`
-      );
-    }
     case "unconfirmed":
       return `- unconfirmed ${exception.id} to ${exception.role}: the recipient confirms or closes it`;
     default:
       return `- ${exception.kind} ${exception.role}: ${exception.detail}`;
   }
+}
+
+function age(slot: number, at: string | undefined): string {
+  const minutes = Math.max(0, Math.floor((slot * 1000 - Date.parse(at ?? "")) / 60_000));
+  if (!Number.isFinite(minutes)) {
+    return "unknown";
+  }
+  return minutes < 120
+    ? `${minutes}m`
+    : minutes < 48 * 60
+      ? `${Math.floor(minutes / 60)}h`
+      : `${Math.floor(minutes / 1440)}d`;
+}
+
+const GROUPED: ReadonlySet<BriefException["kind"]> = new Set(["stalled", "retention-overdue"]);
+
+/** One line per stalled or overdue recipient, at its first exception; others one line each. */
+function exceptionLines(
+  exceptions: readonly BriefException[],
+  slot: number,
+  titles: boolean,
+): { readonly line: string; readonly weight: number }[] {
+  const groups = new Map<string, BriefException[]>();
+  for (const exception of exceptions) {
+    if (GROUPED.has(exception.kind)) {
+      const key = `${exception.kind} ${exception.role}`;
+      groups.set(key, [...(groups.get(key) ?? []), exception]);
+    }
+  }
+  const lines: { line: string; weight: number }[] = [];
+  for (const exception of exceptions) {
+    if (!GROUPED.has(exception.kind)) {
+      lines.push({ line: exceptionLine(exception, titles), weight: 1 });
+      continue;
+    }
+    const key = `${exception.kind} ${exception.role}`;
+    const group = groups.get(key);
+    if (group === undefined) {
+      continue;
+    }
+    groups.delete(key);
+    const oldest = group.reduce((first, item) =>
+      Date.parse(item.sentAt ?? "") < Date.parse(first.sentAt ?? "") ? item : first,
+    );
+    const summary = `oldest ${oldest.id}, age ${age(slot, oldest.sentAt)}`;
+    const newly = group.filter((item) => item.newlyStalled === true).length;
+    lines.push({
+      line:
+        exception.kind === "stalled"
+          ? `- stalled ${exception.role}: ${group.length} open across two slots ` +
+            `(${newly} newly stalled), ${summary}`
+          : `- retention-overdue ${exception.role}: ${group.length} due, ${summary}; ` +
+            "recipient reconciles each original with its owner",
+      weight: group.length,
+    });
+  }
+  return lines;
 }
 
 /** The one-page brief: counts, then exceptions while the page has room, then the detail command. */
@@ -506,11 +560,15 @@ export function composeBrief(
     ...(Number(counts.policyHolds) > 0
       ? [`Active user policy holds: ${String(counts.policyHolds)}`]
       : []),
-    `Native prompt visibility: ${native.questions.visibilityUnknown} unknown; history: ` +
-      `${native.questions.historyComplete} complete, ${native.questions.pending} with pending attestations`,
-    ...(unavailableCapability > 0
+    ...(Number(native.questions.surveyed) > 0
       ? [
-          `Exact native prompt inspection unavailable for ${unavailableCapability} ${visibilityRoles}.`,
+          `Native prompt visibility: ${native.questions.visibilityUnknown} unknown; history: ` +
+            `${native.questions.historyComplete} complete, ${native.questions.pending} with pending attestations`,
+          ...(unavailableCapability > 0
+            ? [
+                `Exact native prompt inspection unavailable for ${unavailableCapability} ${visibilityRoles}.`,
+              ]
+            : []),
         ]
       : []),
     ...(Number(counts.readyHandoffs) > 0
@@ -536,14 +594,15 @@ export function composeBrief(
       all.length <= BRIEF_MAX_LINES && Buffer.byteLength(all.join("\n"), "utf8") <= BRIEF_MAX_BYTES
     );
   };
-  for (const [index, exception] of record.exceptions.entries()) {
-    const remaining = record.exceptions.length - index - 1;
-    const more = remaining > 0 ? [`- ${remaining} more: ${show}`] : [];
-    if (!fits([exceptionLine(exception, titles), ...more])) {
-      lines.push(`- ${record.exceptions.length - index} more: ${show}`);
+  let remaining = record.exceptions.length;
+  for (const { line, weight } of exceptionLines(record.exceptions, slot, titles)) {
+    const more = remaining > weight ? [`- ${remaining - weight} more: ${show}`] : [];
+    if (!fits([line, ...more])) {
+      lines.push(`- ${remaining} more: ${show}`);
       break;
     }
-    lines.push(exceptionLine(exception, titles));
+    lines.push(line);
+    remaining -= weight;
   }
   return [...lines, ...tail].join("\n");
 }
@@ -633,39 +692,20 @@ export async function storeReview(
       return { fresh: true, result };
     });
     if (outcome.fresh) {
-      // A pending question withholds send-time wakes only up to this boundary: the review wakes
-      // past it, while holds and the Codex native question check still apply.
+      // One wake per recipient with unread originals, through its harness adapter. A pending
+      // question withholds send-time wakes only up to this boundary: the review wakes past it,
+      // while role holds and policy holds still apply.
       const wake = {
         env: context.env,
         layout: context.layout,
         ports: { ...context.ports, storeGuard: context.ports?.storeGuard ?? holdGuard },
         store,
       };
-      // A confirmed failed wake can recheck at this scheduled boundary. A Claude channel can
-      // recover an old, unpulled wake. A Codex wake with uncertain acceptance remains guarded
-      // until recipient collection rather than admitting a different native request ID.
-      const staleBefore = Date.parse(context.now?.() ?? new Date().toISOString()) - STALE_WAKE_MS;
-      for (const role of pendingWakeRoles(store)) {
-        const outstanding = wakeState(store, role).outstanding;
-        const row =
-          outstanding === null
-            ? undefined
-            : (store.db
-                .prepare("SELECT outcome, harness, at FROM wakes WHERE id = ?")
-                .get(outstanding) as Row | undefined);
-        const unpulled =
-          row?.outcome === "accepted" &&
-          row.harness === "claude" &&
-          Date.parse(String(row.at)) <= staleBefore;
-        const retryable =
-          row?.outcome === "failed" ||
-          (row?.harness === "claude" && row.outcome !== "accepted") ||
-          unpulled;
-        if (outstanding !== null && retryable) {
-          rearmWake(store, DELIVERY_KIT_ACTOR, role, `review ${game.id} ${slot}`);
-        }
-      }
-      for (const role of [recipient, ...pendingWakeRoles(store).filter((r) => r !== recipient)]) {
+      const roles = pendingWakeRoles(store).sort(
+        (a, b) => Number(b === recipient) - Number(a === recipient),
+      );
+      for (const role of roles) {
+        rearmWake(store, DELIVERY_KIT_ACTOR, role, `review ${game.id} ${slot}`);
         // eslint-disable-next-line no-await-in-loop
         await wakeRecipient(wake, role);
       }

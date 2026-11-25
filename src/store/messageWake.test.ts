@@ -4,7 +4,7 @@ import { Store } from "./db.ts";
 import { sendMessage } from "./messages.ts";
 import { messageWake, safeWakeBlocker } from "./messageWake.ts";
 import { storeDone, storeInbox, storeInboxPeek, storeSend, storeStatus } from "./service.ts";
-import { ART, clearDecision, COORDINATOR, fakeCodex, storeFixture, TECH } from "./testStore.ts";
+import { ART, COORDINATOR, fakeCodex, storeFixture, TECH } from "./testStore.ts";
 
 const ART_ROLE = "archies-dog-walks/art";
 const TECH_ROLE = "archies-dog-walks/tech";
@@ -26,7 +26,6 @@ describe("per-original wake status", () => {
   it("keeps a guarded original visible to its recipient and never retries an identical send", async () => {
     const { layout } = storeFixture();
     const codex = fakeCodex(ART);
-    clearDecision(layout, ART);
     let pending = true;
     const sender = {
       env: { CLAUDE_CODE_SESSION_ID: COORDINATOR },
@@ -101,7 +100,6 @@ describe("per-original wake status", () => {
     const codex = fakeCodex(ART, () => {
       throw new Error("Connection dropped.");
     });
-    clearDecision(layout, ART);
     const sender = {
       env: { CLAUDE_CODE_SESSION_ID: COORDINATOR },
       layout,

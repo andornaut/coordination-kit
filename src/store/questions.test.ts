@@ -283,7 +283,7 @@ describe("wake guard", () => {
       status: "blocked",
     });
     expect(await send()).toMatchObject({ reason: "recipient-question-pending", status: "guarded" });
-    expect(existsSync(wakeFilePath(layout, TECH))).toBe(false);
+    expect(existsSync(wakeFilePath(layout, TECH_ROLE))).toBe(false);
     cancelQuestion(store, TECH_ACTOR, "q-a", "Answered in the plan");
     setHold(store, TECH_ACTOR, { id: "h-work", reason: "Scoped", scope: "work:ag-0001" });
     setHold(store, TECH_ACTOR, { id: "h-role", reason: "Paused", scope: "role" });
@@ -291,7 +291,7 @@ describe("wake guard", () => {
     releaseHold(store, TECH_ACTOR, "h-role");
     expect(questionHoldGuard(store, TECH_ROLE)).toEqual({ status: "clear" });
     expect(await send()).toMatchObject({ status: "accepted" });
-    expect(existsSync(wakeFilePath(layout, TECH))).toBe(true);
+    expect(existsSync(wakeFilePath(layout, TECH_ROLE))).toBe(true);
     expect(readInbox(store, TECH_ACTOR).delivered).toBe(3);
     const outcomes = store.db.prepare("SELECT outcome, detail FROM wakes ORDER BY seq").all();
     expect(outcomes).toEqual([

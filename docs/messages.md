@@ -27,15 +27,10 @@ coordination-kit msg retain 00000000-0000-4000-8000-000000000003 --reason "check
 - `msg send` stores the original, marks the recipient wake-pending and attempts at most one
   guarded wake, which carries no payload. Repeating the same original returns its recorded
   evidence without another native attempt. A wake outcome never changes message state.
-- An explicit `--intent unblock` can create one generated coordinator attention notice per
-  source recipient while urgent originals remain unread after a confirmed guarded or failed
-  wake. Later qualifying sends reuse the existing notice without another coordinator wake.
-  Ordinary queues, including work-linked queues, stay visible in the original inbox and review.
-  The optional `attention` receipt identifies the shared notice. Ambiguous or coalesced outcomes
-  remain visible for reconciliation.
-- Source collection closes obsolete generated attention metadata once the recipient has no
-  unread unblockers. It leaves original disposition to the source recipient. The scheduled
-  review and reminder planner expose the current exact originals and wake evidence.
+- A recipient whose wake was guarded or failed keeps its originals in its inbox and in the
+  scheduled review, which wakes it once per review while they stay unread
+  ([store wakes](store.md#wakes)). `--intent unblock` marks urgency for the recipient; it
+  creates no coordinator notice.
 - Native session messages and channel notifications are wakes only; `msg send` is the one payload
   path between roles.
 - Output is one JSON object, identical for Claude and Codex callers. `msg status ID` and
@@ -48,8 +43,8 @@ coordination-kit msg retain 00000000-0000-4000-8000-000000000003 --reason "check
   its own outcome. Evidence missing from older events stays unknown.
 - `inbox --peek` shows the current role's unread originals and wake metadata without recording
   delivery, clearing a guard or sending native input. The scheduled review preserves the same
-  metadata for its review slot. Codex queue submission is native input, and no passive native
-  alert path is established. Use the store surfaces while a question or unknown state is guarded.
+  metadata for its review slot. Use the store surfaces while a question or unknown state is
+  guarded.
 - `msg retain` takes exactly one boundary. Use `--until` with a timezone-qualified ISO instant,
   `--next-review` for the first scheduled review after retention, or `--next-boundary TEXT` to
   keep a dependency or hold description. Existing boundary text remains valid.

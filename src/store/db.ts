@@ -16,7 +16,7 @@ import {
 } from "./files/compactionCheckpoint.ts";
 import { fileLayoutProjection } from "./files/runtime.ts";
 import { sha256 } from "./messages.ts";
-import { type Projection, PROJECTIONS } from "./projections.ts";
+import { type Projection, PROJECTIONS, RETIRED_TABLES } from "./projections.ts";
 import {
   type Actor,
   type EventInput,
@@ -498,6 +498,9 @@ export class Store {
   rebuild(): VerifyResult {
     return this.transaction(() => {
       const verified = this.verify();
+      for (const table of RETIRED_TABLES) {
+        this.db.exec(`DROP TABLE IF EXISTS ${table}`);
+      }
       for (const projection of PROJECTIONS) {
         for (const table of projection.tables) {
           this.db.exec(`DROP TABLE IF EXISTS ${table}`);

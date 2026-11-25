@@ -1,27 +1,21 @@
-// A durable send may wake its recipient using only the inbox command. Codex queue and fallback
-// reservations follow the exact native conversation across inbox pulls.
+// A durable send may wake its recipient using only the inbox command. One adapter per harness
+// delivers the wake to the role's current binding: Claude through the role's wake file, which its
+// channel announces, and Codex through one guarded control-socket queue add.
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 
 import { wakeText, writeWakeFile } from "../adapters/claude/wakeFile.ts";
-import { clearanceUnchanged } from "../adapters/codex/guard.ts";
+import { queueEntries, type QueueEntry } from "../adapters/codex/inventory.ts";
 import {
   codexQueueTransport,
-  idleInputRoot,
+  inputUnavailable,
   type QueueClearance,
   type TransportReceipt,
 } from "../adapters/codex/queue.ts";
 import { connectControl, type RpcClient } from "../adapters/codex/rpc.ts";
-import { selectTarget } from "../adapters/codex/steer.ts";
-import {
-  decisionClear,
-  decisionDirectory,
-  decisionRecord,
-  inspectDecisionMarker,
-} from "../adapters/shared/decisions.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
-import { sameJson } from "../adapters/shared/pyjson.ts";
+import { isRecord } from "../adapters/shared/pyjson.ts";
 import type { Layout } from "../layout.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Harness } from "../registry/schema.ts";
@@ -33,13 +27,6 @@ import {
   safeWakeBlocker,
   safeWakeReason,
 } from "./messageWake.ts";
-import { type NoticeProof, noticeQueueClear, reconcileNativeNotices } from "./noticeEvidence.ts";
-import {
-  collectedNotices,
-  COLLECTION_RELEASE,
-  type NoticeDispositions,
-  pendingNotices,
-} from "./noticesInFlight.ts";
 import { questionHoldGuard } from "./questions.ts";
 import { type Actor, StoreError, type WakeBlocker, type WakeOutcome } from "./types.ts";
 
@@ -52,7 +39,6 @@ export interface WakeGuard {
 /**
  * The store question and hold check, run after the registry checks. The default,
  * `questionHoldGuard`, blocks pending questions, recipient role holds and scoped policy holds.
- * The Codex native question check still runs after it.
  */
 export type StoreWakeGuard = (store: Store, role: string, harness?: Harness | null) => WakeGuard;
 
@@ -90,6 +76,20 @@ interface WakeClaim {
   readonly count: number;
   readonly target: Target;
 }
+
+interface Delivery {
+  readonly outcome: WakeOutcome;
+  readonly detail: string | null;
+  readonly blocker: WakeBlocker | null;
+}
+
+/** Delivers one claimed wake to the role's current binding on one harness. */
+type WakeAdapter = (
+  context: WakeContext,
+  role: string,
+  target: Target,
+  wake: { readonly id: string; readonly count: number },
+) => Promise<Delivery>;
 
 /** The recipient's current binding, or the registry reason no wake may go to it. */
 function wakeTarget(
@@ -153,7 +153,7 @@ export function wakeState(
   return { outstanding: row?.outstanding ?? null, pending: Number(row?.pending ?? 0) === 1 };
 }
 
-/** Recipients that are wake-pending with undelivered messages. A review seam read. */
+/** Recipients with unread originals since their last pull. A review seam read. */
 export function pendingWakeRoles(store: Store): string[] {
   return (
     store.db
@@ -168,18 +168,11 @@ export function pendingWakeRoles(store: Store): string[] {
 
 /**
  * Clear a recipient's outstanding wake so the next `wakeRecipient` may send one again. Only the
- * scheduled review calls this, after its slot boundary; it never touches message state.
+ * scheduled review calls this, at its slot boundary; it never touches message state.
  */
 export function rearmWake(store: Store, actor: Actor, role: string, reason: string): boolean {
   return store.transaction(() => {
-    const outstanding = wakeState(store, role).outstanding;
-    if (outstanding === null) {
-      return false;
-    }
-    const receipt = store.db
-      .prepare("SELECT harness, outcome FROM wakes WHERE id = ? AND role = ?")
-      .get(outstanding, role);
-    if (receipt === undefined || (receipt.harness !== "claude" && receipt.outcome !== "failed")) {
+    if (wakeState(store, role).outstanding === null) {
       return false;
     }
     store.append({
@@ -191,6 +184,35 @@ export function rearmWake(store: Store, actor: Actor, role: string, reason: stri
     return true;
   });
 }
+
+function outstandingWake(store: Store, role: string, target: Target | null) {
+  const id = wakeState(store, role).outstanding;
+  if (id === null) {
+    return null;
+  }
+  const current = store.db
+    .prepare("SELECT id, seq, conversation, harness FROM wakes WHERE id = ? AND role = ?")
+    .get(id, role) as
+    { id: string; seq: number; conversation: string; harness: Harness } | undefined;
+  return current !== undefined &&
+    (target === null ||
+      (current.harness === target.harness && current.conversation === target.conversation))
+    ? current
+    : null;
+}
+
+const claudeWake: WakeAdapter = (context, role, target, wake) => {
+  const guard = checkStoreGuard(context, role, target.harness);
+  if (guard.status !== "clear") {
+    return Promise.resolve({
+      blocker: safeWakeBlocker(guard.blocker, role),
+      detail: safeWakeReason(guard.reason, "store-guard"),
+      outcome: "guarded",
+    });
+  }
+  writeWakeFile(context.layout, { count: wake.count, role });
+  return Promise.resolve({ blocker: null, detail: null, outcome: "accepted" });
+};
 
 function codexOutcome(receipt: TransportReceipt): WakeOutcome {
   switch (receipt.status) {
@@ -213,94 +235,32 @@ function wakeConnection(context: WakeContext): Promise<RpcClient> {
   );
 }
 
-async function reconcileNotices(
-  context: WakeContext,
-  role: string,
-  target: Target,
-): Promise<NoticeProof[]> {
-  const binding = { conversation: target.conversation, role };
-  const notices = pendingNotices(context.store, binding).filter((notice) => notice.readyForProof);
-  if (notices.length === 0) {
-    return [];
-  }
+const QUEUED_WAKE = /^\d+ new messages for ([^ :]+): run coordination-kit inbox$/;
+
+function queuedWake(entry: QueueEntry, role: string): boolean {
+  return entry.input.some(
+    (item) =>
+      isRecord(item) &&
+      item.type === "text" &&
+      typeof item.text === "string" &&
+      QUEUED_WAKE.exec(item.text)?.[1] === role,
+  );
+}
+
+/** True when no earlier wake for `role` is still queued natively, so a new one is not a duplicate. */
+async function noWakeQueued(client: RpcClient, recipient: string, role: string): Promise<boolean> {
   try {
-    const collected = collectedNotices(context.store, binding);
-    const client = await wakeConnection(context);
-    try {
-      const { conversation } = target;
-      return await reconcileNativeNotices(
-        client,
-        storeRoot(context.layout),
-        binding,
-        notices,
-        collected,
-        async () => {
-          try {
-            const directory = decisionDirectory(context.layout, role);
-            if (directory === null || !decisionClear(directory, conversation)) {
-              return false;
-            }
-            const marker = decisionRecord(directory, conversation);
-            if (!(await idleInputRoot(client, conversation))) {
-              return false;
-            }
-            const [selected] = await selectTarget(client, directory, conversation);
-            return (
-              selected?.method === "turn/start" &&
-              (await idleInputRoot(client, conversation)) &&
-              clearanceUnchanged(directory, conversation, marker)
-            );
-          } catch {
-            return false;
-          }
-        },
-      );
-    } finally {
-      client.close();
-    }
+    return !(await queueEntries(client, recipient, 10)).some((entry) => queuedWake(entry, role));
   } catch {
-    return [];
+    return false;
   }
 }
 
-function outstandingWake(store: Store, role: string, target: Target | null) {
-  if (target?.harness === "codex") {
-    const notice = pendingNotices(store, { conversation: target.conversation, role })[0];
-    if (notice !== undefined) {
-      return notice;
-    }
-  }
-  const id = wakeState(store, role).outstanding;
-  if (id === null) {
-    return null;
-  }
-  const current = store.db
-    .prepare("SELECT id, seq, conversation, harness FROM wakes WHERE id = ? AND role = ?")
-    .get(id, role) as
-    { id: string; seq: number; conversation: string; harness: Harness } | undefined;
-  return current !== undefined &&
-    (target === null ||
-      (current.harness === target.harness && current.conversation === target.conversation))
-    ? current
-    : null;
-}
-
-async function codexWake(
-  context: WakeContext,
-  role: string,
-  target: Target,
-  wake: string,
-  text: string,
-): Promise<{
-  readonly outcome: WakeOutcome;
-  readonly detail: string | null;
-  readonly blocker: WakeBlocker | null;
-}> {
+const codexWake: WakeAdapter = async (context, role, target, wake) => {
   const { layout } = context;
   const recipient = target.conversation;
   let refused: WakeGuard | undefined;
   const locallyClear = (): boolean => {
-    const directory = decisionDirectory(layout, role);
     if (!sameTarget(layout, role, target)) {
       refused = {
         blocker: { id: role, kind: "registry", owner: role },
@@ -310,66 +270,40 @@ async function codexWake(
       return false;
     }
     const guard = checkStoreGuard(context, role, target.harness);
-    if (guard.status === "blocked") {
-      refused = guard;
-      return false;
-    }
-    if (directory === null) {
-      refused = { reason: "decision-clearance", status: "blocked" };
-      return false;
-    }
-    const marker = inspectDecisionMarker(directory, recipient);
-    if (marker.state !== "clear") {
-      refused = { reason: `decision-marker-${marker.state}`, status: "blocked" };
-      return false;
-    }
-    refused = undefined;
-    return true;
+    refused = guard.status === "blocked" ? guard : undefined;
+    return refused === undefined;
   };
   const transport = codexQueueTransport({
     canConnect: locallyClear,
     connect: () => wakeConnection(context),
     guards: {
       beforeAdd: async (client): Promise<QueueClearance> => {
-        const directory = decisionDirectory(layout, role);
-        if (directory === null || !locallyClear()) {
+        if (!locallyClear()) {
           return { status: "blocked" };
         }
-        const marker = decisionRecord(directory, recipient);
-        const [selected, , diagnostic] = await selectTarget(client, directory, recipient);
-        if (selected === null) {
-          return { ...(diagnostic === undefined ? {} : { diagnostic }), status: "blocked" };
+        const diagnostic = await inputUnavailable(client, recipient);
+        if (diagnostic !== null) {
+          return { diagnostic, status: "blocked" };
         }
-        if (!(await noticeQueueClear(client, { conversation: recipient, role }))) {
+        if (!(await noWakeQueued(client, recipient, role))) {
           refused = { reason: "native-notice-queue-unverified", status: "blocked" };
           return { status: "blocked" };
         }
-        return {
-          status:
-            clearanceUnchanged(directory, recipient, marker) && locallyClear()
-              ? "clear"
-              : "blocked",
-        };
+        return { status: locallyClear() ? "clear" : "blocked" };
       },
     },
   });
-  const receipt = await transport.send(join(storeRoot(layout), "wake", "codex", `${wake}.json`), {
-    recipient,
-    requestId: wake,
-    text,
-  });
+  const receipt = await transport.send(
+    join(storeRoot(layout), "wake", "codex", `${wake.id}.json`),
+    {
+      recipient,
+      requestId: wake.id,
+      text: wakeText({ count: wake.count, role, seq: 1 }),
+    },
+  );
   const outcome = codexOutcome(receipt);
-  const native =
-    receipt.diagnostic && "question" in receipt.diagnostic
-      ? receipt.diagnostic.question
-      : undefined;
-  const blocker =
-    safeWakeBlocker(refused?.blocker, role) ??
-    (native === undefined
-      ? null
-      : safeWakeBlocker({ id: wake, kind: "native-question", native, owner: role }, role));
   return {
-    blocker,
+    blocker: safeWakeBlocker(refused?.blocker, role),
     detail:
       outcome === "accepted"
         ? null
@@ -379,24 +313,17 @@ async function codexWake(
           ),
     outcome,
   };
-}
+};
+
+const ADAPTERS: Readonly<Record<Harness, WakeAdapter>> = { claude: claudeWake, codex: codexWake };
 
 /**
  * Attempt at most one wake for `role`, after the caller's send has committed. Nothing is sent
- * when no messages need a wake, when a prior notice remains outstanding, or when a guard refuses
- * the operation.
+ * when no messages need a wake, when a prior wake for the same binding remains outstanding, or
+ * when a guard refuses the operation.
  */
 export async function wakeRecipient(context: WakeContext, role: string): Promise<WakeResult> {
   const { store } = context;
-  const initialTarget = wakeTarget(context.layout, role);
-  const proofs =
-    "conversation" in initialTarget &&
-    initialTarget.harness === "codex" &&
-    wakeState(store, role).pending &&
-    undeliveredIds(store, role).length > 0 &&
-    checkStoreGuard(context, role, "codex").status === "clear"
-      ? await reconcileNotices(context, role, initialTarget)
-      : [];
   const wake = randomUUID();
   const claim = store.transaction<WakeResult | WakeClaim>(() => {
     const target = wakeTarget(context.layout, role);
@@ -405,63 +332,6 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
     const count = messages.length;
     if (!state.pending || count === 0) {
       return { status: "none" };
-    }
-    if (
-      proofs.length > 0 &&
-      "conversation" in initialTarget &&
-      "conversation" in target &&
-      target.harness === "codex" &&
-      target.conversation === initialTarget.conversation
-    ) {
-      const binding = { conversation: target.conversation, role };
-      const pending = new Set(pendingNotices(store, binding).map(({ id }) => id));
-      const collected =
-        proofs.some(({ kind }) => kind === "released") &&
-        checkStoreGuard(context, role, "codex").status === "clear"
-          ? collectedNotices(store, binding)
-          : new Map<string, NoticeDispositions>();
-      const directory = decisionDirectory(context.layout, role);
-      for (const proof of proofs) {
-        const { notice } = proof;
-        if (!pending.has(notice.id)) {
-          continue;
-        }
-        if (proof.kind === "consumed") {
-          store.append({
-            actor: SYSTEM,
-            key: `notice.consumed:${notice.id}`,
-            kind: "notice.consumed",
-            payload: { ...binding, id: notice.id, item: proof.item, turn: proof.turn },
-          });
-        } else {
-          const dispositions = collected.get(notice.id);
-          if (
-            directory === null ||
-            !decisionClear(directory, binding.conversation) ||
-            dispositions === undefined ||
-            !sameJson(dispositions.inboxReads, proof.inboxReads) ||
-            !sameJson(dispositions.attentionClosures, proof.attentionClosures)
-          ) {
-            continue;
-          }
-          store.append({
-            actor: SYSTEM,
-            key: `notice.released:${notice.id}`,
-            kind: "notice.released",
-            payload: {
-              ...binding,
-              claimSeq: notice.seq,
-              id: notice.id,
-              inboxReads: dispositions.inboxReads,
-              ...(dispositions.attentionClosures.length === 0
-                ? {}
-                : { attentionClosures: dispositions.attentionClosures }),
-              queueId: proof.queueId,
-              reason: COLLECTION_RELEASE,
-            },
-          });
-        }
-      }
     }
     const outstanding = outstandingWake(store, role, "conversation" in target ? target : null);
     if (outstanding !== null) {
@@ -522,33 +392,30 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
     return claim;
   }
   const { target } = claim;
-  const text = wakeText({ count: claim.count, role, seq: 1 });
-  let outcome: WakeOutcome;
-  let detail: string | null = null;
-  let blocker: WakeBlocker | null = null;
+  let delivery: Delivery;
   try {
-    if (target.harness === "claude") {
-      const guard = checkStoreGuard(context, role, target.harness);
-      if (guard.status === "clear") {
-        writeWakeFile(context.layout, target.conversation, { count: claim.count, role });
-        outcome = "accepted";
-      } else {
-        detail = safeWakeReason(guard.reason, "store-guard");
-        blocker = safeWakeBlocker(guard.blocker, role);
-        outcome = "guarded";
-      }
-    } else {
-      ({ blocker, detail, outcome } = await codexWake(context, role, target, wake, text));
-    }
+    delivery = await ADAPTERS[target.harness](context, role, target, {
+      count: claim.count,
+      id: wake,
+    });
   } catch (error) {
-    outcome = target.harness === "claude" ? "failed" : "ambiguous";
-    detail = safeWakeReason(error instanceof StoreError ? error.code : null, "wake-error");
+    delivery = {
+      blocker: null,
+      detail: safeWakeReason(error instanceof StoreError ? error.code : null, "wake-error"),
+      outcome: target.harness === "claude" ? "failed" : "ambiguous",
+    };
   }
   store.append({
     actor: SYSTEM,
     key: `wake.completed:${wake}`,
     kind: "wake.completed",
-    payload: { blocker: blockerPayload(blocker), detail, outcome, role, wake },
+    payload: {
+      blocker: blockerPayload(delivery.blocker),
+      detail: delivery.detail,
+      outcome: delivery.outcome,
+      role,
+      wake,
+    },
   });
-  return { status: outcome, wake };
+  return { status: delivery.outcome, wake };
 }

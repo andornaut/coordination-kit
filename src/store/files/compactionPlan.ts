@@ -1,6 +1,5 @@
 import { isRecord } from "../../adapters/shared/pyjson.ts";
 import { canonicalJson } from "../eventCodec.ts";
-import { COLLECTION_RELEASE } from "../noticesInFlight.ts";
 import { GENESIS, type Json, type StoredEvent, StoreError } from "../types.ts";
 
 const WINDOW = 100;
@@ -169,7 +168,7 @@ function unresolvedDelivery(events: readonly StoredEvent[]): ReadonlySet<string>
             (claim.event.kind === "wake.claimed" &&
               claim.outcome === "accepted" &&
               payload.claimSeq === claim.event.seq &&
-              payload.reason === COLLECTION_RELEASE))
+              payload.reason === "accepted-queue-absent-originals-collected"))
         ) {
           claim.consumed = true;
         }

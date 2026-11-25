@@ -122,15 +122,15 @@ export function registerCoordinator(coordinatorRoot, nativeProjectId, conversati
 
 ## State
 
-| Location                                                                                  | Git                  | Content                                                                                                            |
-| ----------------------------------------------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `config.json`, `package.json`, `package-lock.json` in the coordinator                     | Tracked              | Game and role definitions and the installed kit pin.                                                               |
-| `delivery-kit.json` and project work files in each game repository                        | Tracked              | Delivery and reporting configuration, work definitions and decision lines.                                         |
-| `var/registry.json`, `var/registry.lock`, `var/route.json`, `var/handoffs/`               | Ignored              | Local native bindings, review routing and role checkpoints.                                                        |
-| `var/coordination/`, `var/coordination-authority.json`, `var/coordination-authority.lock` | Ignored              | [Filesystem journal and role records](store.md#filesystem-layout), authority receipt and switch lock.              |
-| `var/games/<game>/bus/`                                                                   | Ignored              | Runner state and event logs, ingest cursor and quarantine, review result receipts and wake-guard decision markers. |
-| `var/work-protocol.json`                                                                  | Ignored              | Optional external state-root pointer for the SQLite source, channel and wake files, and artifacts.                 |
-| External state root and independent backups                                               | Outside the checkout | `coordination.db`, transport state, artifacts and retirement archives.                                             |
+| Location                                                                                  | Git                  | Content                                                                                                 |
+| ----------------------------------------------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------- |
+| `config.json`, `package.json`, `package-lock.json` in the coordinator                     | Tracked              | Game and role definitions and the installed kit pin.                                                    |
+| `delivery-kit.json` and project work files in each game repository                        | Tracked              | Delivery and reporting configuration, work definitions and decision lines.                              |
+| `var/registry.json`, `var/registry.lock`, `var/route.json`, `var/handoffs/`               | Ignored              | Local native bindings, review routing and role checkpoints.                                             |
+| `var/coordination/`, `var/coordination-authority.json`, `var/coordination-authority.lock` | Ignored              | [Filesystem journal and role records](store.md#filesystem-layout), authority receipt and switch lock.   |
+| `var/games/<game>/bus/`                                                                   | Ignored              | Runner state and event logs, ingest cursor and quarantine, review result receipts and decision markers. |
+| `var/work-protocol.json`                                                                  | Ignored              | Optional external state-root pointer for the SQLite source, channel and wake files, and artifacts.      |
+| External state root and independent backups                                               | Outside the checkout | `coordination.db`, transport state, artifacts and retirement archives.                                  |
 
 The state pointer is `{"schema":2,"stateRoot":"/abs"}`. The 2.1 shape (`schema` 1 with
 `workspaceId` and `generation`) is still read. The configured root must be absolute and outside

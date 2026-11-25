@@ -1,5 +1,4 @@
-// Bounded read-only question references and exact owner-attested pending proof
-//.
+// Bounded read-only question references and exact owner-attested pending proof.
 //
 // Rendered questions expose title/options only. Tool arguments and outputs remain opaque. History
 // cannot establish exact unresolved requests, cancellation or UI visibility. This collector never
@@ -9,7 +8,6 @@ import { performance } from "node:perf_hooks";
 import { isCanonicalUuid } from "../../shared/ids.ts";
 import { utcStamp } from "../../shared/isoformat.ts";
 import { isRecord, sameJson } from "../../shared/pyjson.ts";
-import { NATIVE_ITEM_TYPES } from "../guard.ts";
 import { NativeTimeout, type RpcClient } from "../rpc.ts";
 
 const MAX_CALLS = 256;
@@ -18,7 +16,28 @@ const MAX_QUESTIONS = 100;
 const MAX_TITLE_BYTES = 4096;
 const MAX_OPTIONS = 32;
 const MAX_QUESTION_BYTES = 16384;
-/** Exact normalized names, unlike the substring match of guard.ts questionItem(). */
+const NATIVE_ITEM_TYPES: ReadonlySet<string> = new Set([
+  "agentMessage",
+  "collabAgentToolCall",
+  "commandExecution",
+  "contextCompaction",
+  "dynamicToolCall",
+  "enteredReviewMode",
+  "exitedReviewMode",
+  "fileChange",
+  "functionCallOutput",
+  "hookPrompt",
+  "imageGeneration",
+  "imageView",
+  "mcpToolCall",
+  "plan",
+  "reasoning",
+  "sleep",
+  "subAgentActivity",
+  "userMessage",
+  "webSearch",
+]);
+/** Exact normalized tool names. */
 const QUESTION_TOOLS: ReadonlySet<string> = new Set([
   "askuserquestion",
   "elicitation",

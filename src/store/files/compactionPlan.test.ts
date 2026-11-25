@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { eventHash } from "../eventCodec.ts";
-import { COLLECTION_RELEASE } from "../noticesInFlight.ts";
 import { GENESIS, type JsonObject, type StoredEvent } from "../types.ts";
 import { type CompactionScope, planFileCompaction } from "./compactionPlan.ts";
+
+const COLLECTION_RELEASE = "accepted-queue-absent-originals-collected";
 
 const SENDER = "sample-kit";
 const FIRST = "sample-game/art";

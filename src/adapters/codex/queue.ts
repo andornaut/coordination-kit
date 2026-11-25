@@ -39,7 +39,7 @@ export type QueueClearance = {
   readonly status: "clear" | "blocked" | "unavailable";
 };
 export interface QueueGuards {
-  /** Must check owner HOLD, local decisions, and nativeQuestionsClear on this same connection. */
+  /** Must check the store guard and `inputUnavailable` on this same connection. */
   readonly beforeAdd: (client: RpcClient, message: NativeMessage) => Promise<QueueClearance>;
 }
 
@@ -93,22 +93,50 @@ export async function rootRecipient(client: RpcClient, recipient: string): Promi
   return typeof source === "string" && ["cli", "vscode", "exec", "appServer"].includes(source);
 }
 
-export async function idleInputRoot(client: RpcClient, recipient: string): Promise<boolean> {
+function refusedInput(category: "input-unavailable" | "state-unavailable"): DeliveryDiagnostic {
+  return { category, classification: "guarded", stage: "question-guard" };
+}
+
+/**
+ * Null when the recipient accepts a wake now: it takes direct input, waits on no question or
+ * approval, and its latest turn is completed while idle or in progress while active. Otherwise
+ * the guarded diagnostic.
+ */
+export async function inputUnavailable(
+  client: RpcClient,
+  recipient: string,
+): Promise<DeliveryDiagnostic | null> {
   const read = await client.call("thread/read", { includeTurns: false, threadId: recipient });
-  const thread = isRecord(read) ? read.thread : null;
-  if (
-    !isRecord(thread) ||
-    thread.id !== recipient ||
-    thread.parentThreadId != null ||
-    (thread.source !== "cli" && thread.source !== "vscode") ||
-    thread.canAcceptDirectInput !== true ||
-    !isRecord(thread.status) ||
-    thread.status.type !== "idle"
-  ) {
-    return false;
+  const thread = isRecord(read) && isRecord(read.thread) ? read.thread : undefined;
+  if (thread === undefined) {
+    throw new Error("native thread shape unknown");
   }
-  const flags = thread.status.activeFlags;
-  return flags === undefined || (Array.isArray(flags) && flags.length === 0);
+  if (thread.canAcceptDirectInput !== true) {
+    return refusedInput("input-unavailable");
+  }
+  const status = isRecord(thread.status) ? thread.status : {};
+  const flags = status.activeFlags;
+  if (status.type === "active" && !(Array.isArray(flags) && flags.length === 0)) {
+    return refusedInput("state-unavailable");
+  }
+  const listed = await client.call("thread/turns/list", {
+    itemsView: "notLoaded",
+    limit: 1,
+    sortDirection: "desc",
+    threadId: recipient,
+  });
+  if (!isRecord(listed) || !Array.isArray(listed.data)) {
+    throw new Error("native turn listing shape unknown");
+  }
+  const latest: unknown = listed.data[0];
+  if (latest !== undefined && (!isRecord(latest) || typeof latest.id !== "string")) {
+    throw new Error("native turn shape unknown");
+  }
+  const ready =
+    isRecord(latest) &&
+    ((status.type === "active" && latest.status === "inProgress") ||
+      (status.type === "idle" && latest.status === "completed"));
+  return ready ? null : refusedInput("state-unavailable");
 }
 
 function result(
@@ -386,7 +414,7 @@ export { acknowledgeEntry, queueEntries };
 export function codexQueueTransport(ports: {
   readonly connect: () => Promise<RpcClient>;
   readonly guards?: QueueGuards;
-  /** Local owner/HOLD and decision check before connecting. No native probes here. */
+  /** Local registry and store guard check before connecting. No native probes here. */
   readonly canConnect?: (message: NativeMessage) => boolean;
 }): {
   send(receiptPath: string, message: NativeMessage): Promise<TransportReceipt>;

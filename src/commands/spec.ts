@@ -6,7 +6,6 @@ import {
   COMPACTION_PREPARE_OPTIONS,
   COMPACTION_RESERVATION_OPTIONS,
 } from "./compaction.ts";
-import { DECISION_MARKER_OPTIONS, DECISION_RESOLVE_OPTIONS } from "./decisionMarker.ts";
 import { DOCTOR_OPTIONS } from "./doctor.ts";
 import { GRAPH_OPTIONS, GRAPH_WHY_OPTIONS } from "./graph.ts";
 import {
@@ -29,12 +28,6 @@ import {
   QUESTION_OPEN_OPTIONS,
   QUESTION_PROJECT_OPTIONS,
 } from "./questions.ts";
-import {
-  REMINDER_CHECK_OPTIONS,
-  REMINDER_CLAIM_OPTIONS,
-  REMINDER_LIST_OPTIONS,
-  REMINDER_SETTLE_OPTIONS,
-} from "./reminders.ts";
 import { REQUEST_CLOSE_OPTIONS } from "./requests.ts";
 import { EVENTS_INGEST_OPTIONS, REVIEW_DELIVER_OPTIONS, REVIEW_SHOW_OPTIONS } from "./runner.ts";
 import {
@@ -113,7 +106,6 @@ export const GROUPS = {
   store: "coordination store maintenance",
   decisions: "questions, holds and decisions (owner writes fenced by the registry)",
   session: "sessions and harness handoffs (writes fenced by the registry)",
-  reminder: "coordination reminder ledger",
   request: "imported requests (owner closes, fenced by the registry)",
   harness: "harness (claude, codex)",
   review: "runner seam (delivery-kit)",
@@ -394,20 +386,6 @@ export const SPECS = {
     options: DECISION_LIST_OPTIONS,
     summary: "list decision records in recording order",
   },
-  "decision marker": {
-    forms: [[]],
-    group: "decisions",
-    options: DECISION_MARKER_OPTIONS,
-    summary: "inspect your own Codex decision marker and its compare-and-swap revision",
-  },
-  "decision resolve": {
-    forms: [
-      ["expect", "expect-revision", "question-turn", "question-item", "answer-turn", "answer-item"],
-    ],
-    group: "decisions",
-    options: DECISION_RESOLVE_OPTIONS,
-    summary: "record an exact verified reply in your own Codex decision marker",
-  },
   "session start": {
     forms: [["native-id?", "worker?"]],
     group: "session",
@@ -446,32 +424,6 @@ export const SPECS = {
     options: HANDOFF_SHOW_OPTIONS,
     summary: "print a handoff, else the latest, with per-role times and its holds",
     values: { id: "ID" },
-  },
-  "reminder check": {
-    forms: [["id", "native-id?"]],
-    group: "reminder",
-    options: REMINDER_CHECK_OPTIONS,
-    summary: "verify an unsettled claim and its exact idle Codex recipient",
-  },
-  "reminder claim": {
-    forms: [["role", "original", "native-id?"]],
-    group: "reminder",
-    options: REMINDER_CLAIM_OPTIONS,
-    summary: "claim exact unread originals for one coordinator reminder",
-    values: { original: "ID" },
-  },
-  "reminder list": {
-    forms: [[]],
-    group: "reminder",
-    options: REMINDER_LIST_OPTIONS,
-    summary: "list unread originals with eligible exact wake evidence",
-  },
-  "reminder settle": {
-    forms: [["id", "outcome", "reason", "native-id?"]],
-    group: "reminder",
-    options: REMINDER_SETTLE_OPTIONS,
-    summary: "record a submitted, refused or uncertain reminder disposition",
-    values: { outcome: "submitted|refused|uncertain", reason: "CODE" },
   },
   "request close": {
     forms: [["id", "reason", "work?", "native-id?", "worker?"]],

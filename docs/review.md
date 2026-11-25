@@ -119,16 +119,15 @@ worker lineage under that role's native parent. The structured record includes e
 Codex parent and child IDs under the observed registry revision. An unreadable child gets no
 lineage proof. A review proves lineage for its slot. A caller still needs that child's exact native
 binding, and a caller-supplied worker label cannot provide it. Held, unsupported, unbound and
-unreadable roles retain an explicit coverage reason. Decision-marker lookup uses the
-recipient's game bus, or the review host bus for shared roles, through the same lookup as the
-wake guard.
+unreadable roles retain an explicit coverage reason. The read-only
+[decision marker](registry.md#decision-markers) lookup uses the recipient's game bus, or the
+review host bus for shared roles.
 
 The review records store decisions and pending store questions separately from local decision
 markers, native history and current prompt visibility. The native collector can verify an exact
 historical question or answer reference. Current prompt visibility remains unknown without an
 exact live capability. The brief counts the shared visibility limitation once; the exact
-per-role reasons and history remain in `review show`. The wake guard continues to require
-its own current clearance. In new `review show` records, `native.questions[].decisionMarker`
+per-role reasons and history remain in `review show`. In new `review show` records, `native.questions[].decisionMarker`
 reports the local marker's structural state. Invalid markers include a reason and, for incomplete
 resolution references, the invalid required field names. The diagnostic contains no marker
 values or answer text. A null diagnostic means the marker was not inspected.
@@ -148,9 +147,12 @@ count and the exception count.
 
 The brief is at most one page, 60 lines and 4096 bytes: open message counts by state and by
 recipient, unconfirmed messages, outstanding, failed, ambiguous and guarded wakes, runner events
-and COMPLETE records since the game's previous brief, store decisions, native prompt and history
-coverage, worker coverage and ready work handoffs. Exceptions fit in the remaining space. `review show` has the full
-details.
+and COMPLETE records since the game's previous brief, store decisions, worker coverage and ready
+work handoffs. The native prompt and history coverage lines appear only when at least one role
+had a supported native survey, that is, a bound active Codex role. Exceptions fit in the
+remaining space. Stalled and overdue originals take one line per recipient each, with the count,
+the oldest original's ID and its age; every other exception takes its own line. `review show` has
+the full details, including every exact ID.
 
 - `store-question-pending`: a question still pending in the store, with its exact ID and owner;
 - `question-pending`: an owner-attested pending question in a Codex role's latest-turn history,
@@ -163,25 +165,26 @@ details.
 - `worker-unknown`: a Codex worker parent whose child health could not be read, with its reason;
 - `stalled`: a message still `sent` or `delivered` that was open at the game's previous brief,
   that is, open across two distinct slots. Each exact ID is compared with the previous brief's
-  stalled IDs. New stalls appear first with `newlyStalled: true` in the detailed record.
+  stalled IDs. New stalls appear first with `newlyStalled: true` in the detailed record, and the
+  brief line counts them. Each detailed record carries the original's `sentAt`.
 - `retention-overdue`: a retained original open across two distinct slots whose declared next
-  boundary is due. The brief reports its recipient, recorded owner, reason and boundary so the
-  recipient can reconcile the original with its owner. Recognized deadlines are a timezone-qualified
+  boundary is due, so the recipient can reconcile the original with its owner. Recognized deadlines are a timezone-qualified
   ISO instant, `Next scheduled review, <instant>`, and `Next scheduled review`, which is due at the
   first recorded slot after retention. `msg retain --until ISO_TIMESTAMP` and
   `msg retain --next-review` record these boundaries explicitly. Other text remains valid for
-  dependencies and holds. The recipient retains control of the original and any hold.
+  dependencies and holds. The recipient retains control of the original and any hold. The
+  detailed record keeps each original's owner, reason and boundary.
 - `unconfirmed`: an imported uncertain delivery the recipient has not closed;
 - `wake-failed` and `wake-ambiguous`: an outstanding wake with that outcome;
 - `wake-guarded`: a wake-pending recipient whose last wake a guard refused.
 
 The existing brief includes the counts of newly stalled originals and newly overdue retention
 boundaries. Continuing cases and exact original IDs stay visible in the detailed review.
-After the commit the review checks wake-pending roles. A pending question does not withhold
-this wake; role holds, policy holds and the Codex native question check still do.
-It can rearm confirmed failures and existing Claude recovery cases. An outstanding Codex wake
-with unknown acceptance stays guarded. A secret-shaped brief omits question titles and
-retention text.
+After the commit the review sends one wake to each recipient with unread originals, the route
+recipient first: it clears the recipient's outstanding wake and wakes it through its harness
+adapter, as for [store wakes](store.md#wakes). A pending question does not withhold this wake;
+role holds, policy holds and the Codex native input check still do, and a Codex wake still queued
+from earlier is not duplicated. A secret-shaped brief omits question titles.
 
 `coordination-kit --root R review show [--game G] [--slot S]` prints the recorded brief for the
 slot, or the latest one, as one JSON line: `kind` `review-show`, the game, slot, recipient,
@@ -194,18 +197,20 @@ A missing brief exits 1 with `brief-missing`.
 
 ## Wake files
 
-A wake tells a Claude session that messages wait, without carrying them. Each conversation has one
-file, `<stateRoot>/wake/<conversation>.json` with a configured state root and `var/wake/` without
-one:
+A wake tells a Claude session that messages wait, without carrying them. Each role has one file,
+`<stateRoot>/wake/roles/<role>.json` with a configured state root and `var/wake/roles/` without
+one; a game role's file is `<game>/<role>.json` there:
 
 ```json
 { "schema": 1, "seq": 3, "role": "game-coordinator", "count": 2 }
 ```
 
 `seq` increases by one per write; `count` is the number of new messages. `writeWakeFile` replaces
-the file atomically under a per-conversation lock and refuses a torn file, whose seq is unknown.
-`msg send` writes it for a Claude recipient, at most once per outstanding wake
-([store wakes](store.md#wakes)). A Codex recipient's wake is one guarded control-socket queue add.
+the file atomically under a per-role lock and refuses a torn file, whose seq is unknown.
+`msg send` writes it for a Claude recipient, at most once per outstanding wake, and the
+scheduled review writes it once per review while originals stay unread
+([store wakes](store.md#wakes)). Because the file is keyed by role, a rebind changes nothing for
+the channel. A Codex recipient's wake is one guarded control-socket queue add.
 
 ## Claude channel
 
@@ -216,7 +221,10 @@ reconnect restarts the launch-time command. A command that runs `node
 same across kit releases, so an upgrade needs `npm ci` at the root and a reconnect, not a
 relaunch.
 
-After `notifications/initialized` the server polls its conversation's wake file. Each seq increase
+After `notifications/initialized` the server polls its role's wake file. With
+`--conversation UUID` the role is the one whose effective Claude conversation is that ID at the
+first poll that finds one; it stays fixed when `session start` later rebinds the role after
+`/clear`, so the running channel keeps announcing the role's wakes. Each seq increase
 emits one channel notification with the fixed text
 `N new messages for ROLE: run coordination-kit inbox` and `meta` `{"kind":"wake","seq":"N"}`.
 Increases between two polls coalesce into one notification, a seq is never announced twice and a
@@ -230,7 +238,7 @@ payload: the recipient reads its messages with `coordination-kit inbox`.
 ## Channel status file
 
 `claude channel` writes `<stateRoot>/channel/<conversation>.json` (`var/channel/` without a configured
-state root) once at start, for the conversation it serves:
+state root) once at start, for the conversation bound to its role then:
 
 ```json
 {

@@ -23,13 +23,14 @@ import { readRegistry } from "../../registry/store.ts";
 import { configuredStateRoot, stateRootConfigPath } from "../../stateRoot.ts";
 import { canonicalJson, eventHash, Store, STORE_FILE, storeRoot } from "../db.ts";
 import { CURSOR_FILE, LOG_FILE, QUARANTINE_FILE, readCursor } from "../ingest.ts";
-import { PROJECTIONS } from "../projections.ts";
+import { PROJECTIONS, RETIRED_TABLES } from "../projections.ts";
 import { GENESIS, type JsonObject, STORE_SCHEMA, type StoredEvent, StoreError } from "../types.ts";
 
 const BUSY_TIMEOUT_MS = 2500;
 const PROJECTION_TABLES = new Set(PROJECTIONS.flatMap(({ tables }) => [...tables]));
 // Graph indexes are derived separately from the store and have no authoritative rows.
 const REBUILDABLE_TABLES = new Set(["edges", "graph_nodes", "graph_index"]);
+const RETIRED = new Set(RETIRED_TABLES);
 const EVENT_TABLE = "events";
 
 export interface SqliteTableState {
@@ -153,7 +154,10 @@ function readState(db: DatabaseSync, collect?: StoredEvent[]): SqliteState {
     if (
       tables.some(
         (name) =>
-          name !== EVENT_TABLE && !PROJECTION_TABLES.has(name) && !REBUILDABLE_TABLES.has(name),
+          name !== EVENT_TABLE &&
+          !PROJECTION_TABLES.has(name) &&
+          !REBUILDABLE_TABLES.has(name) &&
+          !RETIRED.has(name),
       )
     ) {
       throw new StoreError("snapshot-unknown-tables");

@@ -1,5 +1,19 @@
 # Upgrading
 
+## Coordination Kit 5.3
+
+1. Retire the coordinator's guarded inbox reminder executor before or with the pin change. The
+   `reminder list`, `reminder claim`, `reminder check` and `reminder settle` verbs are removed:
+   the scheduled review now wakes every recipient with unread originals once per slot. `msg send`
+   no longer creates coordinator attention notices or prints `attention`.
+2. Stop calling `decision marker` and `decision resolve`; both are removed. No wake reads a
+   decision marker. The review still reports an existing marker's structure read-only.
+3. Claude wake files move from `wake/<conversation>.json` to `wake/roles/<role>.json` under the
+   state root. After `npm ci` at the coordinator root, reconnect each Claude role's channel with
+   `/mcp` so it runs the new code; the channel configuration is unchanged. Old per-conversation
+   wake files are no longer read and can be removed once every channel is reconnected.
+4. Journals and SQLite stores written by earlier versions open and rebuild as before.
+
 ## Coordination Kit 4.0
 
 1. Verify that the existing Delivery Kit runners accept Coordination Kit 4.x. Upgrade the

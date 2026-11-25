@@ -178,7 +178,7 @@ describe("scoped harness diagnostics", () => {
       activation: "unknown",
       native_hold: "unknown",
     });
-    const channel = join(test.layout.varDir, "wake", `${CLAUDE_TECH}.json`);
+    const channel = join(test.layout.varDir, "wake", "roles", `${ROLE}.json`);
     expect(report.roles[0]?.channel_reference).toEqual({ path: channel, source: "wake_file" });
     expect(existsSync(channel)).toBe(false);
     expect(JSON.stringify(report)).not.toContain("DO_NOT_PRINT");

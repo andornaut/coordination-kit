@@ -8,7 +8,6 @@ import type { Layout } from "../layout.ts";
 import { resolveRole } from "../registry/resolve.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
-import { attentionId, recordAttention, retireAttention } from "./attention.ts";
 import { MEMORY, Store } from "./db.ts";
 import { type CallerOptions, resolveCaller } from "./identity.ts";
 import {
@@ -36,8 +35,6 @@ import {
   type UnreadMessage,
 } from "./types.ts";
 import { type WakePorts, wakeRecipient, type WakeStatus } from "./wake.ts";
-
-const COORDINATOR = "game-coordinator";
 
 export interface StoreServiceContext {
   readonly layout: Layout;
@@ -99,51 +96,6 @@ export interface SendOutput {
   readonly message: MessageView;
   readonly duplicate: boolean;
   readonly wake: { readonly status: WakeStatus; readonly evidence: MessageWakeView };
-  readonly attention?: {
-    readonly id: string;
-    readonly status: "recorded" | "unavailable";
-    readonly wake?: WakeStatus;
-  };
-}
-
-/**
- * Route a confirmed unblock wake failure to the coordinator once. The original is already
- * committed. An attention write or wake failure must not turn that committed send into a retry.
- */
-async function notifyCoordinator(
-  ports: Parameters<typeof wakeRecipient>[0],
-  original: MessageView,
-): Promise<NonNullable<SendOutput["attention"]> | undefined> {
-  const { store } = ports;
-  let id = attentionId(original.to, original.id);
-  try {
-    const notice = store.transaction(() => {
-      const current = messageStatus(store, original.id);
-      const { outcome, wake } = messageWake(store, current.id, current.to, current.state);
-      if (
-        current.state !== "sent" ||
-        wake === null ||
-        (outcome !== "guarded" && outcome !== "failed")
-      ) {
-        return undefined;
-      }
-      return recordAttention(store, current.to, current.id);
-    });
-    if (notice === undefined) {
-      return undefined;
-    }
-    id = notice.id;
-    if (notice.duplicate) {
-      return { id, status: "recorded" };
-    }
-    try {
-      return { id, status: "recorded", wake: (await wakeRecipient(ports, COORDINATOR)).status };
-    } catch {
-      return { id, status: "recorded" };
-    }
-  } catch {
-    return { id, status: "unavailable" };
-  }
 }
 
 /** Commit the original, then attempt one guarded recipient wake. Repeating it is read-only. */
@@ -174,15 +126,6 @@ export async function storeSend(
       ...(context.ports === undefined ? {} : { ports: context.ports }),
     };
     const attempt = sent.duplicate ? undefined : await wakeRecipient(ports, to);
-    const attention =
-      !sent.duplicate &&
-      sent.message.intent === "unblock" &&
-      actor.role !== COORDINATOR &&
-      to !== COORDINATOR &&
-      Object.hasOwn(roles.roles, COORDINATOR) &&
-      (attempt?.status === "guarded" || attempt?.status === "failed")
-        ? await notifyCoordinator(ports, sent.message)
-        : undefined;
     const message = messageStatus(store, id);
     const evidence = messageWake(store, id, message.to, message.state);
     const previous: WakeStatus =
@@ -194,7 +137,6 @@ export async function storeSend(
             ? "none"
             : evidence.outcome;
     return {
-      ...(attention === undefined ? {} : { attention }),
       duplicate: sent.duplicate,
       message,
       schema: 1,
@@ -220,9 +162,6 @@ export async function storeInbox(
   return withStore(context, (store) =>
     store.transaction(() => {
       const inbox = readInbox(store, actor, selection);
-      if (inbox.delivered > 0) {
-        retireAttention(store, inbox.role);
-      }
       return {
         count: inbox.messages.length,
         delivered: inbox.delivered,
@@ -269,11 +208,7 @@ export async function storeDone(
   const actor = caller(context, options);
   return withStore(context, (store) =>
     store.transaction(() => {
-      const result = closeMessage(store, actor, id, input);
-      if (result.message.intent === "unblock" && !result.duplicate) {
-        retireAttention(store, actor.role);
-      }
-      return { ...result, schema: 1 as const };
+      return { ...closeMessage(store, actor, id, input), schema: 1 as const };
     }),
   );
 }
@@ -294,9 +229,6 @@ export async function storeRetain(
         owner,
         reason: input.reason,
       });
-      if (result.message.intent === "unblock" && !result.duplicate) {
-        retireAttention(store, actor.role);
-      }
       return { ...result, schema: 1 as const };
     }),
   );

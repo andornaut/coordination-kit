@@ -1,7 +1,8 @@
 // `coordination-kit claude channel`: the stdio MCP server that the recipient Claude session launches
-// from game-coordinator's node_modules. It watches the conversation's wake file and emits one
-// notification per seq increase. The conversation is `--conversation UUID`, else the Claude
-// conversation of the one reports.recipient that every game (or each `--game`) names.
+// from game-coordinator's node_modules. It watches its role's wake file and emits one notification
+// per seq increase. The role is the one whose Claude conversation is `--conversation UUID`, else
+// the one reports.recipient that every game (or each `--game`) names. The wake file is keyed by
+// role, so the channel keeps serving the role after `session start` rebinds it after /clear.
 import { writeSync } from "node:fs";
 import { parseArgs } from "node:util";
 
@@ -11,7 +12,7 @@ import { wakeFilePath, WakeWatcher } from "../adapters/claude/wakeFile.ts";
 import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { gameRecipients } from "../config.ts";
 import { EXIT_INVALID, EXIT_USAGE, type Handler, type Io } from "../io.ts";
-import { gameLayout, loadLayout } from "../layout.ts";
+import { gameLayout, type Layout, loadLayout } from "../layout.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import { readRegistry, RegistryMissing } from "../registry/store.ts";
 import { cliIdentity } from "../version.ts";
@@ -26,8 +27,8 @@ const DEFAULT_POLL_SECONDS = 5;
 
 class ChannelUsage extends Error {}
 
-/** The Claude conversation of the one reports.recipient the selected (or every) game names. */
-function recipientConversation(root: string, games: string[] | undefined): string {
+/** The one reports.recipient the selected (or every) game names, which must be on Claude. */
+function recipientRole(root: string, games: string[] | undefined): string {
   const layout = loadLayout(root);
   const recipients = gameRecipients(layout, games ?? Object.keys(layout.config.games));
   if (recipients.length !== 1) {
@@ -52,11 +53,21 @@ function recipientConversation(root: string, games: string[] | undefined): strin
   if (resolveHarness(registry, role) !== "claude") {
     throw new Error(`channel requires the claude harness for the recipient ${role}`);
   }
-  const conversation = resolveConversation(registry, role);
-  if (conversation === null) {
-    throw new Error(`the recipient ${role} has no claude conversation`);
+  return role;
+}
+
+/** The one role whose effective Claude conversation is `conversation`; throws until there is one. */
+function conversationRole(layout: Layout, conversation: string): string {
+  const registry = readRegistry(layout);
+  const roles = Object.keys(registry.roles).filter(
+    (role) =>
+      resolveHarness(registry, role) === "claude" &&
+      resolveConversation(registry, role) === conversation,
+  );
+  if (roles.length !== 1) {
+    throw new Error(`no single claude role is bound to ${conversation}`);
   }
-  return conversation;
+  return roles[0] as string;
 }
 
 export async function runChannel(
@@ -65,7 +76,8 @@ export async function runChannel(
   root: string,
   args: string[],
 ): Promise<number> {
-  let conversation: string;
+  let conversation: string | undefined;
+  let role: string | undefined;
   let pollSeconds: number;
   try {
     const { values } = parseArgs({
@@ -87,7 +99,8 @@ export async function runChannel(
       const layout = loadLayout(root);
       values.game.forEach((game) => gameLayout(layout, game));
     }
-    conversation = values.conversation ?? recipientConversation(root, values.game);
+    conversation = values.conversation;
+    role = conversation === undefined ? recipientRole(root, values.game) : undefined;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     io.err(`coordination-kit: ${message}\n`);
@@ -101,7 +114,7 @@ export async function runChannel(
     const identity = cliIdentity(io.entry);
     writeChannelStatus(layout, {
       argv: process.argv,
-      conversation,
+      conversation: conversation ?? (resolveConversation(readRegistry(layout), role!) as string),
       distSha256: identity.distSha256,
       pid: process.pid,
       schema: 1,
@@ -111,11 +124,15 @@ export async function runChannel(
   } catch {
     // The status file is diagnostic only; the channel serves without it.
   }
+  // `--conversation` names the role by its binding at the first poll that finds it; the role then
+  // stays fixed while its binding rotates.
+  const locate = (): string => {
+    const layout = loadLayout(root);
+    role ??= conversationRole(layout, conversation!);
+    return wakeFilePath(layout, role);
+  };
   return serve(
-    {
-      pollMs: pollSeconds * 1000,
-      wake: new WakeWatcher(() => wakeFilePath(loadLayout(root), conversation)),
-    },
+    { pollMs: pollSeconds * 1000, wake: new WakeWatcher(locate) },
     streams.input,
     streams.write,
   );

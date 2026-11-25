@@ -243,7 +243,13 @@ Event kinds: `msg.sent`, `msg.imported`, `inbox.read`, `msg.closed`, `msg.retain
 `hold.set`, `hold.released`, `hold.imported`,
 `request.imported`, `request.closed`, `store.retired`, `session.started`, `handoff.opened`,
 `handoff.ready`, `handoff.state` and `handoff.active`. A kind with no projection is still stored and chained, so a
-later projection can read it on its next rebuild. A store written before a projection existed
+later projection can read it on its next rebuild. A journal may also hold `reminder.claimed`,
+`reminder.settled`, `notice.consumed` and `notice.released` from the retired reminder ledger and
+native notice proofs, and generated coordinator attention as ordinary messages. They replay
+without error: a notice ends the exact outstanding wake it names, an attention message closed with
+`attention-source-cleared` keeps no delivery time, and the reminder kinds project nothing.
+Compaction still qualifies all of them. `store rebuild` drops the retired `pending_notices`,
+`reminder_claims` and `reminder_originals` tables. A store written before a projection existed
 gets that projection's tables when it is opened, filled from the existing events in one
 transaction; the events and their hashes are untouched.
 
@@ -329,109 +335,52 @@ Reads (`msg status` and `msg history` without `--include-body`, `question list`,
 ## Wakes
 
 A wake carries no payload. Its only text is `N new messages for ROLE: run coordination-kit inbox`,
-where `N` counts the recipient's `sent` messages.
+where `N` counts the recipient's `sent` messages. One adapter per harness delivers it to the
+role's current binding:
 
-- Claude: the store writes the conversation's wake file through `writeWakeFile`, which advances
-  `seq` by one; the channel coalesces increases between polls.
-- Codex: one control-socket `thread/queue/add` through the existing guarded queue path, with a
-  receipt at `wake/codex/<wake-id>.json` beside the store.
+- Claude: the store writes the role's [wake file](review.md#wake-files) through `writeWakeFile`,
+  which advances `seq` by one. The file is keyed by role, so the channel serving the role
+  announces it whichever conversation the role is bound to, including after a
+  [rebind after /clear](#rebind-after-clear).
+- Codex: one control-socket `thread/queue/add` through the guarded queue path, with a receipt at
+  `wake/codex/<wake-id>.json` beside the store.
 
 A wake is attempted only when the recipient is wake-pending, has `sent` messages and has no
-outstanding wake or notice for its current binding. Before claiming it, the store
-checks the registry: an unregistered, unbound or held recipient (`ownership` not `active`, or
-`phase` `held` or `source-held`) gets no wake. For Codex the guarded queue path also requires the
-recipient-bound decision marker and runs the native question check on the same connection.
-A guard refusal is logged as `guarded` and leaves nothing outstanding. A new original or the
-existing review can check the guard again. An identical send returns the original's recorded
-evidence without a native attempt. Claude collection clears the wake file reservation. The review
-can rearm a Claude wake unpulled for 30 minutes and recover confirmed failures at its existing slot.
-
-`msg status` and review report pre-connection Codex marker refusals as
-`decision-marker-absent`, `decision-marker-invalid`, `decision-marker-unreadable` or
-`decision-marker-pending`. Invalid includes a wrong conversation binding or incomplete
-resolution references. The role owner can inspect or correct the marker using verified
-evidence. Marker states and native question evidence are checked independently.
-Existing `decision-clearance` evidence remains readable.
-
-An exact collected wake may include retired generated coordinator attention. The journal
-records these disposition sequences as `attentionClosures`, separate from `inboxReads`.
-Their use still requires confirmed acceptance, verified native clearance and an empty queue.
-
-Codex queue dispatch and coordinator fallback share one outstanding reservation for the exact role
-and current native conversation. Pulling the durable inbox leaves that reservation in place. A
-confirmed pre-submission refusal releases it. An uncertain or interrupted queue claim
-requires a matching native history user item with the exact client request ID and wake text, plus
-complete queue inventory showing the exact item is no longer queued. A submitted or uncertain
-fallback requires a native history user item with the exact correlated fallback text. The store
-records positive native proof in `notice.consumed`.
-
-An accepted queue wake may also be released once its exact owner has pulled every claimed original.
-The store requires matching transport and journal receipts, a complete empty inventory on the
-current idle native conversation, and current decision clearance. For legacy claims without IDs,
-the first exact owner pull must contain the recorded count of originals sent by the claim.
-`notice.released` records the matching pull references separately from native consumption.
-Missing inventory, unresolved guard states, and older fallback notices without a correlation
-marker retain their reservation. An unsettled fallback stays reserved while the coordinator may
-still submit it. Both proof paths leave native queue entries untouched.
-
-Wake claims and refusals record the exact unread original IDs. An original arriving behind an
-outstanding wake records `wake.coalesced` with its own ID and the prior wake reference.
-`message_wakes` is an additive projection rebuilt from those events. Older events without
-original IDs yield unknown evidence, even when the recipient has other wake records.
-`msg status`, `inbox --peek` and the scheduled brief expose reason codes and safe references
-without native payloads. Peek and review leave delivery and handling to the recipient.
-
-After the registry checks, the store guard (`questionHoldGuard`, the default `storeGuard` port of
-`wakeRecipient`) withholds the wake while the recipient has a pending question or an active hold
-with scope `role`; it is logged `guarded` with `recipient-question-pending` or
+outstanding wake for its current binding. Before claiming it, the store checks the registry: an
+unregistered, unbound or held recipient (`ownership` not `active`, or `phase` `held` or
+`source-held`) gets no wake. Then the store guard (`questionHoldGuard`, the default `storeGuard`
+port of `wakeRecipient`) withholds it while the recipient has a pending question or an active
+hold with scope `role`, logged `guarded` with `recipient-question-pending` or
 `recipient-hold-active`. User policy holds for the exact role or its game withhold wakes with
 `recipient-policy-hold-active`. Work-scoped holds and role-owned game holds apply at work start.
-The guard is checked when claiming a wake and again before native delivery. For Codex the native
-question check still runs after it. A pending question withholds send-time wakes only: the
-scheduled review's wake pass skips the question check and keeps the hold and policy hold checks,
-so a pending question delays a wake by at most one review slot and cannot silence its role.
-One asynchronous reply can prove a completed multi-question prompt when it covers every exact
-rendered index and title once. Partial or mismatched replies keep the native guard closed. A wake
-carries no payload, so it never answers or clears a prompt or hold. When the owner answers or
-cancels its question or releases its hold, that command attempts one guarded wake for it, which
-goes out only if no other guard remains.
+The guard is checked when claiming a wake and again before native delivery.
 
-## Coordinator reminders
+For Codex the queue path also checks, on one control connection, that the thread takes direct
+input, waits on no question or approval (`state-unavailable` otherwise) and has a completed or
+in-progress latest turn, and that no earlier wake for the role is still queued
+(`native-notice-queue-unverified` when the queue cannot be read or holds one). A guard refusal is
+logged as `guarded` and leaves nothing outstanding. An identical send returns the original's
+recorded evidence without a native attempt.
 
-`reminder list` returns schema 2 and plans exact unread originals with a guarded or failed wake tied to the live
-recipient binding. It checks the current local decision marker, durable question and role or
-game holds. Each candidate has a `role`, the first 50 eligible IDs in `originals` and the remaining
-IDs in `deferredOriginals`, both in original send order. Missing, ambiguous, coalesced and
-unconfirmed evidence stays in ordinary unread status.
+Pulling the durable inbox clears the outstanding wake on either harness. An original arriving
+behind an outstanding wake records `wake.coalesced` with its own ID and the prior wake reference.
+A rebind leaves the earlier binding's outstanding wake unmatched, so the next send wakes the new
+binding once.
 
-The live coordinator alone can claim an ordered prefix of the current batch for an active Codex
-recipient. A later eligible arrival can extend the batch while the earlier prefix stays
-claimable. The claim records the exact IDs in their planned order, wake references, recipient
-conversation and registry revision in one transaction before any fallback can run. Its reply
-includes the top-level `notice` text with the claim ID in brackets. Submit that exact text to
-make the native history item attributable to this claim. An immediate `reminder check` verifies
-the unsettled claim, original state, guards, exact idle native recipient and absence of an
-earlier queued notice using read-only operations. An independent caller must also verify the
-attached frontend's empty composer and safe prompt state before submitting a wake-only reminder.
+The scheduled review is the one rearm path. After storing its brief, it clears the outstanding
+wake of every recipient with unread originals and sends each one wake through its adapter. A
+pending question withholds send-time wakes only: the review's wake pass skips the question check
+and keeps the hold and policy hold checks, so a pending question delays a wake by at most one
+review slot and cannot silence its role. A wake never answers or clears a prompt or hold. When the
+owner answers or cancels its question or releases its hold, that command attempts one guarded
+wake for it, which goes out only if no other guard remains.
 
-A past compaction refusal establishes only that the former wake did not submit. Current
-eligibility requires fresh native question clearance. For an absent marker or a current
-compaction proof gap, the qualified Codex 0.171.0 path checks the running server's version,
-exact root thread, idle status and completed current head before and after bounded current
-item inspection. Current question items refuse this path. Historical prompt disposition
-remains unknown. `reminder-owner-clearance-required` routes invalid, unreadable or pending
-markers back to their owner. `reminder-native-clearance-unverified` reports unavailable current evidence.
-
-Record `submitted`, `refused` or `uncertain` with `reminder settle` and a bounded reason code.
-`refused` means a definite refusal before submission. It permits another claim only after new
-exact wake evidence and a later recorded review. Submitted, uncertain and interrupted claims
-stay excluded from subsequent claims. Only one unsettled receipt can exist per role, including
-after an interruption. The `inFlight` list is for coordinator reconciliation and never resumes
-a claim. Recipient collection and handling remain separate from these receipts.
-
-`reminder.claimed` and `reminder.settled` append to the existing event stream. Their additive
-indexes are rebuilt from that stream for either authority. File-backed stores keep claim and
-settlement records under `coordinator/reminders/`.
+Wake claims and refusals record the exact unread original IDs. `message_wakes` is an additive
+projection rebuilt from those events. Older events without original IDs yield unknown evidence,
+even when the recipient has other wake records. `msg status`, `inbox --peek` and the scheduled
+brief expose reason codes and safe references without native payloads. Peek and review leave
+delivery and handling to the recipient. Recorded reason codes from earlier wake guards, such as
+`decision-marker-absent`, stay readable.
 
 ## Message history
 

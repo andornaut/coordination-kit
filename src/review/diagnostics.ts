@@ -176,9 +176,7 @@ function initial(layout: Layout, registry: Registry, role: string): RoleDiagnosi
     activation: "unknown",
     channel_command: harness === "claude" ? channelCommand(layout) : null,
     channel_reference:
-      harness === "claude" && id !== null
-        ? { path: wakeFilePath(layout, id), source: "wake_file" }
-        : null,
+      harness === "claude" ? { path: wakeFilePath(layout, role), source: "wake_file" } : null,
     channel_server: harness === "claude" ? channelServer(layout, id) : null,
     config_reference: { path: layout.registryFile, source: "registry" },
     effective_harness: harness,

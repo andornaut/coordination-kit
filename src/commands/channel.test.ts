@@ -117,12 +117,12 @@ describe("claude channel options", () => {
     const wake = { count: 2, role: "game-coordinator" };
     try {
       await poll(0);
-      writeWakeFile(fixture.layout, RECIPIENT, wake);
+      writeWakeFile(fixture.layout, wake);
       await poll(1);
-      writeWakeFile(fixture.layout, RECIPIENT, wake);
-      writeWakeFile(fixture.layout, RECIPIENT, { ...wake, count: 4 });
+      writeWakeFile(fixture.layout, wake);
+      writeWakeFile(fixture.layout, { ...wake, count: 4 });
       await poll(2);
-      writeFileSync(wakeFilePath(fixture.layout, RECIPIENT), '{"schema":1,"seq":');
+      writeFileSync(wakeFilePath(fixture.layout, wake.role), '{"schema":1,"seq":');
       await poll(2);
     } finally {
       input.end();
@@ -136,6 +136,53 @@ describe("claude channel options", () => {
       {
         content: "4 new messages for game-coordinator: run coordination-kit inbox",
         meta: { kind: "wake", seq: "3" },
+      },
+    ]);
+  });
+
+  it("keeps delivering the role's wakes after session start rebinds it after /clear", async () => {
+    const fixture = claudeFixture();
+    const input = new PassThrough();
+    const lines: string[] = [];
+    const done = runChannel(
+      { input, write: (line) => void lines.push(line) },
+      io(),
+      fixture.layout.root,
+      ["--conversation", RECIPIENT, "--poll-seconds", "3600"],
+    );
+    const drain = async (count: number) => {
+      input.write('{"method":"notifications/initialized"}\n');
+      await vi.waitFor(() => expect(lines).toHaveLength(count));
+    };
+    const wake = { count: 1, role: "game-coordinator" };
+    try {
+      await drain(0);
+      writeWakeFile(fixture.layout, wake);
+      await drain(1);
+      // The /clear rebind rotates the role's Claude conversation while the channel keeps running.
+      updateRegistry(fixture.layout, 1, (draft) => {
+        draft.roles["game-coordinator"]!.conversations.claude =
+          "00000000-0000-4000-8000-0000000000f1";
+      });
+      writeWakeFile(fixture.layout, { ...wake, count: 3 });
+      await drain(2);
+      input.write('{"method":"notifications/initialized"}\n');
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      expect(lines).toHaveLength(2);
+    } finally {
+      input.end();
+      expect(await done).toBe(EXIT_OK);
+    }
+    expect(lines.map((line) => JSON.parse(line).params)).toEqual([
+      {
+        content: "1 new messages for game-coordinator: run coordination-kit inbox",
+        meta: { kind: "wake", seq: "1" },
+      },
+      {
+        content: "3 new messages for game-coordinator: run coordination-kit inbox",
+        meta: { kind: "wake", seq: "2" },
       },
     ]);
   });

@@ -3,19 +3,23 @@ import { dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { claudeFixture, RECIPIENT } from "../../review/fixtures.ts";
+import { claudeFixture } from "../../review/fixtures.ts";
 import { readWakeFile, wakeFilePath, wakeText, WakeWatcher, writeWakeFile } from "./wakeFile.ts";
 
 const WAKE = { count: 2, role: "game-coordinator" };
+const ROLE = WAKE.role;
 
 describe("wake files", () => {
-  it("lives under var/ without an active protocol and advances seq atomically", () => {
+  it("is keyed by role under var/ without an active protocol and advances seq atomically", () => {
     const { layout } = claudeFixture();
-    const path = wakeFilePath(layout, RECIPIENT);
-    expect(path).toBe(join(layout.varDir, "wake", `${RECIPIENT}.json`));
+    const path = wakeFilePath(layout, ROLE);
+    expect(path).toBe(join(layout.varDir, "wake", "roles", "game-coordinator.json"));
+    expect(wakeFilePath(layout, "archies-dog-walks/tech")).toBe(
+      join(layout.varDir, "wake", "roles", "archies-dog-walks", "tech.json"),
+    );
     expect(readWakeFile(path)).toBe("absent");
-    expect(writeWakeFile(layout, RECIPIENT, WAKE)).toBe(1);
-    expect(writeWakeFile(layout, RECIPIENT, { ...WAKE, count: 3 })).toBe(2);
+    expect(writeWakeFile(layout, WAKE)).toBe(1);
+    expect(writeWakeFile(layout, { ...WAKE, count: 3 })).toBe(2);
     expect(readWakeFile(path)).toEqual({ count: 3, role: "game-coordinator", seq: 2 });
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
       count: 3,
@@ -30,16 +34,14 @@ describe("wake files", () => {
 
   it("refuses an invalid wake and a torn file whose seq is unknown", () => {
     const { layout } = claudeFixture();
-    expect(() =>
-      writeWakeFile(layout, RECIPIENT, { count: 0, role: "game-coordinator" }),
-    ).toThrow();
-    expect(() => writeWakeFile(layout, RECIPIENT, { count: 1, role: "../x" })).toThrow();
-    expect(() => writeWakeFile(layout, "not-a-uuid", WAKE)).toThrow();
-    const path = wakeFilePath(layout, RECIPIENT);
+    expect(() => writeWakeFile(layout, { count: 0, role: "game-coordinator" })).toThrow();
+    expect(() => writeWakeFile(layout, { count: 1, role: "../x" })).toThrow();
+    expect(() => wakeFilePath(layout, "../x")).toThrow();
+    const path = wakeFilePath(layout, ROLE);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, '{"schema":1,"seq":');
     expect(readWakeFile(path)).toBe("invalid");
-    expect(() => writeWakeFile(layout, RECIPIENT, WAKE)).toThrow(/unreadable/);
+    expect(() => writeWakeFile(layout, WAKE)).toThrow(/unreadable/);
     for (const value of [
       { count: 1, role: "game-coordinator", schema: 1, seq: 0 },
       { count: 1, role: "game-coordinator", schema: 2, seq: 1 },
@@ -55,24 +57,24 @@ describe("wake files", () => {
 describe("WakeWatcher", () => {
   it("announces each seq increase once, coalescing increases between polls", () => {
     const { layout } = claudeFixture();
-    const path = wakeFilePath(layout, RECIPIENT);
+    const path = wakeFilePath(layout, ROLE);
     const watcher = new WakeWatcher(() => path);
     expect(existsSync(path)).toBe(false);
     expect(watcher.poll()).toBeUndefined();
-    writeWakeFile(layout, RECIPIENT, WAKE);
+    writeWakeFile(layout, WAKE);
     expect(watcher.poll()).toEqual({ ...WAKE, seq: 1 });
     expect(watcher.poll()).toBeUndefined();
-    writeWakeFile(layout, RECIPIENT, WAKE);
-    writeWakeFile(layout, RECIPIENT, { ...WAKE, count: 5 });
+    writeWakeFile(layout, WAKE);
+    writeWakeFile(layout, { ...WAKE, count: 5 });
     expect(watcher.poll()).toEqual({ count: 5, role: "game-coordinator", seq: 3 });
     expect(watcher.poll()).toBeUndefined();
   });
 
   it("announces a wake present at startup once and never announces a lower seq", () => {
     const { layout } = claudeFixture();
-    const path = wakeFilePath(layout, RECIPIENT);
-    writeWakeFile(layout, RECIPIENT, WAKE);
-    writeWakeFile(layout, RECIPIENT, WAKE);
+    const path = wakeFilePath(layout, ROLE);
+    writeWakeFile(layout, WAKE);
+    writeWakeFile(layout, WAKE);
     const watcher = new WakeWatcher(() => path);
     expect(watcher.poll()).toEqual({ ...WAKE, seq: 2 });
     expect(watcher.poll()).toBeUndefined();
@@ -86,7 +88,7 @@ describe("WakeWatcher", () => {
 
   it("survives a missing, torn or unlocatable file", () => {
     const { layout } = claudeFixture();
-    const path = wakeFilePath(layout, RECIPIENT);
+    const path = wakeFilePath(layout, ROLE);
     let locatable = false;
     const watcher = new WakeWatcher(() => {
       if (!locatable) {

@@ -86,11 +86,7 @@ export function claudeRoute(
   return roleRoute(ws, "claude", RECIPIENT, [ARCHIE], change);
 }
 
-export function clear(ws: Workspace, recipient = RECIPIENT, state = "clear"): void {
-  ws.write(`unblock/decisions/${recipient}.json`, JSON.stringify({ thread_id: recipient, state }));
-}
-
-/** A Claude-harness game: registry roles, its route, clearance and an idle recipient. */
+/** A Claude-harness game: registry roles, its route and an idle recipient. */
 export function claudeGame(ws: Workspace, options: { recipient?: boolean } = {}): void {
   ws.writeRegistry({
     schema: 1,
@@ -108,7 +104,6 @@ export function claudeGame(ws: Workspace, options: { recipient?: boolean } = {})
     ...(options.recipient ? { recipient: "game-coordinator" } : {}),
   };
   ws.writeRoute(claudeRoute(ws));
-  clear(ws);
   agents(ws, "idle");
 }
 

@@ -1,7 +1,8 @@
-// Per-conversation wake files. `<stateRoot>/wake/<conversation>.json` (or `var/wake/` without a
+// Per-role wake files. `<stateRoot>/wake/roles/<role>.json` (or `var/wake/roles/` without a
 // configured state root) holds `{"schema":1,"seq":N,"role":ROLE,"count":C}` with a monotonic `seq`.
-// A writer replaces it atomically; the Claude channel announces each increase once. A wake carries
-// no payload: the recipient pulls its messages.
+// A game role's file is `<game>/<role>.json` under that directory. A writer replaces it
+// atomically; the Claude channel serving the role announces each increase once, whichever
+// conversation the role is bound to. A wake carries no payload: the recipient pulls its messages.
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -9,7 +10,6 @@ import { readJsonIfExists, writeJsonDurable } from "../../durable.ts";
 import type { Layout } from "../../layout.ts";
 import { withLock } from "../../lock.ts";
 import { stateRoot } from "../../stateRoot.ts";
-import { canonicalUuid } from "../shared/ids.ts";
 import { isRecord } from "../shared/pyjson.ts";
 
 export interface Wake {
@@ -21,10 +21,12 @@ export interface Wake {
 const KEYS = ["count", "role", "schema", "seq"];
 const ROLE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$/;
 
-/** The wake file of `conversation`: under the state root. */
-export function wakeFilePath(layout: Layout, conversation: string): string {
-  const root = stateRoot(layout);
-  return join(root, "wake", `${canonicalUuid(conversation)}.json`);
+/** The wake file of `role`: under the state root. */
+export function wakeFilePath(layout: Layout, role: string): string {
+  if (!ROLE.test(role)) {
+    throw new Error("wake needs a role name");
+  }
+  return join(stateRoot(layout), "wake", "roles", `${role}.json`);
 }
 
 function positive(value: unknown): value is number {
@@ -57,19 +59,18 @@ export function readWakeFile(path: string): Wake | "absent" | "invalid" {
 }
 
 /**
- * Announce `count` new messages for `role` to `conversation`: replace its wake file atomically
- * with the next `seq`, under a per-conversation lock. Returns the new seq. A torn or malformed
- * file is refused, because its seq is unknown.
+ * Announce `count` new messages for `role`: replace its wake file atomically with the next `seq`,
+ * under a per-role lock. Returns the new seq. A torn or malformed file is refused, because its
+ * seq is unknown.
  */
 export function writeWakeFile(
   layout: Layout,
-  conversation: string,
   wake: { readonly role: string; readonly count: number },
 ): number {
   if (!ROLE.test(wake.role) || !positive(wake.count)) {
     throw new Error("wake needs a role name and a positive message count");
   }
-  const path = wakeFilePath(layout, conversation);
+  const path = wakeFilePath(layout, wake.role);
   mkdirSync(dirname(path), { mode: 0o700, recursive: true });
   return withLock(`${path.slice(0, -".json".length)}.lock`, () => {
     const current = readWakeFile(path);

@@ -126,6 +126,118 @@ describe("Store", () => {
     store.close();
   });
 
+  it("rebuilds a journal holding retired reminder, notice and attention events", () => {
+    const store = Store.open(scratch());
+    // An older store also holds the retired projections' tables.
+    store.db.exec(`CREATE TABLE pending_notices (id TEXT PRIMARY KEY);
+      CREATE TABLE reminder_claims (id TEXT PRIMARY KEY);
+      CREATE TABLE reminder_originals (claim_id TEXT, original_id TEXT)`);
+    const system = { nativeId: null, role: null };
+    const coordinator = { nativeId: null, role: "game-coordinator" };
+    const codex = "00000000-0000-4000-8000-0000000000d3";
+    sendMessage(store, SENDER, { body: "b\n", id: uuid(1), intent: "queue", to: RECIPIENT.role });
+    const wake = (id: string) => {
+      const claimed = store.append({
+        actor: system,
+        key: `wake.claimed:${id}`,
+        kind: "wake.claimed",
+        payload: {
+          conversation: codex,
+          count: 1,
+          harness: "codex",
+          messages: [uuid(1)],
+          role: RECIPIENT.role,
+          wake: id,
+        },
+      });
+      store.append({
+        actor: system,
+        key: `wake.completed:${id}`,
+        kind: "wake.completed",
+        payload: {
+          blocker: null,
+          detail: null,
+          outcome: "accepted",
+          role: RECIPIENT.role,
+          wake: id,
+        },
+      });
+      return claimed.event.seq;
+    };
+    wake("w-1");
+    store.append({
+      actor: system,
+      key: "notice.consumed:w-1",
+      kind: "notice.consumed",
+      payload: {
+        conversation: codex,
+        id: "w-1",
+        item: "item-1",
+        role: RECIPIENT.role,
+        turn: "turn-1",
+      },
+    });
+    store.append({
+      actor: coordinator,
+      key: "reminder.claimed:r-1",
+      kind: "reminder.claimed",
+      payload: {
+        harness: "codex",
+        id: "r-1",
+        nativeId: codex,
+        originals: [{ id: uuid(1), wake: "w-1" }],
+        revision: 1,
+        role: RECIPIENT.role,
+      },
+    });
+    store.append({
+      actor: coordinator,
+      key: "reminder.settled:r-1",
+      kind: "reminder.settled",
+      payload: { id: "r-1", outcome: "submitted", reason: "typed" },
+    });
+    const claimSeq = wake("w-2");
+    store.append({
+      actor: system,
+      key: "notice.released:w-2",
+      kind: "notice.released",
+      payload: {
+        claimSeq,
+        conversation: codex,
+        id: "w-2",
+        inboxReads: [],
+        queueId: "queue-w-2",
+        reason: "accepted-queue-absent-originals-collected",
+        role: RECIPIENT.role,
+      },
+    });
+    sendMessage(store, coordinator, {
+      body: "Urgent work remains unread.",
+      id: uuid(2),
+      intent: "queue",
+      links: [{ kind: "unblock-recipient", ref: RECIPIENT.role }],
+      to: "game-coordinator",
+    });
+    closeMessage(store, coordinator, uuid(2), { evidence: ["attention-source-cleared"] });
+    const before = messages(store);
+    const wakes = store.db.prepare("SELECT * FROM wake_state ORDER BY role").all();
+    expect(wakes).toContainEqual({ outstanding: null, pending: 1, role: RECIPIENT.role });
+    expect(store.rebuild().events).toBe(store.events().length);
+    expect(messages(store)).toEqual(before);
+    expect(store.db.prepare("SELECT * FROM wake_state ORDER BY role").all()).toEqual(wakes);
+    expect(
+      store.db.prepare("SELECT state, delivered_at FROM messages WHERE id = ?").get(uuid(2)),
+    ).toEqual({ delivered_at: null, state: "handled" });
+    expect(
+      store.db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE name IN ('pending_notices', 'reminder_claims', 'reminder_originals')",
+        )
+        .all(),
+    ).toEqual([]);
+    store.close();
+  });
+
   it("makes a repeated idempotency key a no-op that returns the stored event", () => {
     const store = Store.open(scratch());
     const actor = { nativeId: null, role: null };

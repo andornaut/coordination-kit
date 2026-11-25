@@ -1,5 +1,6 @@
-// Recipient-bound user-decision clearance. The marker is written by the
-// recipient's owner. A missing or invalid marker is never clearance.
+// Read-only recipient decision markers. The scheduled review reports a Codex role's marker
+// structure and passes its resolutions to the native question collectors, and question reconcile
+// reads them the same way. No wake depends on a marker.
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -114,10 +115,6 @@ export function inspectDecisionRecord(
 /** The validated marker in `<unblock>/decisions/<recipient>.json`, or null. */
 export function decisionRecord(unblockDir: string, recipient: string): DecisionRecord | null {
   return inspectDecisionMarker(unblockDir, recipient).record;
-}
-
-export function decisionClear(unblockDir: string, recipient: string): boolean {
-  return inspectDecisionMarker(unblockDir, recipient).state === "clear";
 }
 
 /** The bus `unblock` directory holding a role's local decision markers, or null. */

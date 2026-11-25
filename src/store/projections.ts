@@ -4,14 +4,11 @@
 // add appliers for existing kinds and pick them up on the next rebuild.
 import type { DatabaseSync } from "node:sqlite";
 
-import { ATTENTION_CLEARED } from "./attention.ts";
 import { QUESTION_CODEX_PROJECTION } from "./codexQuestions.ts";
 import { HANDOFFS_PROJECTION } from "./handoffs.ts";
 import { MESSAGE_WAKE_PROJECTION } from "./messageWake.ts";
-import { NOTICE_PROJECTION } from "./noticesInFlight.ts";
 import { POLICY_HOLDS_PROJECTION } from "./policyHolds.ts";
 import { QUESTION_ANSWERS_PROJECTION, QUESTIONS_PROJECTION } from "./questions.ts";
-import { REMINDER_PROJECTION } from "./reminders.ts";
 import { REQUESTS_PROJECTION } from "./requests.ts";
 import type { JsonObject, StoredEvent } from "./types.ts";
 import { WORK_PROJECTION } from "./work.ts";
@@ -160,11 +157,12 @@ const inboxRead = (db: DatabaseSync, event: StoredEvent): void => {
 
 const closed = (db: DatabaseSync, event: StoredEvent): void => {
   const p = event.payload;
+  // A journal may hold generated coordinator attention closed without delivery.
   const retiredAttention =
     event.actor.role === "game-coordinator" &&
     event.actor.nativeId === null &&
     Array.isArray(p.evidence) &&
-    p.evidence[0] === ATTENTION_CLEARED;
+    p.evidence[0] === "attention-source-cleared";
   db.prepare(
     `UPDATE messages SET state = ?, closed_at = ?, delivered_at = COALESCE(delivered_at, ?),
        work = ?, superseded_by = ?, evidence = ?, updated_seq = ?, updated_at = ?
@@ -261,6 +259,14 @@ const wakeRearmed = (db: DatabaseSync, event: StoredEvent): void => {
   );
 };
 
+/** A journal may hold native notice proofs, each of which ended its exact outstanding wake. */
+const noticeEnded = (db: DatabaseSync, event: StoredEvent): void => {
+  db.prepare(`UPDATE wake_state SET outstanding = NULL WHERE role = ? AND outstanding = ?`).run(
+    text(event.payload, "role"),
+    text(event.payload, "id"),
+  );
+};
+
 export const MESSAGES_PROJECTION: Projection = {
   apply: {
     "inbox.read": inboxRead,
@@ -268,6 +274,8 @@ export const MESSAGES_PROJECTION: Projection = {
     "msg.imported": imported,
     "msg.retained": retained,
     "msg.sent": sent,
+    "notice.consumed": noticeEnded,
+    "notice.released": noticeEnded,
     "wake.claimed": wakeClaimed,
     "wake.completed": wakeCompleted,
     "wake.guarded": wakeGuarded,
@@ -392,6 +400,14 @@ export const PROJECTIONS: readonly Projection[] = [
   WORK_PROJECTION,
   HANDOFFS_PROJECTION,
   REQUESTS_PROJECTION,
-  REMINDER_PROJECTION,
-  NOTICE_PROJECTION,
+];
+
+/**
+ * Tables of retired projections that an older store may still hold. Rebuild drops them; their
+ * events (`reminder.claimed`, `reminder.settled`) stay in the journal and project nothing.
+ */
+export const RETIRED_TABLES: readonly string[] = [
+  "pending_notices",
+  "reminder_claims",
+  "reminder_originals",
 ];

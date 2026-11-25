@@ -8,7 +8,6 @@ import {
   compactionPrepare,
   compactionReserve,
 } from "./commands/compaction.ts";
-import { decisionMarker, decisionResolve } from "./commands/decisionMarker.ts";
 import { harnessDoctor } from "./commands/doctor.ts";
 import { graph, graphWhy } from "./commands/graph.ts";
 import { harnessSelect } from "./commands/harness.ts";
@@ -31,12 +30,6 @@ import {
   questionReconcile,
 } from "./commands/questions.ts";
 import { claudeReady, codexReady, harnessReady } from "./commands/ready.ts";
-import {
-  reminderCheck,
-  reminderClaim,
-  reminderList,
-  reminderSettle,
-} from "./commands/reminders.ts";
 import { requestClose } from "./commands/requests.ts";
 import { eventsIngest, reviewDeliver, reviewShow } from "./commands/runner.ts";
 import {
@@ -110,8 +103,6 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "claude ready": claudeReady,
   "codex ready": codexReady,
   "decision list": decisionList,
-  "decision marker": decisionMarker,
-  "decision resolve": decisionResolve,
   "events ingest": eventsIngest,
   graph,
   "graph why": graphWhy,
@@ -143,10 +134,6 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "question project": questionProject,
   "question reask": questionReask,
   "question reconcile": questionReconcile,
-  "reminder check": reminderCheck,
-  "reminder claim": reminderClaim,
-  "reminder list": reminderList,
-  "reminder settle": reminderSettle,
   "request close": requestClose,
   "review deliver": reviewDeliver,
   "review show": reviewShow,

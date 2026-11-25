@@ -1,9 +1,6 @@
 // Scratch coordinator trees with a registry for the store tests. Synthetic IDs only.
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-
 import type { RpcClient } from "../adapters/codex/rpc.ts";
-import { gameLayout, type Layout, loadLayout } from "../layout.ts";
+import { type Layout, loadLayout } from "../layout.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
 import { makeFixture } from "../testFixtures.ts";
 
@@ -63,16 +60,6 @@ export function storeFixture(
     transfers: [],
   } as unknown as Omit<Registry, "revision" | "updatedAt">);
   return { base, layout, root };
-}
-
-/** The recipient-bound decision marker the Codex guard requires before any native read. */
-export function clearDecision(layout: Layout, conversation: string): void {
-  const directory = join(gameLayout(layout, GAME).busDir, "unblock", "decisions");
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(
-    join(directory, `${conversation}.json`),
-    JSON.stringify({ resolutions: [], state: "clear", thread_id: conversation }),
-  );
 }
 
 export interface FakeCodex {

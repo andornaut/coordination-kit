@@ -20,23 +20,16 @@ import { derivedId } from "../store/notices.ts";
 import { setPolicyHold } from "../store/policyHolds.ts";
 import { openQuestion, releaseHold, setHold } from "../store/questions.ts";
 import { storeSend } from "../store/service.ts";
-import {
-  ART,
-  clearDecision,
-  COORDINATOR,
-  fakeCodex,
-  GAME,
-  storeFixture,
-  TECH,
-} from "../store/testStore.ts";
+import { ART, COORDINATOR, fakeCodex, GAME, storeFixture, TECH } from "../store/testStore.ts";
 import { blockWork, finishWork, readyWork, startWork } from "../store/work.ts";
 import { deliverReview, reviewResultsDir } from "./deliver.ts";
 import { coordinationEmit } from "./emit.ts";
 import {
   BRIEF_MAX_BYTES,
   BRIEF_MAX_LINES,
+  type BriefException,
+  composeBrief,
   showBrief,
-  STALE_WAKE_MS,
   storeReview,
 } from "./storeBrief.ts";
 
@@ -208,22 +201,37 @@ describe("stored review brief", () => {
     expect(briefs(layout)[0]!.body).toContain("Active user policy holds: 1");
   });
 
-  it("writes an accepted Claude wake again once it has gone unpulled for the stale interval", async () => {
+  it("sends one wake per recipient with unread originals through each harness adapter", async () => {
     const { layout } = await storeModeFixture();
     const game = gameLayout(layout, GAME);
-    await send(layout, 1);
-    const seq = (): number | string => {
-      const wake = readWakeFile(wakeFilePath(layout, TECH));
+    const codex = fakeCodex(ART);
+    const ports = { connect: () => Promise.resolve(codex.client) };
+    await send(layout, 2);
+    for (const n of [1, 2]) {
+      // eslint-disable-next-line no-await-in-loop
+      await storeSend(
+        { env: SENDER, layout, ports },
+        {},
+        { body: `Art ${n}.`, id: uuid(800 + n), to: ART_ROLE },
+      );
+    }
+    await storeSend(
+      { env: SENDER, layout },
+      {},
+      { body: "Held.", id: uuid(900), to: `${GAME}/gameplay` },
+    );
+    const seq = (role: string): number | string => {
+      const wake = readWakeFile(wakeFilePath(layout, role));
       return typeof wake === "string" ? wake : wake.seq;
     };
-    expect(seq()).toBe(1);
-    const at = (ms: number) => () => new Date(Date.now() + ms).toISOString();
-    // Inside the interval the outstanding wake stands.
-    await deliverReview(layout, game, SLOT, undefined, { env: {}, now: at(STALE_WAKE_MS / 3) });
-    expect(seq()).toBe(1);
-    // Past it, the review rearms and the recipient's wake file gets the next seq.
-    await deliverReview(layout, game, NEXT, undefined, { env: {}, now: at(STALE_WAKE_MS * 2) });
-    expect(seq()).toBe(2);
+    expect([seq(TECH_ROLE), codex.adds().length]).toEqual([1, 1]);
+    await deliverReview(layout, game, SLOT, undefined, { env: {}, wakePorts: ports });
+    // Exactly one more wake each, the brief's recipient included; the held role gets none.
+    expect([seq(TECH_ROLE), codex.adds().length, seq("game-coordinator")]).toEqual([2, 2, 1]);
+    expect(seq(`${GAME}/gameplay`)).toBe("absent");
+    await deliverReview(layout, game, NEXT, undefined, { env: {}, wakePorts: ports });
+    expect([seq(TECH_ROLE), codex.adds().length, seq("game-coordinator")]).toEqual([3, 3, 2]);
+    expect(seq(`${GAME}/gameplay`)).toBe("absent");
   });
 
   it("wakes past a pending question at the review boundary but not past a role hold", async () => {
@@ -235,7 +243,7 @@ describe("stored review brief", () => {
     setHold(store, owner, { id: "h-paused", reason: "Paused.", scope: "role" });
     store.close();
     await send(layout, 1);
-    const wake = () => readWakeFile(wakeFilePath(layout, TECH));
+    const wake = () => readWakeFile(wakeFilePath(layout, TECH_ROLE));
     expect(wake()).toBe("absent");
     await deliverReview(layout, game, SLOT, undefined, { env: {} });
     expect(wake()).toBe("absent");
@@ -261,9 +269,15 @@ describe("stored review brief", () => {
     expect(next.body.split("\n").length).toBeLessThanOrEqual(BRIEF_MAX_LINES);
     expect(Buffer.byteLength(next.body, "utf8")).toBeLessThanOrEqual(BRIEF_MAX_BYTES);
     expect(next.body).toContain("Exceptions: 102");
+    // The 100 stalled originals share one line; review show keeps every exact ID.
     expect(next.body).toMatch(
-      /- \d+ more: coordination-kit review show --game archies-dog-walks --slot 2026-11-18T16:30:00.000Z/,
+      new RegExp(
+        `- stalled ${TECH_ROLE}: 100 open across two slots \\(100 newly stalled\\), ` +
+          `oldest ${uuid(1)}, age \\d+[mhd]\n`,
+      ),
     );
+    expect(next.body).not.toContain(uuid(50));
+    expect(next.body).not.toContain(" more: ");
     expect(next.body).toContain("100 newly stalled");
     expect(brief(layout, LATER)).not.toContain("New review exceptions:");
 
@@ -297,20 +311,22 @@ describe("stored review brief", () => {
       },
     });
     expect(shown.exceptions).toHaveLength(102);
+    expect(shown.exceptions).toContainEqual(
+      expect.objectContaining({ id: uuid(50), kind: "stalled", role: TECH_ROLE }),
+    );
     expect(shown.body).toBe(next.body);
     out = "";
     expect(await main(io, ["--root", root, "review", "show"])).toBe(EXIT_OK);
     expect(JSON.parse(out)).toMatchObject({ slot: "2026-11-18T17:30:00.000Z" });
   });
 
-  it("surveys the exact unread original without rearming ambiguous Codex acceptance", async () => {
+  it("records the exact unread original before the review wakes again", async () => {
     const { layout } = await storeModeFixture();
     const game = gameLayout(layout, GAME);
     const codex = fakeCodex(ART, () => {
       throw new Error("Connection dropped.");
     });
     const ports = { connect: () => Promise.resolve(codex.client) };
-    clearDecision(layout, ART);
     const id = uuid(901);
     const sent = await storeSend(
       { env: SENDER, layout, ports },
@@ -322,7 +338,8 @@ describe("stored review brief", () => {
     expect(showBrief(layout, { game: GAME, slot: SLOT })).toMatchObject({
       unread: [{ id, to: ART_ROLE, wake: sent.wake.evidence }],
     });
-    expect(codex.adds()).toHaveLength(1);
+    // The queue shows no earlier wake, so the review's one wake is not a duplicate.
+    expect(codex.adds()).toHaveLength(2);
   });
 
   it("reports a retained original once its declared boundary is due across two slots", async () => {
@@ -381,15 +398,17 @@ describe("stored review brief", () => {
         kind: "retention-overdue",
         retention: { at: "2026-11-18T15:00:00.000Z", nextBoundary, owner, reason },
         role: TECH_ROLE,
+        sentAt: expect.any(String),
         state: "retained",
       },
       expect.objectContaining({ id: uuid(4) }),
     ]);
     const due = brief(layout, NEXT);
-    expect(due).toContain("recipient reconciles the original with its owner");
+    expect(due).toContain(`- retention-overdue ${TECH_ROLE}: 2 due, oldest ${uuid(1)}, age `);
+    expect(due).toContain("recipient reconciles each original with its owner");
     expect(due).toContain("2 newly overdue retained");
     const later = brief(layout, LATER);
-    expect(later).toContain(`- retention-overdue ${uuid(1)}`);
+    expect(later).toContain(`- retention-overdue ${TECH_ROLE}: 2 due, oldest ${uuid(1)}`);
     expect(later).not.toContain("New review exceptions:");
     expect(briefs(layout)).toHaveLength(3);
     const store = Store.forLayout(layout);
@@ -413,9 +432,10 @@ describe("stored review brief", () => {
     await deliverReview(layout, game, LATER, undefined, { env: {} });
 
     const last = brief(layout, LATER);
-    expect(last).toContain(`- stalled ${uuid(1)} to ${TECH_ROLE} (sent, continuing,`);
-    expect(last).toContain(`- stalled ${uuid(2)} to ${TECH_ROLE} (sent, newly stalled,`);
-    expect(last.indexOf(uuid(2))).toBeLessThan(last.indexOf(uuid(1)));
+    expect(last).toContain(
+      `- stalled ${TECH_ROLE}: 2 open across two slots (1 newly stalled), oldest ${uuid(1)}, age `,
+    );
+    expect(last).not.toContain(uuid(2));
     expect(brief(layout, NEXT)).toContain("1 newly stalled");
     expect(last).toContain("1 newly stalled");
     expect(briefs(layout)).toHaveLength(3);
@@ -555,6 +575,88 @@ describe("native checks in the stored brief", () => {
         visibility: "unknown",
         visibilityReason: "exact_unresolved_request_unavailable",
       }),
+    );
+  });
+});
+
+describe("brief exceptions", () => {
+  const counts = (surveyed: number) => ({
+    byRole: {},
+    completes: 0,
+    decisions: { pending: 0, recorded: 0 },
+    native: {
+      claudeRoles: 3,
+      questions: {
+        historyComplete: 0,
+        pending: 0,
+        surveyed,
+        unavailableCapability: 0,
+        visibilityUnknown: 4,
+      },
+      workers: { failed: 0, ok: 0, unknown: 0 },
+    },
+    open: 0,
+    policyHolds: 0,
+    readyHandoffs: 0,
+    runnerEvents: 0,
+    states: { delivered: 0, retained: 0, sent: 0 },
+    unconfirmed: 0,
+    unread: 0,
+    wakes: { ambiguous: 0, failed: 0, guarded: 0, outstanding: 0 },
+  });
+  const game = () => gameLayout(storeFixture().layout, GAME);
+  const at = (minutes: number) => new Date((SLOT - minutes * 60) * 1000).toISOString();
+
+  it("groups stalled and overdue originals per recipient with count, oldest ID and age", () => {
+    const exceptions: BriefException[] = [
+      {
+        id: uuid(3),
+        kind: "stalled",
+        newlyStalled: true,
+        role: TECH_ROLE,
+        sentAt: at(30),
+        state: "sent",
+      },
+      { id: uuid(4), kind: "stalled", role: ART_ROLE, sentAt: at(3 * 24 * 60), state: "sent" },
+      { id: uuid(1), kind: "stalled", role: TECH_ROLE, sentAt: at(5 * 60), state: "delivered" },
+      {
+        id: uuid(5),
+        kind: "retention-overdue",
+        role: TECH_ROLE,
+        sentAt: at(90),
+        state: "retained",
+      },
+      { detail: "recipient-held", kind: "wake-guarded", role: ART_ROLE },
+    ];
+    const lines = composeBrief(game(), SLOT, { counts: counts(1), exceptions }).split("\n");
+    expect(lines.filter((line) => line.startsWith("- "))).toEqual([
+      `- stalled ${TECH_ROLE}: 2 open across two slots (1 newly stalled), oldest ${uuid(1)}, age 5h`,
+      `- stalled ${ART_ROLE}: 1 open across two slots (0 newly stalled), oldest ${uuid(4)}, age 3d`,
+      `- retention-overdue ${TECH_ROLE}: 1 due, oldest ${uuid(5)}, age 90m; ` +
+        "recipient reconciles each original with its owner",
+      `- wake-guarded ${ART_ROLE}: recipient-held`,
+    ]);
+    expect(lines).toContain("Exceptions: 5");
+  });
+
+  it("counts every exception a cut-off line stands for", () => {
+    const exceptions: BriefException[] = Array.from({ length: 80 }, (_, n) => ({
+      detail: "recipient-held",
+      kind: "wake-guarded",
+      role: `role-${n}`,
+    }));
+    const body = composeBrief(game(), SLOT, { counts: counts(1), exceptions });
+    const shown = body.split("\n").filter((line) => line.startsWith("- wake-guarded")).length;
+    expect(body).toContain(`- ${80 - shown} more: coordination-kit review show`);
+    expect(body.split("\n").length).toBeLessThanOrEqual(BRIEF_MAX_LINES);
+  });
+
+  it("prints native prompt visibility only when a supported survey exists", () => {
+    expect(composeBrief(game(), SLOT, { counts: counts(0), exceptions: [] })).not.toContain(
+      "Native prompt visibility",
+    );
+    expect(composeBrief(game(), SLOT, { counts: counts(1), exceptions: [] })).toContain(
+      "Native prompt visibility: 4 unknown",
     );
   });
 });
