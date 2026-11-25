@@ -17,7 +17,9 @@ together.
      recipient with unread originals once per slot.
    - Run `npm ci` at the root, then reconnect each running Claude role's channel with `/mcp`.
      The channel configuration is unchanged; the reconnect loads code that reads the new wake
-     and channel status file locations.
+     and channel status file locations. A session already rotated by `/clear` reconnects with
+     its old launch `--conversation`; the channel follows the `/clear` lineage to the role's
+     current binding ([Claude channel](review.md#claude-channel)), so no relaunch is needed.
 3. Breaking changes:
    - The `reminder list`, `reminder claim`, `reminder check`, `reminder settle`,
      `decision marker` and `decision resolve` verbs are removed. No wake reads a decision

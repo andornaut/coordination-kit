@@ -14,7 +14,9 @@ import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { gameRecipients } from "../config.ts";
 import { EXIT_INVALID, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { gameLayout, type Layout, loadLayout } from "../layout.ts";
+import { claudeProjectsDir, clearSuccessor } from "../registry/claudeLineage.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
+import type { Registry } from "../registry/schema.ts";
 import { readRegistry, RegistryMissing } from "../registry/store.ts";
 import { cliIdentity } from "../version.ts";
 import { SPECS } from "./spec.ts";
@@ -57,18 +59,54 @@ function recipientRole(root: string, games: string[] | undefined): string {
   return role;
 }
 
-/** The one role whose effective Claude conversation is `conversation`; throws until there is one. */
-function conversationRole(layout: Layout, conversation: string): string {
-  const registry = readRegistry(layout);
+/** The one role whose effective Claude conversation is `conversation`, else null. */
+function boundRole(registry: Registry, conversation: string): string | null {
   const roles = Object.keys(registry.roles).filter(
     (role) =>
       resolveHarness(registry, role) === "claude" &&
       resolveConversation(registry, role) === conversation,
   );
-  if (roles.length !== 1) {
-    throw new Error(`no single claude role is bound to ${conversation}`);
+  return roles.length === 1 ? (roles[0] as string) : null;
+}
+
+/** The most /clear steps followed from a launch conversation to a bound one. */
+const LINEAGE_DEPTH = 16;
+/** While unresolved, the transcript lineage is scanned at most this often. */
+export const LINEAGE_SCAN_MS = 60_000;
+
+/**
+ * The role bound to `conversation`, or to the conversation its /clear lineage leads to. Claude
+ * keeps a channel's launch argv for the session, so a reconnect after a rotation still names the
+ * old ID. Each step needs exactly one cleared successor; none or several stops the walk.
+ */
+function lineageRole(
+  registry: Registry,
+  projectsDir: string | null,
+  conversation: string,
+): string | null {
+  if (projectsDir === null) {
+    return null;
   }
-  return roles[0] as string;
+  let current = conversation;
+  for (let step = 0; step < LINEAGE_DEPTH; step++) {
+    const next = clearSuccessor(projectsDir, current);
+    if (next === null) {
+      return null;
+    }
+    const role = boundRole(registry, next);
+    if (role !== null) {
+      return role;
+    }
+    current = next;
+  }
+  return null;
+}
+
+export interface ChannelOptions {
+  /** Claude's transcript directory; defaults to `claudeProjectsDir` of the environment. */
+  readonly projectsDir?: string | null;
+  /** Milliseconds since the epoch; defaults to `Date.now`. */
+  readonly now?: () => number;
 }
 
 export async function runChannel(
@@ -76,6 +114,7 @@ export async function runChannel(
   io: Io,
   root: string,
   args: string[],
+  options: ChannelOptions = {},
 ): Promise<number> {
   let conversation: string | undefined;
   let role: string | undefined;
@@ -121,7 +160,7 @@ export async function runChannel(
       const identity = cliIdentity(io.entry);
       writeChannelStatus(layout, {
         argv: process.argv,
-        conversation: conversation ?? (resolveConversation(readRegistry(layout), known) as string),
+        conversation: (resolveConversation(readRegistry(layout), known) ?? conversation) as string,
         distSha256: identity.distSha256,
         pid: process.pid,
         role: known,
@@ -133,11 +172,28 @@ export async function runChannel(
       // The channel serves without its status file.
     }
   };
-  // `--conversation` names the role by its binding at start, else at the first poll that finds
-  // it; the role then stays fixed while its binding rotates.
+  // `--conversation` names the role by its binding, else by the binding its /clear lineage
+  // reaches, at start or at a later poll that finds one; the role then stays fixed while its
+  // binding rotates.
+  const projectsDir =
+    options.projectsDir === undefined ? claudeProjectsDir(io.env) : options.projectsDir;
+  const now = options.now ?? Date.now;
+  let scanned: number | undefined;
   const locate = (): string => {
     const layout = loadLayout(root);
-    role ??= conversationRole(layout, conversation!);
+    if (role === undefined) {
+      const registry = readRegistry(layout);
+      const at = now();
+      let found = boundRole(registry, conversation!);
+      if (found === null && (scanned === undefined || at - scanned >= LINEAGE_SCAN_MS)) {
+        scanned = at;
+        found = lineageRole(registry, projectsDir, conversation!);
+      }
+      if (found === null) {
+        throw new Error(`no single claude role is bound to ${conversation}`);
+      }
+      role = found;
+    }
     report(layout, role);
     return wakeFilePath(layout, role);
   };

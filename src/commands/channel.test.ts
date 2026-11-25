@@ -1,17 +1,18 @@
-import { writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { readChannelStatus } from "../adapters/claude/channelStatus.ts";
+import { channelStatusPath, readChannelStatus } from "../adapters/claude/channelStatus.ts";
 import { wakeFilePath, writeWakeFile } from "../adapters/claude/wakeFile.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Io } from "../io.ts";
 import { updateRegistry } from "../registry/store.ts";
 import { channelServer } from "../review/diagnostics.ts";
 import { claudeFixture, RECIPIENT } from "../review/fixtures.ts";
 import { projectConfig, writeFixtureJson } from "../testFixtures.ts";
-import { runChannel } from "./channel.ts";
+import { LINEAGE_SCAN_MS, runChannel } from "./channel.ts";
 
 function io(): Io & { errors: string[] } {
   const errors: string[] = [];
@@ -217,5 +218,132 @@ describe("claude channel options", () => {
       code: "status_file_missing",
       status: "unknown",
     });
+  });
+});
+
+describe("claude channel launched with a rotated conversation", () => {
+  const OLD = RECIPIENT;
+  const id = (n: number) => `00000000-0000-4000-8000-0000000000${n.toString(16).padStart(2, "0")}`;
+  const ROLE = "game-coordinator";
+
+  /** A projects directory with OLD's transcript and each `[id, predecessor, via]` header. */
+  function transcripts(links: readonly (readonly [string, string, string])[]): {
+    readonly dir: string;
+    add(link: readonly [string, string, string]): void;
+  } {
+    const dir = mkdtempSync(join(tmpdir(), "ck-channel-lineage-"));
+    const project = join(dir, "-home-user-project");
+    mkdirSync(project);
+    mkdirSync(join(dir, "-home-user-other"));
+    const user = JSON.stringify({ message: { content: "hi", role: "user" }, type: "user" });
+    writeFileSync(join(project, `${OLD}.jsonl`), `${user}\n`);
+    const add = ([session, from, via]: readonly [string, string, string]) =>
+      writeFileSync(
+        join(project, `${session}.jsonl`),
+        `${JSON.stringify({
+          sessionId: session,
+          sessions: [{ id: from, type: "claude_code_session", via }],
+          type: "derived-from",
+        })}\n${user}\n`,
+      );
+    links.forEach(add);
+    return { add, dir };
+  }
+
+  async function launch(bound: string, projectsDir: string, now: () => number = () => 0) {
+    const fixture = claudeFixture();
+    updateRegistry(fixture.layout, 1, (draft) => {
+      draft.roles[ROLE]!.conversations.claude = bound;
+    });
+    const input = new PassThrough();
+    const lines: string[] = [];
+    const done = runChannel(
+      { input, write: (line) => void lines.push(line) },
+      io(),
+      fixture.layout.root,
+      ["--conversation", OLD, "--poll-seconds", "3600"],
+      { now, projectsDir },
+    );
+    const poll = async () => {
+      input.write('{"method":"notifications/initialized"}\n');
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    };
+    const stop = async () => {
+      input.end();
+      expect(await done).toBe(EXIT_OK);
+    };
+    return { layout: fixture.layout, lines, poll, stop };
+  }
+
+  it.each([
+    ["one /clear", [[id(0xe1), OLD, "clear"]], id(0xe1)],
+    [
+      "two /clear steps",
+      [
+        [id(0xe1), OLD, "clear"],
+        [id(0xe2), id(0xe1), "clear"],
+      ],
+      id(0xe2),
+    ],
+  ] as const)("follows %s to the role's current binding", async (_, links, bound) => {
+    const { dir } = transcripts(links);
+    const channel = await launch(bound, dir);
+    try {
+      await channel.poll();
+      expect(readChannelStatus(channel.layout, ROLE)).toMatchObject({
+        conversation: bound,
+        role: ROLE,
+      });
+      writeWakeFile(channel.layout, { count: 2, role: ROLE });
+      await vi.waitFor(async () => {
+        await channel.poll();
+        expect(channel.lines).toHaveLength(1);
+      });
+    } finally {
+      await channel.stop();
+    }
+  });
+
+  it.each([
+    [
+      "two cleared descendants",
+      [
+        [id(0xe1), OLD, "clear"],
+        [id(0xe3), OLD, "clear"],
+      ],
+    ],
+    ["a fork", [[id(0xe1), OLD, "fork"]]],
+  ] as const)("stays unresolved for %s", async (_, links) => {
+    const { dir } = transcripts(links);
+    const channel = await launch(id(0xe1), dir);
+    try {
+      writeWakeFile(channel.layout, { count: 1, role: ROLE });
+      await channel.poll();
+      await channel.poll();
+      expect(channel.lines).toEqual([]);
+      expect(existsSync(channelStatusPath(channel.layout, ROLE))).toBe(false);
+    } finally {
+      await channel.stop();
+    }
+  });
+
+  it("scans the lineage at most once per interval while unresolved", async () => {
+    const lineage = transcripts([]);
+    let clock = 1_000_000;
+    const channel = await launch(id(0xe1), lineage.dir, () => clock);
+    try {
+      // The successor appears after the scan at start; the next scan waits for the interval.
+      lineage.add([id(0xe1), OLD, "clear"]);
+      clock += LINEAGE_SCAN_MS - 1;
+      await channel.poll();
+      expect(existsSync(channelStatusPath(channel.layout, ROLE))).toBe(false);
+      clock += 1;
+      await channel.poll();
+      expect(readChannelStatus(channel.layout, ROLE)).toMatchObject({ conversation: id(0xe1) });
+    } finally {
+      await channel.stop();
+    }
   });
 });

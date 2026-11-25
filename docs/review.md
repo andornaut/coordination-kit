@@ -222,9 +222,18 @@ same across kit releases, so an upgrade needs `npm ci` at the root and a reconne
 relaunch.
 
 After `notifications/initialized` the server polls its role's wake file. With
-`--conversation UUID` the role is the one whose effective Claude conversation is that ID at
-start, else at the first poll that finds one; it stays fixed when `session start` later rebinds the role after
-`/clear`, so the running channel keeps announcing the role's wakes. Each seq increase
+`--conversation UUID` the role is the one whose effective Claude conversation is that ID. Claude
+keeps a channel's launch arguments for the life of the session, so a `/mcp` reconnect after a
+`/clear` still names the old ID. When no role is bound to it, the channel follows the `/clear`
+lineage forward: in the project directory holding the ID's transcript under
+`$CLAUDE_CONFIG_DIR/projects` (else `$HOME/.claude/projects`), the one `*.jsonl` transcript
+whose header proves a `derived-from` record via `clear` from that ID, by the same rules as the
+[rebind after /clear](store.md#rebind-after-clear). If that descendant is bound to exactly one
+Claude role, the channel serves it; otherwise it follows that descendant's own successor, for
+at most 16 steps. No descendant, several, or a fork or resume lineage leaves it unresolved; it
+never guesses. While unresolved it checks the binding on every poll and scans the lineage at
+most once a minute. Once resolved, the role stays fixed when `session start` later rebinds it,
+so the running channel keeps announcing the role's wakes. Each seq increase
 emits one channel notification with the fixed text
 `N new messages for ROLE: run coordination-kit inbox` and `meta` `{"kind":"wake","seq":"N"}`.
 Increases between two polls coalesce into one notification, a seq is never announced twice and a

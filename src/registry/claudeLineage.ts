@@ -3,7 +3,7 @@
 // Only the header is read: records before the first `user` or `assistant` record, within
 // HEADER_LIMIT bytes.
 import { closeSync, openSync, readdirSync, readSync, statSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 import { CONVERSATION_ID_PATTERN } from "../validate.ts";
 
@@ -78,16 +78,8 @@ function headerRecords(path: string): Record<string, unknown>[] | null {
   return complete ? records : null;
 }
 
-/**
- * The conversation ID `sessionId` was cleared from, proved by its one transcript: exactly one
- * `derived-from` record whose `sessionId` is the caller and whose single `sessions` entry is a
- * `claude_code_session` with `via` `clear` and a valid, different ID. Anything else is null.
- */
-export function clearPredecessor(projectsDir: string, sessionId: string): string | null {
-  if (!CONVERSATION_ID_PATTERN.test(sessionId)) {
-    return null;
-  }
-  const path = transcriptPath(projectsDir, sessionId);
+/** The `derived-from` predecessor the transcript at `path` proves for `sessionId`, else null. */
+function predecessorAt(path: string | null, sessionId: string): string | null {
   let records: Record<string, unknown>[] | null = null;
   try {
     records = path === null ? null : headerRecords(path);
@@ -115,4 +107,48 @@ export function clearPredecessor(projectsDir: string, sessionId: string): string
     id !== sessionId
     ? id
     : null;
+}
+
+/**
+ * The conversation ID `sessionId` was cleared from, proved by its one transcript: exactly one
+ * `derived-from` record whose `sessionId` is the caller and whose single `sessions` entry is a
+ * `claude_code_session` with `via` `clear` and a valid, different ID. Anything else is null.
+ */
+export function clearPredecessor(projectsDir: string, sessionId: string): string | null {
+  return CONVERSATION_ID_PATTERN.test(sessionId)
+    ? predecessorAt(transcriptPath(projectsDir, sessionId), sessionId)
+    : null;
+}
+
+/**
+ * The one conversation cleared from `sessionId`: the only `*.jsonl` transcript in the project
+ * directory of `sessionId`'s transcript whose header proves `sessionId` as its `clearPredecessor`.
+ * A /clear keeps the project, so no other directory is read. None or several is null.
+ */
+export function clearSuccessor(projectsDir: string, sessionId: string): string | null {
+  if (!CONVERSATION_ID_PATTERN.test(sessionId)) {
+    return null;
+  }
+  const own = transcriptPath(projectsDir, sessionId);
+  if (own === null) {
+    return null;
+  }
+  const project = dirname(own);
+  let names: string[];
+  try {
+    names = readdirSync(project);
+  } catch {
+    return null;
+  }
+  const successors = names
+    .filter((name) => name.endsWith(".jsonl"))
+    .map((name) => name.slice(0, -".jsonl".length))
+    .filter(
+      (id) =>
+        id !== sessionId &&
+        CONVERSATION_ID_PATTERN.test(id) &&
+        statSync(join(project, `${id}.jsonl`), { throwIfNoEntry: false })?.isFile() === true &&
+        predecessorAt(join(project, `${id}.jsonl`), id) === sessionId,
+    );
+  return successors.length === 1 ? successors[0]! : null;
 }
