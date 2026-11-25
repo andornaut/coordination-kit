@@ -13,7 +13,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { Command, Implementation } from "./adapter.ts";
+import type { Command, Implementation } from "./implementation.ts";
 import { KIT_ROOT, type Workspace, writeJson } from "./workspace.ts";
 
 const CLI = join(KIT_ROOT, "dist", "cli.js");

@@ -93,7 +93,7 @@ Errors go to stderr prefixed `coordination-kit:`. Commands with a JSON result ke
 | Target               | Does                                                                                                                       |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `make`, `make check` | Complete verification: root and contract types, lint, build, unit tests, contracts and package inspection, then ShellCheck |
-| `make lint`          | Root and contract types, Prettier, ESLint, the import graph, Markdown lint and the work-file check, then ShellCheck        |
+| `make lint`          | Root and contract types, Prettier, ESLint with the import rules, Markdown lint and the work-file check, then ShellCheck    |
 | `make test`          | Build, unit tests and the complete native contract suite                                                                   |
 | `make build`         | Build, then package inspection                                                                                             |
 
@@ -114,15 +114,15 @@ WORKAROUND: a root override keeps `markdownlint-cli2` 0.24.1 on a patched `katex
 `micromark-extension-math` 3.1.0 requires `katex` ^0.16.0. Remove it when upstream resolves a
 patched `katex` without the override.
 
-| Command                 | Checks                                                                                                         |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `npm run verify`        | Root and contract types, lint, wrapper syntax, build, unit tests, full contracts and package inspection.       |
-| `npm run check`         | Root and contract types.                                                                                       |
-| `npm run lint`          | Prettier, ESLint, the import graph, Markdown, packaged docs, work files and ShellCheck with `-x -P SCRIPTDIR`. |
-| `npm run build`         | Build the CLI and public build API bundles and declarations.                                                   |
-| `npm test`              | Unit tests, using at most four workers by default; build first.                                                |
-| `npm run contract`      | Build, contract types and the complete native contract suite.                                                  |
-| `npm run package:check` | Inspect the extracted CLI, the build API subpaths and strict NodeNext declarations.                            |
+| Command                 | Checks                                                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `npm run verify`        | Root and contract types, lint, wrapper syntax, build, unit tests, full contracts and package inspection.           |
+| `npm run check`         | Root and contract types.                                                                                           |
+| `npm run lint`          | Prettier, ESLint with the import rules, Markdown, packaged docs, work files and ShellCheck with `-x -P SCRIPTDIR`. |
+| `npm run build`         | Build the CLI and public build API bundles and declarations.                                                       |
+| `npm test`              | Unit tests, using at most four workers by default; build first.                                                    |
+| `npm run contract`      | Build, contract types and the complete native contract suite.                                                      |
+| `npm run package:check` | Inspect the extracted CLI, the build API subpaths and strict NodeNext declarations.                                |
 
 Explicit source or contract paths passed to `npm run verify --` select the corresponding suite;
 unscoped filters apply to both. Standalone `npm run contract -- --lock` regenerates the contract
@@ -130,7 +130,7 @@ lockfile with native npm. Ordinary Git commits run serial local lint-staged, wit
 and ESLint fixes that preserve Git's staged/unstaged workflow.
 
 CI runs the same native npm commands directly on the runner with the pinned Node version and the
-pinned ShellCheck step. Its `lint` job (types, Prettier, ESLint, the import graph, Markdown lint, the packaged-docs
+pinned ShellCheck step. Its `lint` job (types, Prettier, ESLint with the import rules, Markdown lint, the packaged-docs
 check, the work-file check and ShellCheck) runs for every push and pull request. The `build`,
 `test`, `contract` and `package` jobs run only when a path outside `docs/` changed, and otherwise
 report as skipped. A forced push, a new branch or a base the clone does not have runs every job.
@@ -158,9 +158,12 @@ this controller after the checks.
 
 ## Source layout
 
-`src/` is layered, lowest first. A module imports only from its own layer or a lower one, and the
-import graph, type-only imports included, has no cycles. `npm run lint:imports`
-(`scripts/imports-check.ts`) checks both; tests are exempt from the layer rule only.
+`src/` is layered, lowest first. A module imports only from its own layer or a lower one, type-only
+imports and re-exports included; tests are exempt. ESLint enforces the order with one
+`no-restricted-imports` boundary per layer folder and fails on a `src/` folder that is in no layer.
+`import-x/no-cycle` rejects runtime import cycles across `src/`, `scripts/` and `tests/`, including
+cycles that cross those directories. Type-only imports are erased at build time, so they may form
+a cycle within one layer.
 
 | Layer | Directory                     | Holds                                                                                                               |
 | ----- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------- |

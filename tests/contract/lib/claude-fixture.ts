@@ -3,8 +3,9 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 
-import { type Command, impl, type Resident, type Result, start } from "./adapter.ts";
+import { impl, type Resident, type Result, start } from "./adapter.ts";
 import type { CodexSocket } from "./codex-socket.ts";
+import type { Command } from "./implementation.ts";
 import type { Workspace } from "./workspace.ts";
 import type { Json } from "./json.ts";
 import { roleRoute } from "./routes.ts";
