@@ -27,7 +27,7 @@ import {
 
 const exec = promisify(execFile);
 const journalModule = new URL("./journal.ts", import.meta.url).href;
-const dbModule = new URL("../db.ts", import.meta.url).href;
+const codecModule = new URL("../eventCodec.ts", import.meta.url).href;
 const record: FileRecord = {
   data: { message: "Original" },
   path: "roles/archie%2Ftech/sent/1.json",
@@ -56,7 +56,7 @@ function args(script: string, root: string, mode: string, value: unknown = {}): 
     "-e",
     script,
     journalModule,
-    dbModule,
+    codecModule,
     root,
     mode,
     JSON.stringify(value),
@@ -64,7 +64,7 @@ function args(script: string, root: string, mode: string, value: unknown = {}): 
 }
 
 const WRITE = `
-  const [, journalModule, dbModule, root, mode, encoded] = process.argv;
+  const [, journalModule, codecModule, root, mode, encoded] = process.argv;
   if (mode === "companion" || mode === "manifest") {
     const fs = (await import("node:fs")).default;
     const {syncBuiltinESMExports} = await import("node:module");
@@ -78,7 +78,7 @@ const WRITE = `
     syncBuiltinESMExports();
   }
   const {openFileJournal} = await import(journalModule);
-  const {eventHash} = await import(dbModule);
+  const {eventHash} = await import(codecModule);
   const input = JSON.parse(encoded);
   openFileJournal(root).withWriter((writer) => {
     if (mode === "hold") {
