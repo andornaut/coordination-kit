@@ -37,10 +37,11 @@ import {
   reserveFileJournal,
 } from "../store/files/journal.ts";
 import { resolveCaller } from "../store/identity.ts";
-import { MESSAGE_ID, ROLE } from "../store/messages.ts";
+import { MESSAGE_ID } from "../store/messages.ts";
 import { registry, type StoreServiceContext } from "../store/service.ts";
-import { type StoredEvent, StoreError } from "../store/types.ts";
-import { callerOf, required, run, text, type Values } from "./store.ts";
+import { ROLE, type StoredEvent, StoreError } from "../store/types.ts";
+import { callerOf, required, text, type Values } from "./args.ts";
+import { run } from "./store.ts";
 
 export const COMPACTION_PREPARE_OPTIONS = {
   evidence: { type: "string" },

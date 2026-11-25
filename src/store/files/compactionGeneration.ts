@@ -1,11 +1,11 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
 import { readJson, writeDurable } from "../../core/durable.ts";
 import { isCanonicalUuid } from "../../core/ids.ts";
 import { isRecord } from "../../core/pyjson.ts";
-import { canonicalJson } from "../eventCodec.ts";
+import { canonicalJson, sha256 } from "../eventCodec.ts";
 import type { FileProjection } from "../fileProjection.ts";
 import { StoreError } from "../types.ts";
 import {
@@ -114,7 +114,7 @@ function separateRestore(root: string, restored: string): FileCheckpointSource {
 }
 
 function digest(value: unknown): string {
-  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+  return sha256(canonicalJson(value));
 }
 
 function sourceDigest({ archives, previous, tail }: Omit<FileCheckpointSource, "events">): string {

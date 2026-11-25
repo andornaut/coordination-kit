@@ -18,6 +18,7 @@ import { deliverReview, reviewDeliverLine } from "../review/deliver.ts";
 import { showBrief } from "../review/storeBrief.ts";
 import { ingestEvents, type IngestResult } from "../store/ingest.ts";
 import { StoreError } from "../store/types.ts";
+import { errorMessage } from "./args.ts";
 
 export const REVIEW_DELIVER_OPTIONS = {
   game: { type: "string" },
@@ -53,10 +54,6 @@ function slotSeconds(text: string): number {
   return ms / 1000;
 }
 
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 interface Context {
   readonly cli: CliIdentity;
   readonly game: GameLayout;
@@ -69,7 +66,7 @@ function context(io: Io, root: string, game: string | undefined): Context | numb
   try {
     layout = loadLayout(root);
   } catch (error) {
-    io.err(`coordination-kit: ${message(error)}\n`);
+    io.err(`coordination-kit: ${errorMessage(error)}\n`);
     return EXIT_INVALID;
   }
   try {
@@ -78,7 +75,7 @@ function context(io: Io, root: string, game: string | undefined): Context | numb
     }
     return { cli: cliIdentity(io.entry), game: gameLayout(layout, game), layout };
   } catch (error) {
-    io.err(`coordination-kit: ${message(error)}\n`);
+    io.err(`coordination-kit: ${errorMessage(error)}\n`);
     return error instanceof Usage || error instanceof UnknownGame ? EXIT_USAGE : EXIT_INVALID;
   }
 }
@@ -93,7 +90,7 @@ export const reviewDeliver: Handler = async (io, root, args) => {
     }
     slot = slotSeconds(values.slot);
   } catch (error) {
-    io.err(`coordination-kit: ${message(error)}\n`);
+    io.err(`coordination-kit: ${errorMessage(error)}\n`);
     return EXIT_USAGE;
   }
   const resolved = context(io, root, values.game);
@@ -124,7 +121,7 @@ export const reviewDeliver: Handler = async (io, root, args) => {
       io.out(reviewDeliverLine(resolved.cli, resolved.game.id, values.slot, RESERVED));
       return EXIT_OK;
     }
-    io.err(`coordination-kit: review deliver failed: ${message(error)}\n`);
+    io.err(`coordination-kit: review deliver failed: ${errorMessage(error)}\n`);
     return EXIT_INVALID;
   } finally {
     process.off("SIGTERM", abort);
@@ -156,7 +153,7 @@ export const eventsIngest: Handler = async (io, root, args) => {
   try {
     ({ values } = parseArgs({ args, options: EVENTS_INGEST_OPTIONS, strict: true }));
   } catch (error) {
-    io.err(`coordination-kit: ${message(error)}\n`);
+    io.err(`coordination-kit: ${errorMessage(error)}\n`);
     return EXIT_USAGE;
   }
   const resolved = context(io, root, values.game);
@@ -181,7 +178,7 @@ export const eventsIngest: Handler = async (io, root, args) => {
       );
       return EXIT_OK;
     }
-    io.err(`coordination-kit: events ingest failed: ${message(error)}\n`);
+    io.err(`coordination-kit: events ingest failed: ${errorMessage(error)}\n`);
     return EXIT_INVALID;
   }
 };
@@ -194,7 +191,7 @@ export const reviewShow: Handler = (io, root, args) => {
     ({ values } = parseArgs({ args, options: REVIEW_SHOW_OPTIONS, strict: true }));
     slot = values.slot === undefined ? undefined : slotSeconds(values.slot);
   } catch (error) {
-    io.err(`coordination-kit: ${message(error)}\n`);
+    io.err(`coordination-kit: ${errorMessage(error)}\n`);
     return Promise.resolve(EXIT_USAGE);
   }
   let layout: Layout;
@@ -204,7 +201,7 @@ export const reviewShow: Handler = (io, root, args) => {
       gameLayout(layout, values.game);
     }
   } catch (error) {
-    io.err(`coordination-kit: ${message(error)}\n`);
+    io.err(`coordination-kit: ${errorMessage(error)}\n`);
     return Promise.resolve(error instanceof UnknownGame ? EXIT_USAGE : EXIT_INVALID);
   }
   try {

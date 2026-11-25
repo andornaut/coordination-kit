@@ -19,6 +19,7 @@ import { claudeProjectsDir, clearSuccessor } from "../registry/claudeLineage.ts"
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry, RegistryMissing } from "../registry/store.ts";
+import { errorMessage } from "./args.ts";
 import { SPECS } from "./spec.ts";
 
 interface ChannelStreams {
@@ -142,7 +143,7 @@ export async function runChannel(
     conversation = values.conversation;
     role = conversation === undefined ? recipientRole(root, values.game) : undefined;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     io.err(`coordination-kit: ${message}\n`);
     return error instanceof ChannelUsage ||
       (error as { code?: string }).code?.startsWith("ERR_PARSE_ARGS")

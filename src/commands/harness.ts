@@ -5,6 +5,7 @@ import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../core/io.ts";
 import { loadLayout } from "../core/layout.ts";
 import { dumpsJson } from "../core/pyjson.ts";
 import { selectHarness } from "../registry/selection.ts";
+import { errorMessage } from "./args.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 export const harnessSelect: Handler = (io, root, args) => {
@@ -25,7 +26,7 @@ export const harnessSelect: Handler = (io, root, args) => {
     }
     values = parsed.values;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     io.err(`coordination-kit: ${message}\n${commandUsage("harness select")}\n`);
     return EXIT_USAGE;
   }
@@ -49,7 +50,7 @@ export const harnessSelect: Handler = (io, root, args) => {
     io.out(`${dumpsJson(registry)}\n`);
     return EXIT_OK;
   } catch (error) {
-    io.err(`coordination-kit: ${error instanceof Error ? error.message : String(error)}\n`);
+    io.err(`coordination-kit: ${errorMessage(error)}\n`);
     return EXIT_INVALID;
   }
 };

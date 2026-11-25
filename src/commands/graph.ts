@@ -6,7 +6,6 @@ import { parseArgs } from "node:util";
 import { type GitRunner, systemGit } from "../core/git.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
 import { Store } from "../store/db.ts";
-import { StoreError } from "../store/types.ts";
 import {
   buildGraph,
   findDecision,
@@ -18,6 +17,7 @@ import {
   why,
 } from "../work/graph.ts";
 import { type Coordinator, openCoordinator } from "../work/live.ts";
+import { refusalCode, Usage } from "./args.ts";
 
 export const GRAPH_OPTIONS = {
   depth: { type: "string" },
@@ -25,8 +25,6 @@ export const GRAPH_OPTIONS = {
   work: { type: "string" },
 } as const;
 export const GRAPH_WHY_OPTIONS = { decision: { type: "string" } } as const;
-
-class Usage extends Error {}
 
 function load(git: GitRunner, coordinator: Coordinator): Graph {
   const store = Store.readLayout(coordinator.layout);
@@ -62,11 +60,7 @@ function run(
       io.err(`coordination-kit: invalid_graph_options (${command})\n`);
       return EXIT_USAGE;
     }
-    const code =
-      error instanceof StoreError && /^[a-z][a-z-]{0,63}$/.test(error.code)
-        ? error.code
-        : "graph_operation_failed";
-    io.err(`coordination-kit: ${code}\n`);
+    io.err(`coordination-kit: ${refusalCode(error, "graph_operation_failed")}\n`);
     return EXIT_INVALID;
   }
 }

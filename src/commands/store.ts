@@ -13,7 +13,6 @@ import { loadLayout } from "../core/layout.ts";
 import type { Options } from "../core/usage.ts";
 import { Store } from "../store/db.ts";
 import { planFileCompaction } from "../store/files/compactionPlan.ts";
-import type { CallerOptions } from "../store/identity.ts";
 import { NEXT_REVIEW_BOUNDARY, retentionInstant } from "../store/retention.ts";
 import { storeRetire } from "../store/retire.ts";
 import {
@@ -31,11 +30,7 @@ import {
 } from "../store/service.ts";
 import { type MessageLink, StoreError } from "../store/types.ts";
 import { importApprovalLedger } from "../work/approvals.ts";
-
-const CALLER = {
-  "native-id": { type: "string" },
-  worker: { type: "string" },
-} as const;
+import { CALLER, callerOf, refusalCode, required, text, Usage, type Values } from "./args.ts";
 
 export const MSG_SEND_OPTIONS = {
   ...CALLER,
@@ -100,10 +95,6 @@ export const STORE_RETIRE_OPTIONS = {
   "dry-run": { type: "boolean" },
 } as const;
 
-export type Values = Record<string, string | boolean | string[] | undefined>;
-
-export class Usage extends Error {}
-
 function parse(
   spec: Options,
   args: string[],
@@ -143,28 +134,6 @@ function parse(
   return { positionals: parsed.positionals, values };
 }
 
-export function text(values: Values, key: string): string | undefined {
-  const value = values[key];
-  return typeof value === "string" ? value : undefined;
-}
-
-export function required(values: Values, key: string): string {
-  const value = text(values, key);
-  if (value === undefined) {
-    throw new Usage();
-  }
-  return value;
-}
-
-export function callerOf(values: Values): CallerOptions {
-  const nativeId = text(values, "native-id");
-  const worker = text(values, "worker");
-  return {
-    ...(nativeId === undefined ? {} : { nativeId }),
-    ...(worker === undefined ? {} : { worker }),
-  };
-}
-
 /** An ISO 8601 instant, normalized to the store's `toISOString` form for ordered comparison. */
 function instant(value: string): string {
   if (!/^\d{4}-\d{2}-\d{2}T/.test(value) || !Number.isFinite(Date.parse(value))) {
@@ -202,10 +171,7 @@ export async function run(
       io.err(`coordination-kit: invalid_store_options (${command})\n`);
       return EXIT_USAGE;
     }
-    const code =
-      error instanceof StoreError && /^[a-z][a-z-]{0,63}$/.test(error.code)
-        ? error.code
-        : "store_operation_failed";
+    const code = refusalCode(error, "store_operation_failed");
     // A refusal with a short reason, such as `session-held: phase held`, prints it after the code.
     const reason =
       error instanceof StoreError &&

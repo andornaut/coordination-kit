@@ -13,12 +13,8 @@ import {
   storeHandoffState,
   storeSessionStart,
 } from "../store/sessionService.ts";
-import { callerOf, required, run, text, Usage } from "./store.ts";
-
-const CALLER = {
-  "native-id": { type: "string" },
-  worker: { type: "string" },
-} as const;
+import { CALLER, callerOf, required, text, Usage } from "./args.ts";
+import { run } from "./store.ts";
 
 export const SESSION_START_OPTIONS = CALLER;
 export const HANDOFF_OPEN_OPTIONS = {

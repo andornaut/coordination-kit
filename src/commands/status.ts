@@ -7,6 +7,7 @@ import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../core/io.ts";
 import { collectStatus, incomplete, StatusUsageError } from "../status/collect.ts";
 import { DEFAULT_VERIFY_SINCE, STATE_FILTERS, type StateFilter } from "../status/derive.ts";
 import { renderMarkdown } from "../status/markdown.ts";
+import { errorMessage } from "./args.ts";
 
 export const STATUS_OPTIONS = {
   audit: { type: "boolean" },
@@ -60,7 +61,7 @@ export const status: Handler = (io, root, args) => {
       io.err(`coordination-kit: ${error.message}\n${USAGE}`);
       return EXIT_USAGE;
     }
-    io.err(`coordination-kit: ${error instanceof Error ? error.message : String(error)}\n`);
+    io.err(`coordination-kit: ${errorMessage(error)}\n`);
     return EXIT_INVALID;
   }
   io.out(format === "markdown" ? renderMarkdown(report) : `${JSON.stringify(report)}\n`);

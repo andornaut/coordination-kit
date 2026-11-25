@@ -12,8 +12,6 @@ import {
   type Handler,
   type Io,
 } from "../core/io.ts";
-import type { CallerOptions } from "../store/identity.ts";
-import { StoreError } from "../store/types.ts";
 import { WORK_STAGES, type WorkStage } from "../store/work.ts";
 import {
   type LiveContext,
@@ -29,14 +27,10 @@ import {
 } from "../work/live.ts";
 import { checkWork, type Finding, type FindingCode } from "../workfiles/check.ts";
 import { reportWork } from "../workfiles/report.ts";
+import { CALLER, callerOf, refusalCode, required, text, Usage, type Values } from "./args.ts";
 
 export const WORK_OPTIONS = {} as const;
 export const WORK_CHECK_OPTIONS = { decisions: { type: "boolean" } } as const;
-
-const CALLER = {
-  "native-id": { type: "string" },
-  worker: { type: "string" },
-} as const;
 
 export const WORK_START_OPTIONS = { ...CALLER, parent: { type: "string" } } as const;
 export const WORK_EVIDENCE_OPTIONS = {
@@ -86,7 +80,7 @@ export const workCheck: Handler = (io, root, args) => {
     } catch (error) {
       extra.push({
         code: "decisions-unavailable",
-        message: `store decisions could not be read: ${errorCode(error)}`,
+        message: `store decisions could not be read: ${refusalCode(error, "store_operation_failed")}`,
         path: "docs/work",
       });
     }
@@ -113,38 +107,6 @@ export const workReport: Handler = (io, root, args) => {
 
 function liveContext(io: Io): LiveContext {
   return { coordinatorRoot: coordinatorRoot(io.env), env: io.env, git: systemGit(io.env) };
-}
-
-function errorCode(error: unknown): string {
-  return error instanceof StoreError && /^[a-z][a-z-]{0,63}$/.test(error.code)
-    ? error.code
-    : "store_operation_failed";
-}
-
-type Values = Record<string, string | boolean | undefined>;
-
-class Usage extends Error {}
-
-function text(values: Values, key: string): string | undefined {
-  const value = values[key];
-  return typeof value === "string" ? value : undefined;
-}
-
-function required(values: Values, key: string): string {
-  const value = text(values, key);
-  if (value === undefined) {
-    throw new Usage();
-  }
-  return value;
-}
-
-function callerOf(values: Values): CallerOptions {
-  const nativeId = text(values, "native-id");
-  const worker = text(values, "worker");
-  return {
-    ...(nativeId === undefined ? {} : { nativeId }),
-    ...(worker === undefined ? {} : { worker }),
-  };
 }
 
 /** Parse `ID` and the options, run one service call and print its JSON; refusals exit 1. */
@@ -178,7 +140,7 @@ function verb(
         io.err(`coordination-kit: invalid_work_options (${command})\n`);
         return EXIT_USAGE;
       }
-      io.err(`coordination-kit: ${errorCode(error)}\n`);
+      io.err(`coordination-kit: ${refusalCode(error, "store_operation_failed")}\n`);
       return EXIT_INVALID;
     }
   };

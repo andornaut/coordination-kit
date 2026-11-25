@@ -3,13 +3,14 @@
 // become `work.evidence`, `unresolved` items become `work.retained`, and `independentHolds` become
 // `hold.imported` events owned by their original owner. Import never creates a work file and never
 // releases a hold; entries without a work file are listed for their owners to stub.
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import { type GitRunner, readMainFiles } from "../core/git.ts";
+import { isRecord } from "../core/pyjson.ts";
 import { StateRootError } from "../core/stateRoot.ts";
 import type { Repository } from "../status/collect.ts";
 import { MEMORY, Store } from "../store/db.ts";
+import { sha256 } from "../store/eventCodec.ts";
 import { type CallerOptions, resolveCaller } from "../store/identity.ts";
 import { holdOpen } from "../store/projections/questions.ts";
 import { type Actor, type Json, StoreError, type WorkRef } from "../store/types.ts";
@@ -97,14 +98,6 @@ interface ApprovalImportReport {
   }[];
 }
 
-function sha256(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-function isObject(value: unknown): value is Raw {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 function str(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== "" ? value : null;
 }
@@ -113,7 +106,7 @@ function str(value: unknown): string | null {
 function roleOf(raw: Raw, keys: readonly string[]): string | null {
   for (const key of keys) {
     const value = raw[key];
-    const role = str(value) ?? (isObject(value) ? str(value.role) : null);
+    const role = str(value) ?? (isRecord(value) ? str(value.role) : null);
     if (role !== null) {
       return role;
     }
@@ -136,7 +129,7 @@ function items(value: unknown): { key: string | null; value: unknown }[] {
   if (Array.isArray(value)) {
     return value.map((item) => ({ key: null, value: item as unknown }));
   }
-  if (isObject(value)) {
+  if (isRecord(value)) {
     return Object.entries(value).map(([key, item]) => ({ key, value: item }));
   }
   return value === undefined || value === null ? [] : [{ key: null, value }];
@@ -230,7 +223,7 @@ const SHA_FIELDS: readonly (readonly [string, WorkStage])[] = [
 ];
 
 function shaOf(value: unknown): string | null | undefined {
-  const text = str(value) ?? (isObject(value) ? str(value.sha) : null);
+  const text = str(value) ?? (isRecord(value) ? str(value.sha) : null);
   if (text === null) {
     return undefined;
   }
@@ -268,7 +261,7 @@ function evidenceOf(
   if (typeof main === "string" && proofStages.length > 0) {
     const proofs = items(raw.interactionProof).map((item, index) =>
       line(
-        str(item.value) ?? (isObject(item.value) ? first(item.value, ["ref", "receipt"]) : null),
+        str(item.value) ?? (isRecord(item.value) ? first(item.value, ["ref", "receipt"]) : null),
         `${pointer}/interactionProof/${item.key ?? index}`,
       ),
     );
@@ -293,7 +286,7 @@ function retainedOf(
   return items(raw.unresolved).map((item, index) => {
     const pointer = `${APPROVAL_LEDGER_SOURCE}:${entry}/unresolved/${item.key ?? index}`;
     const value = item.value;
-    const object = isObject(value) ? value : null;
+    const object = isRecord(value) ? value : null;
     const reason =
       object === null
         ? str(value)
@@ -336,9 +329,9 @@ function readApprovalLedger(path: string): Raw {
     throw new StoreError("approval-ledger-unreadable");
   }
   if (
-    !isObject(value) ||
+    !isRecord(value) ||
     value.schemaVersion !== 1 ||
-    !(Array.isArray(value.entries) || isObject(value.entries))
+    !(Array.isArray(value.entries) || isRecord(value.entries))
   ) {
     throw new StoreError("approval-ledger-invalid");
   }
@@ -388,7 +381,7 @@ function planImport(
   const holds = new Map<string, HoldPlan>();
   const topHolds = new Map<string, Raw>();
   items(ledger.independentHolds).forEach((item, index) => {
-    if (isObject(item.value)) {
+    if (isRecord(item.value)) {
       topHolds.set(str(item.value.id) ?? item.key ?? `hold-${index}`, item.value);
     } else if (str(item.value) !== null) {
       topHolds.set(str(item.value)!, {});
@@ -419,7 +412,7 @@ function planImport(
   }
   const entries = items(ledger.entries);
   entries.forEach((item, index) => {
-    const raw = isObject(item.value) ? item.value : null;
+    const raw = isRecord(item.value) ? item.value : null;
     const entry = (raw === null ? null : str(raw.id)) ?? item.key ?? `entry-${index}`;
     const outcome = ((): { outcome: ImportOutcome; ref: WorkRef | null; owner: string | null } => {
       if (raw === null) {
@@ -455,10 +448,10 @@ function planImport(
       items(raw.independentHolds).forEach((reference, position) => {
         const value = reference.value;
         const id =
-          str(value) ?? (isObject(value) ? str(value.id) : null) ?? `${entry}#hold-${position}`;
+          str(value) ?? (isRecord(value) ? str(value.id) : null) ?? `${entry}#hold-${position}`;
         const plan = holdPlan(
           id,
-          topHolds.get(id) ?? (isObject(value) ? value : {}),
+          topHolds.get(id) ?? (isRecord(value) ? value : {}),
           topHolds.has(id) ? null : str(value),
         );
         plan.entries.push(entry);

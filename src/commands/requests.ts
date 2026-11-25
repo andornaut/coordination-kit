@@ -4,7 +4,8 @@ import type { Handler } from "../core/io.ts";
 import { resolveCaller } from "../store/identity.ts";
 import { closeRequest } from "../store/requests.ts";
 import { registry, withStore } from "../store/service.ts";
-import { callerOf, required, run, text } from "./store.ts";
+import { callerOf, required, text } from "./args.ts";
+import { run } from "./store.ts";
 
 export const REQUEST_CLOSE_OPTIONS = {
   id: { type: "string" },

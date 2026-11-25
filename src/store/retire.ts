@@ -20,6 +20,7 @@ import type { Layout } from "../core/layout.ts";
 import { isRecord } from "../core/pyjson.ts";
 import { stateRoot } from "../core/stateRoot.ts";
 import { Store } from "./db.ts";
+import { sha256 } from "./eventCodec.ts";
 import { type CallerOptions, resolveCaller } from "./identity.ts";
 import { importRequest, type RequestImport } from "./requests.ts";
 import { registry, type StoreServiceContext } from "./service.ts";
@@ -123,7 +124,7 @@ export function readLedgerRequests(root: string): LedgerRequest[] {
     throw new StoreError("ledger-checkpoint-stale");
   }
   const state = checkpoint.state;
-  const digest = createHash("sha256").update(JSON.stringify(state)).digest("hex");
+  const digest = sha256(JSON.stringify(state));
   if (
     checkpoint.digest !== digest ||
     state.revision !== events.length ||

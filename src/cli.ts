@@ -1,6 +1,7 @@
 // coordination-kit command dispatcher. Every command is a noun group and its verb. Commands resolve
 // game-coordinator from --root (in any position, once), COORDINATION_KIT_ROOT, DELIVERY_KIT_ROOT or
 // the working directory, in that order; the work group reads --root as the repository instead.
+import { errorMessage } from "./commands/args.ts";
 import { channel } from "./commands/channel.ts";
 import {
   compactionActivate,
@@ -99,9 +100,6 @@ const USAGE = [
   "COORDINATION_KIT_ROOT or DELIVERY_KIT_ROOT.",
   "",
 ].join("\n");
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 const HANDLERS: Readonly<Record<Command, Handler>> = {
   "claude channel": channel,
   "claude ready": claudeReady,

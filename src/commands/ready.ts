@@ -7,6 +7,7 @@ import { pyJsonDumps } from "../core/pyjson.ts";
 import type { Harness, Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 import { effectiveReadiness, harnessReadiness, type ReadinessScope } from "../review/readiness.ts";
+import { errorMessage } from "./args.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 async function readiness(
@@ -22,7 +23,7 @@ async function readiness(
     registry = readRegistry(layout);
   } catch (error) {
     // A missing registry or an invalid layout means not ready, not a usage error.
-    io.err(`coordination-kit: ${error instanceof Error ? error.message : String(error)}\n`);
+    io.err(`coordination-kit: ${errorMessage(error)}\n`);
     return EXIT_INVALID;
   }
   let report;
@@ -32,7 +33,7 @@ async function readiness(
         ? await effectiveReadiness(io.env, layout, registry, scope)
         : await harnessReadiness(io.env, layout, registry, harness, scope);
   } catch (error) {
-    io.err(`coordination-kit: ${error instanceof Error ? error.message : String(error)}\n`);
+    io.err(`coordination-kit: ${errorMessage(error)}\n`);
     return EXIT_INVALID;
   }
   if (report.harness === "mixed") {
@@ -78,9 +79,7 @@ function ready(harness: Harness | "mixed"): Handler {
     try {
       ({ values } = parseArgs({ args, options: SPECS[command].options, strict: true }));
     } catch (error) {
-      io.err(
-        `coordination-kit: ${error instanceof Error ? error.message : String(error)}\n${commandUsage(command)}\n`,
-      );
+      io.err(`coordination-kit: ${errorMessage(error)}\n${commandUsage(command)}\n`);
       return EXIT_USAGE;
     }
     const { game, role } = values;

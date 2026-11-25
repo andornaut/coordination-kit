@@ -4,7 +4,7 @@ import { isCanonicalUuid } from "../../core/ids.ts";
 import { payloadText as text } from "../eventCodec.ts";
 import { handoffHoldId } from "../projections/handoffs.ts";
 import { WORK_KINDS } from "../projections/work.ts";
-import { type Json, type JsonObject, type StoredEvent, StoreError } from "../types.ts";
+import { type Json, type JsonObject, ROLE, type StoredEvent, StoreError } from "../types.ts";
 
 interface FileRecord {
   readonly path: string;
@@ -41,7 +41,6 @@ export interface FileRecordContext {
 
 const COORDINATOR = "game-coordinator";
 const DELIVERY_KIT = "delivery-kit";
-const ROLE = /^[a-z0-9][a-z0-9-]{0,63}(?:\/[a-z0-9][a-z0-9-]{0,63})?$/;
 const RECORD_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const WORK_EVENTS: ReadonlySet<string> = new Set(WORK_KINDS);
 const QUESTION_EVENTS = new Set([

@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
@@ -8,7 +7,7 @@ import { withLock } from "../../core/lock.ts";
 import { isRecord } from "../../core/pyjson.ts";
 import { readRegistry } from "../../registry/store.ts";
 import { Store, storePath } from "../db.ts";
-import { canonicalJson } from "../eventCodec.ts";
+import { canonicalJson, sha256 } from "../eventCodec.ts";
 import { type StoredEvent, StoreError } from "../types.ts";
 import {
   activateFileAuthority,
@@ -42,10 +41,6 @@ interface Qualification {
   readonly source: SqliteState;
   readonly inventory: SqliteSourceInventory;
   readonly records: { readonly count: number; readonly sha256: string };
-}
-
-function hash(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function safeCopyPath(layout: Layout, path: string): string {
@@ -97,11 +92,11 @@ function checkRecordManifest(
   if (
     actual.size !== records.length ||
     actual.size !== expected.length ||
-    expected.some(({ data, path }) => actual.get(path) !== hash(`${canonicalJson(data)}\n`))
+    expected.some(({ data, path }) => actual.get(path) !== sha256(`${canonicalJson(data)}\n`))
   ) {
     throw new StoreError("migration-record-mismatch");
   }
-  return { count: records.length, sha256: hash(canonicalJson([...actual].sort())) };
+  return { count: records.length, sha256: sha256(canonicalJson([...actual].sort())) };
 }
 
 function inspectTarget(
@@ -189,7 +184,7 @@ export function prepareMigration(
     const receipt = prepareFileAuthority(
       layout,
       legacy,
-      { head: source.head, proof: hash(canonicalJson(qualification)) },
+      { head: source.head, proof: sha256(canonicalJson(qualification)) },
       (_path, _receipt, currentSource) => {
         if (currentSource === undefined) {
           throw new StoreError("migration-source-unavailable");
@@ -211,7 +206,7 @@ function readQualification(path: string, receipt: CutoverReceipt): Qualification
     throw new StoreError("migration-qualification-invalid");
   }
   const value = readJson(path);
-  if (!isRecord(value) || value.schema !== 1 || hash(canonicalJson(value)) !== receipt.proof) {
+  if (!isRecord(value) || value.schema !== 1 || sha256(canonicalJson(value)) !== receipt.proof) {
     throw new StoreError("migration-qualification-mismatch");
   }
   return value as unknown as Qualification;

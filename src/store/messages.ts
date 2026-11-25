@@ -17,12 +17,12 @@ import {
   type MessageState,
   type MessageView,
   type Retention,
+  ROLE,
   type StoredEvent,
 } from "./types.ts";
 
 /** Legacy message IDs keep their exact form; new sends use canonical UUIDs. */
 export const MESSAGE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
-export const ROLE = /^[a-z0-9][a-z0-9-]{0,63}(?:\/[a-z0-9][a-z0-9-]{0,63})?$/;
 export const MAX_BODY_BYTES = 1024 * 1024;
 const OPEN: readonly MessageState[] = ["sent", "delivered", "retained"];
 

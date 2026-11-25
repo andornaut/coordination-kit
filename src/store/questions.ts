@@ -36,6 +36,7 @@ import {
   type Json,
   type JsonObject,
   type NativeQuestionIdentity,
+  ROLE,
   type WakeGuard,
   type WorkRef,
 } from "./types.ts";
@@ -49,8 +50,6 @@ export const RECORD_ID = /^[a-z0-9][a-z0-9-]{0,127}$/;
 /** A hold ID as `hold release` accepts it, including imported `approval-ledger:<id>` holds. */
 const HOLD_REF = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/;
 const DECISION_REF = /^D([1-9][0-9]{0,5})$/;
-/** A registry role key, as `messages.ts` checks it; repeated so this projection imports no writer. */
-const ROLE = /^[a-z0-9][a-z0-9-]{0,63}(?:\/[a-z0-9][a-z0-9-]{0,63})?$/;
 const BY = ROLE;
 const GAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const HOME_PATH = /\/(?:home|Users)\/[A-Za-z0-9._-]+|(?<![\w.-])\/root(?=\/)/;

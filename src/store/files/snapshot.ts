@@ -22,7 +22,7 @@ import { gameLayout, type Layout, loadLayout, PROJECT_CONFIG_FILE } from "../../
 import { configuredStateRoot, stateRootConfigPath } from "../../core/stateRoot.ts";
 import { readRegistry } from "../../registry/store.ts";
 import { Store, STORE_FILE, storeRoot } from "../db.ts";
-import { canonicalJson, eventHash } from "../eventCodec.ts";
+import { canonicalJson, eventHash, sha256 } from "../eventCodec.ts";
 import { CURSOR_FILE, LOG_FILE, QUARANTINE_FILE, readCursor } from "../ingest.ts";
 import { PROJECTIONS, RETIRED_TABLES } from "../projections.ts";
 import { GENESIS, type JsonObject, STORE_SCHEMA, type StoredEvent, StoreError } from "../types.ts";
@@ -58,7 +58,7 @@ interface SqliteSnapshot {
 type Row = Record<string, SQLOutputValue>;
 
 function digest(value: unknown): string {
-  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+  return sha256(canonicalJson(value));
 }
 
 function quote(identifier: string): string {

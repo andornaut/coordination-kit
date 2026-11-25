@@ -5,7 +5,8 @@ import { activateMigration, prepareMigration } from "../store/files/migration.ts
 import { resolveCaller } from "../store/identity.ts";
 import { registry, type StoreServiceContext } from "../store/service.ts";
 import { StoreError } from "../store/types.ts";
-import { callerOf, required, run } from "./store.ts";
+import { callerOf, required } from "./args.ts";
+import { run } from "./store.ts";
 
 const NATIVE_ID = { "native-id": { type: "string" } } as const;
 

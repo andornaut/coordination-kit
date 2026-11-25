@@ -24,12 +24,8 @@ import {
   storeQuestionReconcile,
 } from "../store/questionService.ts";
 import { parseWorkRef } from "../work/live.ts";
-import { callerOf, required, run, text, Usage, type Values } from "./store.ts";
-
-const CALLER = {
-  "native-id": { type: "string" },
-  worker: { type: "string" },
-} as const;
+import { CALLER, callerOf, required, text, Usage, type Values } from "./args.ts";
+import { run } from "./store.ts";
 
 export const QUESTION_OPEN_OPTIONS = {
   ...CALLER,

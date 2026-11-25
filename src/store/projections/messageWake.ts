@@ -3,11 +3,16 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import { secretShape } from "../secrets.ts";
-import type { JsonObject, Projection, StoredEvent, WakeBlocker } from "../types.ts";
+import {
+  type JsonObject,
+  type Projection,
+  ROLE,
+  type StoredEvent,
+  type WakeBlocker,
+} from "../types.ts";
 
 const CODE = /^[a-z][a-z0-9-]{0,95}$/;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/;
-const ROLE = /^[a-z0-9][a-z0-9-]{0,63}(?:\/[a-z0-9][a-z0-9-]{0,63})?$/;
 const BLOCKER_KINDS = ["question", "hold", "policy-hold", "registry", "wake", "native-question"];
 
 function record(value: unknown): Record<string, unknown> | null {

@@ -2,6 +2,8 @@
 import type { DatabaseSync } from "node:sqlite";
 
 export const STORE_SCHEMA = 1;
+/** A registry role key: a shared role, or a game and its role joined by `/`. */
+export const ROLE = /^[a-z0-9][a-z0-9-]{0,63}(?:\/[a-z0-9][a-z0-9-]{0,63})?$/;
 /** The `prev_hash` of the first event. */
 export const GENESIS = "0".repeat(64);
 

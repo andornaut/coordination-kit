@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   closeSync,
   constants,
@@ -18,8 +18,8 @@ import { fsyncDirectory, tempPrefix, writeDurable } from "../../core/durable.ts"
 import { isCanonicalUuid } from "../../core/ids.ts";
 import { holdLock, LockBusy } from "../../core/lock.ts";
 import { isRecord } from "../../core/pyjson.ts";
-import { canonicalJson, eventHash } from "../eventCodec.ts";
-import { GENESIS, type Json, type StoredEvent, StoreError } from "../types.ts";
+import { canonicalJson, eventHash, sha256 } from "../eventCodec.ts";
+import { ensure, GENESIS, type Json, type StoredEvent, StoreError } from "../types.ts";
 
 export interface FileRecord {
   readonly path: string;
@@ -78,16 +78,6 @@ const RESERVATION = "compaction-reservation.json";
 const EMPTY_BASELINE: JournalBaseline = { head: { hash: GENESIS, seq: 0 }, keys: new Set() };
 const WRITE_TIMEOUT_SECONDS = 5;
 
-function ensure(condition: unknown, code: string): asserts condition {
-  if (!condition) {
-    throw new StoreError(code);
-  }
-}
-
-function digest(bytes: string | Buffer): string {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
 function json(value: unknown): string {
   return `${canonicalJson(value)}\n`;
 }
@@ -112,7 +102,7 @@ function seqName(seq: number): string {
 }
 
 function keyPath(event: StoredEvent): string {
-  return `journal/keys/${digest(event.key)}.json`;
+  return `journal/keys/${sha256(event.key)}.json`;
 }
 
 function keyBytes(first: number, event: StoredEvent): string {
@@ -311,7 +301,7 @@ function batchCompanions(batch: Batch): Companion[] {
     ...batch.records,
     ...batch.events.map((event) => ({
       path: keyPath(event),
-      sha256: digest(keyBytes(batch.events[0]!.seq, event)),
+      sha256: sha256(keyBytes(batch.events[0]!.seq, event)),
     })),
   ];
 }
@@ -323,7 +313,7 @@ function verifyCompanions(paths: Paths, batch: Batch): void {
   );
   for (const record of batchCompanions(batch)) {
     const bytes = readRecord(paths, record.path);
-    ensure(bytes !== undefined && digest(bytes) === record.sha256, "journal-record-mismatch");
+    ensure(bytes !== undefined && sha256(bytes) === record.sha256, "journal-record-mismatch");
   }
 }
 
@@ -412,7 +402,7 @@ function recover(paths: Paths): void {
     // A mismatched file may be unrelated data. Verify ownership of every orphan before removing any.
     const orphans = records.filter((record) => {
       const bytes = readRecord(paths, record.path);
-      ensure(bytes === undefined || digest(bytes) === record.sha256, "journal-record-mismatch");
+      ensure(bytes === undefined || sha256(bytes) === record.sha256, "journal-record-mismatch");
       return bytes !== undefined;
     });
     for (const { path } of orphans) {
@@ -458,7 +448,7 @@ function commitBatch(
     events,
     records: [...companions.keys()].sort().map((path) => ({
       path,
-      sha256: digest(companions.get(path)!),
+      sha256: sha256(companions.get(path)!),
     })),
     schema: 1,
   };

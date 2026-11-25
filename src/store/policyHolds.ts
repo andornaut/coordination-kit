@@ -2,13 +2,12 @@ import type { SQLInputValue } from "node:sqlite";
 
 import type { Store } from "./db.ts";
 import { secretShape } from "./secrets.ts";
-import { type Actor, StoreError, type WorkRef } from "./types.ts";
+import { type Actor, ROLE, StoreError, type WorkRef } from "./types.ts";
 import { checkRef } from "./work.ts";
 
 const ISSUER = "game-coordinator";
 const POLICY_ID = /^policy-[a-z0-9][a-z0-9-]{0,120}$/;
 const TOKEN = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const ROLE = /^[a-z0-9][a-z0-9-]{0,63}(?:\/[a-z0-9][a-z0-9-]{0,63})?$/;
 
 type Row = Record<string, SQLInputValue>;
 type Reader = Pick<Store, "db">;

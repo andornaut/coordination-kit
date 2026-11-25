@@ -3,7 +3,6 @@
 // the only reader. It reads from the cursor, quarantines complete malformed lines, never consumes
 // an unterminated last line, commits the events and their messages (runner events and COMPLETE) in
 // one transaction, then writes the cursor and only after that deletes rotated files it passed.
-import { createHash } from "node:crypto";
 import {
   closeSync,
   existsSync,
@@ -22,7 +21,7 @@ import type { GameLayout, Layout } from "../core/layout.ts";
 import { holdLock, LockBusy, type LockHandle } from "../core/lock.ts";
 import type { ReasonToken, SeamStatus } from "../core/outcome.ts";
 import { Store } from "./db.ts";
-import { REF } from "./eventCodec.ts";
+import { REF, sha256 } from "./eventCodec.ts";
 import { DELIVERY_KIT_ACTOR } from "./identity.ts";
 import {
   clean,
@@ -77,7 +76,7 @@ export interface BusLine {
 
 /** The event identity: sha256 of `${game}\n${type}\n${key}`. */
 export function busEventId(game: string, type: string, key: string): string {
-  return createHash("sha256").update(`${game}\n${type}\n${key}`, "utf8").digest("hex");
+  return sha256(`${game}\n${type}\n${key}`);
 }
 
 const SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
