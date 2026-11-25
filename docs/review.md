@@ -163,6 +163,14 @@ the full details, including every exact ID.
 - `worker-failed`: a verified failed latest child turn of a Codex worker parent, reported once per
   game;
 - `worker-unknown`: a Codex worker parent whose child health could not be read, with its reason;
+- `channel-unresolved`: an active Claude role (effective harness `claude`, not held) whose
+  [channel status file](#channel-status-file) is missing (`no channel status`) or names a
+  conversation other than the role's current binding (`channel on <first 8 characters>`). A
+  missing file means no channel has resolved the role, so its wakes are written but not
+  announced; a different conversation means the channel that wrote it has not followed the
+  rebind, such as a server that has exited;
+- `channel-unknown`: an active Claude role whose channel status file or directory cannot be read
+  or is malformed (`channel status unreadable`). The review still stores the brief;
 - `stalled`: a message still `sent` or `delivered` that was open at the game's previous brief,
   that is, open across two distinct slots. Each exact ID is compared with the previous brief's
   stalled IDs. New stalls appear first with `newlyStalled: true` in the detailed record, and the
@@ -190,8 +198,11 @@ from earlier is not duplicated. A secret-shaped brief omits question titles.
 slot, or the latest one, as one JSON line: `kind` `review-show`, the game, slot, recipient,
 message ID, recording time, result, counts, every exception, the open message IDs and the body.
 New briefs include `decisions` with store references and `native` with per-role evidence and the
-registry revision. The `unread` list preserves the slot's exact passive snapshot with the
-recipient, original ID and wake evidence. Recipients can read current unread status with
+registry revision. `native.channels` lists each active Claude role's channel `status`
+(`current`, `stale`, `missing` or `unreadable`), its `binding`, the recorded `conversation`,
+`pid`, `startedAt` and `version`, and `counts.native.channels` counts each status. The `unread`
+list preserves the slot's exact passive snapshot with the recipient, original ID and wake
+evidence. Recipients can read current unread status with
 `inbox --peek`. Earlier briefs retain their original survey scope and may lack these fields.
 A missing brief exits 1 with `brief-missing`.
 
@@ -225,16 +236,18 @@ After `notifications/initialized` the server polls its role's wake file. With
 `--conversation UUID` the role is the one whose effective Claude conversation is that ID. Claude
 keeps a channel's launch arguments for the life of the session, so a `/mcp` reconnect after a
 `/clear` still names the old ID. When no role is bound to it, the channel follows the `/clear`
-lineage forward: in the project directory holding the ID's transcript under
-`$CLAUDE_CONFIG_DIR/projects` (else `$HOME/.claude/projects`), the one `*.jsonl` transcript
-whose header proves a `derived-from` record via `clear` from that ID, by the same rules as the
-[rebind after /clear](store.md#rebind-after-clear). If that descendant is bound to exactly one
-Claude role, the channel serves it; otherwise it follows that descendant's own successor, for
-at most 16 steps. No descendant, several, or a fork or resume lineage leaves it unresolved; it
-never guesses. While unresolved it checks the binding on every poll and scans the lineage at
-most once a minute. Once resolved, the role stays fixed when `session start` later rebinds it,
-so the running channel keeps announcing the role's wakes. Each seq increase
-emits one channel notification with the fixed text
+lineage forward: across every project directory under `$CLAUDE_CONFIG_DIR/projects` (else
+`$HOME/.claude/projects`), the one `*.jsonl` transcript whose header proves a `derived-from`
+record via `clear` from that ID, by the same rules as the
+[rebind after /clear](store.md#rebind-after-clear). A successor can sit in another project
+directory than its predecessor when the session reached the same working directory through
+another path, such as a symlink. Only transcripts modified at or after the ID's own transcript
+are read. If that descendant is bound to exactly one Claude role, the channel serves it;
+otherwise it follows that descendant's own successor, for at most 16 steps. No descendant,
+several, or a fork or resume lineage leaves it unresolved; it never guesses. While unresolved it
+checks the binding on every poll and scans the lineage at most once a minute. Once resolved, the
+role stays fixed when `session start` later rebinds it, so the running channel keeps announcing
+the role's wakes. Each seq increase emits one channel notification with the fixed text
 `N new messages for ROLE: run coordination-kit inbox` and `meta` `{"kind":"wake","seq":"N"}`.
 Increases between two polls coalesce into one notification, a seq is never announced twice and a
 lower seq is never announced. A wake present when the channel starts is announced once, because it
@@ -247,9 +260,11 @@ payload: the recipient reads its messages with `coordination-kit inbox`.
 ## Channel status file
 
 `claude channel` writes `<stateRoot>/channel/roles/<role>.json` (`var/channel/roles/` without a
-configured state root) once, when it knows its role, with the conversation bound to the role then.
-A game role's file is `<game>/<role>.json` there. Like the wake file it is keyed by role, so
-`harness doctor` still finds it after `session start` rebinds the role after `/clear`:
+configured state root) when it knows its role, with the conversation bound to the role then. It
+compares the role's binding with the file at most once a minute and rewrites the file with the new
+binding after `session start` rebinds the role after `/clear`; `pid`, `startedAt` and `argv` stay
+those of the running server. A game role's file is `<game>/<role>.json` there. Like the wake file
+it is keyed by role, so `harness doctor` and the scheduled review find it after a rebind:
 
 ```json
 {
@@ -265,4 +280,7 @@ A game role's file is `<game>/<role>.json` there. Like the wake file it is keyed
 ```
 
 A failed write never stops the channel. `harness doctor` reads it to report the loaded CLI; see
-[the scoped doctor](registry.md#scoped-harness-doctor).
+[the scoped doctor](registry.md#scoped-harness-doctor). The scheduled review compares its
+`conversation` with the role's current binding and reports a missing, different or unreadable
+file as a [brief exception](#stored-brief). A file shows that a channel resolved its role, never
+that it is still connected.

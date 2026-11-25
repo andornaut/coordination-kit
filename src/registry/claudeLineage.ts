@@ -1,9 +1,10 @@
 // The /clear lineage proof a Claude transcript carries. A cleared session's transcript
 // `<projects>/<project>/<id>.jsonl` opens with one `derived-from` record naming its predecessor.
+// Predecessor and successor are searched across every project directory.
 // Only the header is read: records before the first `user` or `assistant` record, within
 // HEADER_LIMIT bytes.
 import { closeSync, openSync, readdirSync, readSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 import { CONVERSATION_ID_PATTERN } from "../core/validate.ts";
 
@@ -121,34 +122,59 @@ export function clearPredecessor(projectsDir: string, sessionId: string): string
 }
 
 /**
- * The one conversation cleared from `sessionId`: the only `*.jsonl` transcript in the project
- * directory of `sessionId`'s transcript whose header proves `sessionId` as its `clearPredecessor`.
- * A /clear keeps the project, so no other directory is read. None or several is null.
+ * The one conversation cleared from `sessionId`: the only `*.jsonl` transcript, in any project
+ * directory, whose header proves `sessionId` as its `clearPredecessor`. A successor can sit in
+ * another project directory when its session reached the same working directory through another
+ * path, such as a symlink. Only transcripts modified at or after `sessionId`'s own transcript are
+ * read, since a successor is written after its predecessor's /clear. None or several is null.
  */
 export function clearSuccessor(projectsDir: string, sessionId: string): string | null {
   if (!CONVERSATION_ID_PATTERN.test(sessionId)) {
     return null;
   }
   const own = transcriptPath(projectsDir, sessionId);
-  if (own === null) {
+  const since = own === null ? undefined : statSync(own, { throwIfNoEntry: false })?.mtimeMs;
+  if (since === undefined) {
     return null;
   }
-  const project = dirname(own);
-  let names: string[];
+  let projects;
   try {
-    names = readdirSync(project);
+    projects = readdirSync(projectsDir, { withFileTypes: true });
   } catch {
     return null;
   }
-  const successors = names
-    .filter((name) => name.endsWith(".jsonl"))
-    .map((name) => name.slice(0, -".jsonl".length))
-    .filter(
-      (id) =>
-        id !== sessionId &&
-        CONVERSATION_ID_PATTERN.test(id) &&
-        statSync(join(project, `${id}.jsonl`), { throwIfNoEntry: false })?.isFile() === true &&
-        predecessorAt(join(project, `${id}.jsonl`), id) === sessionId,
-    );
+  const successors: string[] = [];
+  for (const project of projects) {
+    if (!project.isDirectory()) {
+      continue;
+    }
+    const directory = join(projectsDir, project.name);
+    let names: string[];
+    try {
+      names = readdirSync(directory);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      const id = name.endsWith(".jsonl") ? name.slice(0, -".jsonl".length) : "";
+      if (id === sessionId || !CONVERSATION_ID_PATTERN.test(id)) {
+        continue;
+      }
+      const path = join(directory, name);
+      let stat;
+      try {
+        stat = statSync(path, { throwIfNoEntry: false });
+      } catch {
+        continue;
+      }
+      if (
+        stat?.isFile() === true &&
+        stat.mtimeMs >= since &&
+        predecessorAt(path, id) === sessionId
+      ) {
+        successors.push(id);
+      }
+    }
+  }
   return successors.length === 1 ? successors[0]! : null;
 }

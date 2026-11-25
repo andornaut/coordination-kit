@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import { performance } from "node:perf_hooks";
 
 import { listingOrNull, recipientAvailability } from "../adapters/claude/agents.ts";
-import { readChannelStatus } from "../adapters/claude/channelStatus.ts";
+import { channelResolution } from "../adapters/claude/channelStatus.ts";
 import { wakeFilePath } from "../adapters/claude/wakeFile.ts";
 import { connectControl, type RpcClient } from "../adapters/codex/rpc.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
@@ -66,7 +66,10 @@ interface ChannelCommand {
 
 interface ChannelServer {
   readonly status: "reported" | "unknown";
-  readonly code: "status_file_read" | "status_file_missing";
+  readonly code:
+    "status_file_read" | "status_file_stale" | "status_file_missing" | "status_file_unreadable";
+  /** The binding the status file names; null without a readable status file. */
+  readonly conversation: string | null;
   readonly version: string | null;
   readonly distSha256: string | null;
   readonly startedAt: string | null;
@@ -136,28 +139,36 @@ function channelCommand(layout: Layout): ChannelCommand {
   };
 }
 
-/** The channel server's own report, or unknown when it wrote none. Never clearance. */
-function channelServer(layout: Layout, role: string): ChannelServer {
-  const status = readChannelStatus(layout, role);
-  return status === null
-    ? {
-        argv: null,
-        code: "status_file_missing",
-        distSha256: null,
-        pid: null,
-        startedAt: null,
-        status: "unknown",
-        version: null,
-      }
-    : {
-        argv: status.argv,
-        code: "status_file_read",
-        distSha256: status.distSha256,
-        pid: status.pid,
-        startedAt: status.startedAt,
-        status: "reported",
-        version: status.version,
-      };
+/**
+ * The channel server's own report, or unknown when it wrote none or the file cannot be read. A
+ * report naming a conversation other than the role's binding is `status_file_stale`. Never
+ * clearance.
+ */
+function channelServer(layout: Layout, role: string, binding: string | null): ChannelServer {
+  const resolution = channelResolution(layout, role, binding);
+  if (resolution.state === "missing" || resolution.state === "unreadable") {
+    return {
+      argv: null,
+      code: resolution.state === "missing" ? "status_file_missing" : "status_file_unreadable",
+      conversation: null,
+      distSha256: null,
+      pid: null,
+      startedAt: null,
+      status: "unknown",
+      version: null,
+    };
+  }
+  const { status } = resolution;
+  return {
+    argv: status.argv,
+    code: resolution.state === "current" ? "status_file_read" : "status_file_stale",
+    conversation: status.conversation,
+    distSha256: status.distSha256,
+    pid: status.pid,
+    startedAt: status.startedAt,
+    status: "reported",
+    version: status.version,
+  };
 }
 
 interface HarnessDiagnosis {
@@ -177,7 +188,7 @@ function initial(layout: Layout, registry: Registry, role: string): RoleDiagnosi
     channel_command: harness === "claude" ? channelCommand(layout) : null,
     channel_reference:
       harness === "claude" ? { path: wakeFilePath(layout, role), source: "wake_file" } : null,
-    channel_server: harness === "claude" ? channelServer(layout, role) : null,
+    channel_server: harness === "claude" ? channelServer(layout, role, id) : null,
     config_reference: { path: layout.registryFile, source: "registry" },
     effective_harness: harness,
     endpoint: { path: null, source: "skipped" },

@@ -184,9 +184,13 @@ Each Claude row also carries two read-only channel checks; Codex rows carry `nul
   `channel_server_not_configured`). It reports the config path, server name, configured command
   and the expected one. A session keeps the command it launched with, so a stable config does not
   prove a running session uses it.
-- `channel_server` reports the version, dist digest, start time, pid and argv from the role's
-  [channel status file](review.md#channel-status-file), which a `/clear` rebind does not move (`reported`,
-  `status_file_read`), or `unknown` (`status_file_missing`) when the channel wrote none. Neither
+- `channel_server` reports the conversation, version, dist digest, start time, pid and argv from
+  the role's [channel status file](review.md#channel-status-file), which a `/clear` rebind does
+  not move. `status` is `reported` with `status_file_read` when its `conversation` is the role's
+  current binding and `status_file_stale` when it names another, or `unknown` with
+  `status_file_missing` when the channel wrote none and `status_file_unreadable` when the file or
+  its directory cannot be read or is malformed. The scheduled review reports the same cases as
+  `channel-unresolved` and `channel-unknown` [brief exceptions](review.md#stored-brief). Neither
   check is clearance or proof of a connected channel, and neither changes `failed_layer` or the
   exit status.
 

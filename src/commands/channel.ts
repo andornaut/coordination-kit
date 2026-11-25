@@ -3,7 +3,7 @@
 // per seq increase. The role is the one whose Claude conversation is `--conversation UUID`, else
 // the one reports.recipient that every game (or each `--game`) names. The wake file and the
 // channel status file are keyed by role, so the channel keeps serving the role, and the doctor
-// keeps finding its status, after `session start` rebinds it after /clear.
+// and the review keep finding its status, after `session start` rebinds it after /clear.
 import { writeSync } from "node:fs";
 import { parseArgs } from "node:util";
 
@@ -69,11 +69,14 @@ function boundRole(registry: Registry, conversation: string): string | null {
 const LINEAGE_DEPTH = 16;
 /** While unresolved, the transcript lineage is scanned at most this often. */
 const LINEAGE_SCAN_MS = 60_000;
+/** Once resolved, the role's binding is compared with the status file at most this often. */
+const STATUS_CHECK_MS = 60_000;
 
 /**
  * The role bound to `conversation`, or to the conversation its /clear lineage leads to. Claude
  * keeps a channel's launch argv for the session, so a reconnect after a rotation still names the
- * old ID. Each step needs exactly one cleared successor; none or several stops the walk.
+ * old ID. Each step needs exactly one cleared successor in any project directory; none or
+ * several stops the walk.
  */
 function lineageRole(
   registry: Registry,
@@ -169,25 +172,38 @@ export async function channel(
       ? EXIT_USAGE
       : EXIT_INVALID;
   }
-  let reported = false;
-  // Written once, when the role is known; diagnostic only, so a failure never stops the channel.
-  const report = (layout: Layout, known: string): void => {
-    if (reported) {
+  // The conversation the status file names. It is written when the role is known and rewritten
+  // when a later check finds the role rebound, so the file names the binding the channel serves.
+  // Diagnostic only, so a failure never stops the channel.
+  let reported: string | undefined;
+  let checked: number | undefined;
+  let startedAt: string | undefined;
+  const report = (layout: Layout, known: string, at: number): void => {
+    if (checked !== undefined && at - checked < STATUS_CHECK_MS) {
       return;
     }
-    reported = true;
+    checked = at;
     try {
+      const current = (resolveConversation(readRegistry(layout), known) ?? conversation) as string;
+      if (current === reported) {
+        return;
+      }
       const identity = cliIdentity(io.entry);
-      writeChannelStatus(layout, {
-        argv: process.argv,
-        conversation: (resolveConversation(readRegistry(layout), known) ?? conversation) as string,
-        distSha256: identity.distSha256,
-        pid: process.pid,
-        role: known,
-        schema: 2,
-        startedAt: new Date().toISOString(),
-        version: identity.version,
-      });
+      startedAt ??= new Date().toISOString();
+      if (
+        writeChannelStatus(layout, {
+          argv: process.argv,
+          conversation: current,
+          distSha256: identity.distSha256,
+          pid: process.pid,
+          role: known,
+          schema: 2,
+          startedAt,
+          version: identity.version,
+        })
+      ) {
+        reported = current;
+      }
     } catch {
       // The channel serves without its status file.
     }
@@ -201,9 +217,9 @@ export async function channel(
   let scanned: number | undefined;
   const locate = (): string => {
     const layout = loadLayout(root);
+    const at = now();
     if (role === undefined) {
       const registry = readRegistry(layout);
-      const at = now();
       let found = boundRole(registry, conversation!);
       if (found === null && (scanned === undefined || at - scanned >= LINEAGE_SCAN_MS)) {
         scanned = at;
@@ -214,7 +230,7 @@ export async function channel(
       }
       role = found;
     }
-    report(layout, role);
+    report(layout, role, at);
     return wakeFilePath(layout, role);
   };
   try {

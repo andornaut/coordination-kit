@@ -205,7 +205,8 @@ describe("claude channel options", () => {
       draft.roles["game-coordinator"]!.conversations.claude =
         "00000000-0000-4000-8000-0000000000f1";
     });
-    // The doctor reads each Claude role's status file, keyed by role, not by conversation.
+    // The doctor reads each Claude role's status file, keyed by role, not by conversation. This
+    // channel ended before the rebind, so its file still names the earlier binding.
     const { roles } = await diagnoseHarness(
       fixture.env,
       fixture.layout,
@@ -214,7 +215,12 @@ describe("claude channel options", () => {
     );
     expect(Object.fromEntries(roles.map((row) => [row.role, row.channel_server]))).toMatchObject({
       "archies-dog-walks/tech": { code: "status_file_missing", status: "unknown" },
-      "game-coordinator": { code: "status_file_read", pid: process.pid, status: "reported" },
+      "game-coordinator": {
+        code: "status_file_stale",
+        conversation: RECIPIENT,
+        pid: process.pid,
+        status: "reported",
+      },
     });
   });
 });
@@ -227,10 +233,13 @@ describe("claude channel launched with a rotated conversation", () => {
   const statusFile = (layout: { readonly varDir: string }) =>
     join(layout.varDir, "channel", "roles", `${ROLE}.json`);
 
-  /** A projects directory with OLD's transcript and each `[id, predecessor, via]` header. */
-  function transcripts(links: readonly (readonly [string, string, string])[]): {
+  /** `[id, predecessor, via]`, with the project directory name, else `-home-user-project`. */
+  type Link = readonly [string, string, string] | readonly [string, string, string, string];
+
+  /** A projects directory with OLD's transcript and each link's header in its project. */
+  function transcripts(links: readonly Link[]): {
     readonly dir: string;
-    add(link: readonly [string, string, string]): void;
+    add(link: Link): void;
   } {
     const dir = mkdtempSync(join(tmpdir(), "ck-channel-lineage-"));
     const project = join(dir, "-home-user-project");
@@ -238,15 +247,17 @@ describe("claude channel launched with a rotated conversation", () => {
     mkdirSync(join(dir, "-home-user-other"));
     const user = JSON.stringify({ message: { content: "hi", role: "user" }, type: "user" });
     writeFileSync(join(project, `${OLD}.jsonl`), `${user}\n`);
-    const add = ([session, from, via]: readonly [string, string, string]) =>
+    const add = ([session, from, via, name = "-home-user-project"]: Link) => {
+      mkdirSync(join(dir, name), { recursive: true });
       writeFileSync(
-        join(project, `${session}.jsonl`),
+        join(dir, name, `${session}.jsonl`),
         `${JSON.stringify({
           sessionId: session,
           sessions: [{ id: from, type: "claude_code_session", via }],
           type: "derived-from",
         })}\n${user}\n`,
       );
+    };
     links.forEach(add);
     return { add, dir };
   }
@@ -287,6 +298,14 @@ describe("claude channel launched with a rotated conversation", () => {
       ],
       id(0xe2),
     ],
+    [
+      "two /clear steps across project directories",
+      [
+        [id(0xe1), OLD, "clear", "-home-user-other"],
+        [id(0xe2), id(0xe1), "clear", "-home-user-link"],
+      ],
+      id(0xe2),
+    ],
   ] as const)("follows %s to the role's current binding", async (_, links, bound) => {
     const { dir } = transcripts(links);
     const served = await launch(bound, dir);
@@ -314,6 +333,13 @@ describe("claude channel launched with a rotated conversation", () => {
         [id(0xe3), OLD, "clear"],
       ],
     ],
+    [
+      "two cleared descendants in different project directories",
+      [
+        [id(0xe1), OLD, "clear", "-home-user-other"],
+        [id(0xe3), OLD, "clear", "-home-user-link"],
+      ],
+    ],
     ["a fork", [[id(0xe1), OLD, "fork"]]],
   ] as const)("stays unresolved for %s", async (_, links) => {
     const { dir } = transcripts(links);
@@ -324,6 +350,31 @@ describe("claude channel launched with a rotated conversation", () => {
       await served.poll();
       expect(served.lines).toEqual([]);
       expect(existsSync(statusFile(served.layout))).toBe(false);
+    } finally {
+      await served.stop();
+    }
+  });
+
+  it("rewrites its status file within the interval after a rebind", async () => {
+    const { dir } = transcripts([[id(0xe1), OLD, "clear"]]);
+    let clock = 1_000_000;
+    const served = await launch(id(0xe1), dir, () => clock);
+    try {
+      await served.poll();
+      const first = readChannelStatus(served.layout, ROLE);
+      expect(first).toMatchObject({ conversation: id(0xe1) });
+      updateRegistry(served.layout, 2, (draft) => {
+        draft.roles[ROLE]!.conversations.claude = id(0xe2);
+      });
+      clock += 60_000 - 1;
+      await served.poll();
+      expect(readChannelStatus(served.layout, ROLE)).toMatchObject({ conversation: id(0xe1) });
+      clock += 1;
+      await served.poll();
+      expect(readChannelStatus(served.layout, ROLE)).toEqual({
+        ...first,
+        conversation: id(0xe2),
+      });
     } finally {
       await served.stop();
     }

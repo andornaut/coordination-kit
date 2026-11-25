@@ -1,13 +1,14 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { claudeProjectsDir, clearPredecessor } from "./claudeLineage.ts";
+import { claudeProjectsDir, clearPredecessor, clearSuccessor } from "./claudeLineage.ts";
 
 const OLD = "00000000-0000-4000-8000-0000000000a1";
 const NEW = "00000000-0000-4000-8000-0000000000a2";
+const OTHER = "00000000-0000-4000-8000-0000000000a3";
 /** The most transcript bytes read for the header. */
 const HEADER_LIMIT = 64 * 1024;
 
@@ -76,6 +77,56 @@ describe("clearPredecessor", () => {
     mkdirSync(join(dir, "project-b"));
     writeFileSync(join(dir, "project-b", `${NEW}.jsonl`), JSON.stringify(derived(NEW, clear)));
     expect(clearPredecessor(dir, NEW)).toBeNull();
+  });
+});
+
+describe("clearSuccessor", () => {
+  /** A projects directory with OLD's transcript in project-a, modified at `oldAt` seconds. */
+  function lineage(oldAt = 1_000): {
+    dir: string;
+    add(project: string, id: string, at?: number): void;
+  } {
+    const dir = mkdtempSync(join(tmpdir(), "ck-lineage-"));
+    const add = (project: string, id: string, at?: number) => {
+      mkdirSync(join(dir, project), { recursive: true });
+      const path = join(dir, project, `${id}.jsonl`);
+      const lines = id === OLD ? [user] : [derived(id, clear), user];
+      writeFileSync(path, lines.map((line) => JSON.stringify(line)).join("\n"));
+      if (at !== undefined) {
+        utimesSync(path, at, at);
+      }
+    };
+    add("project-a", OLD, oldAt);
+    return { add, dir };
+  }
+
+  it("finds a successor in another project directory", () => {
+    const { add, dir } = lineage();
+    add("project-b", NEW, 2_000);
+    expect(clearSuccessor(dir, OLD)).toBe(NEW);
+  });
+
+  it("ignores a transcript modified before the predecessor's", () => {
+    const { add, dir } = lineage();
+    add("project-b", OTHER, 999);
+    expect(clearSuccessor(dir, OLD)).toBeNull();
+    add("project-c", NEW, 1_000);
+    expect(clearSuccessor(dir, OLD)).toBe(NEW);
+  });
+
+  it("stays unresolved for two successors in different project directories", () => {
+    const { add, dir } = lineage();
+    add("project-b", NEW, 2_000);
+    add("project-c", OTHER, 2_000);
+    expect(clearSuccessor(dir, OLD)).toBeNull();
+  });
+
+  it("needs exactly one predecessor transcript", () => {
+    const { add, dir } = lineage();
+    add("project-b", NEW, 2_000);
+    add("project-c", OLD, 1_000);
+    expect(clearSuccessor(dir, OLD)).toBeNull();
+    expect(clearSuccessor(join(dir, "absent"), OLD)).toBeNull();
   });
 });
 

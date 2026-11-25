@@ -1,6 +1,7 @@
 // Read bounded, recipient-scoped native evidence for the scheduled review.
 import { performance } from "node:perf_hooks";
 
+import { channelResolution } from "../adapters/claude/channelStatus.ts";
 import { collectAll, unavailableCollected } from "../adapters/codex/collect.ts";
 import { connectControl, type RpcClient } from "../adapters/codex/rpc.ts";
 import {
@@ -97,12 +98,30 @@ export interface NativeWorker {
   readonly reason: string | null;
 }
 
+/**
+ * A registered, active Claude role's channel status file against its current binding:
+ * `current`, `stale` (it names another conversation), `missing` or `unreadable`.
+ */
+export interface NativeChannel {
+  readonly role: string;
+  readonly status: "current" | "stale" | "missing" | "unreadable";
+  /** The role's current Claude binding. */
+  readonly binding: string | null;
+  /** The binding the status file names, when it was read. */
+  readonly conversation: string | null;
+  readonly pid: number | null;
+  readonly startedAt: string | null;
+  readonly version: string | null;
+}
+
 export interface NativeSurvey {
   readonly registryRevision: number;
   readonly questions: readonly NativeQuestion[];
   readonly workers: readonly NativeWorker[];
   /** Registered Claude roles have no native question or child health collector. */
   readonly claudeRoles: readonly string[];
+  /** Each active Claude role's channel status; briefs recorded before 6.4.0 omit it. */
+  readonly channels?: readonly NativeChannel[];
 }
 
 /** The collectors' entry point; the default connects and runs `collectAll`. */
@@ -328,6 +347,21 @@ function unavailableRecipient(
   return bindingCounts.get(conversation) === 1 ? null : "recipient_binding_ambiguous";
 }
 
+/** One role's channel status file; a file or directory it cannot read is `unreadable`. */
+function channelStatus(layout: Layout, role: string, binding: string | null): NativeChannel {
+  const resolution = channelResolution(layout, role, binding);
+  const status = "status" in resolution ? resolution.status : null;
+  return {
+    binding,
+    conversation: status?.conversation ?? null,
+    pid: status?.pid ?? null,
+    role,
+    startedAt: status?.startedAt ?? null,
+    status: resolution.state,
+    version: status?.version ?? null,
+  };
+}
+
 /** Read every registered role and its exact native children outside the store transaction. */
 export async function surveyNative(context: NativeContext, slot: number): Promise<NativeSurvey> {
   const { layout } = context;
@@ -371,6 +405,9 @@ export async function surveyNative(context: NativeContext, slot: number): Promis
       ? unavailableCollected("recipient_unavailable", request)
       : await (context.collect ?? defaultCollect(context))(request);
   return {
+    channels: roles
+      .filter(({ harness, record }) => harness === "claude" && active(record))
+      .map(({ conversation, role }) => channelStatus(layout, role, conversation)),
     claudeRoles: roles.filter(({ harness }) => harness === "claude").map(({ role }) => role),
     questions: targets.map(({ marker, reason, recipient, role }) =>
       questionStatus(

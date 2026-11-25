@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { writeChannelStatus } from "../adapters/claude/channelStatus.ts";
 import { type FakeControl, startFakeControl } from "../adapters/codex/testControlSocket.ts";
 import { loadLayout } from "../core/layout.ts";
+import { stateRoot } from "../core/stateRoot.ts";
 import { CLAUDE_TECH, CODEX_TECH, makeFixture, registryInput } from "../core/testFixtures.ts";
 import { createRegistry, readRegistry, type Registry } from "../registry/index.ts";
 import { diagnoseHarness } from "./diagnostics.ts";
@@ -241,24 +242,42 @@ describe("scoped harness diagnostics", () => {
       command: stableChannelCommand(test.root),
       status: "stable",
     });
-    writeChannelStatus(test.layout, {
-      argv: stableChannelCommand(test.root),
-      conversation: CLAUDE_TECH,
-      distSha256: "a".repeat(64),
-      pid: 4242,
-      role: ROLE,
-      schema: 2,
-      startedAt: "2026-11-18T15:00:00.000Z",
-      version: "2.0.0",
-    });
+    const status = (conversation: string) =>
+      writeChannelStatus(test.layout, {
+        argv: stableChannelCommand(test.root),
+        conversation,
+        distSha256: "a".repeat(64),
+        pid: 4242,
+        role: ROLE,
+        schema: 2,
+        startedAt: "2026-11-18T15:00:00.000Z",
+        version: "2.0.0",
+      });
+    status(CLAUDE_TECH);
     expect((await row()).channel_server).toEqual({
       argv: stableChannelCommand(test.root),
       code: "status_file_read",
+      conversation: CLAUDE_TECH,
       distSha256: "a".repeat(64),
       pid: 4242,
       startedAt: "2026-11-18T15:00:00.000Z",
       status: "reported",
       version: "2.0.0",
+    });
+    const stale = "e1e1e1e1-0000-4000-8000-000000000000";
+    status(stale);
+    expect((await row()).channel_server).toMatchObject({
+      code: "status_file_stale",
+      conversation: stale,
+      status: "reported",
+    });
+    const roles = join(stateRoot(test.layout), "channel", "roles");
+    rmSync(roles, { recursive: true });
+    writeFileSync(roles, "");
+    expect((await row()).channel_server).toMatchObject({
+      code: "status_file_unreadable",
+      conversation: null,
+      status: "unknown",
     });
     expect(readFileSync(config, "utf8")).toContain("delivery-kit-monitor");
   });

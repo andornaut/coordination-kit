@@ -1,8 +1,10 @@
 // The channel server's status file: `<stateRoot>/channel/roles/<role>.json` (or
-// `var/channel/roles/` without a configured state root), written once when `claude channel` knows
-// its role. It is keyed by role like the wake files, so `harness doctor` finds it after a /clear
-// rebind. It names the CLI version and dist digest the server loaded and its launch command, so
-// the doctor can report what a session is running without contacting it.
+// `var/channel/roles/` without a configured state root), written when `claude channel` knows its
+// role and rewritten when it finds the role rebound. It is keyed by role like the wake files, so
+// `harness doctor` and the scheduled review find it after a /clear rebind. It names the binding
+// the server serves, the CLI version and dist digest it loaded and its launch command, so both
+// can report what a session is running and whether its channel follows the current binding
+// without contacting it.
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -17,7 +19,7 @@ const ROLE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,6
 interface ChannelStatus {
   readonly schema: 2;
   readonly role: string;
-  /** The role's Claude conversation when the channel wrote the file. */
+  /** The role's Claude binding when the channel last wrote the file. */
   readonly conversation: string;
   readonly version: string;
   readonly distSha256: string;
@@ -46,26 +48,67 @@ export function writeChannelStatus(layout: Layout, status: ChannelStatus): boole
   }
 }
 
+/** The status file as read: absent, unreadable (including malformed), or its valid content. */
+type ChannelStatusRead =
+  | { readonly state: "missing" }
+  | { readonly state: "unreadable" }
+  | { readonly state: "read"; readonly status: ChannelStatus };
+
+function readChannelStatusFile(layout: Layout, role: string): ChannelStatusRead {
+  let value: unknown;
+  try {
+    value = readJsonIfExists(channelStatusPath(layout, role));
+  } catch {
+    return { state: "unreadable" };
+  }
+  if (value === undefined) {
+    return { state: "missing" };
+  }
+  if (
+    !isRecord(value) ||
+    value.schema !== 2 ||
+    value.role !== role ||
+    !isCanonicalUuid(value.conversation) ||
+    typeof value.version !== "string" ||
+    typeof value.distSha256 !== "string" ||
+    !Number.isSafeInteger(value.pid) ||
+    typeof value.startedAt !== "string" ||
+    !Array.isArray(value.argv) ||
+    !value.argv.every((item) => typeof item === "string")
+  ) {
+    return { state: "unreadable" };
+  }
+  return { state: "read", status: value as unknown as ChannelStatus };
+}
+
 /** The recorded status, or null when it is absent, unreadable or malformed. */
 export function readChannelStatus(layout: Layout, role: string): ChannelStatus | null {
-  try {
-    const value = readJsonIfExists(channelStatusPath(layout, role));
-    if (
-      !isRecord(value) ||
-      value.schema !== 2 ||
-      value.role !== role ||
-      !isCanonicalUuid(value.conversation) ||
-      typeof value.version !== "string" ||
-      typeof value.distSha256 !== "string" ||
-      !Number.isSafeInteger(value.pid) ||
-      typeof value.startedAt !== "string" ||
-      !Array.isArray(value.argv) ||
-      !value.argv.every((item) => typeof item === "string")
-    ) {
-      return null;
-    }
-    return value as unknown as ChannelStatus;
-  } catch {
-    return null;
+  const read = readChannelStatusFile(layout, role);
+  return read.state === "read" ? read.status : null;
+}
+
+/**
+ * Whether a Claude role's channel resolved to its current binding: `current` when the status file
+ * names `binding`, `stale` when it names another conversation, `missing` when the channel wrote
+ * none and `unreadable` when the file or its directory cannot be read or is malformed. A status
+ * file shows that a channel resolved its role, never that it is still connected.
+ */
+export type ChannelResolution =
+  | { readonly state: "missing" }
+  | { readonly state: "unreadable" }
+  | { readonly state: "current"; readonly status: ChannelStatus }
+  | { readonly state: "stale"; readonly status: ChannelStatus };
+
+export function channelResolution(
+  layout: Layout,
+  role: string,
+  binding: string | null,
+): ChannelResolution {
+  const read = readChannelStatusFile(layout, role);
+  if (read.state !== "read") {
+    return read;
   }
+  return read.status.conversation === binding
+    ? { state: "current", status: read.status }
+    : { state: "stale", status: read.status };
 }

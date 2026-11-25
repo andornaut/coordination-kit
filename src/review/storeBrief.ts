@@ -108,6 +108,8 @@ export interface BriefException {
     | "question-unknown"
     | "worker-failed"
     | "worker-unknown"
+    | "channel-unresolved"
+    | "channel-unknown"
     | "work-ready"
     | "stalled"
     | "retention-overdue"
@@ -185,7 +187,8 @@ const UNSURVEYED: ReadonlySet<string> = new Set([
 /**
  * The native exceptions first, so they survive the page cap: each owner-attested pending Codex
  * question, each Codex role whose question state is unreadable, each worker failure no earlier
- * brief reported, and each worker parent whose child health is unreadable.
+ * brief reported, each worker parent whose child health is unreadable, and each active Claude
+ * role whose channel status is missing, names another conversation or is unreadable.
  */
 function nativeExceptions(
   native: NativeSurvey,
@@ -252,8 +255,25 @@ function nativeExceptions(
       });
     }
   }
+  const channels = { current: 0, missing: 0, stale: 0, unreadable: 0 };
+  for (const channel of native.channels ?? []) {
+    channels[channel.status] += 1;
+    if (channel.status === "current") {
+      continue;
+    }
+    exceptions.push({
+      detail:
+        channel.status === "missing"
+          ? "no channel status"
+          : channel.status === "stale"
+            ? `channel on ${channel.conversation!.slice(0, 8)}`
+            : "channel status unreadable",
+      kind: channel.status === "unreadable" ? "channel-unknown" : "channel-unresolved",
+      role: channel.role,
+    });
+  }
   return {
-    counts: { claudeRoles: native.claudeRoles.length, questions, workers },
+    counts: { channels, claudeRoles: native.claudeRoles.length, questions, workers },
     exceptions,
     reported: [...reported].sort(),
   };

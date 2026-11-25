@@ -4,11 +4,13 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { writeChannelStatus } from "../adapters/claude/channelStatus.ts";
 import { wakeFilePath } from "../adapters/claude/wakeFile.ts";
 import type { Collected, CollectRequest } from "../adapters/types.ts";
 import { main } from "../cli.ts";
 import { EXIT_OK } from "../core/io.ts";
 import { gameLayout, type Layout } from "../core/layout.ts";
+import { stateRoot } from "../core/stateRoot.ts";
 import { Store } from "../store/db.ts";
 import {
   prepareFileCheckpoint,
@@ -59,6 +61,21 @@ function uuid(n: number): string {
 
 const ART_ROLE = `${GAME}/art`;
 
+/** A channel status file for `role` naming `conversation`, as `claude channel` writes it. */
+function channelStatus(layout: Layout, role: string, conversation: string): boolean {
+  return writeChannelStatus(layout, {
+    argv: ["node", "cli.js"],
+    conversation,
+    distSha256: "0".repeat(64),
+    pid: 4242,
+    role,
+    schema: 2,
+    startedAt: "2026-11-18T15:00:00.000Z",
+    version: "6.4.0",
+  });
+}
+
+/** Each active Claude role's channel resolved to its binding, so only the case under test is reported. */
 async function storeModeFixture(
   targets: readonly string[] = [TECH_ROLE],
 ): Promise<{ layout: Layout; root: string; base: string }> {
@@ -67,6 +84,8 @@ async function storeModeFixture(
     fixture.layout.routeFile,
     JSON.stringify({ host: GAME, schema: 2, state: "active", targets }),
   );
+  channelStatus(fixture.layout, "game-coordinator", COORDINATOR);
+  channelStatus(fixture.layout, TECH_ROLE, TECH);
   await Promise.resolve();
   return fixture;
 }
@@ -586,6 +605,68 @@ describe("native checks in the stored brief", () => {
         visibilityReason: "exact_unresolved_request_unavailable",
       }),
     );
+  });
+});
+
+describe("channel status in the stored brief", () => {
+  const STALE = "e1e1e1e1-0000-4000-8000-000000000000";
+  const channelExceptions = (layout: Layout, slot: number) =>
+    brief(layout, slot)
+      .split("\n")
+      .filter((line) => line.startsWith("- channel-"));
+  const collect = () =>
+    Promise.resolve({ collection_budget: {}, history: {}, question_state: {}, worker_health: {} });
+
+  it("reports each active Claude role whose channel is missing or on another conversation", async () => {
+    const { layout } = await storeModeFixture();
+    const game = gameLayout(layout, GAME);
+    rmSync(join(stateRoot(layout), "channel", "roles", `${TECH_ROLE}.json`));
+    await deliverReview(layout, game, SLOT, undefined, { collect, env: {} });
+    // The held gameplay role and the Codex art role are not reported.
+    expect(channelExceptions(layout, SLOT)).toEqual([
+      `- channel-unresolved ${TECH_ROLE}: no channel status`,
+    ]);
+    channelStatus(layout, TECH_ROLE, STALE);
+    await deliverReview(layout, game, NEXT, undefined, { collect, env: {} });
+    expect(channelExceptions(layout, NEXT)).toEqual([
+      `- channel-unresolved ${TECH_ROLE}: channel on e1e1e1e1`,
+    ]);
+    expect(showBrief(layout, { slot: NEXT }).native.channels).toEqual([
+      expect.objectContaining({
+        binding: TECH,
+        conversation: STALE,
+        pid: 4242,
+        role: TECH_ROLE,
+        status: "stale",
+      }),
+      expect.objectContaining({
+        binding: COORDINATOR,
+        conversation: COORDINATOR,
+        role: "game-coordinator",
+        status: "current",
+      }),
+    ]);
+    channelStatus(layout, TECH_ROLE, TECH);
+    await deliverReview(layout, game, LATER, undefined, { collect, env: {} });
+    expect(channelExceptions(layout, LATER)).toEqual([]);
+    expect(showBrief(layout, { slot: LATER }).counts.native).toMatchObject({
+      channels: { current: 2, missing: 0, stale: 0, unreadable: 0 },
+    });
+  });
+
+  it("reports unknown when the channel status cannot be read", async () => {
+    const { layout } = await storeModeFixture();
+    const game = gameLayout(layout, GAME);
+    const roles = join(stateRoot(layout), "channel", "roles");
+    rmSync(roles, { recursive: true });
+    // A file where the status directory belongs: every read fails with ENOTDIR.
+    writeFileSync(roles, "");
+    const result = await deliverReview(layout, game, SLOT, undefined, { collect, env: {} });
+    expect(result?.status).toBe("delivered");
+    expect(channelExceptions(layout, SLOT)).toEqual([
+      `- channel-unknown ${TECH_ROLE}: channel status unreadable`,
+      "- channel-unknown game-coordinator: channel status unreadable",
+    ]);
   });
 });
 
