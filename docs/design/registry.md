@@ -11,4 +11,6 @@ Reference: [registry](../registry.md).
 
 ## Work items
 
-No work items yet.
+| ID      | Title                                              | Link                                                                                       |
+| ------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| ck-0043 | Rebind a Claude role after /clear in session start | [ck-0043.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0043.md) |
