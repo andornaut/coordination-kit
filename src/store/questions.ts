@@ -864,6 +864,7 @@ export function cancelQuestion(
   actor: Actor,
   id: string,
   reason: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for the 5.x signature
   _proof?: NativeQuestionProof,
 ): QuestionResult {
   const why = storeText(reason, 1000, "invalid-reason");
