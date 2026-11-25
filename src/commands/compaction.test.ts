@@ -16,6 +16,7 @@ import { expect, it, vi } from "vitest";
 import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
 import { gameLayout } from "../core/layout.ts";
+import { TEST_CLOCK, TEST_CONTEXT, TEST_GIT } from "../core/testFixtures.ts";
 import { updateRegistry } from "../registry/store.ts";
 import { showBrief, storeReview } from "../review/storeBrief.ts";
 import { Store } from "../store/db.ts";
@@ -57,7 +58,7 @@ function fixture() {
     join(layout.varDir, "work-protocol.json"),
     JSON.stringify({ schema: 2, stateRoot: outside }),
   );
-  const store = Store.forLayout(layout);
+  const store = Store.forLayout(TEST_CONTEXT, layout);
   const start = (key: string) =>
     recordSession(store, OWNER, { cwd: "/fixture", harness: "claude", key, version: "3.4.4" });
   start("anchor");
@@ -76,11 +77,12 @@ function fixture() {
   const head = store.head();
   store.close();
   const { receipt: cutover } = prepareMigration(
+    TEST_GIT,
     layout,
     join(base, "backup.db"),
     join(base, "restore.db"),
   );
-  activateMigration(layout, cutover.id);
+  activateMigration(TEST_GIT, layout, cutover.id);
   const target = join(layout.varDir, "coordination");
   const restore = join(base, "restored-journal");
   cpSync(target, restore, { recursive: true });
@@ -175,7 +177,7 @@ it("requires exact qualification, preserves original loose records and resumes t
   expect(await run(activate)).toMatchObject({ code: EXIT_OK, err: "" });
   expect(readFileSync(oldBatch)).toEqual(oldBytes);
   expect(openFileJournal(restore).snapshot().events.at(-1)).toMatchObject(head);
-  const store = Store.readLayout(layout)!;
+  const store = Store.readLayout(TEST_CONTEXT, layout)!;
   try {
     expect(store.verify().head).toEqual(head);
     expect(messageStatus(store, ID, true)).toMatchObject({ bodyExpired: true, state: "handled" });
@@ -229,7 +231,7 @@ it("refuses unbound or stale proof, unqualified replacements and non-independent
   const prepared = await run(["compaction-prepare", ...cleanArgs]);
   expect(prepared.code).toBe(EXIT_OK);
   const { id } = JSON.parse(prepared.out) as { id: string };
-  updateRegistry(layout, 1, () => {});
+  updateRegistry(TEST_CLOCK, layout, 1, () => {});
   expect(
     await run(["compaction-activate", "--approval", "decision-1", "--id", id, ...cleanArgs]),
   ).toMatchObject({ code: EXIT_INVALID, err: "coordination-kit: compaction-evidence-changed\n" });
@@ -342,7 +344,7 @@ it("binds prepare and interrupted activation to one acquisition and exact candid
     code: EXIT_INVALID,
     err: "coordination-kit: compaction-source-already-fenced\n",
   });
-  expect(() => Store.readLayout(layout)).toThrow("checkpoint-selection-pending");
+  expect(() => Store.readLayout(TEST_CONTEXT, layout)).toThrow("checkpoint-selection-pending");
   expect(await run(activation(id, alternatePath))).toMatchObject({ code: EXIT_OK });
   expect(readFileJournalReservation(target)).toBeUndefined();
   expect(await run(activation(old.id, receipt))).toMatchObject({
@@ -401,7 +403,7 @@ it("rotates three real generations and preserves expired bodies, exact keys and 
   }
 
   async function rotate(index: number) {
-    const old = Store.forLayout(layout);
+    const old = Store.forLayout(TEST_CONTEXT, layout);
     try {
       old.transaction(() => {
         recordSession(old, OWNER, {
@@ -455,7 +457,7 @@ it("rotates three real generations and preserves expired bodies, exact keys and 
       expect(reserved.code, reserved.err).toBe(EXIT_OK);
       const acquired = readFileJournalReservation(durable.path)!;
       expect(() => old.transaction(() => {})).toThrow("compaction-reserved");
-      const currentRead = Store.readLayout(layout)!;
+      const currentRead = Store.readLayout(TEST_CONTEXT, layout)!;
       try {
         expect(currentRead.head()).toEqual(head);
       } finally {
@@ -501,7 +503,9 @@ it("rotates three real generations and preserves expired bodies, exact keys and 
             durable.baseline,
           ),
         ).toThrow("interrupted");
-        expect(() => Store.readLayout(layout)).toThrow("checkpoint-selection-pending");
+        expect(() => Store.readLayout(TEST_CONTEXT, layout)).toThrow(
+          "checkpoint-selection-pending",
+        );
         expect(
           await run(["compaction-cancel", ...reserve, "--nonce", reservation.nonce]),
         ).toMatchObject({
@@ -520,10 +524,11 @@ it("rotates three real generations and preserves expired bodies, exact keys and 
           },
           env: {},
           layout,
+          clock: TEST_CLOCK,
         };
         const reviewed = await storeReview(context, game, slot);
         expect(reviewed.status).toBe("delivered");
-        expect(showBrief(layout, { slot }).result).toEqual(reviewed);
+        expect(showBrief(TEST_CONTEXT, layout, { slot }).result).toEqual(reviewed);
         expect(await storeReview(context, game, slot)).toEqual(reviewed);
       }
       expect(await activate()).toMatchObject({ code: EXIT_OK });
@@ -543,7 +548,7 @@ it("rotates three real generations and preserves expired bodies, exact keys and 
         expect(selected.checkpoint.entries[entry.event.seq - 1]).toEqual(entry);
       }
       prior = selected;
-      const reopened = Store.forLayout(layout);
+      const reopened = Store.forLayout(TEST_CONTEXT, layout);
       try {
         expect(reopened.rebuild()).toEqual(reopened.verify());
         expect(messageStatus(reopened, ID, true)).toMatchObject({

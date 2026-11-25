@@ -2,6 +2,7 @@
 // call and time limits.
 import { performance } from "node:perf_hooks";
 
+import type { Clock } from "../../core/clock.ts";
 import { isRecord, unicodeDumps } from "../../core/pyjson.ts";
 import type { Collected, CollectRequest } from "../types.ts";
 import { workerHealth } from "./collectors/childHealth.ts";
@@ -96,13 +97,14 @@ function boundQuestions(owner: string, value: Json): void {
 }
 
 async function questionState(
+  clock: Clock,
   client: RpcClient,
   decisions: CollectRequest["decisionRecords"],
   recipients: readonly string[],
 ): Promise<Json> {
   let collected: Json;
   try {
-    collected = await collectQuestionState(client, decisions, recipients);
+    collected = await collectQuestionState(clock, client, decisions, recipients);
   } catch (error) {
     const code =
       error instanceof NativeTimeout
@@ -125,6 +127,7 @@ async function questionState(
 
 /** Collect every snapshot capability over `client`, whose own deadline is `deadline`. */
 export async function collectAll(
+  clock: Clock,
   client: RpcClient,
   deadline: number,
   request: CollectRequest,
@@ -137,13 +140,18 @@ export async function collectAll(
     collectionDeadline - (hasParents ? WORKER_RESERVE_MS : 0),
     MAX_COLLECTION_CALLS - (hasParents ? WORKER_RESERVE_CALLS : 0),
   );
-  const questions = await questionState(questionsBudget, request.decisionRecords, recipients);
+  const questions = await questionState(
+    clock,
+    questionsBudget,
+    request.decisionRecords,
+    recipients,
+  );
   const workerBudget = new BudgetClient(
     client,
     collectionDeadline,
     MAX_COLLECTION_CALLS - questionsBudget.callsUsed,
   );
-  const workers = hasParents ? await workerHealth(workerBudget, request.parents) : {};
+  const workers = hasParents ? await workerHealth(clock, workerBudget, request.parents) : {};
   return {
     collection_budget: {
       calls_used: questionsBudget.callsUsed + workerBudget.callsUsed,

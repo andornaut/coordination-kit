@@ -2,6 +2,7 @@ import { performance } from "node:perf_hooks";
 
 import { expect, it, vi } from "vitest";
 
+import { TEST_CLOCK } from "../../core/testFixtures.ts";
 import { collectAll } from "./collect.ts";
 import { NativeTimeout, type RpcClient } from "./rpc.ts";
 
@@ -18,7 +19,7 @@ it("reserves worker calls when question history exhausts its share", async () =>
       method === "thread/items/list" ? { data: [], nextCursor: String(++cursor) } : { data: [] },
     ),
   );
-  const records = await collectAll({ call, close() {} }, deadline, {
+  const records = await collectAll(TEST_CLOCK, { call, close() {} }, deadline, {
     decisionRecords: {},
     parents: [parent],
     recipients: Array.from({ length: 20 }, (_, index) => recipient(index)),
@@ -52,7 +53,7 @@ it("preserves the worker deadline after a question response times out", async ()
       ? Promise.reject(new NativeTimeout("response"))
       : Promise.resolve({ data: [] }),
   );
-  const records = await collectAll({ call, close() {} }, deadline, {
+  const records = await collectAll(TEST_CLOCK, { call, close() {} }, deadline, {
     decisionRecords: {},
     parents: [parent],
     recipients: [parent],

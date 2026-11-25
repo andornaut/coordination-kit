@@ -2,6 +2,7 @@ import { performance } from "node:perf_hooks";
 
 import { describe, expect, it } from "vitest";
 
+import { clockAt, TEST_CLOCK } from "../../../core/testFixtures.ts";
 import { NativeTimeout, type RpcClient } from "../rpc.ts";
 import { workerHealth } from "./childHealth.ts";
 
@@ -196,7 +197,7 @@ async function collect(
   client: RpcClient,
   parents: readonly string[],
 ): Promise<Record<string, Health>> {
-  return (await workerHealth(client, parents)) as Record<string, Health>;
+  return (await workerHealth(TEST_CLOCK, client, parents)) as Record<string, Health>;
 }
 
 async function snapshot(native: RpcClient = new Native()): Promise<Health> {
@@ -220,6 +221,11 @@ function json(value: unknown): string {
 }
 
 describe("workerHealth", () => {
+  it("stamps each parent's observation with the clock it is given", async () => {
+    const at = (await workerHealth(clockAt("2026-01-02T03:04:05Z"), new Native(), [P]))[P];
+    expect(at).toMatchObject({ observed_at: "2026-01-02T03:04:05+00:00" });
+  });
+
   it("classifies every typed failure code and discards private fields", async () => {
     for (const [code, classification] of Object.entries(ERROR_CLASSES)) {
       const native = new Native();

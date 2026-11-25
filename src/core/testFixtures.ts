@@ -3,6 +3,24 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { Clock } from "./clock.ts";
+import { type GitRunner, systemGit } from "./git.ts";
+
+/** The instant every `TEST_CLOCK` reading returns. */
+export const TEST_NOW = "2026-11-25T12:00:00.000Z";
+/** A fixed clock, so no test reads the real time. */
+export const TEST_CLOCK: Clock = () => new Date(TEST_NOW);
+/** A clock fixed at `iso`. */
+export function clockAt(iso: string): Clock {
+  return () => new Date(iso);
+}
+/** Git over an empty environment: no caller configuration, the default executable path. */
+export const TEST_GIT: GitRunner = systemGit({});
+/** The host name tests pass where decision text must not contain this machine's name. */
+export const TEST_HOST = "fixture-host";
+/** The context tests open stores with: the fixed clock and an empty environment. */
+export const TEST_CONTEXT = { clock: TEST_CLOCK, env: {} } as const;
+
 export const CLAUDE_TECH = "00000000-0000-4000-8000-000000000001";
 export const CODEX_TECH = "00000000-0000-4000-8000-000000000002";
 export const CLAUDE_COORDINATOR = "00000000-0000-4000-8000-000000000003";

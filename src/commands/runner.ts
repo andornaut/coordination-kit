@@ -2,7 +2,6 @@
 // coordinator-installed CLI. Each prints exactly one JSON line on stdout and exits 0 for every
 // typed outcome, 2 for a usage error and 1 for an internal failure, which prints nothing on
 // stdout and one `coordination-kit:` line on stderr.
-import { parseArgs } from "node:util";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
 import {
@@ -18,7 +17,7 @@ import { deliverReview, reviewDeliverLine } from "../review/deliver.ts";
 import { showBrief } from "../review/storeBrief.ts";
 import { ingestEvents, type IngestResult } from "../store/ingest.ts";
 import { StoreError } from "../store/types.ts";
-import { errorMessage } from "./args.ts";
+import { errorMessage, parseOptions, systemClock } from "./args.ts";
 
 export const REVIEW_DELIVER_OPTIONS = {
   game: { type: "string" },
@@ -84,7 +83,7 @@ export const reviewDeliver: Handler = async (io, root, args) => {
   let values;
   let slot: number;
   try {
-    ({ values } = parseArgs({ args, options: REVIEW_DELIVER_OPTIONS, strict: true }));
+    ({ values } = parseOptions(REVIEW_DELIVER_OPTIONS, args));
     if (values.slot === undefined) {
       throw new Usage("--slot is required");
     }
@@ -105,6 +104,7 @@ export const reviewDeliver: Handler = async (io, root, args) => {
   }
   try {
     const result = await deliverReview(
+      { clock: systemClock, env: io.env },
       resolved.layout,
       resolved.game,
       slot,
@@ -151,7 +151,7 @@ function eventsIngestLine(cli: CliIdentity, game: string, result: IngestResult):
 export const eventsIngest: Handler = async (io, root, args) => {
   let values;
   try {
-    ({ values } = parseArgs({ args, options: EVENTS_INGEST_OPTIONS, strict: true }));
+    ({ values } = parseOptions(EVENTS_INGEST_OPTIONS, args));
   } catch (error) {
     io.err(`coordination-kit: ${errorMessage(error)}\n`);
     return EXIT_USAGE;
@@ -161,7 +161,10 @@ export const eventsIngest: Handler = async (io, root, args) => {
     return resolved;
   }
   try {
-    const result = await ingestEvents({ env: io.env, layout: resolved.layout }, resolved.game);
+    const result = await ingestEvents(
+      { clock: systemClock, env: io.env, layout: resolved.layout },
+      resolved.game,
+    );
     io.out(eventsIngestLine(resolved.cli, resolved.game.id, result));
     return EXIT_OK;
   } catch (error) {
@@ -188,7 +191,7 @@ export const reviewShow: Handler = (io, root, args) => {
   let values;
   let slot: number | undefined;
   try {
-    ({ values } = parseArgs({ args, options: REVIEW_SHOW_OPTIONS, strict: true }));
+    ({ values } = parseOptions(REVIEW_SHOW_OPTIONS, args));
     slot = values.slot === undefined ? undefined : slotSeconds(values.slot);
   } catch (error) {
     io.err(`coordination-kit: ${errorMessage(error)}\n`);
@@ -205,7 +208,7 @@ export const reviewShow: Handler = (io, root, args) => {
     return Promise.resolve(error instanceof UnknownGame ? EXIT_USAGE : EXIT_INVALID);
   }
   try {
-    const brief = showBrief(layout, {
+    const brief = showBrief(io, layout, {
       ...(values.game === undefined ? {} : { game: values.game }),
       ...(slot === undefined ? {} : { slot }),
     });

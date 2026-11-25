@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
 import { loadLayout } from "../core/layout.ts";
+import { TEST_CONTEXT, TEST_HOST } from "../core/testFixtures.ts";
 import { Store } from "../store/db.ts";
 import { releasePolicyHold, setPolicyHold } from "../store/policyHolds.ts";
 import {
@@ -138,7 +139,7 @@ describe("work verbs", () => {
     const tech = live(fixture, IDS.tech);
     const sk = { id: "sk-0001", worktree: fixture.kit };
     const sg = { id: "sg-0001", worktree: fixture.game };
-    const store = Store.forLayout(loadLayout(fixture.root));
+    const store = Store.forLayout(TEST_CONTEXT, loadLayout(fixture.root));
     const coordinator = { nativeId: IDS.coordinator, role: ROLES.coordinator };
     const kitActor = { nativeId: IDS.kit, role: KIT };
     const holdIds = () => workShow(kit, sk).holds.map((hold) => hold.id);
@@ -175,7 +176,7 @@ describe("work verbs", () => {
 
   it("checks exact policy targets before start and keeps other work available", () => {
     const fixture = kitFixture();
-    const store = Store.forLayout(loadLayout(fixture.root));
+    const store = Store.forLayout(TEST_CONTEXT, loadLayout(fixture.root));
     const actor = { nativeId: IDS.coordinator, role: ROLES.coordinator };
     const item = (id: string) => ({ id, worktree: fixture.game });
     const set = (id: string, scope: string) =>
@@ -207,7 +208,7 @@ describe("work verbs", () => {
     const fixture = kitFixture();
     const tech = live(fixture, IDS.tech);
     const art = live(fixture, IDS.art);
-    const host = Store.forLayout(loadLayout(fixture.root));
+    const host = Store.forLayout(TEST_CONTEXT, loadLayout(fixture.root));
     const actor = { nativeId: IDS.art, role: ROLES.art };
     const blocked = { id: "sg-0001", worktree: fixture.game };
     const independent = { id: "sg-0002", worktree: fixture.game };
@@ -219,7 +220,7 @@ describe("work verbs", () => {
     expect(workShow(tech, blocked).pendingQuestions).toEqual(["q-required"]);
     expect(code(() => workStart(tech, {}, blocked))).toBe("work-question-pending");
     expect(workStart(art, {}, independent).record.state).toBe("started");
-    recordQuestionAnswer(host, actor, "q-required", {
+    recordQuestionAnswer(TEST_HOST, host, actor, "q-required", {
       text: "Use the first option.",
       work: "sg-0002",
     });
@@ -455,7 +456,7 @@ describe("work verbs", () => {
     workBlock(kit, {}, { ...input, reason: "Waiting" });
     workEvidence(kit, {}, { ...input, sha: SHA, stage: "implemented" });
     const before = workShow(live(fixture), input).record;
-    const store = Store.forLayout(loadLayout(fixture.root));
+    const store = Store.forLayout(TEST_CONTEXT, loadLayout(fixture.root));
     store.rebuild();
     store.close();
     expect(workShow(live(fixture), input).record).toEqual(before);
@@ -521,7 +522,7 @@ describe("work check --decisions", () => {
         }),
       },
     });
-    const store = Store.forLayout(loadLayout(fixture.root));
+    const store = Store.forLayout(TEST_CONTEXT, loadLayout(fixture.root));
     // Store decisions through the question records: D1 is in the file, D2 only in the store, and
     // zz-0001 belongs to no repository's work files.
     const actor = { nativeId: IDS.kit, role: KIT };
@@ -531,7 +532,7 @@ describe("work check --decisions", () => {
       ["q-3", "zz-0001", "Another repository."],
     ] as const) {
       openQuestion(store, actor, { id, title: "Decide?" });
-      answerQuestion(store, actor, id, { text, work });
+      answerQuestion(TEST_HOST, store, actor, id, { text, work });
     }
     expect(listDecisions(store).map((decision) => decision.id)).toEqual([
       "sk-0001/D1",

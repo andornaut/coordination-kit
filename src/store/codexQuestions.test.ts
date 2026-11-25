@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { TEST_CLOCK, TEST_HOST } from "../core/testFixtures.ts";
 import { nativeQuestionObservation } from "./codexQuestionObservation.ts";
 import { dependentQuestions, type NativeQuestionProof } from "./codexQuestions.ts";
 import { Store } from "./db.ts";
@@ -24,7 +25,7 @@ const wording = "Pick a palette.\nWhich do you prefer?";
 const options = [{ description: "High saturation", label: "Warm" }, { label: "Cool" }];
 
 function fixture() {
-  const store = Store.open(":memory:");
+  const store = Store.open(TEST_CLOCK, ":memory:");
   const opened = openQuestion(store, actor, {
     codex: { dependsOn: [ref], thread: ART },
     id: "q-palette",
@@ -102,9 +103,13 @@ describe("Codex question lifecycle", () => {
       linkNativeQuestion(store, actor, "q-other", next, observation("observed", next));
     }
     const stranger = { nativeId: COORDINATOR, role: "game-coordinator" };
-    expect(() => recordQuestionAnswer(store, stranger, "q-palette", answer)).toThrow("not-owner");
+    expect(() => recordQuestionAnswer(TEST_HOST, store, stranger, "q-palette", answer)).toThrow(
+      "not-owner",
+    );
     expect(() => cancelQuestion(store, stranger, "q-other", "Not needed.")).toThrow("not-owner");
-    expect(recordQuestionAnswer(store, owner, "q-palette", answer).question).toMatchObject({
+    expect(
+      recordQuestionAnswer(TEST_HOST, store, owner, "q-palette", answer).question,
+    ).toMatchObject({
       codex: { resolution: null },
       state: "answered",
     });

@@ -2,7 +2,6 @@
 // answering it records a typed decision linked to a work item. A hold is owned by the role that
 // set it and only that role releases it. Every writer trusts its `actor`: the CLI resolves it
 // through the registry fence first, and these functions refuse any other owner's record.
-import { hostname } from "node:os";
 import type { SQLInputValue } from "node:sqlite";
 
 import type { Harness } from "../registry/schema.ts";
@@ -131,11 +130,12 @@ function storeText(value: string, max: number, code: string): string {
 
 /**
  * Decision text goes into a public work file: one line with no secret shape, home-directory path,
- * UUID or this machine's host name, read at run time and never stored.
+ * UUID or `hostname`, this machine's host name as the caller read it; the host name is never
+ * stored.
  */
-export function publicText(value: string): string {
+export function publicText(hostname: string, value: string): string {
   storeText(value, 1000, "invalid-text");
-  const host = hostname().toLowerCase();
+  const host = hostname.toLowerCase();
   ensure(
     !HOME_PATH.test(value) &&
       !UUID.test(value) &&
@@ -426,9 +426,9 @@ export interface AnswerResult extends QuestionResult {
 
 type AnswerDetails = Pick<RecordedAnswer, "by" | "supersedes" | "text" | "work">;
 
-function validatedAnswer(input: AnswerInput): AnswerDetails {
+function validatedAnswer(hostname: string, input: AnswerInput): AnswerDetails {
   ensure(WORK_ID.test(input.work), "invalid-work");
-  const decisionText = publicText(input.text);
+  const decisionText = publicText(hostname, input.text);
   const by = input.by ?? "user";
   ensure(BY.test(by), "invalid-by");
   const ref = input.supersedes === undefined ? null : DECISION_REF.exec(input.supersedes);
@@ -468,6 +468,7 @@ export function getQuestionDecision(store: Store, actor: Actor, id: string): Dec
  * The owning role answers from any binding; native evidence never gates it.
  */
 export function recordQuestionAnswer(
+  hostname: string,
   store: Store,
   actor: Actor,
   id: string,
@@ -481,7 +482,7 @@ export function recordQuestionAnswer(
     if (input === undefined) {
       ensure(previous !== undefined, "question-unanswered");
     }
-    const answer = input === undefined ? previous! : validatedAnswer(input);
+    const answer = input === undefined ? previous! : validatedAnswer(hostname, input);
     ensure(row.work == null || row.work === answer.work, "work-mismatch");
     const duplicate = row.state !== "pending";
     ensure(!duplicate || matchesAnswer(previous, answer), "already-closed");
@@ -573,12 +574,13 @@ function numberDecision(
 
 /** Answer directly when decision numbering is already available to the store caller. */
 export function answerQuestion(
+  hostname: string,
   store: Store,
   actor: Actor,
   id: string,
   input: AnswerInput,
 ): AnswerResult {
-  const answer = validatedAnswer(input);
+  const answer = validatedAnswer(hostname, input);
   return store.transaction(() => numberDecision(store, actor, id, answer, input.fileNumbers ?? []));
 }
 

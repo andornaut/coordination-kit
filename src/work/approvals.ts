@@ -9,7 +9,7 @@ import { type GitRunner, readMainFiles } from "../core/git.ts";
 import { isRecord } from "../core/pyjson.ts";
 import { StateRootError } from "../core/stateRoot.ts";
 import type { Repository } from "../status/collect.ts";
-import { MEMORY, Store } from "../store/db.ts";
+import { MEMORY, READ_ONLY_CLOCK, Store, type StoreContext } from "../store/db.ts";
 import { sha256 } from "../store/eventCodec.ts";
 import { type CallerOptions, resolveCaller } from "../store/identity.ts";
 import { holdOpen } from "../store/projections/questions.ts";
@@ -338,12 +338,9 @@ function readApprovalLedger(path: string): Raw {
   return value;
 }
 
-interface ApprovalImportContext {
-  readonly env: NodeJS.ProcessEnv;
+interface ApprovalImportContext extends StoreContext {
   readonly git: GitRunner;
   readonly coordinatorRoot: string;
-  /** Test hook: the store clock. */
-  readonly now?: () => string;
 }
 
 /** Each ledger entry's work item and outcome, and the events it proves. */
@@ -592,8 +589,8 @@ export function importApprovalLedger(
   let store: Store;
   try {
     store = selection.dryRun
-      ? (Store.readLayout(coordinator.layout) ?? Store.open(MEMORY))
-      : Store.forLayout(coordinator.layout, context.now === undefined ? {} : { now: context.now });
+      ? (Store.readLayout(context, coordinator.layout) ?? Store.open(READ_ONLY_CLOCK, MEMORY))
+      : Store.forLayout(context, coordinator.layout);
   } catch (error) {
     if (error instanceof StateRootError) {
       throw new StoreError("store-unavailable");

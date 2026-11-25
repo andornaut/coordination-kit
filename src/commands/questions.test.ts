@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
+import { TEST_CLOCK, TEST_CONTEXT } from "../core/testFixtures.ts";
 import { updateRegistry } from "../registry/index.ts";
 import { dependentQuestions } from "../store/codexQuestions.ts";
 import { Store } from "../store/db.ts";
@@ -211,7 +212,7 @@ describe("question commands", () => {
       art("question", "open", "--id", id, "--title", `${id}?`, "--depends-on", `${GAME}:ag-0001`);
     const opened = await Promise.all(["q-answer", "q-cancel", "q-legacy"].map(open));
     expect(opened.map(({ code }) => code)).toEqual([EXIT_OK, EXIT_OK, EXIT_OK]);
-    updateRegistry(layout, 1, (draft) => {
+    updateRegistry(TEST_CLOCK, layout, 1, (draft) => {
       draft.roles[ART_ROLE] = {
         ...draft.roles[ART_ROLE]!,
         conversations: { claude: ROTATED, codex: ART },
@@ -265,7 +266,7 @@ describe("question commands", () => {
       "coordination-kit: legacy-question-required\n",
       "coordination-kit: legacy-question-required\n",
     ]);
-    const store = Store.forLayout(layout);
+    const store = Store.forLayout(TEST_CONTEXT, layout);
     expect(dependentQuestions(store, { id: "ag-0001", repository: GAME })).toEqual(["q-depends"]);
     store.close();
   });

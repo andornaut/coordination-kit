@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
+import { clockAt, TEST_CLOCK, TEST_CONTEXT } from "../core/testFixtures.ts";
 import { Store, storePath } from "./db.ts";
 import { canonicalJson } from "./eventCodec.ts";
 import { closeMessage, readInbox, retainMessage, sendMessage } from "./messages.ts";
@@ -58,8 +59,36 @@ describe("canonicalJson", () => {
 });
 
 describe("Store", () => {
+  it("times each appended event with the store's clock and refuses one through a read-only store", () => {
+    const { layout } = storeFixture();
+    const writer = Store.forLayout(
+      { ...TEST_CONTEXT, clock: clockAt("2026-01-02T03:04:05.000Z") },
+      layout,
+    );
+    try {
+      sendMessage(writer, SENDER, {
+        body: "Timed.",
+        id: uuid(1),
+        intent: "queue",
+        to: RECIPIENT.role,
+      });
+      expect(writer.events().map((event) => event.at)).toEqual(["2026-01-02T03:04:05.000Z"]);
+    } finally {
+      writer.close();
+    }
+    const reader = Store.readLayout(TEST_CONTEXT, layout)!;
+    try {
+      expect(() =>
+        reader.append({ actor: SENDER, key: "read-only:1", kind: "test.read-only", payload: {} }),
+      ).toThrow("store-read-only");
+      expect(reader.events()).toHaveLength(1);
+    } finally {
+      reader.close();
+    }
+  });
+
   it("opens with WAL, synchronous FULL, a 5 s busy timeout, foreign keys and owner-only mode", () => {
-    const store = Store.open(scratch());
+    const store = Store.open(TEST_CLOCK, scratch());
     const pragma = (name: string) =>
       Object.values(store.db.prepare(`PRAGMA ${name}`).get() ?? {})[0];
     expect(pragma("journal_mode")).toBe("wal");
@@ -76,7 +105,7 @@ describe("Store", () => {
   });
 
   it("chains every event to the previous hash from the genesis value", () => {
-    const store = Store.open(scratch());
+    const store = Store.open(TEST_CLOCK, scratch());
     populate(store);
     const events = store.events();
     expect(events[0]?.prevHash).toBe(GENESIS);
@@ -89,7 +118,7 @@ describe("Store", () => {
   });
 
   it("refuses updates and deletes of events", () => {
-    const store = Store.open(scratch());
+    const store = Store.open(TEST_CLOCK, scratch());
     populate(store);
     expect(() => store.db.exec("UPDATE events SET kind = 'x.y' WHERE seq = 1")).toThrow(
       "append-only",
@@ -100,21 +129,21 @@ describe("Store", () => {
 
   it("detects an edited payload and refuses to rebuild from a broken chain", () => {
     const path = scratch();
-    const store = Store.open(path);
+    const store = Store.open(TEST_CLOCK, path);
     populate(store);
     store.close();
     const raw = new DatabaseSync(path);
     raw.exec("DROP TRIGGER events_no_update");
     raw.exec(`UPDATE events SET payload = replace(payload, 'body 2', 'body X') WHERE seq = 2`);
     raw.close();
-    const reopened = Store.open(path);
+    const reopened = Store.open(TEST_CLOCK, path);
     expect(() => reopened.verify()).toThrow("chain-broken: at seq 2");
     expect(() => reopened.rebuild()).toThrow("chain-broken");
     reopened.close();
   });
 
   it("rebuilds every projection from the events to the same rows", () => {
-    const store = Store.open(scratch());
+    const store = Store.open(TEST_CLOCK, scratch());
     populate(store);
     const before = messages(store);
     const wakes = store.db.prepare("SELECT * FROM wake_state").all();
@@ -128,7 +157,7 @@ describe("Store", () => {
   });
 
   it("rebuilds a journal holding retired reminder, notice and attention events", () => {
-    const store = Store.open(scratch());
+    const store = Store.open(TEST_CLOCK, scratch());
     // An older store also holds the retired projections' tables.
     store.db.exec(`CREATE TABLE pending_notices (id TEXT PRIMARY KEY);
       CREATE TABLE reminder_claims (id TEXT PRIMARY KEY);
@@ -240,7 +269,7 @@ describe("Store", () => {
   });
 
   it("makes a repeated idempotency key a no-op that returns the stored event", () => {
-    const store = Store.open(scratch());
+    const store = Store.open(TEST_CLOCK, scratch());
     const actor = { nativeId: null, role: null };
     const first = store.append({ actor, key: "k-1", kind: "test.noted", payload: { n: 1 } });
     const again = store.append({ actor, key: "k-1", kind: "test.noted", payload: { n: 2 } });
@@ -254,7 +283,7 @@ describe("Store", () => {
   });
 
   it("rolls back a failed transaction without leaving an event", () => {
-    const store = Store.open(scratch());
+    const store = Store.open(TEST_CLOCK, scratch());
     expect(() =>
       store.transaction(() => {
         store.append({
@@ -272,10 +301,10 @@ describe("Store", () => {
 
   it("refuses a store written by a newer schema", () => {
     const path = scratch();
-    Store.open(path).close();
+    Store.open(TEST_CLOCK, path).close();
     const raw = new DatabaseSync(path);
     raw.exec("PRAGMA user_version = 2");
     raw.close();
-    expect(() => Store.open(path)).toThrow("store-schema-newer");
+    expect(() => Store.open(TEST_CLOCK, path)).toThrow("store-schema-newer");
   });
 });

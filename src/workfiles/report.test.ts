@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK } from "../core/io.ts";
 import { loadLayout } from "../core/layout.ts";
-import { makeFixture, registryInput } from "../core/testFixtures.ts";
+import { makeFixture, registryInput, TEST_CLOCK } from "../core/testFixtures.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
 import { reportWork } from "./report.ts";
 
@@ -17,6 +17,7 @@ const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "deliv
 function coordinator(): string {
   const { root } = makeFixture();
   createRegistry(
+    TEST_CLOCK,
     loadLayout(root),
     registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">,
   );

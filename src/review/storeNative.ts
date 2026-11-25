@@ -12,6 +12,7 @@ import {
 } from "../adapters/shared/decisions.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
 import type { Collected, CollectRequest } from "../adapters/types.ts";
+import type { Clock } from "../core/clock.ts";
 import { isCanonicalUuid } from "../core/ids.ts";
 import type { Layout } from "../core/layout.ts";
 import { isRecord } from "../core/pyjson.ts";
@@ -128,6 +129,7 @@ export interface NativeSurvey {
 export type NativeCollect = (request: CollectRequest) => Promise<Collected>;
 
 interface NativeContext {
+  readonly clock: Clock;
   readonly layout: Layout;
   readonly env: NodeJS.ProcessEnv;
   /** The Codex control connection, as for wakes; defaults to the resolved control socket. */
@@ -149,7 +151,7 @@ function defaultCollect(context: NativeContext): NativeCollect {
       return unavailableCollected("control_unavailable", request);
     }
     try {
-      return await collectAll(client, deadline, request);
+      return await collectAll(context.clock, client, deadline, request);
     } catch {
       return unavailableCollected("collector_unavailable", request);
     } finally {

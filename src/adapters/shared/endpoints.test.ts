@@ -1,5 +1,4 @@
 import { statSync } from "node:fs";
-import { homedir } from "node:os";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,15 +11,11 @@ import { resolveCodexControlSocket } from "./endpoints.ts";
 
 const SOCKET_MISSING =
   "set CODEX_CONTROL_SOCKET to an available absolute Codex control socket path";
-const MANAGED = "/managed-home/.codex/app-server-control/app-server-control.sock";
+const HOME = "/managed-home";
+const MANAGED = `${HOME}/.codex/app-server-control/app-server-control.sock`;
 const SCOPE = { roles: ["archies-dog-walks/tech"] };
 const LAYOUT = { config: coordinatorConfig() } as unknown as Layout;
 const REGISTRY = { ...registryInput(), harness: "codex" } as unknown as Registry;
-
-vi.mock("node:os", async (original) => ({
-  ...(await original<typeof import("node:os")>()),
-  homedir: vi.fn(() => "/managed-home"),
-}));
 
 vi.mock("node:fs", async (original) => ({
   ...(await original<typeof import("node:fs")>()),
@@ -41,32 +36,42 @@ describe("Codex endpoint selection", () => {
     expect(
       resolveCodexControlSocket({
         controlSocket: "/chosen/not-created.sock",
-        env: { CODEX_CONTROL_SOCKET: "/environment.sock" },
+        env: { CODEX_CONTROL_SOCKET: "/environment.sock", HOME },
         home: "/other-home",
       }),
     ).toEqual({ path: "/chosen/not-created.sock", source: "option" });
     expect(statSync).not.toHaveBeenCalled();
-    expect(homedir).not.toHaveBeenCalled();
   });
 
   it.each([
-    ["empty option", { controlSocket: "", env: { CODEX_CONTROL_SOCKET: "/environment.sock" } }],
-    ["relative environment", { env: { CODEX_CONTROL_SOCKET: "relative.sock" } }],
+    [
+      "empty option",
+      { controlSocket: "", env: { CODEX_CONTROL_SOCKET: "/environment.sock", HOME } },
+    ],
+    ["relative environment", { env: { CODEX_CONTROL_SOCKET: "relative.sock", HOME } }],
   ] as const)("rejects %s without falling back or exposing the value", (_name, options) => {
     expect(() => resolveCodexControlSocket({ ...options, home: "/other-home" })).toThrowError(
       /^Codex control socket must be a nonempty absolute path without NUL bytes$/,
     );
-    expect(homedir).not.toHaveBeenCalled();
     expect(statSync).not.toHaveBeenCalled();
   });
 
   it("selects the managed home default only when explicit configuration is absent", () => {
-    expect(resolveCodexControlSocket({ env: {} })).toEqual({
+    expect(resolveCodexControlSocket({ env: { HOME } })).toEqual({
       path: MANAGED,
       source: "managed",
     });
     expect(statSync).not.toHaveBeenCalled();
     expect(connectControl).not.toHaveBeenCalled();
+  });
+
+  it("takes the managed home from the environment, or refuses without one", () => {
+    expect(resolveCodexControlSocket({ env: { HOME: "/env-home" } }).path).toBe(
+      "/env-home/.codex/app-server-control/app-server-control.sock",
+    );
+    expect(() => resolveCodexControlSocket({ env: {} })).toThrowError(
+      /^Codex control socket must be a nonempty absolute path without NUL bytes$/,
+    );
   });
 
   it("uses the same managed socket for direct and mixed readiness", async () => {
@@ -76,8 +81,8 @@ describe("Codex endpoint selection", () => {
       call,
       close,
     });
-    const direct = await harnessReadiness({}, LAYOUT, REGISTRY, "codex", SCOPE);
-    const mixed = await effectiveReadiness({}, LAYOUT, REGISTRY, SCOPE);
+    const direct = await harnessReadiness({ HOME }, LAYOUT, REGISTRY, "codex", SCOPE);
+    const mixed = await effectiveReadiness({ HOME }, LAYOUT, REGISTRY, SCOPE);
 
     expect(direct.ready).toBe(true);
     expect(mixed.ready).toBe(true);
@@ -93,7 +98,7 @@ describe("Codex endpoint selection", () => {
     "refuses an invalid socket override without managed discovery",
     async (value) => {
       const result = await harnessReadiness(
-        { CODEX_CONTROL_SOCKET: value },
+        { CODEX_CONTROL_SOCKET: value, HOME },
         LAYOUT,
         REGISTRY,
         "codex",
@@ -101,7 +106,6 @@ describe("Codex endpoint selection", () => {
       );
       expect(result.adapter).toEqual({ reason: SOCKET_MISSING, status: "unavailable" });
       expect(result.ready).toBe(false);
-      expect(homedir).not.toHaveBeenCalled();
       expect(statSync).not.toHaveBeenCalled();
       expect(connectControl).not.toHaveBeenCalled();
     },
@@ -112,7 +116,7 @@ describe("Codex endpoint selection", () => {
       throw new Error("missing socket");
     });
     const result = await effectiveReadiness(
-      { CODEX_CONTROL_SOCKET: "/explicit/missing.sock" },
+      { CODEX_CONTROL_SOCKET: "/explicit/missing.sock", HOME },
       LAYOUT,
       REGISTRY,
       SCOPE,
@@ -120,7 +124,6 @@ describe("Codex endpoint selection", () => {
     expect(result.adapters.codex).toEqual({ reason: SOCKET_MISSING, status: "unavailable" });
     expect(result.ready).toBe(false);
     expect(statSync).toHaveBeenCalledExactlyOnceWith("/explicit/missing.sock");
-    expect(homedir).not.toHaveBeenCalled();
     expect(connectControl).not.toHaveBeenCalled();
   });
 
@@ -128,7 +131,7 @@ describe("Codex endpoint selection", () => {
     vi.mocked(statSync).mockImplementationOnce(() => {
       throw new Error("missing socket");
     });
-    const result = await harnessReadiness({}, LAYOUT, REGISTRY, "codex", SCOPE);
+    const result = await harnessReadiness({ HOME }, LAYOUT, REGISTRY, "codex", SCOPE);
     expect(result.adapter).toEqual({
       reason: "the managed Codex control socket is unavailable",
       status: "unavailable",
@@ -140,7 +143,7 @@ describe("Codex endpoint selection", () => {
 
   it("does not fall back when the explicitly configured socket refuses a probe", async () => {
     const result = await harnessReadiness(
-      { CODEX_CONTROL_SOCKET: "/explicit/refused.sock" },
+      { CODEX_CONTROL_SOCKET: "/explicit/refused.sock", HOME },
       LAYOUT,
       REGISTRY,
       "codex",
@@ -155,6 +158,5 @@ describe("Codex endpoint selection", () => {
       expect.any(Number),
       "/explicit/refused.sock",
     );
-    expect(homedir).not.toHaveBeenCalled();
   });
 });

@@ -1,30 +1,15 @@
 // Scoped selection is a revision-checked registry mutation, separate from provider activation.
-import { parseArgs } from "node:util";
-
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../core/io.ts";
 import { loadLayout } from "../core/layout.ts";
 import { dumpsJson } from "../core/pyjson.ts";
 import { selectHarness } from "../registry/selection.ts";
-import { errorMessage } from "./args.ts";
+import { errorMessage, parseOptions, systemClock } from "./args.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 export const harnessSelect: Handler = (io, root, args) => {
   let values;
   try {
-    const parsed = parseArgs({
-      args,
-      options: SPECS["harness select"].options,
-      strict: true,
-      tokens: true,
-    });
-    for (const name of ["harness", "expected-revision"]) {
-      if (
-        parsed.tokens.filter((token) => token.kind === "option" && token.name === name).length > 1
-      ) {
-        throw new Error(`--${name} must be given once`);
-      }
-    }
-    values = parsed.values;
+    ({ values } = parseOptions(SPECS["harness select"].options, args));
   } catch (error) {
     const message = errorMessage(error);
     io.err(`coordination-kit: ${message}\n${commandUsage("harness select")}\n`);
@@ -42,7 +27,7 @@ export const harnessSelect: Handler = (io, root, args) => {
     return EXIT_USAGE;
   }
   try {
-    const registry = selectHarness(loadLayout(root), Number(revision), {
+    const registry = selectHarness(systemClock, loadLayout(root), Number(revision), {
       ...(game === undefined ? {} : { games: game }),
       harness,
       ...(role === undefined ? {} : { roles: role }),

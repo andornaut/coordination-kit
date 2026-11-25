@@ -64,10 +64,10 @@ function readDeployments(db: DatabaseSync): ReadonlyMap<string, readonly DeployP
  * The store's work records and imported requests, read through a read-only connection: nothing is created or migrated.
  * No store file is `absent`; a store without the work tables has no records.
  */
-export function readStoreWork(layout: Layout): StoreWorkSnapshot {
+export function readStoreWork(env: NodeJS.ProcessEnv, layout: Layout): StoreWorkSnapshot {
   let store: Store | null = null;
   try {
-    store = Store.readLayout(layout);
+    store = Store.readLayout({ env }, layout);
     if (store === null) {
       return empty({ status: "absent" });
     }

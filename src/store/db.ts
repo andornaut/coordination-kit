@@ -5,6 +5,8 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
+import type { Clock } from "../core/clock.ts";
+import { systemGit } from "../core/git.ts";
 import type { Layout } from "../core/layout.ts";
 import { stateRoot } from "../core/stateRoot.ts";
 import { canonicalJson, eventHash, rowEvent, sha256 } from "./eventCodec.ts";
@@ -117,10 +119,16 @@ export interface VerifyResult {
   readonly head: { readonly seq: number; readonly hash: string };
 }
 
-export interface OpenOptions {
-  /** Test hook: the clock for `at`. */
-  readonly now?: () => string;
+/** What opening a layout's store reads: the clock for event times and the environment for Git. */
+export interface StoreContext {
+  readonly clock: Clock;
+  readonly env: NodeJS.ProcessEnv;
 }
+
+/** The clock of a store that never times an event: reading it refuses `store-read-only`. */
+export const READ_ONLY_CLOCK: Clock = () => {
+  throw new StoreError("store-read-only");
+};
 
 /**
  * One open connection. Library callers trust their `Actor`: the CLI applies the registry fence
@@ -129,22 +137,22 @@ export interface OpenOptions {
 export class Store {
   readonly db: DatabaseSync;
   readonly path: string;
-  readonly #now: () => string;
+  readonly #clock: Clock;
   readonly #files: FileProjection | undefined;
   readonly #checkpointHead: CompactionCheckpoint["head"] | undefined;
   readonly #reducedDigests = new Map<number, string>();
   #depth = 0;
 
   private constructor(
+    clock: Clock,
     path: string,
     db: DatabaseSync,
-    options: OpenOptions,
     files?: FileProjection,
     checkpoint?: CompactionCheckpoint,
   ) {
     this.path = path;
     this.db = db;
-    this.#now = options.now ?? (() => new Date().toISOString());
+    this.#clock = clock;
     this.#files = files;
     this.#checkpointHead = checkpoint?.head;
     for (const { event, reducedDigest } of checkpoint?.entries ?? []) {
@@ -154,8 +162,11 @@ export class Store {
     }
   }
 
-  /** Open or create the store at `path` with WAL, synchronous=FULL and foreign keys. */
-  static open(path: string, options: OpenOptions = {}): Store {
+  /**
+   * Open or create the store at `path` with WAL, synchronous=FULL and foreign keys. `clock` times
+   * the events it appends.
+   */
+  static open(clock: Clock, path: string): Store {
     const memory = path === MEMORY;
     const created = !memory && !existsSync(path);
     if (!memory) {
@@ -196,45 +207,54 @@ export class Store {
       db.close();
       throw error;
     }
-    return new Store(path, db, options);
+    return new Store(clock, path, db);
   }
 
+  /** Open or create the layout's selected authority. */
   static forLayout(
+    context: StoreContext,
     layout: Layout,
-    options: OpenOptions & { readonly createMissing?: boolean } = {},
+    options: { readonly createMissing?: boolean } = {},
   ): Store {
-    const selected = fileAuthority(layout, storePath(layout));
+    const selected = fileAuthority(systemGit(context.env), layout, storePath(layout));
     if (selected.kind === "files") {
-      return Store.#openSelectedFiles(layout, selected, options);
+      return Store.#openSelectedFiles(context.clock, layout, selected);
     }
     const path = selected.path;
     return Store.open(
+      context.clock,
       options.createMissing === false && !existsSync(path) ? MEMORY : path,
-      options,
     );
   }
 
-  /** Open an existing authority for queries without creating or repairing its disk state. */
-  static readLayout(layout: Layout): Store | null {
-    const selected = fileAuthority(layout, storePath(layout));
+  /**
+   * Open an existing authority for queries without creating or repairing its disk state. Its clock
+   * is `READ_ONLY_CLOCK`.
+   */
+  static readLayout(context: Pick<StoreContext, "env">, layout: Layout): Store | null {
+    const selected = fileAuthority(systemGit(context.env), layout, storePath(layout));
     const path = selected.path;
     if (selected.kind === "files") {
-      const store = Store.#openSelectedFiles(layout, selected);
+      const store = Store.#openSelectedFiles(READ_ONLY_CLOCK, layout, selected);
       store.db.exec("PRAGMA query_only = ON");
       return store;
     }
     return existsSync(path)
-      ? new Store(path, new DatabaseSync(path, { readOnly: true, timeout: BUSY_TIMEOUT_MS }), {})
+      ? new Store(
+          READ_ONLY_CLOCK,
+          path,
+          new DatabaseSync(path, { readOnly: true, timeout: BUSY_TIMEOUT_MS }),
+        )
       : null;
   }
 
   static #openSelectedFiles(
+    clock: Clock,
     layout: Layout,
     selected: Extract<ReturnType<typeof fileAuthority>, { kind: "files" }>,
-    options: OpenOptions = {},
   ): Store {
     const { path, receipt } = selected;
-    const store = Store.openFileProjection(path, fileLayoutProjection(layout, path), options);
+    const store = Store.openFileProjection(clock, path, fileLayoutProjection(layout, path));
     const { hash, seq } = receipt.head;
     try {
       if (
@@ -251,11 +271,11 @@ export class Store {
   }
 
   /** Rebuild the compatibility query index from the authoritative committed file events. */
-  static openFileProjection(path: string, files: FileProjection, options: OpenOptions = {}): Store {
+  static openFileProjection(clock: Clock, path: string, files: FileProjection): Store {
     const proof = files.checkpoint;
     const checkpoint = proof && verifyCompactionCheckpoint(proof.value, proof.receipt);
-    const index = Store.open(MEMORY);
-    const store = new Store(path, index.db, options, files, checkpoint);
+    const index = Store.open(clock, MEMORY);
+    const store = new Store(clock, path, index.db, files, checkpoint);
     try {
       if (checkpoint !== undefined) {
         store.#replay(
@@ -284,8 +304,9 @@ export class Store {
     this.db.close();
   }
 
+  /** The store clock's instant in `toISOString` form. */
   now(): string {
-    return this.#now();
+    return this.#clock().toISOString();
   }
 
   /** Run `body` in one `BEGIN IMMEDIATE` transaction; nested calls join the outer one. */

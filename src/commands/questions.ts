@@ -3,6 +3,8 @@
 // fence and refuse any other owner's record. Each prints one JSON object on stdout; a refusal
 // prints `coordination-kit: CODE` on stderr and exits 1, and a usage error exits 2.
 
+import { hostname } from "node:os";
+
 import type { Handler } from "../core/io.ts";
 import { HOLD_STATES, type HoldState } from "../store/policyHolds.ts";
 import { normalizeOptions, QUESTION_STATES, type QuestionState } from "../store/questions.ts";
@@ -25,7 +27,7 @@ import {
 } from "../store/questionService.ts";
 import { parseWorkRef } from "../work/live.ts";
 import { CALLER, callerOf, required, text, Usage, type Values } from "./args.ts";
-import { run } from "./store.ts";
+import { storeVerb } from "./store.ts";
 
 export const QUESTION_OPEN_OPTIONS = {
   ...CALLER,
@@ -114,229 +116,172 @@ function optional<K extends string>(key: K, value: string | undefined): Partial<
   return value === undefined ? {} : ({ [key]: value } as Record<K, string>);
 }
 
-export const questionOpen: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "question open",
-    args,
-    (context, values) => {
-      const labels = values.option;
-      const descriptions = values["option-json"];
-      const dependencies = values["depends-on"];
-      if (labels !== undefined && descriptions !== undefined) {
+export const questionOpen: Handler = storeVerb(
+  "question open",
+  QUESTION_OPEN_OPTIONS,
+  (context, values) => {
+    const labels = values.option;
+    const descriptions = values["option-json"];
+    const dependencies = values["depends-on"];
+    if (labels !== undefined && descriptions !== undefined) {
+      throw new Usage();
+    }
+    let entries: unknown = labels;
+    if (Array.isArray(descriptions)) {
+      try {
+        entries = descriptions.map((entry) => JSON.parse(entry) as unknown);
+      } catch {
         throw new Usage();
       }
-      let entries: unknown = labels;
-      if (Array.isArray(descriptions)) {
-        try {
-          entries = descriptions.map((entry) => JSON.parse(entry) as unknown);
-        } catch {
-          throw new Usage();
-        }
-      }
-      const options = entries === undefined ? undefined : normalizeOptions(entries);
-      return storeQuestionOpen(context, callerOf(values), {
-        ...(Array.isArray(dependencies) ? { dependsOn: dependencies.map(parseWorkRef) } : {}),
-        title: required(values, "title"),
-        ...optional("id", text(values, "id")),
-        ...optional("work", text(values, "work")),
-        ...(options === undefined ? {} : { options }),
-      });
-    },
-    QUESTION_OPEN_OPTIONS,
-  );
+    }
+    const options = entries === undefined ? undefined : normalizeOptions(entries);
+    return storeQuestionOpen(context, callerOf(values), {
+      ...(Array.isArray(dependencies) ? { dependsOn: dependencies.map(parseWorkRef) } : {}),
+      title: required(values, "title"),
+      ...optional("id", text(values, "id")),
+      ...optional("work", text(values, "work")),
+      ...(options === undefined ? {} : { options }),
+    });
+  },
+);
 
-export const questionAnswer: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "question answer",
-    args,
-    (context, values) =>
-      storeQuestionAnswer(context, callerOf(values), required(values, "id"), {
+export const questionAnswer: Handler = storeVerb(
+  "question answer",
+  QUESTION_ANSWER_OPTIONS,
+  (context, values) =>
+    storeQuestionAnswer(
+      { ...context, hostname: hostname() },
+      callerOf(values),
+      required(values, "id"),
+      {
         text: required(values, "text"),
         work: required(values, "work"),
         ...optional("by", text(values, "by")),
         ...optional("supersedes", text(values, "supersedes")),
-      }),
-    QUESTION_ANSWER_OPTIONS,
-  );
+      },
+    ),
+);
 
-export const questionProject: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "question project",
-    args,
-    (context, values) => storeQuestionProject(context, callerOf(values), required(values, "id")),
-    QUESTION_PROJECT_OPTIONS,
-  );
+export const questionProject: Handler = storeVerb(
+  "question project",
+  QUESTION_PROJECT_OPTIONS,
+  (context, values) =>
+    storeQuestionProject(
+      { ...context, hostname: hostname() },
+      callerOf(values),
+      required(values, "id"),
+    ),
+);
 
-export const questionAttach: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "question attach",
-    args,
-    (context, values) =>
-      storeQuestionAttach(context, callerOf(values), required(values, "id"), {
-        index: Number(required(values, "index")),
-        item: required(values, "item"),
-        turn: required(values, "turn"),
-      }),
-    QUESTION_ATTACH_OPTIONS,
-  );
+export const questionAttach: Handler = storeVerb(
+  "question attach",
+  QUESTION_ATTACH_OPTIONS,
+  (context, values) =>
+    storeQuestionAttach(context, callerOf(values), required(values, "id"), {
+      index: Number(required(values, "index")),
+      item: required(values, "item"),
+      turn: required(values, "turn"),
+    }),
+);
 
-export const questionReconcile: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "question reconcile",
-    args,
-    (context, values) => storeQuestionReconcile(context, callerOf(values), required(values, "id")),
-    QUESTION_PROJECT_OPTIONS,
-  );
+export const questionReconcile: Handler = storeVerb(
+  "question reconcile",
+  QUESTION_PROJECT_OPTIONS,
+  (context, values) => storeQuestionReconcile(context, callerOf(values), required(values, "id")),
+);
 
-export const questionReask: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "question reask",
-    args,
-    (context, values) => storeQuestionReask(context, callerOf(values), required(values, "id")),
-    QUESTION_PROJECT_OPTIONS,
-  );
+export const questionReask: Handler = storeVerb(
+  "question reask",
+  QUESTION_PROJECT_OPTIONS,
+  (context, values) => storeQuestionReask(context, callerOf(values), required(values, "id")),
+);
 
-export const questionCancel: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "question cancel",
-    args,
-    (context, values) =>
-      storeQuestionCancel(
-        context,
-        callerOf(values),
-        required(values, "id"),
-        required(values, "reason"),
-      ),
-    QUESTION_CANCEL_OPTIONS,
-  );
+export const questionCancel: Handler = storeVerb(
+  "question cancel",
+  QUESTION_CANCEL_OPTIONS,
+  (context, values) =>
+    storeQuestionCancel(
+      context,
+      callerOf(values),
+      required(values, "id"),
+      required(values, "reason"),
+    ),
+);
 
 /** CLEANUP (added 2026-11-25): see `closeLegacyQuestion`. */
-export const questionCloseLegacy: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "question close-legacy",
-    args,
-    (context, values) =>
-      storeQuestionCloseLegacy(context, callerOf(values), {
-        approval: required(values, "approval"),
-        id: required(values, "id"),
-        reason: required(values, "reason"),
-      }),
-    QUESTION_CLOSE_LEGACY_OPTIONS,
-  );
+export const questionCloseLegacy: Handler = storeVerb(
+  "question close-legacy",
+  QUESTION_CLOSE_LEGACY_OPTIONS,
+  (context, values) =>
+    storeQuestionCloseLegacy(context, callerOf(values), {
+      approval: required(values, "approval"),
+      id: required(values, "id"),
+      reason: required(values, "reason"),
+    }),
+);
 
-export const questionList: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "question list",
-    args,
-    (context, values) => {
-      const states = state<QuestionState>(values, QUESTION_STATES);
-      return storeQuestionList(context, {
-        ...optional("role", text(values, "role")),
-        ...(states === undefined ? {} : { states }),
-      });
-    },
-    QUESTION_LIST_OPTIONS,
-  );
+export const questionList: Handler = storeVerb(
+  "question list",
+  QUESTION_LIST_OPTIONS,
+  (context, values) => {
+    const states = state<QuestionState>(values, QUESTION_STATES);
+    return storeQuestionList(context, {
+      ...optional("role", text(values, "role")),
+      ...(states === undefined ? {} : { states }),
+    });
+  },
+);
 
-export const holdSet: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "hold set",
-    args,
-    (context, values) =>
-      storeHoldSet(context, callerOf(values), {
-        id: required(values, "id"),
-        reason: required(values, "reason"),
-        scope: required(values, "scope"),
-      }),
-    HOLD_SET_OPTIONS,
-  );
+export const holdSet: Handler = storeVerb("hold set", HOLD_SET_OPTIONS, (context, values) =>
+  storeHoldSet(context, callerOf(values), {
+    id: required(values, "id"),
+    reason: required(values, "reason"),
+    scope: required(values, "scope"),
+  }),
+);
 
-export const holdRelease: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "hold release",
-    args,
-    (context, values) => storeHoldRelease(context, callerOf(values), required(values, "id")),
-    HOLD_RELEASE_OPTIONS,
-  );
+export const holdRelease: Handler = storeVerb(
+  "hold release",
+  HOLD_RELEASE_OPTIONS,
+  (context, values) => storeHoldRelease(context, callerOf(values), required(values, "id")),
+);
 
-export const policyHoldSet: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "hold policy-set",
-    args,
-    (context, values) =>
-      storePolicyHoldSet(context, callerOf(values), {
-        approval: required(values, "approval"),
-        id: required(values, "id"),
-        reason: required(values, "reason"),
-        scope: required(values, "scope"),
-      }),
-    POLICY_HOLD_SET_OPTIONS,
-  );
+export const policyHoldSet: Handler = storeVerb(
+  "hold policy-set",
+  POLICY_HOLD_SET_OPTIONS,
+  (context, values) =>
+    storePolicyHoldSet(context, callerOf(values), {
+      approval: required(values, "approval"),
+      id: required(values, "id"),
+      reason: required(values, "reason"),
+      scope: required(values, "scope"),
+    }),
+);
 
-export const policyHoldRelease: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "hold policy-release",
-    args,
-    (context, values) =>
-      storePolicyHoldRelease(context, callerOf(values), {
-        approval: required(values, "approval"),
-        id: required(values, "id"),
-      }),
-    POLICY_HOLD_RELEASE_OPTIONS,
-  );
+export const policyHoldRelease: Handler = storeVerb(
+  "hold policy-release",
+  POLICY_HOLD_RELEASE_OPTIONS,
+  (context, values) =>
+    storePolicyHoldRelease(context, callerOf(values), {
+      approval: required(values, "approval"),
+      id: required(values, "id"),
+    }),
+);
 
-export const holdList: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "hold list",
-    args,
-    (context, values) => {
-      const states = state<HoldState>(values, HOLD_STATES);
-      return storeHoldList(context, {
-        ...optional("role", text(values, "role")),
-        ...(states === undefined ? {} : { states }),
-      });
-    },
-    HOLD_LIST_OPTIONS,
-  );
+export const holdList: Handler = storeVerb("hold list", HOLD_LIST_OPTIONS, (context, values) => {
+  const states = state<HoldState>(values, HOLD_STATES);
+  return storeHoldList(context, {
+    ...optional("role", text(values, "role")),
+    ...(states === undefined ? {} : { states }),
+  });
+});
 
-export const decisionList: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "decision list",
-    args,
-    (context, values) =>
-      storeDecisionList(context, {
-        ...optional("role", text(values, "role")),
-        ...optional("work", text(values, "work")),
-      }),
-    DECISION_LIST_OPTIONS,
-  );
+export const decisionList: Handler = storeVerb(
+  "decision list",
+  DECISION_LIST_OPTIONS,
+  (context, values) =>
+    storeDecisionList(context, {
+      ...optional("role", text(values, "role")),
+      ...optional("work", text(values, "work")),
+    }),
+);

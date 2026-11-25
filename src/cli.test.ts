@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { main } from "./cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "./core/io.ts";
 import { loadLayout } from "./core/layout.ts";
-import { makeFixture, registryInput } from "./core/testFixtures.ts";
+import { makeFixture, registryInput, TEST_CLOCK } from "./core/testFixtures.ts";
 import { createRegistry, type Registry } from "./registry/index.ts";
 
 async function run(
@@ -23,6 +23,7 @@ async function run(
 
 function withRegistry(root: string): void {
   createRegistry(
+    TEST_CLOCK,
     loadLayout(root),
     registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">,
   );

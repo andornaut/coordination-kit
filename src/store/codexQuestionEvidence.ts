@@ -4,6 +4,7 @@ import { collectQuestionState } from "../adapters/codex/collectors/questionState
 import { connectControl } from "../adapters/codex/rpc.ts";
 import { decisionDirectory, decisionRecord } from "../adapters/shared/decisions.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
+import type { Clock } from "../core/clock.ts";
 import type { Layout } from "../core/layout.ts";
 import { nativeQuestionObservation, unknownProof } from "./codexQuestionObservation.ts";
 import type { NativeQuestionProof } from "./codexQuestions.ts";
@@ -11,6 +12,7 @@ import type { QuestionView } from "./questions.ts";
 import type { NativeQuestionIdentity } from "./types.ts";
 
 interface EvidenceContext {
+  readonly clock: Clock;
   readonly env: NodeJS.ProcessEnv;
   readonly layout: Layout;
 }
@@ -41,9 +43,16 @@ export async function readCodexQuestionEvidence(
   try {
     const client = await connectControl(performance.now() + 4000, socket);
     try {
-      const result = await collectQuestionState(client, { [thread]: record }, [thread], 3, {
-        maxCalls: 12,
-      });
+      const result = await collectQuestionState(
+        context.clock,
+        client,
+        { [thread]: record },
+        [thread],
+        3,
+        {
+          maxCalls: 12,
+        },
+      );
       return nativeQuestionObservation(question, native, result[thread]);
     } finally {
       client.close();

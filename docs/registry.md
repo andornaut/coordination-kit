@@ -163,9 +163,9 @@ Read-only probe eligibility requires `ownership: "active"` and excludes phases `
 `source-held`. Other phases, including `prototype-approved`, describe product scope and do not
 disable probes. Eligibility never proves native HOLD clearance or activation.
 
-Codex readiness, doctor and wakes use `resolveCodexControlSocket({env?, home?, controlSocket?})`:
+Codex readiness, doctor and wakes use `resolveCodexControlSocket({env, home?, controlSocket?})`:
 explicit option, then `CODEX_CONTROL_SOCKET`, then the managed socket under
-`~/.codex/app-server-control/app-server-control.sock`. The result is `{path, source}`, where
+`.codex/app-server-control/app-server-control.sock` in `home`, else in `env.HOME`. The result is `{path, source}`, where
 source is `option`, `environment` or `managed`. Selection performs no probe; an invalid
 explicit path never falls back. Doctor uses environment or managed selection and performs only
 control connect/initialization and exact `thread/read` with `includeTurns: false` for selected

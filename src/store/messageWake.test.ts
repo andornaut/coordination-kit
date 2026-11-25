@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { TEST_CLOCK, TEST_CONTEXT } from "../core/testFixtures.ts";
 import { Store } from "./db.ts";
 import { sendMessage } from "./messages.ts";
 import { messageWake } from "./messageWake.ts";
@@ -29,6 +30,7 @@ describe("per-original wake status", () => {
     const codex = fakeCodex(ART);
     let pending = true;
     const sender = {
+      clock: TEST_CLOCK,
       env: { CLAUDE_CODE_SESSION_ID: COORDINATOR },
       layout,
       ports: {
@@ -43,7 +45,7 @@ describe("per-original wake status", () => {
             : { status: "clear" as const },
       },
     };
-    const recipient = { env: { CODEX_THREAD_ID: ART }, layout };
+    const recipient = { clock: TEST_CLOCK, env: { CODEX_THREAD_ID: ART }, layout };
     const request = { body: "Original remains in the store.", id: FIRST, to: ART_ROLE };
     const result = await storeSend(sender, {}, request);
     expect(result.wake).toMatchObject({
@@ -102,6 +104,7 @@ describe("per-original wake status", () => {
       throw new Error("Connection dropped.");
     });
     const sender = {
+      clock: TEST_CLOCK,
       env: { CLAUDE_CODE_SESSION_ID: COORDINATOR },
       layout,
       ports: { connect: () => Promise.resolve(codex.client) },
@@ -123,7 +126,7 @@ describe("per-original wake status", () => {
       expect((await storeSend(sender, {}, { ...request, id })).duplicate).toBe(true);
     }
     expect(codex.adds()).toHaveLength(1);
-    const store = Store.forLayout(layout);
+    const store = Store.forLayout(TEST_CONTEXT, layout);
     try {
       store.rebuild();
     } finally {
@@ -134,7 +137,7 @@ describe("per-original wake status", () => {
   });
 
   it("does not guess a wake for a legacy message without exact associations", () => {
-    const store = Store.open(":memory:");
+    const store = Store.open(TEST_CLOCK, ":memory:");
     try {
       const actor = { nativeId: COORDINATOR, role: "game-coordinator" };
       sendMessage(store, actor, { body: "Legacy body.", id: FIRST, intent: "queue", to: ART_ROLE });
@@ -158,8 +161,8 @@ describe("per-original wake status", () => {
 
   it("preserves Claude acceptance and does not apply it to later originals", async () => {
     const { layout } = storeFixture();
-    const sender = { env: { CLAUDE_CODE_SESSION_ID: COORDINATOR }, layout };
-    const recipient = { env: { CLAUDE_CODE_SESSION_ID: TECH }, layout };
+    const sender = { clock: TEST_CLOCK, env: { CLAUDE_CODE_SESSION_ID: COORDINATOR }, layout };
+    const recipient = { clock: TEST_CLOCK, env: { CLAUDE_CODE_SESSION_ID: TECH }, layout };
     await storeSend(sender, {}, { body: "First.", id: FIRST, to: TECH_ROLE });
     await storeSend(sender, {}, { body: "Second.", id: SECOND, to: TECH_ROLE });
     const status = await storeInboxPeek(recipient, {});

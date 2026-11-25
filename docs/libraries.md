@@ -60,15 +60,15 @@ come first and the subject last.
   for readers that still use those names.
 - `readRegistry(layout)`: a validated snapshot carrying its `revision`; `RegistryMissing` when
   absent.
-- `updateRegistry(layout, expectedRevision, mutate, options)` and
-  `createRegistry(layout, initial, options)`: hold `var/registry.lock` (30 s by default), reject a
+- `updateRegistry(clock, layout, expectedRevision, mutate, options)` and
+  `createRegistry(clock, layout, initial, options)`: hold `var/registry.lock` (30 s by default), reject a
   changed revision with `RevisionConflict` or an existing file with `RegistryExists`, validate,
-  write durably, increment `revision` and set `updatedAt`. An invalid result throws
+  write durably, increment `revision` and set `updatedAt` from `clock`. An invalid result throws
   `ValidationError` and leaves the file unchanged. Pass `options.held` when the caller already
   holds the lock.
 - `resolveRole(registry, role)` and `resolveConversation(registry, role)`, which throw
   `UnknownRole` for a name that is not a registered role key.
 - `resolveHarness(registry, role)` returns a registered role's override or the registry default.
-  `selectHarness(layout, expectedRevision, {harness, games?, roles?}, options?)` validates the
+  `selectHarness(clock, layout, expectedRevision, {harness, games?, roles?}, options?)` validates the
   entire explicit selection and changes only those overrides under `registry.lock`.
 - `RegistrySchema`, `validateRegistry`, `HARNESSES` and `TRANSFER_PHASES`, with the record types.

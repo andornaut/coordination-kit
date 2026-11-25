@@ -1,5 +1,4 @@
 // Readiness probes send nothing and change no registry or activation state.
-import { parseArgs } from "node:util";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
 import { type Layout, loadLayout } from "../core/layout.ts";
@@ -7,7 +6,7 @@ import { pyJsonDumps } from "../core/pyjson.ts";
 import type { Harness, Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 import { effectiveReadiness, harnessReadiness, type ReadinessScope } from "../review/readiness.ts";
-import { errorMessage } from "./args.ts";
+import { errorMessage, parseOptions } from "./args.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 async function readiness(
@@ -77,7 +76,7 @@ function ready(harness: Harness | "mixed"): Handler {
       harness === "mixed" ? "harness ready" : harness === "claude" ? "claude ready" : "codex ready";
     let values;
     try {
-      ({ values } = parseArgs({ args, options: SPECS[command].options, strict: true }));
+      ({ values } = parseOptions(SPECS[command].options, args));
     } catch (error) {
       io.err(`coordination-kit: ${errorMessage(error)}\n${commandUsage(command)}\n`);
       return EXIT_USAGE;

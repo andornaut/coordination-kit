@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { wakeFilePath } from "../adapters/claude/wakeFile.ts";
+import { clockAt, TEST_CONTEXT, TEST_HOST } from "../core/testFixtures.ts";
 import { Store } from "./db.ts";
 import { readInbox, sendMessage } from "./messages.ts";
 import {
@@ -25,7 +26,7 @@ const TECH_ACTOR = { nativeId: TECH, role: TECH_ROLE };
 const COORDINATOR_ACTOR = { nativeId: COORDINATOR, role: "game-coordinator" };
 
 function memory(): Store {
-  return Store.open(":memory:", { now: () => "2026-11-19T15:00:00.000Z" });
+  return Store.open(clockAt("2026-11-19T15:00:00.000Z"), ":memory:");
 }
 
 function codeOf(body: () => unknown): string | undefined {
@@ -77,7 +78,10 @@ describe("questions", () => {
     openQuestion(store, TECH_ACTOR, { id: "q-a", title: "Ship it?" });
     expect(
       codeOf(() =>
-        answerQuestion(store, COORDINATOR_ACTOR, "q-a", { text: "Yes.", work: "ag-0001" }),
+        answerQuestion(TEST_HOST, store, COORDINATOR_ACTOR, "q-a", {
+          text: "Yes.",
+          work: "ag-0001",
+        }),
       ),
     ).toBe("not-owner");
     expect(codeOf(() => cancelQuestion(store, COORDINATOR_ACTOR, "q-a", "Not needed"))).toBe(
@@ -92,7 +96,7 @@ describe("questions", () => {
     openQuestion(store, TECH_ACTOR, { id: "q-a", title: "First" });
     openQuestion(store, TECH_ACTOR, { id: "q-b", title: "Second", work: "ag-0001" });
     openQuestion(store, COORDINATOR_ACTOR, { id: "q-c", title: "Third" });
-    const first = answerQuestion(store, TECH_ACTOR, "q-a", {
+    const first = answerQuestion(TEST_HOST, store, TECH_ACTOR, "q-a", {
       fileNumbers: [1],
       text: "Use the warm palette.",
       work: "ag-0001",
@@ -113,30 +117,37 @@ describe("questions", () => {
       question: { decision: "ag-0001/D2", state: "answered" },
     });
     expect(
-      answerQuestion(store, TECH_ACTOR, "q-a", { text: "Use the warm palette.", work: "ag-0001" }),
+      answerQuestion(TEST_HOST, store, TECH_ACTOR, "q-a", {
+        text: "Use the warm palette.",
+        work: "ag-0001",
+      }),
     ).toMatchObject({ duplicate: true, n: 2 });
     expect(
-      codeOf(() => answerQuestion(store, TECH_ACTOR, "q-a", { text: "Other.", work: "ag-0001" })),
+      codeOf(() =>
+        answerQuestion(TEST_HOST, store, TECH_ACTOR, "q-a", { text: "Other.", work: "ag-0001" }),
+      ),
     ).toBe("already-closed");
     expect(
-      codeOf(() => answerQuestion(store, TECH_ACTOR, "q-b", { text: "No.", work: "ag-0002" })),
+      codeOf(() =>
+        answerQuestion(TEST_HOST, store, TECH_ACTOR, "q-b", { text: "No.", work: "ag-0002" }),
+      ),
     ).toBe("work-mismatch");
     expect(
       codeOf(() =>
-        answerQuestion(store, TECH_ACTOR, "q-b", {
+        answerQuestion(TEST_HOST, store, TECH_ACTOR, "q-b", {
           supersedes: "D9",
           text: "No.",
           work: "ag-0001",
         }),
       ),
     ).toBe("invalid-supersedes");
-    const second = answerQuestion(store, TECH_ACTOR, "q-b", {
+    const second = answerQuestion(TEST_HOST, store, TECH_ACTOR, "q-b", {
       supersedes: "D2",
       text: "Use the cool palette.",
       work: "ag-0001",
     });
     expect(second.decision).toMatchObject({ id: "ag-0001/D3", supersedes: "ag-0001/D2" });
-    answerQuestion(store, COORDINATOR_ACTOR, "q-c", {
+    answerQuestion(TEST_HOST, store, COORDINATOR_ACTOR, "q-c", {
       by: "game-coordinator",
       text: "Keep.",
       work: "gc-0001",
@@ -154,13 +165,15 @@ describe("questions", () => {
   });
 
   it("keeps decision text public", () => {
-    expect(publicText("Use the warm palette.")).toBe("Use the warm palette.");
+    expect(publicText(TEST_HOST, "Use the warm palette.")).toBe("Use the warm palette.");
+    expect(publicText("other-host", `Built on ${TEST_HOST}.`)).toBe(`Built on ${TEST_HOST}.`);
     for (const text of [
+      `Built on ${TEST_HOST.toUpperCase()}.`,
       "See /home/someone/notes",
       "Session 00000000-0000-4000-8000-000000000001",
       "two\nlines",
     ]) {
-      expect(codeOf(() => publicText(text))).toMatch(/^(text-not-public|invalid-text)$/);
+      expect(codeOf(() => publicText(TEST_HOST, text))).toMatch(/^(text-not-public|invalid-text)$/);
     }
   });
 
@@ -173,7 +186,9 @@ describe("questions", () => {
     });
     expect(cancelQuestion(store, TECH_ACTOR, "q-a", "Superseded by the plan").duplicate).toBe(true);
     expect(
-      codeOf(() => answerQuestion(store, TECH_ACTOR, "q-a", { text: "Yes.", work: "ag-0001" })),
+      codeOf(() =>
+        answerQuestion(TEST_HOST, store, TECH_ACTOR, "q-a", { text: "Yes.", work: "ag-0001" }),
+      ),
     ).toBe("already-closed");
   });
 });
@@ -264,7 +279,7 @@ describe("imported holds", () => {
 describe("wake guard", () => {
   it("withholds wakes while a question is pending or a role hold is active, then wakes", async () => {
     const { layout } = storeFixture();
-    const store = Store.forLayout(layout);
+    const store = Store.forLayout(TEST_CONTEXT, layout);
     let n = 0;
     const send = async () => {
       n++;
@@ -305,7 +320,7 @@ describe("wake guard", () => {
   it("rebuilds the question, hold and decision tables from the events", () => {
     const store = memory();
     openQuestion(store, TECH_ACTOR, { id: "q-a", title: "First" });
-    answerQuestion(store, TECH_ACTOR, "q-a", { text: "Yes.", work: "ag-0001" });
+    answerQuestion(TEST_HOST, store, TECH_ACTOR, "q-a", { text: "Yes.", work: "ag-0001" });
     setHold(store, TECH_ACTOR, { id: "h-1", reason: "Paused", scope: "role" });
     const before = [listQuestions(store), listDecisions(store), listHolds(store)];
     store.rebuild();

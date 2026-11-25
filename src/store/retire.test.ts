@@ -7,9 +7,10 @@ import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
-import { stateRootFixture } from "../core/testFixtures.ts";
+import { clockAt, stateRootFixture, TEST_CLOCK } from "../core/testFixtures.ts";
 import { Store } from "./db.ts";
 import { readRequests } from "./requests.ts";
+import { storeRetire } from "./retire.ts";
 import { COORDINATOR, GAME, storeFixture, TECH } from "./testStore.ts";
 
 const TECH_ROLE = `${GAME}/tech`;
@@ -187,7 +188,7 @@ describe("store retire", () => {
     const after = tree(stateRoot).filter((path) => !path.startsWith(join(stateRoot, "archive")));
     expect(after.filter((path) => !path.includes("coordination.db"))).toEqual(originals);
     expect(existsSync(join(root, "var", "work-protocol-fence.json"))).toBe(true);
-    const store = Store.open(join(stateRoot, "coordination.db"));
+    const store = Store.open(TEST_CLOCK, join(stateRoot, "coordination.db"));
     try {
       const requests = readRequests(store.db);
       expect(requests.map((request) => [request.id, request.owner, request.state])).toEqual([
@@ -221,6 +222,18 @@ describe("store retire", () => {
     expect(tree(stateRoot)).toEqual(files);
     const dry = await cli({}, "store", "retire", "--dry-run");
     expect(dry.json).toMatchObject({ applied: true, dryRun: true, duplicate: true });
+  });
+
+  it("names the archive and stamps its manifest with the clock it is given", async () => {
+    const { layout, stateRoot } = setup();
+    const clock = clockAt("2026-01-02T03:04:05.000Z");
+    const applied = await storeRetire({ clock, env: COORDINATOR_ENV, layout }, {}, { apply: true });
+    expect(applied.archive.path).toBe(join(stateRoot, "archive", "phase4-2026-01-02.tar.gz"));
+    const manifest = JSON.parse(readFileSync(applied.archive.manifest, "utf8"));
+    expect(manifest).toMatchObject({
+      archive: { name: "phase4-2026-01-02.tar.gz" },
+      createdAt: "2026-01-02T03:04:05.000Z",
+    });
   });
 
   it("refuses a checkpoint that does not cover the journal", async () => {

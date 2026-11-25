@@ -3,6 +3,7 @@
 // persistence, scheduling or lifecycle mutation.
 import { performance } from "node:perf_hooks";
 
+import type { Clock } from "../../../core/clock.ts";
 import { isCanonicalUuid } from "../../../core/ids.ts";
 import { isRecord, sameJson } from "../../../core/pyjson.ts";
 import { NativeTimeout, type RpcClient } from "../rpc.ts";
@@ -172,7 +173,7 @@ function member(values: ReadonlySet<string>, value: unknown): value is string {
   return typeof value === "string" && values.has(value);
 }
 
-/** datetime.now(timezone.utc).isoformat(), at the millisecond precision Date carries. */
+/** datetime.isoformat() of a UTC instant, at the millisecond precision Date carries. */
 function isoformat(date: Date): string {
   const seconds = date.toISOString().slice(0, 19);
   const milliseconds = date.getUTCMilliseconds();
@@ -415,13 +416,14 @@ function applyPage(stream: Stream, page: unknown): boolean {
  * parent_id, child_id, turn_id and error_code. No state is persisted here.
  */
 async function collectChildHealth(
+  clock: Clock,
   client: RpcClient,
   parents: readonly string[],
 ): Promise<Record<string, Record<string, unknown>>> {
   if (!Array.isArray(parents) || !parents.every((parent) => isCanonicalUuid(parent))) {
     throw new Error("invalid_parent_scope");
   }
-  const observed = isoformat(new Date());
+  const observed = isoformat(clock());
   const budget = new Budget(client, MAX_CALLS);
   const states: ParentState[] = [...new Set(parents)].map((parent) => ({
     children: new Map(),
@@ -559,6 +561,7 @@ function collectorUnavailable(reasonCode: string): Record<string, unknown> {
  * caller has already reserved. A collector failure marks every parent unavailable, never omitted.
  */
 export async function workerHealth(
+  clock: Clock,
   client: RpcClient,
   parents: readonly string[],
 ): Promise<Record<string, Record<string, unknown>>> {
@@ -568,7 +571,7 @@ export async function workerHealth(
   let reasonCode = "collector_unavailable";
   let result: Record<string, unknown> = {};
   try {
-    const collected: unknown = await collectChildHealth(client, parents);
+    const collected: unknown = await collectChildHealth(clock, client, parents);
     if (!isRecord(collected)) {
       throw new Error("invalid collector result");
     }

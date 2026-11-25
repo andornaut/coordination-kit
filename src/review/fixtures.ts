@@ -9,6 +9,7 @@ import {
   CLAUDE_TECH,
   makeFixture,
   registryInput,
+  TEST_CLOCK,
 } from "../core/testFixtures.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
 
@@ -46,7 +47,11 @@ function idle(sessionId: string = RECIPIENT): Record<string, unknown> {
 export function claudeFixture(): ClaudeFixture {
   const { base, root } = makeFixture();
   const layout = loadLayout(root);
-  createRegistry(layout, registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">);
+  createRegistry(
+    TEST_CLOCK,
+    layout,
+    registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">,
+  );
   const game = gameLayout(layout, GAME);
   const unblock = join(game.busDir, "unblock");
   mkdirSync(join(unblock, "decisions"), { recursive: true });

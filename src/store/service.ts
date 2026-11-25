@@ -8,7 +8,7 @@ import type { Layout } from "../core/layout.ts";
 import { resolveRole } from "../registry/resolve.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
-import { MEMORY, Store } from "./db.ts";
+import { MEMORY, READ_ONLY_CLOCK, Store, type StoreContext } from "./db.ts";
 import { type CallerOptions, resolveCaller } from "./identity.ts";
 import {
   type CloseInput,
@@ -36,12 +36,9 @@ import {
 } from "./types.ts";
 import { type WakePorts, wakeRecipient, type WakeStatus } from "./wake.ts";
 
-export interface StoreServiceContext {
+export interface StoreServiceContext extends StoreContext {
   readonly layout: Layout;
-  readonly env: NodeJS.ProcessEnv;
   readonly ports?: WakePorts;
-  /** Test hook: the store clock. */
-  readonly now?: () => string;
 }
 
 export async function withStore<T>(
@@ -51,8 +48,8 @@ export async function withStore<T>(
 ): Promise<T> {
   const store =
     options.createMissing === false
-      ? (Store.readLayout(context.layout) ?? Store.open(MEMORY))
-      : Store.forLayout(context.layout, context.now === undefined ? {} : { now: context.now });
+      ? (Store.readLayout(context, context.layout) ?? Store.open(READ_ONLY_CLOCK, MEMORY))
+      : Store.forLayout(context, context.layout);
   try {
     return await body(store);
   } finally {
@@ -243,7 +240,7 @@ export async function storeStatus(
   if (!MESSAGE_ID.test(id)) {
     throw new StoreError("invalid-id");
   }
-  const store = Store.readLayout(context.layout);
+  const store = Store.readLayout(context, context.layout);
   if (store === null) {
     throw new StoreError("missing");
   }

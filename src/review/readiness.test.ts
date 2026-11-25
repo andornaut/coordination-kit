@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { type FakeControl, startFakeControl } from "../adapters/codex/testControlSocket.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
 import { type Layout, loadLayout } from "../core/layout.ts";
-import { CODEX_TECH, makeFixture, registryInput } from "../core/testFixtures.ts";
+import { CODEX_TECH, makeFixture, registryInput, TEST_CLOCK } from "../core/testFixtures.ts";
 import { createRegistry, readRegistry, type Registry, updateRegistry } from "../registry/index.ts";
 import { harnessReadiness } from "./readiness.ts";
 
@@ -20,7 +20,11 @@ afterEach(async () => {
 
 function setup(): Layout {
   const layout = loadLayout(makeFixture().root);
-  createRegistry(layout, registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">);
+  createRegistry(
+    TEST_CLOCK,
+    layout,
+    registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">,
+  );
   writeFileSync(
     layout.routeFile,
     JSON.stringify({
@@ -83,7 +87,7 @@ describe("harnessReadiness", () => {
         { conversation: CODEX_TECH, role: "archies-dog-walks/tech", status: "resolved" },
       ],
     });
-    updateRegistry(layout, 1, (draft) => {
+    updateRegistry(TEST_CLOCK, layout, 1, (draft) => {
       draft.roles["game-coordinator"]!.conversations.codex = CODEX_COORDINATOR;
     });
     const after = await harnessReadiness(env, layout, readRegistry(layout), "codex");

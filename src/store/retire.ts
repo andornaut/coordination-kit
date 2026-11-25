@@ -242,8 +242,6 @@ async function writeArchive(
 
 interface RetireOptions {
   readonly apply: boolean;
-  /** The UTC date of the archive name; defaults to today. */
-  readonly date?: string;
 }
 
 /**
@@ -264,13 +262,14 @@ export async function storeRetire(
     }
   }
   const root = stateRoot(context.layout);
-  const date = options.date ?? new Date().toISOString().slice(0, 10);
+  // The UTC date of the archive name.
+  const date = context.clock().toISOString().slice(0, 10);
   const archiveDir = join(root, "archive");
   const archivePath = join(archiveDir, `phase4-${date}.tar.gz`);
   const manifestPath = join(archiveDir, `phase4-${date}.json`);
   const store = options.apply
-    ? Store.forLayout(context.layout, context.now === undefined ? {} : { now: context.now })
-    : Store.readLayout(context.layout);
+    ? Store.forLayout(context, context.layout)
+    : Store.readLayout(context, context.layout);
   const payloadOf = (key: string): JsonObject | undefined => store?.eventByKey(key)?.payload;
   try {
     const recorded = payloadOf(RETIRED_KEY);
@@ -334,7 +333,7 @@ export async function storeRetire(
     };
     writeJsonDurable(manifestPath, {
       archive: { bytes, name: `phase4-${date}.tar.gz`, sha256 },
-      createdAt: new Date().toISOString(),
+      createdAt: context.clock().toISOString(),
       kind: "phase4-archive",
       paths: paths
         .filter((item) => item.present)

@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
 import { loadLayout } from "../core/layout.ts";
+import { TEST_CONTEXT, TEST_GIT } from "../core/testFixtures.ts";
 import { Store, storePath } from "../store/db.ts";
 import { openFileJournal } from "../store/files/journal.ts";
 import { activateMigration, prepareMigration } from "../store/files/migration.ts";
@@ -57,7 +58,7 @@ describe("store compaction-plan", () => {
       join(layout.varDir, "work-protocol.json"),
       JSON.stringify({ schema: 2, stateRoot: join(base, "external-state") }),
     );
-    const store = Store.forLayout(layout);
+    const store = Store.forLayout(TEST_CONTEXT, layout);
     try {
       sendMessage(
         store,
@@ -67,8 +68,13 @@ describe("store compaction-plan", () => {
     } finally {
       store.close();
     }
-    const { receipt } = prepareMigration(layout, join(base, "backup.db"), join(base, "restore.db"));
-    activateMigration(layout, receipt.id);
+    const { receipt } = prepareMigration(
+      TEST_GIT,
+      layout,
+      join(base, "backup.db"),
+      join(base, "restore.db"),
+    );
+    activateMigration(TEST_GIT, layout, receipt.id);
     const target = join(layout.varDir, "coordination");
     const journal = openFileJournal(target);
     const before = journal.snapshot();

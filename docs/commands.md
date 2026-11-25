@@ -43,6 +43,25 @@ every form and flag.
 | `graph [--work [REPOSITORY:]ID] [--depth N] [--format json\|dot]`, `graph why --decision ID`                                                                                                                                                                                           | The live decision graph and supersedes chains; see [decision graph](store.md#decision-graph).                                      |
 | `help`, `--help`, `--version`, `--version --json`                                                                                                                                                                                                                                      | Usage, the version, and the version with the `dist/cli.js` sha256 as one JSON line.                                                |
 
+## Options and refusals
+
+Every command parses its options strictly. An unknown option, an option without its value or a
+single-value option given more than once is a usage error, exit 2. Only the options that `--help`
+shows with `...` repeat, such as `--link`, `--option`, `--depends-on` and `msg done --evidence`.
+
+The store, `work` and `graph` verbs share one wrapper, with one rule each for the cases below.
+The family is `store` for the `msg`, `inbox`, `store`, `question`, `hold`, `decision`, `request`,
+`session` and `handoff` verbs, `work` for `work start|evidence|block|unblock|ready|finish|show|history`
+and `graph` for `graph` and `graph why`.
+
+- **Positionals:** exactly the ones the form names (`ID`), else none.
+- **Usage errors:** a blank option value or positional is also a usage error. Each prints
+  `coordination-kit: invalid_FAMILY_options (COMMAND)` on stderr and exits 2.
+- **Refusals:** exit 1 with `coordination-kit: CODE` on stderr, where `CODE` is the store refusal
+  code, else `FAMILY_operation_failed`. A refusal that carries a short reason prints it after the
+  code, such as `coordination-kit: session-held: phase held`.
+- **Output:** one JSON object on stdout, or DOT for `graph --format dot`.
+
 ## Filesystem migration commands
 
 `store migration-status` reads the current authority and any prepared receipt.

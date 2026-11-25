@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
+import { TEST_CLOCK, TEST_CONTEXT } from "../core/testFixtures.ts";
 import { readRegistry, updateRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
 import { checkpointPath, storeSessionStart } from "../store/sessionService.ts";
@@ -244,8 +245,12 @@ describe("session start after /clear", () => {
     const { revision } = readRegistry(layout);
     // The start reads the registry before its first await and rebinds after it, so this write
     // lands between the read and the rebind.
-    const started = storeSessionStart({ env, layout }, {}, { cwd: "/", version: "0.0.0-test" });
-    updateRegistry(layout, revision, () => {});
+    const started = storeSessionStart(
+      { clock: TEST_CLOCK, env, layout },
+      {},
+      { cwd: "/", version: "0.0.0-test" },
+    );
+    updateRegistry(TEST_CLOCK, layout, revision, () => {});
     await expect(started).rejects.toMatchObject({ code: "rotation-conflict" });
     expect(readRegistry(layout).roles[KIT]!.conversations.claude).toBe(KIT_CLAUDE);
   });
@@ -414,7 +419,7 @@ describe("handoff", () => {
     expect(target.code, target.err).toBe(EXIT_OK);
     // The store guard passes it: the wake is claimed for the Codex target (the fixture has no
     // control socket, so the native attempt itself does not succeed).
-    const store = Store.forLayout(layout);
+    const store = Store.forLayout(TEST_CONTEXT, layout);
     try {
       const last = store.db
         .prepare("SELECT harness, conversation, detail FROM wakes WHERE role = ? ORDER BY seq DESC")

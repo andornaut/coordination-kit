@@ -10,7 +10,7 @@ import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 import { repositories, type Repository } from "../status/collect.ts";
 import { dependentQuestions } from "../store/codexQuestions.ts";
-import { MEMORY, Store } from "../store/db.ts";
+import { MEMORY, READ_ONLY_CLOCK, Store, type StoreContext } from "../store/db.ts";
 import { fileWorkerCaller } from "../store/files/workerAccess.ts";
 import { type CallerOptions, resolveCaller } from "../store/identity.ts";
 import {
@@ -53,15 +53,12 @@ export interface Coordinator {
   readonly repositories: readonly Repository[];
 }
 
-export interface LiveContext {
-  readonly env: NodeJS.ProcessEnv;
+export interface LiveContext extends StoreContext {
   readonly git: GitRunner;
   /** The coordinator root, from COORDINATION_KIT_ROOT or DELIVERY_KIT_ROOT only. */
   readonly coordinatorRoot: string | undefined;
   /** The open holds covering an item; defaults to the store's hold records. */
   readonly holds?: HoldLookup;
-  /** Test hook: the store clock. */
-  readonly now?: () => string;
 }
 
 export function openCoordinator(git: GitRunner, root: string | undefined): Coordinator {
@@ -234,9 +231,9 @@ function ownerActor(
     worker === "none"
       ? undefined
       : fileWorkerCaller(
+          context,
           layout,
           registry,
-          context.now ?? (() => new Date().toISOString()),
           (index, nativeId) =>
             worker === "start" ||
             index
@@ -262,8 +259,8 @@ function withStore<T>(
   let store: Store;
   try {
     store = createMissing
-      ? Store.forLayout(layout, context.now === undefined ? {} : { now: context.now })
-      : (Store.readLayout(layout) ?? Store.open(MEMORY));
+      ? Store.forLayout(context, layout)
+      : (Store.readLayout(context, layout) ?? Store.open(READ_ONLY_CLOCK, MEMORY));
   } catch (error) {
     if (error instanceof StateRootError) {
       throw new StoreError("store-unavailable");

@@ -9,9 +9,11 @@ import { type Layout, loadLayout } from "../core/layout.ts";
 import { holdLock, LockBusy, LockError, lockIsFree } from "../core/lock.ts";
 import {
   CLAUDE_COORDINATOR,
+  clockAt,
   CODEX_TECH,
   makeFixture,
   registryInput,
+  TEST_CLOCK,
 } from "../core/testFixtures.ts";
 import { ValidationError } from "../core/validate.ts";
 import {
@@ -27,13 +29,15 @@ import {
 } from "./index.ts";
 
 const MODULE = join(dirname(fileURLToPath(import.meta.url)), "index.ts");
-const NOW = (): Date => new Date("2026-11-04T03:00:00.000Z");
+const NOW = clockAt("2026-11-04T03:00:00.000Z");
 
 function setup(): Layout {
   const layout = loadLayout(makeFixture().root);
-  createRegistry(layout, registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">, {
-    now: NOW,
-  });
+  createRegistry(
+    NOW,
+    layout,
+    registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">,
+  );
   return layout;
 }
 
@@ -61,25 +65,20 @@ describe("createRegistry and readRegistry", () => {
     expect(registry.revision).toBe(1);
     expect(registry.updatedAt).toBe("2026-11-04T03:00:00.000Z");
     expect(RegistrySchema.validate(layout.config, registry)).toEqual(registry);
-    expect(() => createRegistry(layout, registry)).toThrow(RegistryExists);
+    expect(() => createRegistry(TEST_CLOCK, layout, registry)).toThrow(RegistryExists);
   });
 });
 
 describe("updateRegistry", () => {
   it("increments the revision, sets updatedAt and persists the mutation", () => {
     const layout = setup();
-    const next = updateRegistry(
-      layout,
-      1,
-      (draft) => {
-        draft.operations["archies-dog-walks"]!.lastAdoption = {
-          at: "2026-11-04T03:00:00Z",
-          cliSha256: "a".repeat(64),
-          version: "1.0.0",
-        };
-      },
-      { now: () => new Date("2026-11-04T04:00:00.000Z") },
-    );
+    const next = updateRegistry(clockAt("2026-11-04T04:00:00.000Z"), layout, 1, (draft) => {
+      draft.operations["archies-dog-walks"]!.lastAdoption = {
+        at: "2026-11-04T03:00:00Z",
+        cliSha256: "a".repeat(64),
+        version: "1.0.0",
+      };
+    });
     expect(next.revision).toBe(2);
     expect(next.updatedAt).toBe("2026-11-04T04:00:00.000Z");
     expect(readRegistry(layout)).toEqual(next);
@@ -87,9 +86,9 @@ describe("updateRegistry", () => {
 
   it("rejects a stale revision with RevisionConflict and leaves the file unchanged", () => {
     const layout = setup();
-    updateRegistry(layout, 1, () => undefined);
+    updateRegistry(TEST_CLOCK, layout, 1, () => undefined);
     const before = readFileSync(layout.registryFile);
-    expect(() => updateRegistry(layout, 1, () => undefined)).toThrow(RevisionConflict);
+    expect(() => updateRegistry(TEST_CLOCK, layout, 1, () => undefined)).toThrow(RevisionConflict);
     expect(readFileSync(layout.registryFile)).toEqual(before);
   });
 
@@ -97,7 +96,7 @@ describe("updateRegistry", () => {
     const layout = setup();
     const before = readFileSync(layout.registryFile);
     expect(() =>
-      updateRegistry(layout, 1, (draft) => {
+      updateRegistry(TEST_CLOCK, layout, 1, (draft) => {
         draft.roles["game-coordinator"]!.worktree = "/absolute";
       }),
     ).toThrow(ValidationError);
@@ -111,12 +110,13 @@ describe("updateRegistry", () => {
     const rounds = 5;
     const body = `
 const [root, id, rounds] = process.argv.slice(1);
+const clock = () => new Date("2026-11-04T05:00:00.000Z");
 const layout = registry.loadLayout(root);
 for (let round = 0; round < Number(rounds); round += 1) {
   for (;;) {
     const current = registry.readRegistry(layout);
     try {
-      registry.updateRegistry(layout, current.revision, (draft) => {
+      registry.updateRegistry(clock, layout, current.revision, (draft) => {
         draft.transfers.push({ checkpoint: "var/handoffs/x.json", from: "codex", marker: \`w\${id}-\${round}\`,
           phase: "source-held", roles: ["game-coordinator"], to: "claude" });
       });
@@ -144,14 +144,15 @@ for (let round = 0; round < Number(rounds); round += 1) {
     const before = readFileSync(layout.registryFile);
     const body = `
 const layout = registry.loadLayout(process.argv[1]);
-registry.updateRegistry(layout, 1, (draft) => { draft.harness = "codex"; }, {
+const clock = () => new Date("2026-11-04T05:00:00.000Z");
+registry.updateRegistry(clock, layout, 1, (draft) => { draft.harness = "codex"; }, {
   onStage: (stage) => { if (stage === "synced") process.kill(process.pid, "SIGKILL"); },
 });`;
     expect(await runChild(body, [layout.root])).toEqual({ code: null, signal: "SIGKILL" });
     expect(readFileSync(layout.registryFile)).toEqual(before);
     expect(readdirSync(layout.varDir).filter((name) => name.endsWith(".tmp"))).toHaveLength(1);
     expect(lockIsFree(layout.registryLock)).toBe(true);
-    expect(updateRegistry(layout, 1, () => undefined).revision).toBe(2);
+    expect(updateRegistry(TEST_CLOCK, layout, 1, () => undefined).revision).toBe(2);
     expect(readdirSync(layout.varDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });
 
@@ -163,9 +164,12 @@ registry.updateRegistry(layout, 1, (draft) => { draft.harness = "codex"; }, {
     try {
       const input = registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">;
       // A second descriptor waits on the caller's own lock.
-      expect(() => createRegistry(layout, input, { timeoutSeconds: 1 })).toThrow(LockBusy);
-      createRegistry(layout, input, { held, timeoutSeconds: 1 });
+      expect(() => createRegistry(TEST_CLOCK, layout, input, { timeoutSeconds: 1 })).toThrow(
+        LockBusy,
+      );
+      createRegistry(TEST_CLOCK, layout, input, { held, timeoutSeconds: 1 });
       const updated = updateRegistry(
+        TEST_CLOCK,
         layout,
         1,
         (draft) => {
@@ -186,7 +190,7 @@ registry.updateRegistry(layout, 1, (draft) => { draft.harness = "codex"; }, {
     const other = holdLock(join(layout.varDir, "other.lock"));
     try {
       expect(() =>
-        updateRegistry(layout, 1, () => undefined, { held: other, timeoutSeconds: 1 }),
+        updateRegistry(TEST_CLOCK, layout, 1, () => undefined, { held: other, timeoutSeconds: 1 }),
       ).toThrow(LockError);
       expect(readRegistry(layout).revision).toBe(1);
     } finally {
@@ -198,7 +202,7 @@ registry.updateRegistry(layout, 1, (draft) => { draft.harness = "codex"; }, {
 describe("role harness overrides", () => {
   it("uses the role's override while preserving the global default", () => {
     const layout = setup();
-    const registry = updateRegistry(layout, 1, (draft) => {
+    const registry = updateRegistry(TEST_CLOCK, layout, 1, (draft) => {
       draft.roles["archies-dog-walks/tech"]!.harness = "codex";
     });
     expect(resolveHarness(registry, "archies-dog-walks/tech")).toBe("codex");
@@ -209,7 +213,7 @@ describe("role harness overrides", () => {
 
   it("returns null instead of an inactive provider's ID when the selected ID is missing", () => {
     const layout = setup();
-    const registry = updateRegistry(layout, 1, (draft) => {
+    const registry = updateRegistry(TEST_CLOCK, layout, 1, (draft) => {
       draft.roles["game-coordinator"]!.harness = "codex";
     });
     expect(resolveConversation(registry, "game-coordinator")).toBeNull();

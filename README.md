@@ -165,16 +165,19 @@ imports and re-exports included; tests are exempt. ESLint enforces the order wit
 cycles that cross those directories. Type-only imports are erased at build time, so they may form
 a cycle within one layer.
 
-| Layer | Directory                     | Holds                                                                                                               |
-| ----- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| 1     | `core/`                       | Identifiers, the persisted JSON form, validation, durable files, locks, the layout, Git reads, the command contract |
-| 2     | `registry/`                   | `var/registry.json`: schema, guarded updates, resolution and harness selection                                      |
-| 3     | `workfiles/`                  | The work-file convention: front matter, decision lines, `work check` and `work report`                              |
-| 4     | `adapters/`                   | Claude and Codex transports and collectors, the review route, decision markers and endpoint selection               |
-| 5     | `store/`                      | The event store, its projections and file authority, the records over it, wakes and the store services              |
-| 6     | `review/`, `status/`, `work/` | The scheduled review, `status`, the work verbs, the decision graph and the approval-ledger import                   |
-| 7     | `commands/`                   | Each command's options, parsing and output                                                                          |
-| 8     | `src/*.ts`                    | `bin.ts`, `cli.ts` and the public build barrels `store.ts`, `review.ts` and `shared.ts`                             |
+| Layer | Directory                     | Holds                                                                                                                          |
+| ----- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| 1     | `core/`                       | Identifiers, the persisted JSON form, validation, durable files, locks, the layout, Git reads, the clock, the command contract |
+| 2     | `registry/`                   | `var/registry.json`: schema, guarded updates, resolution and harness selection                                                 |
+| 3     | `workfiles/`                  | The work-file convention: front matter, decision lines, `work check` and `work report`                                         |
+| 4     | `adapters/`                   | Claude and Codex transports and collectors, the review route, decision markers and endpoint selection                          |
+| 5     | `store/`                      | The event store, its projections and file authority, the records over it, wakes and the store services                         |
+| 6     | `review/`, `status/`, `work/` | The scheduled review, `status`, the work verbs, the decision graph and the approval-ledger import                              |
+| 7     | `commands/`                   | Each command's options, parsing and output                                                                                     |
+| 8     | `src/*.ts`                    | `bin.ts`, `cli.ts` and the public build barrels `store.ts`, `review.ts` and `shared.ts`                                        |
+
+Only `bin.ts`, `cli.ts` and `commands/` read the process environment, the wall clock and the
+host name; the layers below take them as explicit leading parameters or context fields.
 
 `registry/index.ts` is the `build/registry` barrel. Within `store/`, `types.ts`, `eventCodec.ts`
 and the projections in `projections/` sit below `db.ts`, so every record module can take a `Store`.

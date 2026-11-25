@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { loadLayout } from "../core/layout.ts";
-import { makeFixture, registryInput } from "../core/testFixtures.ts";
+import { makeFixture, registryInput, TEST_CLOCK } from "../core/testFixtures.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
 import { harnessDoctor } from "./doctor.ts";
 import { synopsis } from "./spec.ts";
@@ -43,7 +43,7 @@ describe("harness doctor handler", () => {
     const { root } = makeFixture();
     const layout = loadLayout(root);
     const input = registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">;
-    createRegistry(layout, { ...input, harness: "codex" });
+    createRegistry(TEST_CLOCK, layout, { ...input, harness: "codex" });
     const result = await run(root, "--role", "archies-dog-walks/tech");
     expect(result).toMatchObject({ code: 1, err: "" });
     expect(result.out.trim().split("\n")).toHaveLength(1);

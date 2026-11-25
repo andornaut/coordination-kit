@@ -1,3 +1,4 @@
+import { systemGit } from "../core/git.ts";
 import type { Handler } from "../core/io.ts";
 import { storePath } from "../store/db.ts";
 import { inspectFileAuthority } from "../store/files/authority.ts";
@@ -6,7 +7,7 @@ import { resolveCaller } from "../store/identity.ts";
 import { registry, type StoreServiceContext } from "../store/service.ts";
 import { StoreError } from "../store/types.ts";
 import { callerOf, required } from "./args.ts";
-import { run } from "./store.ts";
+import { storeVerb } from "./store.ts";
 
 const NATIVE_ID = { "native-id": { type: "string" } } as const;
 
@@ -37,48 +38,40 @@ function verifyCoordinator(
   }
 }
 
-export const migrationStatus: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "store migration-status",
-    args,
-    ({ layout }) => {
-      const { kind, receipt } = inspectFileAuthority(layout, storePath(layout));
-      return { authority: kind, receipt: receipt ?? null, schema: 1 };
-    },
-    MIGRATION_STATUS_OPTIONS,
-  );
+export const migrationStatus: Handler = storeVerb(
+  "store migration-status",
+  MIGRATION_STATUS_OPTIONS,
+  ({ env, layout }) => {
+    const { kind, receipt } = inspectFileAuthority(systemGit(env), layout, storePath(layout));
+    return { authority: kind, receipt: receipt ?? null, schema: 1 };
+  },
+);
 
-export const migrationPrepare: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "store migration-prepare",
-    args,
-    (context, values) => {
-      verifyCoordinator(context, callerOf(values));
-      return {
-        ...prepareMigration(
-          context.layout,
-          required(values, "backup"),
-          required(values, "restore"),
-        ),
-        schema: 1,
-      };
-    },
-    MIGRATION_PREPARE_OPTIONS,
-  );
+export const migrationPrepare: Handler = storeVerb(
+  "store migration-prepare",
+  MIGRATION_PREPARE_OPTIONS,
+  (context, values) => {
+    verifyCoordinator(context, callerOf(values));
+    return {
+      ...prepareMigration(
+        systemGit(context.env),
+        context.layout,
+        required(values, "backup"),
+        required(values, "restore"),
+      ),
+      schema: 1,
+    };
+  },
+);
 
-export const migrationActivate: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "store migration-activate",
-    args,
-    (context, values) => {
-      verifyCoordinator(context, callerOf(values));
-      return { receipt: activateMigration(context.layout, required(values, "id")), schema: 1 };
-    },
-    MIGRATION_ACTIVATE_OPTIONS,
-  );
+export const migrationActivate: Handler = storeVerb(
+  "store migration-activate",
+  MIGRATION_ACTIVATE_OPTIONS,
+  (context, values) => {
+    verifyCoordinator(context, callerOf(values));
+    return {
+      receipt: activateMigration(systemGit(context.env), context.layout, required(values, "id")),
+      schema: 1,
+    };
+  },
+);

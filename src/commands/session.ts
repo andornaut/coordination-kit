@@ -14,7 +14,7 @@ import {
   storeSessionStart,
 } from "../store/sessionService.ts";
 import { CALLER, callerOf, required, text, Usage } from "./args.ts";
-import { run } from "./store.ts";
+import { storeVerb } from "./store.ts";
 
 export const SESSION_START_OPTIONS = CALLER;
 export const HANDOFF_OPEN_OPTIONS = {
@@ -33,84 +33,60 @@ function id(value: string | undefined): { id?: string } {
   return value === undefined ? {} : { id: value };
 }
 
-export const sessionStart: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "session start",
-    args,
-    (context, values) =>
-      storeSessionStart(context, callerOf(values), { cwd: io.cwd, version: VERSION }),
-    SESSION_START_OPTIONS,
-  );
+export const sessionStart: Handler = storeVerb(
+  "session start",
+  SESSION_START_OPTIONS,
+  (context, values) =>
+    storeSessionStart(context, callerOf(values), { cwd: context.cwd, version: VERSION }),
+);
 
-export const handoffOpen: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "handoff open",
-    args,
-    (context, values) => {
-      const to = required(values, "to");
-      const scope = (values.scope as string[] | undefined) ?? [];
-      if (!(HARNESSES as readonly string[]).includes(to) || scope.length === 0) {
-        throw new Usage();
-      }
-      return storeHandoffOpen(context, callerOf(values), {
-        scope,
-        to: to as Harness,
-        ...id(text(values, "id")),
-      });
-    },
-    HANDOFF_OPEN_OPTIONS,
-  );
+export const handoffOpen: Handler = storeVerb(
+  "handoff open",
+  HANDOFF_OPEN_OPTIONS,
+  (context, values) => {
+    const to = required(values, "to");
+    const scope = (values.scope as string[] | undefined) ?? [];
+    if (!(HARNESSES as readonly string[]).includes(to) || scope.length === 0) {
+      throw new Usage();
+    }
+    return storeHandoffOpen(context, callerOf(values), {
+      scope,
+      to: to as Harness,
+      ...id(text(values, "id")),
+    });
+  },
+);
 
-export const handoffReady: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "handoff ready",
-    args,
-    (context, values) => storeHandoffReady(context, callerOf(values), id(text(values, "id"))),
-    HANDOFF_ROLE_OPTIONS,
-  );
+export const handoffReady: Handler = storeVerb(
+  "handoff ready",
+  HANDOFF_ROLE_OPTIONS,
+  (context, values) => storeHandoffReady(context, callerOf(values), id(text(values, "id"))),
+);
 
-export const handoffActive: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "handoff active",
-    args,
-    (context, values) => storeHandoffActive(context, callerOf(values), id(text(values, "id"))),
-    HANDOFF_ROLE_OPTIONS,
-  );
+export const handoffActive: Handler = storeVerb(
+  "handoff active",
+  HANDOFF_ROLE_OPTIONS,
+  (context, values) => storeHandoffActive(context, callerOf(values), id(text(values, "id"))),
+);
 
-export const handoffState: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "handoff state",
-    args,
-    (context, values, positionals) => {
-      const [state] = positionals;
-      if (positionals.length !== 1 || !(SETTABLE as readonly string[]).includes(state!)) {
-        throw new Usage();
-      }
-      return storeHandoffState(context, callerOf(values), {
-        id: required(values, "id"),
-        state: state as HandoffState,
-      });
-    },
-    HANDOFF_STATE_OPTIONS,
-    1,
-  );
+export const handoffState: Handler = storeVerb(
+  "handoff state",
+  HANDOFF_STATE_OPTIONS,
+  (context, values, positionals) => {
+    const [state] = positionals;
+    if (positionals.length !== 1 || !(SETTABLE as readonly string[]).includes(state!)) {
+      throw new Usage();
+    }
+    return storeHandoffState(context, callerOf(values), {
+      id: required(values, "id"),
+      state: state as HandoffState,
+    });
+  },
+  1,
+);
 
-export const handoffShow: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "handoff show",
-    args,
-    (context, values) => storeHandoffShow(context, id(text(values, "id"))),
-    HANDOFF_SHOW_OPTIONS,
-  );
+export const handoffShow: Handler = storeVerb(
+  "handoff show",
+  HANDOFF_SHOW_OPTIONS,
+  (context, values) => storeHandoffShow(context, id(text(values, "id"))),
+);

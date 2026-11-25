@@ -11,6 +11,7 @@ import { main } from "../cli.ts";
 import { EXIT_OK } from "../core/io.ts";
 import { gameLayout, type Layout } from "../core/layout.ts";
 import { stateRoot } from "../core/stateRoot.ts";
+import { clockAt, TEST_CLOCK, TEST_CONTEXT, TEST_GIT, TEST_NOW } from "../core/testFixtures.ts";
 import { Store } from "../store/db.ts";
 import {
   prepareFileCheckpoint,
@@ -92,9 +93,11 @@ async function storeModeFixture(
 
 async function send(layout: Layout, count: number): Promise<void> {
   for (let n = 1; n <= count; n++) {
+    // Each message is sent a second after the previous one.
+    const sentAt = new Date(Date.parse(TEST_NOW) + n * 1000).toISOString();
     // eslint-disable-next-line no-await-in-loop
     await storeSend(
-      { env: SENDER, layout },
+      { clock: clockAt(sentAt), env: SENDER, layout },
       {},
       { body: `Task ${n}.`, id: uuid(n), to: TECH_ROLE },
     );
@@ -104,7 +107,7 @@ async function send(layout: Layout, count: number): Promise<void> {
 function briefs(
   layout: Layout,
 ): { id: string; body: string; from_role: string; to_role: string }[] {
-  const store = Store.forLayout(layout);
+  const store = Store.forLayout(TEST_CONTEXT, layout);
   try {
     return store.db
       .prepare(
@@ -125,19 +128,20 @@ it("reopens selected authority when compaction activates during the native surve
     JSON.stringify({ schema: 2, stateRoot: join(base, "prior-state") }),
   );
   const actor = { nativeId: COORDINATOR, role: "game-coordinator" };
-  const source = Store.forLayout(layout);
+  const source = Store.forLayout(TEST_CONTEXT, layout);
   const start = (store: Store, key: string) =>
     recordSession(store, actor, { cwd: "/fixture", harness: "claude", key, version: "4.1.0" });
   start(source, "anchor");
   source.close();
   const { receipt: cutover } = prepareMigration(
+    TEST_GIT,
     layout,
     join(base, "backup.db"),
     join(base, "restore.db"),
   );
-  activateMigration(layout, cutover.id);
+  activateMigration(TEST_GIT, layout, cutover.id);
 
-  const old = Store.forLayout(layout);
+  const old = Store.forLayout(TEST_CONTEXT, layout);
   try {
     const expired = old.transaction(() => {
       const first = start(old, "historical");
@@ -169,13 +173,13 @@ it("reopens selected authority when compaction activates during the native surve
     });
 
     const game = gameLayout(layout, GAME);
-    const context = { collect, env: {}, layout };
+    const context = { clock: TEST_CLOCK, collect, env: {}, layout };
     const result = await storeReview(context, game, SLOT);
     expect(result.status).toBe("delivered");
     expect(await storeReview(context, game, SLOT)).toEqual(result);
     expect(collect).toHaveBeenCalledTimes(1);
     const id = derivedId("review-brief", GAME, SLOT);
-    expect(showBrief(layout, { game: GAME, slot: SLOT })).toMatchObject({
+    expect(showBrief(TEST_CONTEXT, layout, { game: GAME, slot: SLOT })).toMatchObject({
       messageId: id,
       result,
     });
@@ -190,7 +194,7 @@ describe("stored review brief", () => {
     const { layout } = await storeModeFixture();
     const game = gameLayout(layout, GAME);
     await send(layout, 2);
-    const result = await deliverReview(layout, game, SLOT, undefined, { env: {} });
+    const result = await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, SLOT);
     const id = derivedId("review-brief", GAME, SLOT);
     expect(result).toEqual({
       detail: `brief ${id} stored for game-coordinator: 2 open, 2 exceptions`,
@@ -201,17 +205,17 @@ describe("stored review brief", () => {
       expect.objectContaining({ from_role: "delivery-kit", id, to_role: "game-coordinator" }),
     ]);
     expect(briefs(layout)[0]!.body).toContain("Open messages: 2 (sent 2, delivered 0, retained 0)");
-    expect(await deliverReview(layout, game, SLOT, undefined, { env: {} })).toEqual(result);
+    expect(await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, SLOT)).toEqual(result);
     // Without the per-slot receipt the store still answers: no second message.
     rmSync(deliverRecord(game, SLOT));
-    expect(await deliverReview(layout, game, SLOT, undefined, { env: {} })).toEqual(result);
+    expect(await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, SLOT)).toEqual(result);
     expect(existsSync(deliverRecord(game, SLOT))).toBe(true);
     expect(briefs(layout)).toHaveLength(1);
   });
 
   it("records exact user policy hold evidence in the stored review", async () => {
     const { layout } = await storeModeFixture();
-    const store = Store.forLayout(layout);
+    const store = Store.forLayout(TEST_CONTEXT, layout);
     setPolicyHold(
       store,
       { ...ACTOR, nativeId: COORDINATOR },
@@ -223,8 +227,8 @@ describe("stored review brief", () => {
       },
     );
     store.close();
-    await deliverReview(layout, gameLayout(layout, GAME), SLOT, undefined, { env: {} });
-    expect(showBrief(layout, { game: GAME, slot: SLOT })).toMatchObject({
+    await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, gameLayout(layout, GAME), SLOT);
+    expect(showBrief(TEST_CONTEXT, layout, { game: GAME, slot: SLOT })).toMatchObject({
       counts: { policyHolds: 1 },
       policyHolds: [
         { id: "policy-tech", policy: { approval: "request-1", target: { role: TECH_ROLE } } },
@@ -242,23 +246,23 @@ describe("stored review brief", () => {
     for (const n of [1, 2]) {
       // eslint-disable-next-line no-await-in-loop
       await storeSend(
-        { env: SENDER, layout, ports },
+        { clock: TEST_CLOCK, env: SENDER, layout, ports },
         {},
         { body: `Art ${n}.`, id: uuid(800 + n), to: ART_ROLE },
       );
     }
     await storeSend(
-      { env: SENDER, layout },
+      { clock: TEST_CLOCK, env: SENDER, layout },
       {},
       { body: "Held.", id: uuid(900), to: `${GAME}/gameplay` },
     );
     const seq = (role: string) => wakeSeq(wakeFilePath(layout, role));
     expect([seq(TECH_ROLE), codex.adds().length]).toEqual([1, 1]);
-    await deliverReview(layout, game, SLOT, undefined, { env: {}, wakePorts: ports });
+    await deliverReview({ ...TEST_CONTEXT, env: {}, wakePorts: ports }, layout, game, SLOT);
     // Exactly one more wake each, the brief's recipient included; the held role gets none.
     expect([seq(TECH_ROLE), codex.adds().length, seq("game-coordinator")]).toEqual([2, 2, 1]);
     expect(seq(`${GAME}/gameplay`)).toBe("absent");
-    await deliverReview(layout, game, NEXT, undefined, { env: {}, wakePorts: ports });
+    await deliverReview({ ...TEST_CONTEXT, env: {}, wakePorts: ports }, layout, game, NEXT);
     expect([seq(TECH_ROLE), codex.adds().length, seq("game-coordinator")]).toEqual([3, 3, 2]);
     expect(seq(`${GAME}/gameplay`)).toBe("absent");
   });
@@ -267,19 +271,19 @@ describe("stored review brief", () => {
     const { layout } = await storeModeFixture();
     const game = gameLayout(layout, GAME);
     const owner = { nativeId: TECH, role: TECH_ROLE };
-    const store = Store.forLayout(layout);
+    const store = Store.forLayout(TEST_CONTEXT, layout);
     openQuestion(store, owner, { id: "q-forgotten", title: "Still open?" });
     setHold(store, owner, { id: "h-paused", reason: "Paused.", scope: "role" });
     store.close();
     await send(layout, 1);
     const wake = () => wakeSeq(wakeFilePath(layout, TECH_ROLE));
     expect(wake()).toBe("absent");
-    await deliverReview(layout, game, SLOT, undefined, { env: {} });
+    await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, SLOT);
     expect(wake()).toBe("absent");
-    const again = Store.forLayout(layout);
+    const again = Store.forLayout(TEST_CONTEXT, layout);
     releaseHold(again, owner, "h-paused");
     again.close();
-    await deliverReview(layout, game, NEXT, undefined, { env: {} });
+    await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, NEXT);
     expect(wake()).toBe(1);
   });
 
@@ -287,9 +291,9 @@ describe("stored review brief", () => {
     const { base, layout, root } = await storeModeFixture();
     const game = gameLayout(layout, GAME);
     await send(layout, 100);
-    await deliverReview(layout, game, SLOT, undefined, { env: {} });
-    await deliverReview(layout, game, NEXT, undefined, { env: {} });
-    await deliverReview(layout, game, LATER, undefined, { env: {} });
+    await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, SLOT);
+    await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, NEXT);
+    await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, LATER);
     const stored = briefs(layout);
     expect(stored.map(({ id }) => id)).toEqual(
       [SLOT, NEXT, LATER].map((slot) => derivedId("review-brief", GAME, slot)),
@@ -358,13 +362,13 @@ describe("stored review brief", () => {
     const ports = { connect: () => Promise.resolve(codex.client) };
     const id = uuid(901);
     const sent = await storeSend(
-      { env: SENDER, layout, ports },
+      { clock: TEST_CLOCK, env: SENDER, layout, ports },
       {},
       { body: "Uncertain wake.", id, to: ART_ROLE },
     );
     expect(sent.wake.evidence.outcome).toBe("ambiguous");
-    await deliverReview(layout, game, SLOT, undefined, { env: {}, wakePorts: ports });
-    expect(showBrief(layout, { game: GAME, slot: SLOT })).toMatchObject({
+    await deliverReview({ ...TEST_CONTEXT, env: {}, wakePorts: ports }, layout, game, SLOT);
+    expect(showBrief(TEST_CONTEXT, layout, { game: GAME, slot: SLOT })).toMatchObject({
       unread: [{ id, to: ART_ROLE, wake: sent.wake.evidence }],
     });
     // The queue shows no earlier wake, so the review's one wake is not a duplicate.
@@ -375,7 +379,10 @@ describe("stored review brief", () => {
     const { base, layout, root } = await storeModeFixture();
     const game = gameLayout(layout, GAME);
     await send(layout, 5);
-    const held = Store.forLayout(layout, { now: () => "2026-11-18T15:00:00.000Z" });
+    const held = Store.forLayout(
+      { ...TEST_CONTEXT, clock: clockAt("2026-11-18T15:00:00.000Z") },
+      layout,
+    );
     const actor = { nativeId: TECH, role: TECH_ROLE };
     const owner = ART_ROLE;
     const reason = "Waiting for the checked capture";
@@ -401,10 +408,10 @@ describe("stored review brief", () => {
     } finally {
       held.close();
     }
-    await deliverReview(layout, game, SLOT, undefined, { env: {} });
+    await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, SLOT);
     expect(brief(layout, SLOT)).not.toContain("retention-overdue");
-    await deliverReview(layout, game, NEXT, undefined, { env: {} });
-    await deliverReview(layout, game, LATER, undefined, { env: {} });
+    await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, NEXT);
+    await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, LATER);
 
     let out = "";
     const io = { cwd: base, env: {}, err: () => {}, out: (text: string) => (out += text) };
@@ -440,7 +447,7 @@ describe("stored review brief", () => {
     expect(later).toContain(`- retention-overdue ${TECH_ROLE}: 2 due, oldest ${uuid(1)}`);
     expect(later).not.toContain("New review exceptions:");
     expect(briefs(layout)).toHaveLength(3);
-    const store = Store.forLayout(layout);
+    const store = Store.forLayout(TEST_CONTEXT, layout);
     try {
       expect(messageStatus(store, uuid(1))).toMatchObject({
         retention: { nextBoundary, owner, reason },
@@ -455,10 +462,10 @@ describe("stored review brief", () => {
     const { layout } = await storeModeFixture();
     const game = gameLayout(layout, GAME);
     await send(layout, 1);
-    await deliverReview(layout, game, SLOT, undefined, { env: {} });
+    await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, SLOT);
     await send(layout, 2);
-    await deliverReview(layout, game, NEXT, undefined, { env: {} });
-    await deliverReview(layout, game, LATER, undefined, { env: {} });
+    await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, NEXT);
+    await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, LATER);
 
     const last = brief(layout, LATER);
     expect(last).toContain(
@@ -473,7 +480,7 @@ describe("stored review brief", () => {
   it("skips a game that does not host the route without storing anything", async () => {
     const { layout } = await storeModeFixture();
     const other = gameLayout(layout, "chibis-way-home");
-    expect(await deliverReview(layout, other, SLOT, undefined, { env: {} })).toMatchObject({
+    expect(await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, other, SLOT)).toMatchObject({
       reason: "nothing-due",
       status: "skipped",
     });
@@ -485,7 +492,12 @@ describe("coordination events", () => {
   it("go to the store as messages, never to the event outbox", async () => {
     const { layout } = await storeModeFixture();
     const game = gameLayout(layout, GAME);
-    coordinationEmit(layout, game, "Archie")("review-stuck", "k-1", "needs reconciliation");
+    coordinationEmit(
+      TEST_CONTEXT,
+      layout,
+      game,
+      "Archie",
+    )("review-stuck", "k-1", "needs reconciliation");
     expect(existsSync(join(game.busDir, "events"))).toBe(false);
     expect(briefs(layout)).toEqual([
       expect.objectContaining({
@@ -551,7 +563,7 @@ describe("native checks in the stored brief", () => {
     const game = gameLayout(layout, GAME);
     const collect = vi.fn((request: CollectRequest) => Promise.resolve(collectedFor(request)));
     const options = { collect, env: {} };
-    await deliverReview(layout, game, SLOT, undefined, options);
+    await deliverReview({ ...TEST_CONTEXT, ...options }, layout, game, SLOT);
     const first = brief(layout, SLOT);
     expect(first).toContain(
       "Native prompt visibility: 4 unknown; history: 1 complete, 1 with pending attestations",
@@ -563,12 +575,12 @@ describe("native checks in the stored brief", () => {
     expect(first).toContain(
       `- worker-failed archies-dog-walks/art: child ${uuid(1001)} turn ${uuid(1002)} failed (tool_failed)`,
     );
-    await deliverReview(layout, game, NEXT, undefined, options);
+    await deliverReview({ ...TEST_CONTEXT, ...options }, layout, game, NEXT);
     const second = brief(layout, NEXT);
     expect(second).toContain("- question-pending archies-dog-walks/art");
     expect(second).not.toContain("- worker-failed");
     // A repeated slot is answered from the store without another native read.
-    await deliverReview(layout, game, NEXT, undefined, options);
+    await deliverReview({ ...TEST_CONTEXT, ...options }, layout, game, NEXT);
     expect(collect).toHaveBeenCalledTimes(2);
   });
 
@@ -576,7 +588,7 @@ describe("native checks in the stored brief", () => {
     const { layout } = await storeModeFixture();
     const game = gameLayout(layout, GAME);
     const connect = () => Promise.reject(new Error("no control socket"));
-    await deliverReview(layout, game, SLOT, undefined, { env: {}, wakePorts: { connect } });
+    await deliverReview({ ...TEST_CONTEXT, env: {}, wakePorts: { connect } }, layout, game, SLOT);
     const body = brief(layout, SLOT);
     expect(body).toContain("Native prompt visibility: 4 unknown; history: 0 complete");
     expect(body).toContain("- question-unknown archies-dog-walks/art: control_unavailable");
@@ -587,17 +599,19 @@ describe("native checks in the stored brief", () => {
     const { layout } = await storeModeFixture([TECH_ROLE, ART_ROLE]);
     const game = gameLayout(layout, GAME);
     const codex = fakeCodex(ART);
-    await deliverReview(layout, game, SLOT, undefined, {
-      env: {},
-      wakePorts: { connect: () => Promise.resolve(codex.client) },
-    });
+    await deliverReview(
+      { ...TEST_CONTEXT, env: {}, wakePorts: { connect: () => Promise.resolve(codex.client) } },
+      layout,
+      game,
+      SLOT,
+    );
     expect(codex.calls.map((call) => call.method)).toContain("thread/items/list");
     expect(codex.adds()).toEqual([]);
     const body = brief(layout, SLOT);
     expect(body).toContain("Native prompt visibility: 4 unknown; history: 1 complete");
     expect(body).toContain("Exact native prompt inspection unavailable for 1 role.");
     expect(body).not.toContain("- question-unknown archies-dog-walks/art");
-    const row = showBrief(layout, { slot: SLOT });
+    const row = showBrief(TEST_CONTEXT, layout, { slot: SLOT });
     expect(row.native.questions).toContainEqual(
       expect.objectContaining({
         role: ART_ROLE,
@@ -621,17 +635,17 @@ describe("channel status in the stored brief", () => {
     const { layout } = await storeModeFixture();
     const game = gameLayout(layout, GAME);
     rmSync(join(stateRoot(layout), "channel", "roles", `${TECH_ROLE}.json`));
-    await deliverReview(layout, game, SLOT, undefined, { collect, env: {} });
+    await deliverReview({ ...TEST_CONTEXT, collect, env: {} }, layout, game, SLOT);
     // The held gameplay role and the Codex art role are not reported.
     expect(channelExceptions(layout, SLOT)).toEqual([
       `- channel-unresolved ${TECH_ROLE}: no channel status`,
     ]);
     channelStatus(layout, TECH_ROLE, STALE);
-    await deliverReview(layout, game, NEXT, undefined, { collect, env: {} });
+    await deliverReview({ ...TEST_CONTEXT, collect, env: {} }, layout, game, NEXT);
     expect(channelExceptions(layout, NEXT)).toEqual([
       `- channel-unresolved ${TECH_ROLE}: channel on e1e1e1e1`,
     ]);
-    expect(showBrief(layout, { slot: NEXT }).native.channels).toEqual([
+    expect(showBrief(TEST_CONTEXT, layout, { slot: NEXT }).native.channels).toEqual([
       expect.objectContaining({
         binding: TECH,
         conversation: STALE,
@@ -647,9 +661,9 @@ describe("channel status in the stored brief", () => {
       }),
     ]);
     channelStatus(layout, TECH_ROLE, TECH);
-    await deliverReview(layout, game, LATER, undefined, { collect, env: {} });
+    await deliverReview({ ...TEST_CONTEXT, collect, env: {} }, layout, game, LATER);
     expect(channelExceptions(layout, LATER)).toEqual([]);
-    expect(showBrief(layout, { slot: LATER }).counts.native).toMatchObject({
+    expect(showBrief(TEST_CONTEXT, layout, { slot: LATER }).counts.native).toMatchObject({
       channels: { current: 2, missing: 0, stale: 0, unreadable: 0 },
     });
   });
@@ -661,7 +675,7 @@ describe("channel status in the stored brief", () => {
     rmSync(roles, { recursive: true });
     // A file where the status directory belongs: every read fails with ENOTDIR.
     writeFileSync(roles, "");
-    const result = await deliverReview(layout, game, SLOT, undefined, { collect, env: {} });
+    const result = await deliverReview({ ...TEST_CONTEXT, collect, env: {} }, layout, game, SLOT);
     expect(result?.status).toBe("delivered");
     expect(channelExceptions(layout, SLOT)).toEqual([
       `- channel-unknown ${TECH_ROLE}: channel status unreadable`,
@@ -754,7 +768,7 @@ describe("brief exceptions", () => {
 
 it("shows ready work under its exact recorded parent without reopening finished or blocked work", async () => {
   const { base, layout, root } = await storeModeFixture();
-  const store = Store.forLayout(layout);
+  const store = Store.forLayout(TEST_CONTEXT, layout);
   const parent = { id: "work-0101", repository: GAME };
   const ready = { id: "work-0102", repository: "art-kit" };
   const unknownParent = { id: "work-0103", repository: "art-kit" };
@@ -787,17 +801,23 @@ it("shows ready work under its exact recorded parent without reopening finished 
     store.close();
   }
 
-  await deliverReview(layout, gameLayout(layout, GAME), SLOT, undefined, {
-    collect: () =>
-      Promise.resolve({
-        collection_budget: {},
-        history: {},
-        question_state: {},
-        worker_health: {},
-      }),
-    env: {},
-  });
-  const record = showBrief(layout, { slot: SLOT });
+  await deliverReview(
+    {
+      ...TEST_CONTEXT,
+      collect: () =>
+        Promise.resolve({
+          collection_budget: {},
+          history: {},
+          question_state: {},
+          worker_health: {},
+        }),
+      env: {},
+    },
+    layout,
+    gameLayout(layout, GAME),
+    SLOT,
+  );
+  const record = showBrief(TEST_CONTEXT, layout, { slot: SLOT });
   expect(record.counts.readyHandoffs).toBe(2);
   expect(record.readyHandoffs).toEqual(
     expect.arrayContaining([

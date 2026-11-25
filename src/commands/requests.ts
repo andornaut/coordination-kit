@@ -5,7 +5,7 @@ import { resolveCaller } from "../store/identity.ts";
 import { closeRequest } from "../store/requests.ts";
 import { registry, withStore } from "../store/service.ts";
 import { callerOf, required, text } from "./args.ts";
-import { run } from "./store.ts";
+import { storeVerb } from "./store.ts";
 
 export const REQUEST_CLOSE_OPTIONS = {
   id: { type: "string" },
@@ -15,21 +15,17 @@ export const REQUEST_CLOSE_OPTIONS = {
   worker: { type: "string" },
 } as const;
 
-export const requestClose: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "request close",
-    args,
-    (context, values) => {
-      const id = required(values, "id");
-      const reason = required(values, "reason");
-      const work = text(values, "work");
-      const actor = resolveCaller(registry(context), context.env, callerOf(values));
-      return withStore(context, (store) => ({
-        schema: 1,
-        ...closeRequest(store, actor, { id, reason, ...(work === undefined ? {} : { work }) }),
-      }));
-    },
-    REQUEST_CLOSE_OPTIONS,
-  );
+export const requestClose: Handler = storeVerb(
+  "request close",
+  REQUEST_CLOSE_OPTIONS,
+  (context, values) => {
+    const id = required(values, "id");
+    const reason = required(values, "reason");
+    const work = text(values, "work");
+    const actor = resolveCaller(registry(context), context.env, callerOf(values));
+    return withStore(context, (store) => ({
+      schema: 1,
+      ...closeRequest(store, actor, { id, reason, ...(work === undefined ? {} : { work }) }),
+    }));
+  },
+);

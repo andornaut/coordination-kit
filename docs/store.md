@@ -860,7 +860,11 @@ inserted and unchanged events per type (`events`), SHA fields that are not objec
 
 `@andornaut/coordination-kit/build/store` exports:
 
-- `Store.open(path)`, `Store.forLayout(layout)`, `storePath(layout)` and `storeRoot(layout)`;
+- `Store.open(clock, path)`, `Store.forLayout({clock, env}, layout)`, `Store.readLayout({env},
+layout)`, `storePath(layout)` and `storeRoot(layout)`. `clock` times the events a store appends;
+  `env` is the environment for the Git checks of the file authority. A `readLayout` store refuses
+  to time an event (`store-read-only`). The service contexts, such as `StoreServiceContext` and
+  `IngestContext`, carry the same `clock` and `env`;
   `store.append({key, kind, actor, payload, at?})` returns `{event, duplicate}` and applies the
   projections; `store.transaction(body)` joins nested calls; `store.events({afterSeq, kinds})`,
   `store.head()`, `store.eventByKey(key)`, `store.verify()` and `store.rebuild()`.
@@ -884,7 +888,7 @@ inserted and unchanged events per type (`events`), SHA fields that are not objec
 - Questions, holds and decisions: `openQuestion`, `answerQuestion`, `cancelQuestion`,
   `requireOwnQuestion`, `listQuestions`, `setHold`, `releaseHold`, `listHolds`, `listDecisions`
   (the `DecisionRow` records `graph` and `work check --decisions` read), `storeHolds` (the
-  default `HoldLookup`), `questionHoldGuard`, `publicText`, `holdScope` and
+  default `HoldLookup`), `questionHoldGuard`, `publicText(hostname, value)`, `holdScope` and
   `normalizeOptions`; the work-file half `mainWorkFile`, `fileDecisionNumbers`, `decisionLine` and
   `appendDecisionLine`. Writers trust their `Actor` and refuse another owner's record.
 - Sessions and handoffs: `HANDOFFS_PROJECTION`, `recordSession`, `openHandoff`, `readyHandoff`,

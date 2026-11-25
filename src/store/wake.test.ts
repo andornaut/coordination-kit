@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { wakeFilePath } from "../adapters/claude/wakeFile.ts";
 import { RpcError } from "../adapters/codex/rpc.ts";
+import { TEST_CLOCK, TEST_CONTEXT } from "../core/testFixtures.ts";
 import { updateRegistry } from "../registry/store.ts";
 import { Store } from "./db.ts";
 import { readInbox, sendMessage } from "./messages.ts";
@@ -28,7 +29,7 @@ function uuid(n: number): string {
 
 function setup(ports: WakePorts = {}) {
   const fixture = storeFixture();
-  const store = Store.forLayout(fixture.layout);
+  const store = Store.forLayout(TEST_CONTEXT, fixture.layout);
   let n = 0;
   const send = async (to: string) => {
     n++;
@@ -76,7 +77,7 @@ describe("Claude wakes", () => {
         role: "archies-dog-walks/gameplay",
       },
     ]);
-    updateRegistry(layout, 1, (draft) => {
+    updateRegistry(TEST_CLOCK, layout, 1, (draft) => {
       delete draft.roles["archies-dog-walks/gameplay"]!.phase;
     });
     expect(await send("archies-dog-walks/gameplay")).toMatchObject({ status: "accepted" });
@@ -91,7 +92,7 @@ describe("Claude wakes", () => {
     const path = wakeFilePath(layout, TECH_ROLE);
     expect(await send(TECH_ROLE)).toMatchObject({ status: "accepted" });
     const rotated = "00000000-0000-4000-8000-0000000000e2";
-    updateRegistry(layout, 1, (draft) => {
+    updateRegistry(TEST_CLOCK, layout, 1, (draft) => {
       draft.roles[TECH_ROLE]!.conversations.claude = rotated;
     });
     // The outstanding wake belongs to the earlier binding, so the next send wakes the new one.
@@ -205,7 +206,7 @@ describe("Codex wakes", () => {
     const codex = fakeCodex(ART);
     const { layout, send, store } = setup({
       connect: () => {
-        const writer = Store.forLayout(layout);
+        const writer = Store.forLayout(TEST_CONTEXT, layout);
         setPolicyHold(writer, SENDER, {
           approval: "request-1",
           id: "policy-art",

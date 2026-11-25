@@ -1,13 +1,11 @@
 // `coordination-kit status`: the read-only cross-repository status of every work item, as JSON or
 // a Markdown digest. --root names the coordinator, as for every non-work command.
-import { parseArgs } from "node:util";
-
 import { systemGit } from "../core/git.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../core/io.ts";
 import { collectStatus, incomplete, StatusUsageError } from "../status/collect.ts";
 import { DEFAULT_VERIFY_SINCE, STATE_FILTERS, type StateFilter } from "../status/derive.ts";
 import { renderMarkdown } from "../status/markdown.ts";
-import { errorMessage } from "./args.ts";
+import { errorMessage, parseOptions } from "./args.ts";
 
 export const STATUS_OPTIONS = {
   audit: { type: "boolean" },
@@ -26,7 +24,7 @@ const USAGE =
 export const status: Handler = (io, root, args) => {
   let values;
   try {
-    ({ values } = parseArgs({ args, options: STATUS_OPTIONS, strict: true }));
+    ({ values } = parseOptions(STATUS_OPTIONS, args));
   } catch {
     io.err(USAGE);
     return EXIT_USAGE;

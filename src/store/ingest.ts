@@ -20,7 +20,7 @@ import { writeDurable } from "../core/durable.ts";
 import type { GameLayout, Layout } from "../core/layout.ts";
 import { holdLock, LockBusy, type LockHandle } from "../core/lock.ts";
 import type { ReasonToken, SeamStatus } from "../core/outcome.ts";
-import { Store } from "./db.ts";
+import { Store, type StoreContext } from "./db.ts";
 import { REF, sha256 } from "./eventCodec.ts";
 import { DELIVERY_KIT_ACTOR } from "./identity.ts";
 import {
@@ -328,12 +328,10 @@ export interface IngestResult {
   readonly completed: number;
 }
 
-export interface IngestContext {
+export interface IngestContext extends StoreContext {
   readonly layout: Layout;
-  readonly env: NodeJS.ProcessEnv;
   readonly ports?: WakePorts;
-  /** Test hooks: the store clock, and a step between opening the live file and listing rotations. */
-  readonly now?: () => string;
+  /** Test hook: a step between opening the live file and listing rotations. */
   readonly afterOpenLive?: () => void;
 }
 
@@ -602,10 +600,7 @@ export async function ingestEvents(
     const start = resolveStart(files, cursor);
     const consumed = consume(game.id, files, start);
     const ingested = consumed.valid.length + consumed.malformed.length;
-    const store = Store.forLayout(
-      context.layout,
-      context.now === undefined ? {} : { now: context.now },
-    );
+    const store = Store.forLayout(context, context.layout);
     let delivered = 0;
     let completed = 0;
     let notified = false;
@@ -656,7 +651,7 @@ export async function ingestEvents(
     }
     appendQuarantine(busDir, consumed.malformed);
     const next: Cursor = {
-      at: context.now?.() ?? new Date().toISOString(),
+      at: context.clock().toISOString(),
       dev: live?.dev ?? null,
       file: LOG_FILE,
       firstId: live?.firstId ?? null,

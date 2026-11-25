@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { TEST_CONTEXT, TEST_GIT } from "../../core/testFixtures.ts";
 import { Store, storePath } from "../db.ts";
 import { canonicalJson } from "../eventCodec.ts";
 import { messageStatus, readInbox, sendMessage } from "../messages.ts";
@@ -24,7 +25,7 @@ function fixture() {
     join(layout.varDir, "work-protocol.json"),
     canonicalJson({ schema: 2, stateRoot: join(base, "external-state") }),
   );
-  const legacy = Store.forLayout(layout);
+  const legacy = Store.forLayout(TEST_CONTEXT, layout);
   sendMessage(legacy, SENDER, {
     body: "Fixture message",
     id: MESSAGE,
@@ -42,10 +43,15 @@ describe("filesystem migration", () => {
     const { base, layout, legacy, target } = fixture();
     const source = storePath(layout);
     const before = legacy.head();
-    const prepared = prepareMigration(layout, join(base, "backup.db"), join(base, "restore.db"));
+    const prepared = prepareMigration(
+      TEST_GIT,
+      layout,
+      join(base, "backup.db"),
+      join(base, "restore.db"),
+    );
     try {
       expect(prepared.receipt.head).toEqual(before);
-      expect(inspectFileAuthority(layout, source).kind).toBe("sqlite");
+      expect(inspectFileAuthority(TEST_GIT, layout, source).kind).toBe("sqlite");
       const original = join(
         target,
         "roles",
@@ -57,12 +63,12 @@ describe("filesystem migration", () => {
       const immutableBytes = readFileSync(original);
       expect(JSON.parse(immutableBytes.toString()).payload.body).toBe("Fixture message");
 
-      const active = activateMigration(layout, prepared.receipt.id);
+      const active = activateMigration(TEST_GIT, layout, prepared.receipt.id);
       expect(active.phase).toBe("active");
-      expect(activateMigration(layout, active.id)).toEqual(active);
+      expect(activateMigration(TEST_GIT, layout, active.id)).toEqual(active);
       expect(() => readInbox(legacy, RECIPIENT)).toThrow("store-authority-frozen");
 
-      const store = Store.forLayout(layout);
+      const store = Store.forLayout(TEST_CONTEXT, layout);
       try {
         expect(store.fileBacked).toBe(true);
         expect(store.head()).toEqual(before);
@@ -70,7 +76,7 @@ describe("filesystem migration", () => {
       } finally {
         store.close();
       }
-      const reader = Store.readLayout(layout)!;
+      const reader = Store.readLayout(TEST_CONTEXT, layout)!;
       try {
         expect(messageStatus(reader, MESSAGE).state).toBe("delivered");
         expect(legacy.head()).toEqual(before);
@@ -87,22 +93,28 @@ describe("filesystem migration", () => {
   it("refuses stale qualification and safely extends an inactive candidate from an exact prefix", () => {
     const { base, layout, legacy } = fixture();
     try {
-      const first = prepareMigration(layout, join(base, "backup.db"), join(base, "restore.db"));
+      const first = prepareMigration(
+        TEST_GIT,
+        layout,
+        join(base, "backup.db"),
+        join(base, "restore.db"),
+      );
       readInbox(legacy, RECIPIENT);
-      expect(() => activateMigration(layout, first.receipt.id)).toThrow(
+      expect(() => activateMigration(TEST_GIT, layout, first.receipt.id)).toThrow(
         "file-authority-source-head-changed",
       );
       const second = prepareMigration(
+        TEST_GIT,
         layout,
         join(base, "backup-2.db"),
         join(base, "restore-2.db"),
       );
       expect(second.receipt.head).toEqual(legacy.head());
       expect(second.receipt.id).not.toBe(first.receipt.id);
-      expect(() => activateMigration(layout, first.receipt.id)).toThrow(
+      expect(() => activateMigration(TEST_GIT, layout, first.receipt.id)).toThrow(
         "file-authority-cutover-receipt-mismatch",
       );
-      expect(activateMigration(layout, second.receipt.id).phase).toBe("active");
+      expect(activateMigration(TEST_GIT, layout, second.receipt.id).phase).toBe("active");
     } finally {
       legacy.close();
     }
@@ -112,7 +124,12 @@ describe("filesystem migration", () => {
     const { base, layout, legacy, target } = fixture();
     try {
       expect(() =>
-        prepareMigration(layout, join(layout.varDir, "backup.db"), join(base, "restore.db")),
+        prepareMigration(
+          TEST_GIT,
+          layout,
+          join(layout.varDir, "backup.db"),
+          join(base, "restore.db"),
+        ),
       ).toThrow("migration-backup-inside-checkout");
       expect(existsSync(target)).toBe(false);
     } finally {
@@ -123,15 +140,20 @@ describe("filesystem migration", () => {
   it("refuses unjournaled projection drift even when the SQLite head has not moved", () => {
     const { base, layout, legacy } = fixture();
     try {
-      const prepared = prepareMigration(layout, join(base, "backup.db"), join(base, "restore.db"));
+      const prepared = prepareMigration(
+        TEST_GIT,
+        layout,
+        join(base, "backup.db"),
+        join(base, "restore.db"),
+      );
       legacy.db
         .prepare("UPDATE questions SET title = ? WHERE id = ?")
         .run("Drift", "question-fixture");
       expect(legacy.head()).toEqual(prepared.receipt.head);
-      expect(() => activateMigration(layout, prepared.receipt.id)).toThrow(
+      expect(() => activateMigration(TEST_GIT, layout, prepared.receipt.id)).toThrow(
         "snapshot-projection-mismatch",
       );
-      expect(inspectFileAuthority(layout, storePath(layout)).kind).toBe("sqlite");
+      expect(inspectFileAuthority(TEST_GIT, layout, storePath(layout)).kind).toBe("sqlite");
     } finally {
       legacy.close();
     }

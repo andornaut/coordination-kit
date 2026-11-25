@@ -5,7 +5,6 @@
 // channel status file are keyed by role, so the channel keeps serving the role, and the doctor
 // and the review keep finding its status, after `session start` rebinds it after /clear.
 import { writeSync } from "node:fs";
-import { parseArgs } from "node:util";
 
 import { type LineWriter, serve } from "../adapters/claude/channel.ts";
 import { writeChannelStatus } from "../adapters/claude/channelStatus.ts";
@@ -19,7 +18,7 @@ import { claudeProjectsDir, clearSuccessor } from "../registry/claudeLineage.ts"
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry, RegistryMissing } from "../registry/store.ts";
-import { errorMessage } from "./args.ts";
+import { errorMessage, parseOptions, Usage } from "./args.ts";
 import { SPECS } from "./spec.ts";
 
 const DEFAULT_POLL_SECONDS = 5;
@@ -126,7 +125,10 @@ interface ChannelOptions {
   readonly write?: LineWriter;
   /** Claude's transcript directory; defaults to `claudeProjectsDir` of the environment. */
   readonly projectsDir?: string | null;
-  /** Milliseconds since the epoch; defaults to `Date.now`. */
+  /**
+   * Milliseconds since the epoch, for the lineage scan, the status refresh and `startedAt`;
+   * defaults to `Date.now`.
+   */
   readonly now?: () => number;
 }
 
@@ -143,11 +145,7 @@ export async function channel(
   let role: string | undefined;
   let pollSeconds: number;
   try {
-    const { values } = parseArgs({
-      args,
-      options: SPECS["claude channel"].options,
-      strict: true,
-    });
+    const { values } = parseOptions(SPECS["claude channel"].options, args);
     pollSeconds = Number(values["poll-seconds"] ?? DEFAULT_POLL_SECONDS);
     if (!Number.isFinite(pollSeconds) || pollSeconds <= 0) {
       throw new ChannelUsage("--poll-seconds must be a positive number");
@@ -167,10 +165,7 @@ export async function channel(
   } catch (error) {
     const message = errorMessage(error);
     io.err(`coordination-kit: ${message}\n`);
-    return error instanceof ChannelUsage ||
-      (error as { code?: string }).code?.startsWith("ERR_PARSE_ARGS")
-      ? EXIT_USAGE
-      : EXIT_INVALID;
+    return error instanceof ChannelUsage || error instanceof Usage ? EXIT_USAGE : EXIT_INVALID;
   }
   // The conversation the status file names. It is written when the role is known and rewritten
   // when a later check finds the role rebound, so the file names the binding the channel serves.
@@ -189,7 +184,7 @@ export async function channel(
         return;
       }
       const identity = cliIdentity(io.entry);
-      startedAt ??= new Date().toISOString();
+      startedAt ??= new Date(at).toISOString();
       if (
         writeChannelStatus(layout, {
           argv: process.argv,

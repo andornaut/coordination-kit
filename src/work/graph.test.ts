@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
 import { loadLayout } from "../core/layout.ts";
+import { clockAt, TEST_CONTEXT, TEST_GIT, TEST_HOST } from "../core/testFixtures.ts";
 import { Store } from "../store/db.ts";
 import { activateMigration, prepareMigration } from "../store/files/migration.ts";
 import { answerQuestion, openQuestion } from "../store/questions.ts";
@@ -55,10 +56,13 @@ function fixture() {
     },
   );
   // A decision recorded through the question records, beside the work file's own D1.
-  const store = Store.forLayout(loadLayout(made.root), { now: () => "2026-11-06T12:00:00.000Z" });
+  const store = Store.forLayout(
+    { ...TEST_CONTEXT, clock: clockAt("2026-11-06T12:00:00.000Z") },
+    loadLayout(made.root),
+  );
   const actor = { nativeId: IDS.kit, role: KIT };
   openQuestion(store, actor, { id: "q-sample-kit-2", title: "Shard the store?" });
-  answerQuestion(store, actor, "q-sample-kit-2", {
+  answerQuestion(TEST_HOST, store, actor, "q-sample-kit-2", {
     fileNumbers: [1],
     supersedes: "D1",
     text: "Shard it.",
@@ -158,11 +162,12 @@ describe("graph", () => {
     const made = fixture();
     const layout = loadLayout(made.root);
     const { receipt } = prepareMigration(
+      TEST_GIT,
       layout,
       join(made.base, "backup.db"),
       join(made.base, "restore.db"),
     );
-    activateMigration(layout, receipt.id);
+    activateMigration(TEST_GIT, layout, receipt.id);
     const previous = await run(made, "graph");
     expect(previous.exit, previous.err).toBe(EXIT_OK);
     const cache = join(layout.varDir, "coordination", "graph-index.json");
@@ -191,7 +196,7 @@ describe("graph", () => {
     );
 
     const head = () => {
-      const store = Store.readLayout(layout)!;
+      const store = Store.readLayout(TEST_CONTEXT, layout)!;
       try {
         return store.head();
       } finally {

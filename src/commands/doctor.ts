@@ -1,10 +1,9 @@
 // Doctor reports capabilities without sending, activating or changing registry state.
-import { parseArgs } from "node:util";
-
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../core/io.ts";
 import { loadLayout } from "../core/layout.ts";
 import { readRegistry } from "../registry/store.ts";
 import { diagnoseHarness } from "../review/diagnostics.ts";
+import { parseOptions } from "./args.ts";
 
 export const DOCTOR_OPTIONS = {
   game: { multiple: true, type: "string" },
@@ -18,11 +17,7 @@ const USAGE =
 export const harnessDoctor: Handler = async (io, root, args) => {
   let values;
   try {
-    ({ values } = parseArgs({
-      args,
-      options: DOCTOR_OPTIONS,
-      strict: true,
-    }));
+    ({ values } = parseOptions(DOCTOR_OPTIONS, args));
     if (
       (values.game === undefined && values.role === undefined) ||
       [...(values.game ?? []), ...(values.role ?? [])].some((value) => value.trim() === "")

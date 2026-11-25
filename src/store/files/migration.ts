@@ -2,11 +2,12 @@ import { lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { readJson, writeJsonDurable } from "../../core/durable.ts";
+import type { GitRunner } from "../../core/git.ts";
 import type { Layout } from "../../core/layout.ts";
 import { withLock } from "../../core/lock.ts";
 import { isRecord } from "../../core/pyjson.ts";
 import { readRegistry } from "../../registry/store.ts";
-import { Store, storePath } from "../db.ts";
+import { READ_ONLY_CLOCK, Store, storePath } from "../db.ts";
 import { canonicalJson, sha256 } from "../eventCodec.ts";
 import { type StoredEvent, StoreError } from "../types.ts";
 import {
@@ -105,7 +106,7 @@ function inspectTarget(
   roles: ReadonlySet<string>,
 ): Qualification["records"] {
   const snapshot = openFileJournal(target).snapshot();
-  const index = Store.openFileProjection(target, {
+  const index = Store.openFileProjection(READ_ONLY_CLOCK, target, {
     journal: {
       events: () => [...snapshot.events],
       withWriter: () => {
@@ -123,6 +124,7 @@ function inspectTarget(
 }
 
 export function prepareMigration(
+  git: GitRunner,
   layout: Layout,
   backupPath: string,
   restorePath: string,
@@ -131,14 +133,14 @@ export function prepareMigration(
   const backup = safeCopyPath(layout, backupPath);
   const restored = safeCopyPath(layout, restorePath);
   if (
-    fileAuthority(layout, legacy).kind !== "sqlite" ||
+    fileAuthority(git, layout, legacy).kind !== "sqlite" ||
     backup === restored ||
     backup === legacy ||
     restored === legacy
   ) {
     throw new StoreError("migration-already-active-or-copy-conflict");
   }
-  const target = fileAuthorityTarget(layout, { create: true });
+  const target = fileAuthorityTarget(git, layout, { create: true });
   return migrationLock(target, () => {
     const inventory = sourceInventory(layout);
     const roles = new Set(Object.keys(readRegistry(layout).roles));
@@ -182,6 +184,7 @@ export function prepareMigration(
       source,
     };
     const receipt = prepareFileAuthority(
+      git,
       layout,
       legacy,
       { head: source.head, proof: sha256(canonicalJson(qualification)) },
@@ -212,10 +215,10 @@ function readQualification(path: string, receipt: CutoverReceipt): Qualification
   return value as unknown as Qualification;
 }
 
-export function activateMigration(layout: Layout, id: string): CutoverReceipt {
-  const target = fileAuthorityTarget(layout);
+export function activateMigration(git: GitRunner, layout: Layout, id: string): CutoverReceipt {
+  const target = fileAuthorityTarget(git, layout);
   return migrationLock(target, () =>
-    activateFileAuthority(layout, storePath(layout), id, (_path, receipt, currentSource) => {
+    activateFileAuthority(git, layout, storePath(layout), id, (_path, receipt, currentSource) => {
       const expected = readQualification(join(target, QUALIFICATION), receipt);
       if (currentSource !== undefined) {
         assertSqliteEquivalent(expected.source, inspectSqliteConnection(currentSource));

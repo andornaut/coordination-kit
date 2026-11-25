@@ -7,6 +7,7 @@ import {
   makeFixture,
   projectConfig,
   registryInput,
+  TEST_CLOCK,
   writeFixtureJson,
 } from "../../core/testFixtures.ts";
 import { createRegistry, type Registry, updateRegistry } from "../../registry/index.ts";
@@ -17,8 +18,8 @@ const CODEX_COORDINATOR = "00000000-0000-4000-8000-000000000004";
 function setup(route: unknown): Layout {
   const layout = loadLayout(makeFixture().root);
   const input = registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">;
-  createRegistry(layout, input);
-  updateRegistry(layout, 1, (draft) => {
+  createRegistry(TEST_CLOCK, layout, input);
+  updateRegistry(TEST_CLOCK, layout, 1, (draft) => {
     draft.roles["game-coordinator"]!.conversations.codex = CODEX_COORDINATOR;
   });
   writeFileSync(layout.routeFile, JSON.stringify(route));

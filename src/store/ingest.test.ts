@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { main } from "../cli.ts";
 import { EXIT_OK, EXIT_USAGE } from "../core/io.ts";
 import { type GameLayout, gameLayout, type Layout } from "../core/layout.ts";
+import { clockAt, TEST_CONTEXT } from "../core/testFixtures.ts";
 import { Store } from "./db.ts";
 import {
   busEventId,
@@ -87,7 +88,7 @@ function setup(): Setup {
   const game = gameLayout(layout, GAME);
   mkdirSync(game.busDir, { recursive: true });
   return {
-    context: { env: {}, layout, now: () => "2026-11-18T16:00:00.000Z" },
+    context: { clock: clockAt("2026-11-18T16:00:00.000Z"), env: {}, layout },
     game,
     layout,
     log: join(game.busDir, LOG_FILE),
@@ -95,7 +96,7 @@ function setup(): Setup {
 }
 
 function withStore<T>(layout: Layout, body: (store: Store) => T): T {
-  const store = Store.forLayout(layout);
+  const store = Store.forLayout(TEST_CONTEXT, layout);
   try {
     return body(store);
   } finally {

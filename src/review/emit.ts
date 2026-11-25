@@ -2,7 +2,7 @@
 // store as a message from delivery-kit to the game's reports.recipient; it is never written to
 // the runner's events.jsonl. The recipient is woken by the next send to it or the next review.
 import type { GameLayout, Layout } from "../core/layout.ts";
-import { Store } from "../store/db.ts";
+import { Store, type StoreContext } from "../store/db.ts";
 import { clean, derivedId, type Notice, reportsRecipient, storeNotice } from "../store/notices.ts";
 type HealthEmit = (kind: string, key: string, message: string) => void;
 
@@ -23,9 +23,14 @@ export function coordinationNotice(
 }
 
 /** The emit port for review health: one stored notice. */
-export function coordinationEmit(layout: Layout, game: GameLayout, project: string): HealthEmit {
+export function coordinationEmit(
+  context: StoreContext,
+  layout: Layout,
+  game: GameLayout,
+  project: string,
+): HealthEmit {
   return (kind, key, message) => {
-    const store = Store.forLayout(layout);
+    const store = Store.forLayout(context, layout);
     try {
       const notice = coordinationNotice(reportsRecipient(layout, game), game, project, {
         key,

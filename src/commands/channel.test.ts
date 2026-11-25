@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { readChannelStatus } from "../adapters/claude/channelStatus.ts";
 import { wakeFilePath, writeWakeFile } from "../adapters/claude/wakeFile.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Io } from "../core/io.ts";
-import { projectConfig, writeFixtureJson } from "../core/testFixtures.ts";
+import { projectConfig, TEST_CLOCK, writeFixtureJson } from "../core/testFixtures.ts";
 import { readRegistry, updateRegistry } from "../registry/store.ts";
 import { diagnoseHarness } from "../review/diagnostics.ts";
 import { claudeFixture, RECIPIENT } from "../review/fixtures.ts";
@@ -22,7 +22,7 @@ function io(): Io & { errors: string[] } {
 describe("claude channel options", () => {
   it("serves the Claude recipient while the global default is Codex", async () => {
     const fixture = claudeFixture();
-    updateRegistry(fixture.layout, 1, (draft) => {
+    updateRegistry(TEST_CLOCK, fixture.layout, 1, (draft) => {
       draft.harness = "codex";
       draft.roles["game-coordinator"]!.harness = "claude";
     });
@@ -42,7 +42,7 @@ describe("claude channel options", () => {
 
   it("refuses a Codex recipient even while the global default is Claude", async () => {
     const fixture = claudeFixture();
-    updateRegistry(fixture.layout, 1, (draft) => {
+    updateRegistry(TEST_CLOCK, fixture.layout, 1, (draft) => {
       draft.roles["game-coordinator"]!.harness = "codex";
       draft.roles["game-coordinator"]!.conversations.codex = RECIPIENT;
     });
@@ -159,7 +159,7 @@ describe("claude channel options", () => {
       writeWakeFile(fixture.layout, wake);
       await drain(1);
       // The /clear rebind rotates the role's Claude conversation while the channel keeps running.
-      updateRegistry(fixture.layout, 1, (draft) => {
+      updateRegistry(TEST_CLOCK, fixture.layout, 1, (draft) => {
         draft.roles["game-coordinator"]!.conversations.claude =
           "00000000-0000-4000-8000-0000000000f1";
       });
@@ -201,7 +201,7 @@ describe("claude channel options", () => {
       role: "game-coordinator",
       schema: 2,
     });
-    updateRegistry(fixture.layout, 1, (draft) => {
+    updateRegistry(TEST_CLOCK, fixture.layout, 1, (draft) => {
       draft.roles["game-coordinator"]!.conversations.claude =
         "00000000-0000-4000-8000-0000000000f1";
     });
@@ -264,7 +264,7 @@ describe("claude channel launched with a rotated conversation", () => {
 
   async function launch(bound: string, projectsDir: string, now: () => number = () => 0) {
     const fixture = claudeFixture();
-    updateRegistry(fixture.layout, 1, (draft) => {
+    updateRegistry(TEST_CLOCK, fixture.layout, 1, (draft) => {
       draft.roles[ROLE]!.conversations.claude = bound;
     });
     const input = new PassThrough();
@@ -363,7 +363,7 @@ describe("claude channel launched with a rotated conversation", () => {
       await served.poll();
       const first = readChannelStatus(served.layout, ROLE);
       expect(first).toMatchObject({ conversation: id(0xe1) });
-      updateRegistry(served.layout, 2, (draft) => {
+      updateRegistry(TEST_CLOCK, served.layout, 2, (draft) => {
         draft.roles[ROLE]!.conversations.claude = id(0xe2);
       });
       clock += 60_000 - 1;

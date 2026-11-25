@@ -1,4 +1,5 @@
 // Scoped transport selection changes no activation or ownership evidence.
+import type { Clock } from "../core/clock.ts";
 import type { Layout } from "../core/layout.ts";
 import { checkArray, checkEnum, checkObject, checkString, Issues } from "../core/validate.ts";
 import { resolveRole } from "./resolve.ts";
@@ -52,12 +53,14 @@ export function resolveSelectedRoles(
 
 /** Atomically select only named roles under the registry's revision-checked write lock. */
 export function selectHarness(
+  clock: Clock,
   layout: Layout,
   expectedRevision: number,
   selection: HarnessSelection,
   options: UpdateOptions = {},
 ): Registry {
   return updateRegistry(
+    clock,
     layout,
     expectedRevision,
     (draft) => {

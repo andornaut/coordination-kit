@@ -699,7 +699,7 @@ export function collectStatus(
   const registry = readRegistry(layout);
   const repos = repositories(context, layout, registry);
   const selected = selectScope(layout, registry, repos, options.scope);
-  const storeWork = readStoreWork(layout);
+  const storeWork = readStoreWork(context.io.env, layout);
   const reports = repos
     .filter((repo) => selected.names.has(repo.name))
     .map((repo) => readRepository(context, layout, repo, storeWork, options.verifySince));

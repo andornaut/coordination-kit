@@ -21,7 +21,7 @@ import { fsyncDirectory } from "../../core/durable.ts";
 import { gameLayout, type Layout, loadLayout, PROJECT_CONFIG_FILE } from "../../core/layout.ts";
 import { configuredStateRoot, stateRootConfigPath } from "../../core/stateRoot.ts";
 import { readRegistry } from "../../registry/store.ts";
-import { Store, STORE_FILE, storeRoot } from "../db.ts";
+import { READ_ONLY_CLOCK, Store, STORE_FILE, storeRoot } from "../db.ts";
 import { canonicalJson, eventHash, sha256 } from "../eventCodec.ts";
 import { CURSOR_FILE, LOG_FILE, QUARANTINE_FILE, readCursor } from "../ingest.ts";
 import { PROJECTIONS, RETIRED_TABLES } from "../projections.ts";
@@ -283,7 +283,7 @@ function qualifyReplay(copy: string): SqliteState {
   const before = inspectSqliteState(copy);
   let runtime: Store | undefined;
   try {
-    runtime = Store.open(copy);
+    runtime = Store.open(READ_ONLY_CLOCK, copy);
     runtime.rebuild();
     assertSqliteEquivalent(before, inspectSqliteConnection(runtime.db));
     return before;

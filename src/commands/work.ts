@@ -1,8 +1,6 @@
 // The work group over one repository, which --root names (default: the working directory): `work
 // check` and `work report`, and the store work verbs `work start|evidence|block|unblock|ready|
 // finish|show|history`. The coordinator root for live state comes only from the environment.
-import { parseArgs } from "node:util";
-
 import { systemGit } from "../core/git.ts";
 import {
   coordinatorRoot,
@@ -12,6 +10,7 @@ import {
   type Handler,
   type Io,
 } from "../core/io.ts";
+import type { Options } from "../core/usage.ts";
 import { WORK_STAGES, type WorkStage } from "../store/work.ts";
 import {
   type LiveContext,
@@ -27,7 +26,18 @@ import {
 } from "../work/live.ts";
 import { checkWork, type Finding, type FindingCode } from "../workfiles/check.ts";
 import { reportWork } from "../workfiles/report.ts";
-import { CALLER, callerOf, refusalCode, required, text, Usage, type Values } from "./args.ts";
+import {
+  CALLER,
+  callerOf,
+  parseOptions,
+  refusalCode,
+  required,
+  systemClock,
+  text,
+  Usage,
+  type Values,
+  verbFamily,
+} from "./args.ts";
 
 export const WORK_OPTIONS = {} as const;
 export const WORK_CHECK_OPTIONS = { decisions: { type: "boolean" } } as const;
@@ -47,20 +57,10 @@ export const WORK_BLOCK_OPTIONS = {
 export const WORK_WRITE_OPTIONS = CALLER;
 export const WORK_READ_OPTIONS = {} as const;
 
-function usage(args: string[]): boolean {
-  try {
-    parseArgs({ args, options: WORK_OPTIONS, strict: true });
-    return false;
-  } catch {
-    return true;
-  }
-}
-
 export const workCheck: Handler = (io, root, args) => {
   let decisions: boolean;
   try {
-    decisions =
-      parseArgs({ args, options: WORK_CHECK_OPTIONS, strict: true }).values.decisions === true;
+    decisions = parseOptions(WORK_CHECK_OPTIONS, args).values.decisions === true;
   } catch {
     io.err("coordination-kit: usage: coordination-kit work check [--decisions] [--root DIR]\n");
     return EXIT_USAGE;
@@ -96,7 +96,9 @@ export const workCheck: Handler = (io, root, args) => {
 };
 
 export const workReport: Handler = (io, root, args) => {
-  if (usage(args)) {
+  try {
+    parseOptions(WORK_OPTIONS, args);
+  } catch {
     io.err("coordination-kit: usage: coordination-kit work report [--root DIR]\n");
     return EXIT_USAGE;
   }
@@ -106,100 +108,83 @@ export const workReport: Handler = (io, root, args) => {
 };
 
 function liveContext(io: Io): LiveContext {
-  return { coordinatorRoot: coordinatorRoot(io.env), env: io.env, git: systemGit(io.env) };
-}
-
-/** Parse `ID` and the options, run one service call and print its JSON; refusals exit 1. */
-function verb(
-  command: string,
-  options: Record<string, { readonly type: "string" | "boolean" }>,
-  action: (context: LiveContext, values: Values, id: string, root: string) => unknown,
-): Handler {
-  return (io, root, args) => {
-    let values: Values;
-    let id: string;
-    try {
-      const parsed = parseArgs({ allowPositionals: true, args, options, strict: true });
-      values = parsed.values as Values;
-      if (
-        parsed.positionals.length !== 1 ||
-        Object.values(values).some((value) => typeof value === "string" && value.trim() === "")
-      ) {
-        throw new Usage();
-      }
-      id = parsed.positionals[0]!;
-    } catch {
-      io.err(`coordination-kit: invalid_work_options (${command})\n`);
-      return EXIT_USAGE;
-    }
-    try {
-      io.out(`${JSON.stringify(action(liveContext(io), values, id, root))}\n`);
-      return EXIT_OK;
-    } catch (error) {
-      if (error instanceof Usage) {
-        io.err(`coordination-kit: invalid_work_options (${command})\n`);
-        return EXIT_USAGE;
-      }
-      io.err(`coordination-kit: ${refusalCode(error, "store_operation_failed")}\n`);
-      return EXIT_INVALID;
-    }
+  return {
+    clock: systemClock,
+    coordinatorRoot: coordinatorRoot(io.env),
+    env: io.env,
+    git: systemGit(io.env),
   };
 }
 
-export const workStart = verb("work start", WORK_START_OPTIONS, (context, values, id, root) => {
+/** What a `work` store verb runs against: the live context and the repository `--root` names. */
+interface WorkCommandContext extends LiveContext {
+  readonly worktree: string;
+}
+
+/** The `work` store verbs' wrapper: each takes exactly one positional, the work item `ID`. */
+const workFamily = verbFamily("work", (io, root): WorkCommandContext => ({
+  ...liveContext(io),
+  worktree: root,
+}));
+
+function verb(
+  command: string,
+  options: Options,
+  action: (context: WorkCommandContext, values: Values, id: string) => unknown,
+): Handler {
+  return workFamily(command, options, (context, values, [id]) => action(context, values, id!), 1);
+}
+
+export const workStart = verb("work start", WORK_START_OPTIONS, (context, values, id) => {
   const parent = text(values, "parent");
   return startService(context, callerOf(values), {
     id,
-    worktree: root,
+    worktree: context.worktree,
     ...(parent === undefined ? {} : { parent }),
   });
 });
 
-export const workEvidence = verb(
-  "work evidence",
-  WORK_EVIDENCE_OPTIONS,
-  (context, values, id, root) => {
-    const stage = required(values, "stage");
-    if (!(WORK_STAGES as readonly string[]).includes(stage)) {
-      throw new Usage();
-    }
-    const ref = text(values, "ref");
-    return evidenceService(context, callerOf(values), {
-      id,
-      sha: required(values, "sha"),
-      stage: stage as WorkStage,
-      worktree: root,
-      ...(ref === undefined ? {} : { ref }),
-    });
-  },
-);
+export const workEvidence = verb("work evidence", WORK_EVIDENCE_OPTIONS, (context, values, id) => {
+  const stage = required(values, "stage");
+  if (!(WORK_STAGES as readonly string[]).includes(stage)) {
+    throw new Usage();
+  }
+  const ref = text(values, "ref");
+  return evidenceService(context, callerOf(values), {
+    id,
+    sha: required(values, "sha"),
+    stage: stage as WorkStage,
+    worktree: context.worktree,
+    ...(ref === undefined ? {} : { ref }),
+  });
+});
 
-export const workBlock = verb("work block", WORK_BLOCK_OPTIONS, (context, values, id, root) => {
+export const workBlock = verb("work block", WORK_BLOCK_OPTIONS, (context, values, id) => {
   const owner = text(values, "owner");
   return blockService(context, callerOf(values), {
     id,
     reason: required(values, "reason"),
-    worktree: root,
+    worktree: context.worktree,
     ...(owner === undefined ? {} : { owner }),
   });
 });
 
-export const workUnblock = verb("work unblock", WORK_WRITE_OPTIONS, (context, values, id, root) =>
-  unblockService(context, callerOf(values), { id, worktree: root }),
+export const workUnblock = verb("work unblock", WORK_WRITE_OPTIONS, (context, values, id) =>
+  unblockService(context, callerOf(values), { id, worktree: context.worktree }),
 );
 
-export const workReady = verb("work ready", WORK_WRITE_OPTIONS, (context, values, id, root) =>
-  readyService(context, callerOf(values), { id, worktree: root }),
+export const workReady = verb("work ready", WORK_WRITE_OPTIONS, (context, values, id) =>
+  readyService(context, callerOf(values), { id, worktree: context.worktree }),
 );
 
-export const workFinish = verb("work finish", WORK_WRITE_OPTIONS, (context, values, id, root) =>
-  finishService(context, callerOf(values), { id, worktree: root }),
+export const workFinish = verb("work finish", WORK_WRITE_OPTIONS, (context, values, id) =>
+  finishService(context, callerOf(values), { id, worktree: context.worktree }),
 );
 
-export const workShow = verb("work show", WORK_READ_OPTIONS, (context, _values, id, root) =>
-  showService(context, { id, worktree: root }),
+export const workShow = verb("work show", WORK_READ_OPTIONS, (context, _values, id) =>
+  showService(context, { id, worktree: context.worktree }),
 );
 
-export const workHistory = verb("work history", WORK_READ_OPTIONS, (context, _values, id, root) =>
-  workHistoryOf(context, { id, worktree: root }),
+export const workHistory = verb("work history", WORK_READ_OPTIONS, (context, _values, id) =>
+  workHistoryOf(context, { id, worktree: context.worktree }),
 );

@@ -5,6 +5,7 @@
 // clears guards, answers or reissues questions.
 import { performance } from "node:perf_hooks";
 
+import type { Clock } from "../../../core/clock.ts";
 import { isCanonicalUuid } from "../../../core/ids.ts";
 import { utcStamp } from "../../../core/isoformat.ts";
 import { isRecord, sameJson } from "../../../core/pyjson.ts";
@@ -63,13 +64,11 @@ const PAGE_DIAGNOSTICS: ReadonlySet<string> = new Set([
 interface QuestionStateOptions {
   /** Shared native call budget; defaults to 256. */
   readonly maxCalls?: number;
-  /** Clock compared with `client.deadline`, a performance.now() value as rpc.ts sets it. */
+  /** The monotonic clock compared with `client.deadline`, a performance.now() value as rpc.ts sets it. */
   readonly monotonic?: () => number;
-  /** Wall-clock seconds since the epoch, for attestation freshness. */
-  readonly time?: () => number;
 }
 
-interface Clock {
+interface Bounds {
   readonly maxCalls: number;
   readonly monotonic: () => number;
   readonly time: () => number;
@@ -138,9 +137,9 @@ class Reader {
   calls = 0;
   reason: string | null = null;
   readonly client: RpcClient;
-  readonly clock: Clock;
+  readonly clock: Bounds;
 
-  constructor(clock: Clock, client: RpcClient) {
+  constructor(clock: Bounds, client: RpcClient) {
     this.clock = clock;
     this.client = client;
   }
@@ -585,7 +584,7 @@ function pendingConflict(
 }
 
 function applyPending(
-  clock: Clock,
+  clock: Bounds,
   result: HistoryResult,
   latestPositions: Positions,
   recipient: string,
@@ -756,7 +755,7 @@ function mergeLatest(result: HistoryResult, latest: Capture): void {
 }
 
 async function collectOne(
-  clock: Clock,
+  clock: Bounds,
   reader: Reader,
   records: Records,
   maxPages: number,
@@ -830,6 +829,7 @@ async function collectOne(
  * attestations are supplied. No persistence or mutation occurs.
  */
 export async function collectQuestionState(
+  clock: Clock,
   client: RpcClient,
   decisionRecords: Readonly<Record<string, Record<string, unknown> | null>>,
   recipients: readonly string[],
@@ -850,17 +850,17 @@ export async function collectQuestionState(
   if (new Set(recipients).size !== recipients.length) {
     throw new Error("duplicate_recipient");
   }
-  const clock: Clock = {
+  const bounds: Bounds = {
     maxCalls: options.maxCalls ?? MAX_CALLS,
     monotonic: options.monotonic ?? (() => performance.now()),
-    time: options.time ?? (() => Date.now() / 1000),
+    time: () => clock().getTime() / 1000,
   };
-  const reader = new Reader(clock, client);
+  const reader = new Reader(bounds, client);
   const output: Record<string, Record<string, unknown>> = {};
   for (const recipient of recipients) {
     // Recipients share one call budget and deadline, so they are read in order.
     // eslint-disable-next-line no-await-in-loop
-    output[recipient] = await collectOne(clock, reader, decisionRecords, maxPages, recipient);
+    output[recipient] = await collectOne(bounds, reader, decisionRecords, maxPages, recipient);
   }
   return output;
 }

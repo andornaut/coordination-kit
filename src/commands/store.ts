@@ -1,16 +1,14 @@
 // The store verbs: `msg send|done|retain|status|history`, `inbox` and
-// `store import|export|rebuild|retire|compaction-plan`, and the parsing helpers the question verbs share.
-// Each prints one JSON object on stdout. A refusal prints `coordination-kit: CODE` on stderr and
-// exits 1; a usage error exits 2.
+// `store import|export|rebuild|retire|compaction-plan`, and `storeVerb`, the wrapper every
+// store-backed verb shares. Each prints one JSON object on stdout. A refusal prints
+// `coordination-kit: CODE` on stderr and exits 1; a usage error exits 2.
 import { isUtf8 } from "node:buffer";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { parseArgs } from "node:util";
 
 import { systemGit } from "../core/git.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
+import type { Handler } from "../core/io.ts";
 import { loadLayout } from "../core/layout.ts";
-import type { Options } from "../core/usage.ts";
 import { Store } from "../store/db.ts";
 import { planFileCompaction } from "../store/files/compactionPlan.ts";
 import { NEXT_REVIEW_BOUNDARY, retentionInstant } from "../store/retention.ts";
@@ -30,7 +28,16 @@ import {
 } from "../store/service.ts";
 import { type MessageLink, StoreError } from "../store/types.ts";
 import { importApprovalLedger } from "../work/approvals.ts";
-import { CALLER, callerOf, refusalCode, required, text, Usage, type Values } from "./args.ts";
+import {
+  CALLER,
+  callerOf,
+  required,
+  systemClock,
+  text,
+  Usage,
+  type Values,
+  verbFamily,
+} from "./args.ts";
 
 export const MSG_SEND_OPTIONS = {
   ...CALLER,
@@ -95,45 +102,6 @@ export const STORE_RETIRE_OPTIONS = {
   "dry-run": { type: "boolean" },
 } as const;
 
-function parse(
-  spec: Options,
-  args: string[],
-  positionals = 0,
-): { values: Values; positionals: string[] } {
-  let parsed;
-  try {
-    parsed = parseArgs({
-      allowPositionals: positionals > 0,
-      args,
-      options: spec,
-      strict: true,
-      tokens: true,
-    });
-  } catch {
-    throw new Usage();
-  }
-  const seen = new Set<string>();
-  for (const token of parsed.tokens) {
-    if (token.kind === "option" && spec[token.name]?.multiple !== true) {
-      if (seen.has(token.name)) {
-        throw new Usage();
-      }
-      seen.add(token.name);
-    }
-  }
-  const values = parsed.values as Values;
-  const strings = Object.values(values).flatMap((value) =>
-    Array.isArray(value) ? value : [value],
-  );
-  if (
-    strings.some((value) => typeof value === "string" && value.trim() === "") ||
-    parsed.positionals.length !== positionals
-  ) {
-    throw new Usage();
-  }
-  return { positionals: parsed.positionals, values };
-}
-
 /** An ISO 8601 instant, normalized to the store's `toISOString` form for ordered comparison. */
 function instant(value: string): string {
   if (!/^\d{4}-\d{2}-\d{2}T/.test(value) || !Number.isFinite(Date.parse(value))) {
@@ -142,48 +110,18 @@ function instant(value: string): string {
   return new Date(value).toISOString();
 }
 
-export async function run(
-  io: Io,
-  root: string,
-  command: string,
-  args: string[],
-  action: (context: StoreServiceContext, values: Values, positionals: string[]) => unknown,
-  spec: Options,
-  positionals = 0,
-): Promise<number> {
-  let parsed;
-  try {
-    parsed = parse(spec, args, positionals);
-  } catch {
-    io.err(`coordination-kit: invalid_store_options (${command})\n`);
-    return EXIT_USAGE;
-  }
-  try {
-    const result = await action(
-      { env: io.env, layout: loadLayout(root) },
-      parsed.values,
-      parsed.positionals,
-    );
-    io.out(`${JSON.stringify(result)}\n`);
-    return EXIT_OK;
-  } catch (error) {
-    if (error instanceof Usage) {
-      io.err(`coordination-kit: invalid_store_options (${command})\n`);
-      return EXIT_USAGE;
-    }
-    const code = refusalCode(error, "store_operation_failed");
-    // A refusal with a short reason, such as `session-held: phase held`, prints it after the code.
-    const reason =
-      error instanceof StoreError &&
-      "reason" in error &&
-      typeof error.reason === "string" &&
-      /^[a-z0-9 -]{1,64}$/.test(error.reason)
-        ? `: ${error.reason}`
-        : "";
-    io.err(`coordination-kit: ${code}${reason}\n`);
-    return EXIT_INVALID;
-  }
+/** What a store verb runs against: the service context and the caller's working directory. */
+interface StoreCommandContext extends StoreServiceContext {
+  readonly cwd: string;
 }
+
+/** The store verbs' wrapper: the coordinator layout from `root`, the real clock and environment. */
+export const storeVerb = verbFamily("store", (io, root): StoreCommandContext => ({
+  clock: systemClock,
+  cwd: io.cwd,
+  env: io.env,
+  layout: loadLayout(root),
+}));
 
 function links(values: Values): MessageLink[] {
   return ((values.link as string[] | undefined) ?? []).map((value) => {
@@ -195,234 +133,194 @@ function links(values: Values): MessageLink[] {
   });
 }
 
-export const msgSend: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "msg send",
-    args,
-    (context, values) => {
-      const file = text(values, "body-file");
-      const inline = text(values, "body");
-      const intent = text(values, "intent") ?? "queue";
-      if (
-        (file === undefined) === (inline === undefined) ||
-        (intent !== "queue" && intent !== "unblock")
-      ) {
-        throw new Usage();
-      }
-      const parsedLinks = links(values);
-      const to = required(values, "to");
-      let body = inline;
-      if (file !== undefined) {
-        const bytes = readFileSync(resolve(io.cwd, file));
-        if (!isUtf8(bytes)) {
-          throw new StoreError("invalid-body-encoding");
-        }
-        body = bytes.toString("utf8");
-      }
-      const id = text(values, "id");
-      return storeSend(context, callerOf(values), {
-        body: body!,
-        intent,
-        links: parsedLinks,
-        to,
-        ...(id === undefined ? {} : { id }),
-      });
-    },
-    MSG_SEND_OPTIONS,
-  );
+export const msgSend: Handler = storeVerb("msg send", MSG_SEND_OPTIONS, (context, values) => {
+  const file = text(values, "body-file");
+  const inline = text(values, "body");
+  const intent = text(values, "intent") ?? "queue";
+  if (
+    (file === undefined) === (inline === undefined) ||
+    (intent !== "queue" && intent !== "unblock")
+  ) {
+    throw new Usage();
+  }
+  const parsedLinks = links(values);
+  const to = required(values, "to");
+  let body = inline;
+  if (file !== undefined) {
+    const bytes = readFileSync(resolve(context.cwd, file));
+    if (!isUtf8(bytes)) {
+      throw new StoreError("invalid-body-encoding");
+    }
+    body = bytes.toString("utf8");
+  }
+  const id = text(values, "id");
+  return storeSend(context, callerOf(values), {
+    body: body!,
+    intent,
+    links: parsedLinks,
+    to,
+    ...(id === undefined ? {} : { id }),
+  });
+});
 
-export const msgDone: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "msg done",
-    args,
-    (context, values, [id]) => {
-      const work = text(values, "work");
-      const supersededBy = text(values, "superseded-by");
-      return storeDone(context, callerOf(values), id!, {
-        evidence: (values.evidence as string[] | undefined) ?? [],
-        ...(supersededBy === undefined ? {} : { supersededBy }),
-        ...(work === undefined ? {} : { work }),
-      });
-    },
-    MSG_DONE_OPTIONS,
-    1,
-  );
+export const msgDone: Handler = storeVerb(
+  "msg done",
+  MSG_DONE_OPTIONS,
+  (context, values, [id]) => {
+    const work = text(values, "work");
+    const supersededBy = text(values, "superseded-by");
+    return storeDone(context, callerOf(values), id!, {
+      evidence: (values.evidence as string[] | undefined) ?? [],
+      ...(supersededBy === undefined ? {} : { supersededBy }),
+      ...(work === undefined ? {} : { work }),
+    });
+  },
+  1,
+);
 
-export const msgRetain: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "msg retain",
-    args,
-    (context, values, [id]) => {
-      const owner = text(values, "owner");
-      const boundary = text(values, "next-boundary");
-      const until = text(values, "until");
-      const nextReview = values["next-review"] === true;
-      if ([boundary !== undefined, until !== undefined, nextReview].filter(Boolean).length !== 1) {
-        throw new Usage();
-      }
-      const deadline = until === undefined ? null : retentionInstant(until);
-      if (until !== undefined && deadline === null) {
-        throw new Usage();
-      }
-      return storeRetain(context, callerOf(values), id!, {
-        nextBoundary:
-          boundary ?? (deadline === null ? NEXT_REVIEW_BOUNDARY : new Date(deadline).toISOString()),
-        reason: required(values, "reason"),
-        ...(owner === undefined ? {} : { owner }),
-      });
-    },
-    MSG_RETAIN_OPTIONS,
-    1,
-  );
+export const msgRetain: Handler = storeVerb(
+  "msg retain",
+  MSG_RETAIN_OPTIONS,
+  (context, values, [id]) => {
+    const owner = text(values, "owner");
+    const boundary = text(values, "next-boundary");
+    const until = text(values, "until");
+    const nextReview = values["next-review"] === true;
+    if ([boundary !== undefined, until !== undefined, nextReview].filter(Boolean).length !== 1) {
+      throw new Usage();
+    }
+    const deadline = until === undefined ? null : retentionInstant(until);
+    if (until !== undefined && deadline === null) {
+      throw new Usage();
+    }
+    return storeRetain(context, callerOf(values), id!, {
+      nextBoundary:
+        boundary ?? (deadline === null ? NEXT_REVIEW_BOUNDARY : new Date(deadline).toISOString()),
+      reason: required(values, "reason"),
+      ...(owner === undefined ? {} : { owner }),
+    });
+  },
+  1,
+);
 
-export const msgStatus: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "msg status",
-    args,
-    (context, values, [id]) => {
-      const includeBody = values["include-body"] === true;
-      if (!includeBody && (values["native-id"] !== undefined || values.worker !== undefined)) {
-        throw new Usage();
-      }
-      return storeStatus(context, id!, includeBody ? callerOf(values) : undefined);
-    },
-    MSG_STATUS_OPTIONS,
-    1,
-  );
+export const msgStatus: Handler = storeVerb(
+  "msg status",
+  MSG_STATUS_OPTIONS,
+  (context, values, [id]) => {
+    const includeBody = values["include-body"] === true;
+    if (!includeBody && (values["native-id"] !== undefined || values.worker !== undefined)) {
+      throw new Usage();
+    }
+    return storeStatus(context, id!, includeBody ? callerOf(values) : undefined);
+  },
+  1,
+);
 
-export const msgHistory: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "msg history",
-    args,
-    (context, values) => {
-      const role = text(values, "role");
-      const since = text(values, "since");
-      const limit = text(values, "limit");
-      if (limit !== undefined && !/^[1-9][0-9]{0,5}$/.test(limit)) {
-        throw new Usage();
-      }
-      const includeBody = values["include-body"] === true;
-      if (!includeBody && (values["native-id"] !== undefined || values.worker !== undefined)) {
-        throw new Usage();
-      }
-      return storeHistory(context, {
-        ...(includeBody ? { caller: callerOf(values), includeBody } : {}),
-        ...(limit === undefined ? {} : { limit: Number(limit) }),
-        ...(role === undefined ? {} : { role }),
-        ...(since === undefined ? {} : { since: instant(since) }),
-      });
-    },
-    MSG_HISTORY_OPTIONS,
-  );
+export const msgHistory: Handler = storeVerb(
+  "msg history",
+  MSG_HISTORY_OPTIONS,
+  (context, values) => {
+    const role = text(values, "role");
+    const since = text(values, "since");
+    const limit = text(values, "limit");
+    if (limit !== undefined && !/^[1-9][0-9]{0,5}$/.test(limit)) {
+      throw new Usage();
+    }
+    const includeBody = values["include-body"] === true;
+    if (!includeBody && (values["native-id"] !== undefined || values.worker !== undefined)) {
+      throw new Usage();
+    }
+    return storeHistory(context, {
+      ...(includeBody ? { caller: callerOf(values), includeBody } : {}),
+      ...(limit === undefined ? {} : { limit: Number(limit) }),
+      ...(role === undefined ? {} : { role }),
+      ...(since === undefined ? {} : { since: instant(since) }),
+    });
+  },
+);
 
-export const inbox: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "inbox",
-    args,
-    (context, values) => {
-      if (values.peek === true) {
-        if (values.all === true || values["include-body"] === true) {
-          throw new Usage();
-        }
-        return storeInboxPeek(context, callerOf(values));
-      }
-      return storeInbox(context, callerOf(values), {
-        all: values.all === true,
-        includeBody: values["include-body"] === true,
-      });
-    },
-    INBOX_OPTIONS,
-  );
+export const inbox: Handler = storeVerb("inbox", INBOX_OPTIONS, (context, values) => {
+  if (values.peek === true) {
+    if (values.all === true || values["include-body"] === true) {
+      throw new Usage();
+    }
+    return storeInboxPeek(context, callerOf(values));
+  }
+  return storeInbox(context, callerOf(values), {
+    all: values.all === true,
+    includeBody: values["include-body"] === true,
+  });
+});
 
-export const storeImportCommand: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "store import",
-    args,
-    (context, values) => {
-      const ledger = required(values, "approval-ledger");
-      return importApprovalLedger(
-        { coordinatorRoot: context.layout.root, env: context.env, git: systemGit(context.env) },
-        callerOf(values),
-        { dryRun: values["dry-run"] === true, file: resolve(io.cwd, ledger) },
+export const storeImportCommand: Handler = storeVerb(
+  "store import",
+  STORE_IMPORT_OPTIONS,
+  (context, values) => {
+    const ledger = required(values, "approval-ledger");
+    return importApprovalLedger(
+      {
+        clock: context.clock,
+        coordinatorRoot: context.layout.root,
+        env: context.env,
+        git: systemGit(context.env),
+      },
+      callerOf(values),
+      { dryRun: values["dry-run"] === true, file: resolve(context.cwd, ledger) },
+    );
+  },
+);
+
+export const storeExportCommand: Handler = storeVerb(
+  "store export",
+  STORE_EXPORT_OPTIONS,
+  (context, values) => storeExport(context, instant(required(values, "since"))),
+);
+
+export const storeRebuildCommand: Handler = storeVerb(
+  "store rebuild",
+  STORE_REBUILD_OPTIONS,
+  (context) => storeRebuild(context),
+);
+
+export const storeCompactionPlanCommand: Handler = storeVerb(
+  "store compaction-plan",
+  STORE_COMPACTION_PLAN_OPTIONS,
+  (context) => {
+    const { revision, roles } = registry(context);
+    const store = Store.readLayout(context, context.layout);
+    try {
+      if (!store?.fileBacked) {
+        throw new StoreError("compaction-file-authority-required");
+      }
+      const events = store.events();
+      if (registry(context).revision !== revision) {
+        throw new StoreError("compaction-registry-changed");
+      }
+      return planFileCompaction(
+        events,
+        {
+          registeredGames: new Set(Object.keys(context.layout.config.games)),
+          registeredRoles: new Set(Object.keys(roles)),
+          registryRevision: revision,
+        },
+        store.compactedEventSequences(),
       );
-    },
-    STORE_IMPORT_OPTIONS,
-  );
+    } finally {
+      store?.close();
+    }
+  },
+);
 
-export const storeExportCommand: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "store export",
-    args,
-    (context, values) => storeExport(context, instant(required(values, "since"))),
-    STORE_EXPORT_OPTIONS,
-  );
-
-export const storeRebuildCommand: Handler = (io, root, args) =>
-  run(io, root, "store rebuild", args, (context) => storeRebuild(context), STORE_REBUILD_OPTIONS);
-
-export const storeCompactionPlanCommand: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "store compaction-plan",
-    args,
-    (context) => {
-      const { revision, roles } = registry(context);
-      const store = Store.readLayout(context.layout);
-      try {
-        if (!store?.fileBacked) {
-          throw new StoreError("compaction-file-authority-required");
-        }
-        const events = store.events();
-        if (registry(context).revision !== revision) {
-          throw new StoreError("compaction-registry-changed");
-        }
-        return planFileCompaction(
-          events,
-          {
-            registeredGames: new Set(Object.keys(context.layout.config.games)),
-            registeredRoles: new Set(Object.keys(roles)),
-            registryRevision: revision,
-          },
-          store.compactedEventSequences(),
-        );
-      } finally {
-        store?.close();
-      }
-    },
-    STORE_COMPACTION_PLAN_OPTIONS,
-  );
-
-export const storeRetireCommand: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "store retire",
-    args,
-    (context, values) => {
-      if ((values.apply === true) === (values["dry-run"] === true)) {
-        throw new Usage();
-      }
-      if (values["dry-run"] === true && (values["native-id"] ?? values.worker) !== undefined) {
-        throw new Usage();
-      }
-      return storeRetire(context, callerOf(values), { apply: values.apply === true });
-    },
-    STORE_RETIRE_OPTIONS,
-  );
+export const storeRetireCommand: Handler = storeVerb(
+  "store retire",
+  STORE_RETIRE_OPTIONS,
+  (context, values) => {
+    if ((values.apply === true) === (values["dry-run"] === true)) {
+      throw new Usage();
+    }
+    if (values["dry-run"] === true && (values["native-id"] ?? values.worker) !== undefined) {
+      throw new Usage();
+    }
+    return storeRetire(context, callerOf(values), { apply: values.apply === true });
+  },
+);

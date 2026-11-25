@@ -2,6 +2,7 @@
 import { mkdirSync, readdirSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import type { Clock } from "../core/clock.ts";
 import {
   type DurableStage,
   readJsonIfExists,
@@ -15,7 +16,6 @@ import { type Registry, type RegistryDraft, validateRegistry } from "./schema.ts
 export interface UpdateOptions {
   /** Seconds to wait for var/registry.lock before failing with LockBusy. Default 30. */
   readonly timeoutSeconds?: number;
-  readonly now?: () => Date;
   /** Test hook passed to the durable write. */
   readonly onStage?: (stage: DurableStage, tempPath: string) => void;
   /**
@@ -103,13 +103,14 @@ function lockAndWrite<T>(layout: Layout, options: UpdateOptions, write: () => T)
 }
 
 function persist(
+  clock: Clock,
   layout: Layout,
   options: UpdateOptions,
   draft: RegistryDraft,
   revision: number,
 ): Registry {
   draft.revision = revision;
-  draft.updatedAt = (options.now?.() ?? new Date()).toISOString();
+  draft.updatedAt = clock().toISOString();
   const next = validateRegistry(layout.config, draft);
   writeJsonDurable(
     layout.registryFile,
@@ -123,9 +124,11 @@ function persist(
  * Apply `mutate` to a private copy of the current registry under var/registry.lock.
  * Rejects with RevisionConflict when the stored revision is not `expectedRevision`, and with a
  * ValidationError when the result is invalid; either way the file is unchanged. `mutate` may
- * change the draft in place or return a replacement; revision and updatedAt are set here.
+ * change the draft in place or return a replacement; revision and updatedAt, from `clock`, are set
+ * here.
  */
 export function updateRegistry(
+  clock: Clock,
   layout: Layout,
   expectedRevision: number,
   mutate: (draft: RegistryDraft) => RegistryDraft | void,
@@ -137,12 +140,13 @@ export function updateRegistry(
       throw new RevisionConflict(expectedRevision, current.revision);
     }
     const draft = structuredClone(current) as RegistryDraft;
-    return persist(layout, options, mutate(draft) ?? draft, current.revision + 1);
+    return persist(clock, layout, options, mutate(draft) ?? draft, current.revision + 1);
   });
 }
 
 /** Write the first registry at revision 1. Rejects with RegistryExists if one is present. */
 export function createRegistry(
+  clock: Clock,
   layout: Layout,
   initial: Omit<Registry, "revision" | "updatedAt">,
   options: UpdateOptions = {},
@@ -152,6 +156,7 @@ export function createRegistry(
       throw new RegistryExists(layout.registryFile);
     }
     return persist(
+      clock,
       layout,
       options,
       structuredClone({ ...initial, revision: 0, updatedAt: "" }) as RegistryDraft,

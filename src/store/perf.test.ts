@@ -5,6 +5,7 @@ import { performance } from "node:perf_hooks";
 
 import { describe, expect, it } from "vitest";
 
+import { TEST_CLOCK, TEST_CONTEXT } from "../core/testFixtures.ts";
 import { Store } from "./db.ts";
 import { closeMessage, sendMessage } from "./messages.ts";
 import { storeDone, storeInbox, storeSend } from "./service.ts";
@@ -35,7 +36,7 @@ describe("store performance", () => {
     { timeout: 600_000 },
     async () => {
       const { layout } = storeFixture();
-      const store = Store.forLayout(layout);
+      const store = Store.forLayout(TEST_CONTEXT, layout);
       const sender = { nativeId: COORDINATOR, role: "game-coordinator" };
       for (let start = 0; start < VOLUME; start += 1000) {
         store.transaction(() => {
@@ -75,7 +76,11 @@ describe("store performance", () => {
       );
       store.close();
 
-      const context = (id: string) => ({ env: { CLAUDE_CODE_SESSION_ID: id }, layout });
+      const context = (id: string) => ({
+        clock: TEST_CLOCK,
+        env: { CLAUDE_CODE_SESSION_ID: id },
+        layout,
+      });
       const times = { done: [] as number[], inbox: [] as number[], send: [] as number[] };
       for (let n = 0; n < SAMPLES; n++) {
         const id = uuid(VOLUME + 1 + n);
@@ -99,7 +104,7 @@ describe("store performance", () => {
         await storeDone(context(TECH), {}, id, { work: "ck-0017" });
         times.done.push(performance.now() - started);
       }
-      const reopened = Store.forLayout(layout);
+      const reopened = Store.forLayout(TEST_CONTEXT, layout);
       // One event per send, read, close and wake claim and outcome: nothing scales with the store.
       expect(reopened.head().seq).toBe(VOLUME + (VOLUME - VOLUME / 50) + SAMPLES * 5);
       reopened.close();

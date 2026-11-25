@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { systemGit } from "../core/git.ts";
 import type { Io } from "../core/io.ts";
 import { loadLayout } from "../core/layout.ts";
+import { TEST_CLOCK } from "../core/testFixtures.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
 import type { LiveContext } from "./live.ts";
 
@@ -150,7 +151,7 @@ export function liveFixture(
   });
   commit(kit, "Start the kit", { "README.md": "Kit\n", ...prefixed(files.kit) });
   commit(game, "Start the game", { "README.md": "Game\n", ...prefixed(files.game) });
-  createRegistry(loadLayout(root), {
+  createRegistry(TEST_CLOCK, loadLayout(root), {
     harness: "claude",
     host: { nativeProjectId: "project-1", root: "." },
     operations: {},
@@ -194,7 +195,7 @@ export function live(fixture: LiveFixture, nativeId?: string): LiveContext {
     PATH: process.env.PATH,
     ...(nativeId === undefined ? {} : { CLAUDE_CODE_SESSION_ID: nativeId }),
   };
-  return { coordinatorRoot: fixture.root, env, git: systemGit(env) };
+  return { clock: TEST_CLOCK, coordinatorRoot: fixture.root, env, git: systemGit(env) };
 }
 
 /** An Io for `main` with the coordinator in the environment. */

@@ -7,7 +7,13 @@ import { writeChannelStatus } from "../adapters/claude/channelStatus.ts";
 import { type FakeControl, startFakeControl } from "../adapters/codex/testControlSocket.ts";
 import { loadLayout } from "../core/layout.ts";
 import { stateRoot } from "../core/stateRoot.ts";
-import { CLAUDE_TECH, CODEX_TECH, makeFixture, registryInput } from "../core/testFixtures.ts";
+import {
+  CLAUDE_TECH,
+  CODEX_TECH,
+  makeFixture,
+  registryInput,
+  TEST_CLOCK,
+} from "../core/testFixtures.ts";
 import { createRegistry, readRegistry, type Registry } from "../registry/index.ts";
 import { diagnoseHarness } from "./diagnostics.ts";
 
@@ -33,7 +39,7 @@ function setup(harness: "codex" | "claude" = "codex", ownership = "active", phas
   const fixture = makeFixture();
   const layout = loadLayout(fixture.root);
   const input = registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">;
-  const registry = createRegistry(layout, {
+  const registry = createRegistry(TEST_CLOCK, layout, {
     ...input,
     harness,
     roles: {

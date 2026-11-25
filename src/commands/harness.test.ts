@@ -11,6 +11,7 @@ import {
   makeFixture,
   projectConfig,
   registryInput,
+  TEST_CLOCK,
   writeFixtureJson,
 } from "../core/testFixtures.ts";
 import {
@@ -65,7 +66,7 @@ function setup() {
       };
     }
   }
-  createRegistry(layout, { ...input, harness: "codex", roles });
+  createRegistry(TEST_CLOCK, layout, { ...input, harness: "codex", roles });
   const claude = join(base, "claude.mjs");
   const claudeCalls = join(base, "claude-calls");
   writeFileSync(

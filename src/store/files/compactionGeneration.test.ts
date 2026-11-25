@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { expect, it } from "vitest";
 
+import { TEST_CLOCK } from "../../core/testFixtures.ts";
 import { Store } from "../db.ts";
 import {
   prepareFileCheckpoint,
@@ -22,7 +23,7 @@ function fixture() {
   const root = join(base, "source");
   const restored = join(base, "restored");
   const journal = openFileJournal(root);
-  const store = Store.openFileProjection(root, { journal, records: () => [] });
+  const store = Store.openFileProjection(TEST_CLOCK, root, { journal, records: () => [] });
   const first = store.append({ actor: ACTOR, key: "anchor", kind: "fixture.anchor", payload: {} });
   const anchor = { hash: first.event.hash, seq: first.event.seq };
   store.transaction(() => {
@@ -81,7 +82,7 @@ it("fences the old journal and opens an exact selected generation using a separa
   expect(readFileSync(oldBatch)).toEqual(oldBytes);
 
   const selected = selectedFileCheckpoint(root)!;
-  const replay = Store.openFileProjection(root, { ...selected, records: () => [] });
+  const replay = Store.openFileProjection(TEST_CLOCK, root, { ...selected, records: () => [] });
   try {
     expect(replay.verify().head).toEqual(head);
     expect(replay.eventByKey("session-0")?.payload.cwd).toBeUndefined();

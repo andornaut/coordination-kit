@@ -7,7 +7,7 @@ export {
   type NativeQuestionProof,
 } from "./store/codexQuestions.ts";
 export type { AppendResult, VerifyResult } from "./store/db.ts";
-export { type OpenOptions, Store, STORE_FILE, storePath, storeRoot } from "./store/db.ts";
+export { Store, STORE_FILE, type StoreContext, storePath, storeRoot } from "./store/db.ts";
 export {
   appendDecisionLine,
   decisionLine,
@@ -132,6 +132,7 @@ export {
   storeHolds,
 } from "./store/questions.ts";
 export {
+  type AnswerContext,
   type AnswerOutput,
   type HoldOutput,
   type QuestionOutput,

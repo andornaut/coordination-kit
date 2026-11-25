@@ -5,7 +5,7 @@ import { expect, it, vi } from "vitest";
 
 import { decisionDirectory } from "../adapters/shared/decisions.ts";
 import { gameLayout, type Layout } from "../core/layout.ts";
-import { writeFixtureJson } from "../core/testFixtures.ts";
+import { TEST_CLOCK, writeFixtureJson } from "../core/testFixtures.ts";
 import { ART, GAME, storeFixture } from "../store/testStore.ts";
 import { type NativeCollect, surveyNative } from "./storeNative.ts";
 
@@ -131,7 +131,7 @@ it("surveys registered recipients and parents using each exact decision record",
     });
   });
 
-  const survey = await surveyNative({ collect, env: {}, layout }, 1);
+  const survey = await surveyNative({ clock: TEST_CLOCK, collect, env: {}, layout }, 1);
   expect(collect).toHaveBeenCalledExactlyOnceWith({
     decisionRecords: {
       [ART]: { state: "pending", thread_id: ART },
@@ -222,7 +222,7 @@ it("reports only safe field names for a malformed legacy owner marker", async ()
       worker_health: {},
     }),
   );
-  const survey = await surveyNative({ collect, env: {}, layout }, 1);
+  const survey = await surveyNative({ clock: TEST_CLOCK, collect, env: {}, layout }, 1);
   const art = survey.questions.find(({ role }) => role === `${GAME}/art`);
   expect(collect.mock.calls[0]?.[0].decisionRecords[ART]).toBeNull();
   expect(art?.decisionRecord).toBe("unknown");
@@ -271,7 +271,7 @@ it("reports exact recorded replies as historical proof while visibility stays un
     }),
   );
   const survey = await surveyNative(
-    { connect: () => Promise.resolve({ call, close() {} }), env: {}, layout },
+    { clock: TEST_CLOCK, connect: () => Promise.resolve({ call, close() {} }), env: {}, layout },
     1,
   );
   expect(survey.questions.find(({ role }) => role === `${GAME}/art`)).toMatchObject({

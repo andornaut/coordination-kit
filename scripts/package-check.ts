@@ -126,23 +126,25 @@ import {
   deliverReview, readRoleRoute, type ReviewResult, type RoleRoute,
 } from "@andornaut/coordination-kit/build/review";
 import {
-  holdLock, loadProjectConfig, writeJsonDurable, type LockHandle, type ProjectConfig, type GameLayout,
+  holdLock, loadProjectConfig, writeJsonDurable, type Clock, type LockHandle, type ProjectConfig,
+  type GameLayout,
 } from "@andornaut/coordination-kit/build/shared";
 import { Store, storeRetire, type RetireOutput } from "@andornaut/coordination-kit/build/store";
 const revision: (registry: Registry) => number = registry => registry.revision;
 // @ts-expect-error Registry declarations must preserve the numeric revision type.
 const wrongRevision: (registry: Registry) => string = registry => registry.revision;
+const clock: Clock = () => new Date(0);
 const review = (layout: Layout, game: GameLayout): Promise<ReviewResult | undefined> =>
-  deliverReview(layout, game, 0);
+  deliverReview({ clock, env: {} }, layout, game, 0);
 // @ts-expect-error A review slot is an epoch-seconds number.
-deliverReview({} as Layout, {} as GameLayout, "0");
+deliverReview({ clock, env: {} }, {} as Layout, {} as GameLayout, "0");
 const route = (layout: Layout): RoleRoute | null => readRoleRoute(layout);
 const lock: (path: string) => LockHandle = (path) => holdLock(path);
 const project = (path: string): ProjectConfig["reports"] => loadProjectConfig(path).reports;
 const durable = (path: string) => writeJsonDurable(path, {});
 const retired = (output: RetireOutput): boolean => output.applied;
 const retire = storeRetire;
-const open = (path: string): Store => Store.open(path);
+const open = (path: string): Store => Store.open(clock, path);
 export { revision, wrongRevision, readRegistry, updateRegistry, RevisionConflict,
   review, route, lock, project, durable, retired, retire, open };
 `;

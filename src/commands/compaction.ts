@@ -10,6 +10,7 @@ import {
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import { fsyncDirectory, readJson } from "../core/durable.ts";
+import { systemGit } from "../core/git.ts";
 import { isCanonicalUuid, uuid5 } from "../core/ids.ts";
 import type { Handler } from "../core/io.ts";
 import { withLock } from "../core/lock.ts";
@@ -41,7 +42,7 @@ import { MESSAGE_ID } from "../store/messages.ts";
 import { registry, type StoreServiceContext } from "../store/service.ts";
 import { ROLE, type StoredEvent, StoreError } from "../store/types.ts";
 import { callerOf, required, text, type Values } from "./args.ts";
-import { run } from "./store.ts";
+import { storeVerb } from "./store.ts";
 
 export const COMPACTION_PREPARE_OPTIONS = {
   evidence: { type: "string" },
@@ -217,7 +218,7 @@ function coordinator(context: StoreServiceContext, values: Values) {
 
 function files(context: StoreServiceContext) {
   const { layout } = context;
-  const source = fileAuthority(layout, storePath(layout));
+  const source = fileAuthority(systemGit(context.env), layout, storePath(layout));
   if (source.kind !== "files") {
     throw new StoreError("compaction-file-authority-required");
   }
@@ -257,29 +258,25 @@ function expectedReservation(values: Values): FileJournalReservationRequest {
 }
 
 function reservationCommand(cancel: boolean): Handler {
-  return (io, root, args) =>
-    run(
-      io,
-      root,
-      cancel ? "store compaction-cancel" : "store compaction-reserve",
-      args,
-      (context, values) =>
-        coordinatorLock(context, values, ({ revision }) => {
-          const reservation = expectedReservation(values);
-          const { baseline, path } = fileCheckpointJournal(files(context).path);
-          if (cancel) {
-            const nonce = required(values, "nonce");
-            const acquired = { ...reservation, nonce };
-            cancelFileJournalReservation(path, acquired, baseline);
-            return { ...acquired, reserved: false, schema: 1 };
-          }
-          if (revision !== reservation.registryRevision) {
-            throw new StoreError("compaction-registry-changed");
-          }
-          return { ...reserveFileJournal(path, reservation, baseline), reserved: true, schema: 1 };
-        }),
-      cancel ? COMPACTION_CANCEL_OPTIONS : COMPACTION_RESERVATION_OPTIONS,
-    );
+  return storeVerb(
+    cancel ? "store compaction-cancel" : "store compaction-reserve",
+    cancel ? COMPACTION_CANCEL_OPTIONS : COMPACTION_RESERVATION_OPTIONS,
+    (context, values) =>
+      coordinatorLock(context, values, ({ revision }) => {
+        const reservation = expectedReservation(values);
+        const { baseline, path } = fileCheckpointJournal(files(context).path);
+        if (cancel) {
+          const nonce = required(values, "nonce");
+          const acquired = { ...reservation, nonce };
+          cancelFileJournalReservation(path, acquired, baseline);
+          return { ...acquired, reserved: false, schema: 1 };
+        }
+        if (revision !== reservation.registryRevision) {
+          throw new StoreError("compaction-registry-changed");
+        }
+        return { ...reserveFileJournal(path, reservation, baseline), reserved: true, schema: 1 };
+      }),
+  );
 }
 
 export const compactionReserve = reservationCommand(false);
@@ -353,110 +350,102 @@ function receiptMetadata(
   return { ...bound, id: uuid5(reservation.nonce, canonicalJson(bound)) };
 }
 
-export const compactionPrepare: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "store compaction-prepare",
-    args,
-    (context, values) =>
-      coordinatorLock(context, values, () => {
-        const input = operation(context, values);
-        const { path } = fileCheckpointJournal(input.path);
-        if (readFileJournalFence(path) !== undefined) {
-          throw new StoreError("compaction-source-already-fenced");
-        }
-        const id = text(values, "id");
-        if (id !== undefined && !isCanonicalUuid(id)) {
-          throw new StoreError("compaction-reservation-invalid");
-        }
-        const current = id === undefined ? undefined : readFileJournalReservation(path);
-        if (id !== undefined && current === undefined) {
-          throw new StoreError("compaction-reservation-required");
-        }
-        const reservation =
-          id === undefined || current === undefined
-            ? undefined
-            : { ...input.binding, id, nonce: current.nonce };
-        const prepared = prepareFileCheckpoint(
-          input.path,
-          input.restored,
-          input.scope(),
-          input.cutover.head,
-          reservation,
-        );
-        input.scope();
-        assertFileJournalReservation(path, reservation);
-        const record = receiptMetadata(
-          input,
-          prepared.id,
-          prepared.receipt,
-          prepared.restoreDigest,
-          reservation,
-        );
-        writeReceipt(input.file, record);
-        return record;
-      }),
-    COMPACTION_PREPARE_OPTIONS,
-  );
-
-export const compactionActivate: Handler = (io, root, args) =>
-  run(
-    io,
-    root,
-    "store compaction-activate",
-    args,
-    (context, values) => {
-      const id = required(values, "id");
-      const approval = required(values, "approval");
-      if (!isCanonicalUuid(id) || !reference(approval, REF)) {
-        throw new StoreError("compaction-activation-invalid");
+export const compactionPrepare: Handler = storeVerb(
+  "store compaction-prepare",
+  COMPACTION_PREPARE_OPTIONS,
+  (context, values) =>
+    coordinatorLock(context, values, () => {
+      const input = operation(context, values);
+      const { path } = fileCheckpointJournal(input.path);
+      if (readFileJournalFence(path) !== undefined) {
+        throw new StoreError("compaction-source-already-fenced");
       }
-      return coordinatorLock(context, values, () => {
-        const input = operation(context, values);
-        const saved = regularJson(input.file);
-        if (!isRecord(saved) || !reference(saved.restoreDigest, HEX)) {
-          throw new StoreError("compaction-receipt-invalid");
-        }
-        const candidate = fileCheckpointCandidate(
-          input.restoredSource,
-          input.scope(),
-          input.cutover.head,
-        );
-        const { reservationId, reservationNonce } = saved;
-        const reservation =
-          isCanonicalUuid(reservationId) && isCanonicalUuid(reservationNonce)
-            ? { ...input.binding, id: reservationId, nonce: reservationNonce }
-            : undefined;
-        // Reserved IDs are version 5; legacy prepare issued random version 4 IDs.
-        if ((id[14] === "5") !== (reservation !== undefined)) {
-          throw new StoreError("compaction-receipt-mismatch");
-        }
-        const record = receiptMetadata(
-          input,
-          id,
-          candidate.receipt,
-          saved.restoreDigest,
-          reservation,
-        );
-        if (id !== record.id || canonicalJson(saved) !== canonicalJson(record)) {
-          throw new StoreError("compaction-receipt-mismatch");
-        }
-        const prepared: PreparedFileCheckpoint = {
-          ...candidate,
-          id,
-          restoreDigest: saved.restoreDigest,
-        };
-        selectFileCheckpoint(
-          input.path,
-          input.restored,
-          prepared,
-          input.scope,
-          input.cutover.head,
-          reservation,
-        );
-        return { ...record, approval };
-      });
-    },
-    COMPACTION_ACTIVATE_OPTIONS,
-  );
+      const id = text(values, "id");
+      if (id !== undefined && !isCanonicalUuid(id)) {
+        throw new StoreError("compaction-reservation-invalid");
+      }
+      const current = id === undefined ? undefined : readFileJournalReservation(path);
+      if (id !== undefined && current === undefined) {
+        throw new StoreError("compaction-reservation-required");
+      }
+      const reservation =
+        id === undefined || current === undefined
+          ? undefined
+          : { ...input.binding, id, nonce: current.nonce };
+      const prepared = prepareFileCheckpoint(
+        input.path,
+        input.restored,
+        input.scope(),
+        input.cutover.head,
+        reservation,
+      );
+      input.scope();
+      assertFileJournalReservation(path, reservation);
+      const record = receiptMetadata(
+        input,
+        prepared.id,
+        prepared.receipt,
+        prepared.restoreDigest,
+        reservation,
+      );
+      writeReceipt(input.file, record);
+      return record;
+    }),
+);
+
+export const compactionActivate: Handler = storeVerb(
+  "store compaction-activate",
+  COMPACTION_ACTIVATE_OPTIONS,
+  (context, values) => {
+    const id = required(values, "id");
+    const approval = required(values, "approval");
+    if (!isCanonicalUuid(id) || !reference(approval, REF)) {
+      throw new StoreError("compaction-activation-invalid");
+    }
+    return coordinatorLock(context, values, () => {
+      const input = operation(context, values);
+      const saved = regularJson(input.file);
+      if (!isRecord(saved) || !reference(saved.restoreDigest, HEX)) {
+        throw new StoreError("compaction-receipt-invalid");
+      }
+      const candidate = fileCheckpointCandidate(
+        input.restoredSource,
+        input.scope(),
+        input.cutover.head,
+      );
+      const { reservationId, reservationNonce } = saved;
+      const reservation =
+        isCanonicalUuid(reservationId) && isCanonicalUuid(reservationNonce)
+          ? { ...input.binding, id: reservationId, nonce: reservationNonce }
+          : undefined;
+      // Reserved IDs are version 5; legacy prepare issued random version 4 IDs.
+      if ((id[14] === "5") !== (reservation !== undefined)) {
+        throw new StoreError("compaction-receipt-mismatch");
+      }
+      const record = receiptMetadata(
+        input,
+        id,
+        candidate.receipt,
+        saved.restoreDigest,
+        reservation,
+      );
+      if (id !== record.id || canonicalJson(saved) !== canonicalJson(record)) {
+        throw new StoreError("compaction-receipt-mismatch");
+      }
+      const prepared: PreparedFileCheckpoint = {
+        ...candidate,
+        id,
+        restoreDigest: saved.restoreDigest,
+      };
+      selectFileCheckpoint(
+        input.path,
+        input.restored,
+        prepared,
+        input.scope,
+        input.cutover.head,
+        reservation,
+      );
+      return { ...record, approval };
+    });
+  },
+);

@@ -147,7 +147,7 @@ async function rebindAfterClear(
   }
   let next: Registry;
   try {
-    next = updateRegistry(context.layout, roles.revision, (draft) => {
+    next = updateRegistry(context.clock, context.layout, roles.revision, (draft) => {
       draft.roles[role]!.conversations.claude = nativeId;
     });
   } catch (error) {

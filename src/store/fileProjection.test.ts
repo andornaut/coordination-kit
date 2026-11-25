@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { TEST_CLOCK } from "../core/testFixtures.ts";
 import { MEMORY, Store } from "./db.ts";
 import type { FileProjection } from "./fileProjection.ts";
 import { messageStatus, sendMessage } from "./messages.ts";
@@ -43,7 +44,7 @@ function journal() {
     interruptAt: (phase: typeof interrupt) => {
       interrupt = phase;
     },
-    open: () => Store.openFileProjection(MEMORY, projection),
+    open: () => Store.openFileProjection(TEST_CLOCK, MEMORY, projection),
     records,
   };
 }

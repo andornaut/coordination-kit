@@ -16,15 +16,14 @@ import {
   type SeamStatus,
 } from "../core/outcome.ts";
 import { isRecord } from "../core/pyjson.ts";
+import type { StoreContext } from "../store/db.ts";
 import type { WakePorts } from "../store/wake.ts";
 import { storeReview } from "./storeBrief.ts";
 import type { NativeCollect } from "./storeNative.ts";
 
-export interface ReviewOptions {
-  /** The environment and wake ports for the brief's wakes, and the store clock. */
-  readonly env?: NodeJS.ProcessEnv;
+/** The store clock, and the environment and wake ports for the brief's wakes. */
+export interface ReviewOptions extends StoreContext {
   readonly wakePorts?: WakePorts;
-  readonly now?: () => string;
   /** Test hook: replaces the native connection and collectors. */
   readonly collect?: NativeCollect;
 }
@@ -89,11 +88,11 @@ const CALL_BUSY: ReviewResult = {
  * contention. Undefined when `signal` stopped the call before it began: nothing is recorded.
  */
 export async function deliverReview(
+  options: ReviewOptions,
   layout: Layout,
   game: GameLayout,
   slot: number,
   signal?: AbortSignal,
-  options: ReviewOptions = {},
 ): Promise<ReviewResult | undefined> {
   mkdirSync(reviewResultsDir(game), { recursive: true });
   let lock: LockHandle;
@@ -115,10 +114,10 @@ export async function deliverReview(
     }
     const stored = await storeReview(
       {
-        env: options.env ?? process.env,
+        clock: options.clock,
+        env: options.env,
         layout,
         ...(options.wakePorts === undefined ? {} : { ports: options.wakePorts }),
-        ...(options.now === undefined ? {} : { now: options.now }),
         ...(options.collect === undefined ? {} : { collect: options.collect }),
       },
       game,

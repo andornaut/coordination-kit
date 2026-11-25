@@ -100,10 +100,12 @@ SIGTERM or an aborted signal before the brief is stored records nothing, prints 
 
 ### Library seam
 
-`@andornaut/coordination-kit/build/review` exports `deliverReview(layout, game, slot, signal?,
-options?)`, which returns the typed result above without `cli`, `storeReview`, `composeBrief`,
-`showBrief`, the route readers and `REASON_TOKENS`. `coordinationEmit` stores explicit events as
-messages from `delivery-kit` to the game's `reports.recipient`.
+`@andornaut/coordination-kit/build/review` exports `deliverReview(options, layout, game, slot,
+signal?)`, which returns the typed result above without `cli`, `storeReview`, `composeBrief`,
+`showBrief(context, layout, selection)`, the route readers and `REASON_TOKENS`. `options` carries
+the store `clock` and the `env` for the brief's wakes. `coordinationEmit(context, layout, game,
+project)` stores explicit events as messages from `delivery-kit` to the game's
+`reports.recipient`.
 
 ## Stored brief
 

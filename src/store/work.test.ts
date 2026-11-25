@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { TEST_CLOCK } from "../core/testFixtures.ts";
 import { Store } from "./db.ts";
 import { planFileCompaction } from "./files/compactionPlan.ts";
 import { StoreError } from "./types.ts";
@@ -50,7 +51,7 @@ describe("work finish records", () => {
       name: "an open status",
     },
   ])("refuses $name", ({ code: expected, input }) => {
-    const store = Store.open(scratch());
+    const store = Store.open(TEST_CLOCK, scratch());
     try {
       expect(
         code(() => finishWork(store, ACTOR, { ...input, owner: OWNER, ref: ref("sk-0001") })),
@@ -63,7 +64,7 @@ describe("work finish records", () => {
 
   it("rebuilds finish statuses and successors from the events", () => {
     const path = scratch();
-    const store = Store.open(path);
+    const store = Store.open(TEST_CLOCK, path);
     for (const id of ["sk-0001", "sk-0002", "sk-0003"]) {
       startWork(store, ACTOR, { owner: OWNER, parent: null, ref: ref(id) });
       readyWork(store, ACTOR, { ref: ref(id) });
@@ -90,7 +91,7 @@ describe("work finish records", () => {
     expect(store.rebuild().events).toBe(store.events().length);
     expect(records()).toEqual(before);
     store.close();
-    const reopened = Store.open(path);
+    const reopened = Store.open(TEST_CLOCK, path);
     expect(reopened.verify().events).toBe(reopened.events().length);
     expect(readWorkRecord(reopened.db, ref("sk-0002"))).toEqual(before[1]);
     // Compaction keeps every work event, whatever its payload fields.

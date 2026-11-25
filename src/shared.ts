@@ -6,6 +6,7 @@ export {
   type CodexControlSocketOptions,
   resolveCodexControlSocket,
 } from "./adapters/shared/endpoints.ts";
+export * from "./core/clock.ts";
 export * from "./core/config.ts";
 export * from "./core/durable.ts";
 export * from "./core/ids.ts";

@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import type { Clock } from "../core/clock.ts";
 import { Store } from "./db.ts";
 import {
   closeMessage,
@@ -23,15 +24,13 @@ const ART = { nativeId: "00000000-0000-4000-8000-00000000000c", role: "archies-d
 const ID = "00000000-0000-4000-8000-000000000101";
 const OTHER = "00000000-0000-4000-8000-000000000102";
 
-function clock(): () => string {
+function clock(): Clock {
   let tick = 0;
-  return () => new Date(Date.UTC(2026, 10, 18, 12, 0, tick++)).toISOString();
+  return () => new Date(Date.UTC(2026, 10, 18, 12, 0, tick++));
 }
 
 function open(): Store {
-  return Store.open(join(mkdtempSync(join(tmpdir(), "store-msg-")), "coordination.db"), {
-    now: clock(),
-  });
+  return Store.open(clock(), join(mkdtempSync(join(tmpdir(), "store-msg-")), "coordination.db"));
 }
 
 function send(store: Store, id = ID, body = "Please review.\n") {

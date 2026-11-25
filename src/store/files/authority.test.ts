@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { loadLayout } from "../../core/layout.ts";
+import { TEST_CLOCK, TEST_GIT } from "../../core/testFixtures.ts";
 import { Store } from "../db.ts";
 import { GENESIS } from "../types.ts";
 import {
@@ -65,7 +66,7 @@ function fixture() {
   mkdirSync(target, { recursive: true });
   const selector = join(layout.varDir, "coordination-authority.json");
   const source = join(scratch, "external", "coordination.db");
-  const store = Store.open(source);
+  const store = Store.open(TEST_CLOCK, source);
   store.close();
   return { layout, scratch, selector, source, target };
 }
@@ -83,9 +84,9 @@ describe("filesystem authority", () => {
   it("keeps SQLite authoritative while a validated candidate is prepared", () => {
     const { layout, selector, source, target } = fixture();
     const verify = vi.fn();
-    expect(fileAuthority(layout, source)).toEqual({ kind: "sqlite", path: source });
+    expect(fileAuthority(TEST_GIT, layout, source)).toEqual({ kind: "sqlite", path: source });
     expect(existsSync(selector)).toBe(false);
-    const receipt = prepareFileAuthority(layout, source, EVIDENCE, verify);
+    const receipt = prepareFileAuthority(TEST_GIT, layout, source, EVIDENCE, verify);
     expect(receipt).toMatchObject({
       ...EVIDENCE,
       legacyPath: source,
@@ -93,30 +94,48 @@ describe("filesystem authority", () => {
       root: layout.root,
     });
     expect(verify).toHaveBeenCalledWith(target, receipt, expect.anything());
-    expect(inspectFileAuthority(layout, source)).toEqual({ kind: "sqlite", path: source, receipt });
-    expect(fileAuthority(layout, source)).toEqual({ kind: "sqlite", path: source });
-    expect(prepareFileAuthority(layout, source, EVIDENCE, verify)).toEqual(receipt);
+    expect(inspectFileAuthority(TEST_GIT, layout, source)).toEqual({
+      kind: "sqlite",
+      path: source,
+      receipt,
+    });
+    expect(fileAuthority(TEST_GIT, layout, source)).toEqual({ kind: "sqlite", path: source });
+    expect(prepareFileAuthority(TEST_GIT, layout, source, EVIDENCE, verify)).toEqual(receipt);
+  });
+
+  it("checks the primary checkout with the Git runner it is given", () => {
+    const { layout, target } = fixture();
+    const calls: string[][] = [];
+    const refusing = (cwd: string, args: readonly string[]): string => {
+      calls.push([cwd, ...args]);
+      throw new Error("git refused");
+    };
+    expect(() => fileAuthorityTarget(refusing, layout)).toThrow(
+      "file-authority-non-primary-checkout",
+    );
+    expect(calls[0]).toEqual([layout.root, "rev-parse", "--show-toplevel", "--absolute-git-dir"]);
+    expect(fileAuthorityTarget(TEST_GIT, layout)).toBe(target);
   });
 
   it("creates an ignored primary candidate directory with private permissions", () => {
     const { layout, scratch, target } = fixture();
     renameSync(target, join(scratch, "initial-target"));
-    expect(() => fileAuthorityTarget(layout)).toThrow("file-authority-target-directory");
-    expect(fileAuthorityTarget(layout, { create: true })).toBe(target);
+    expect(() => fileAuthorityTarget(TEST_GIT, layout)).toThrow("file-authority-target-directory");
+    expect(fileAuthorityTarget(TEST_GIT, layout, { create: true })).toBe(target);
     expect(statSync(target).mode & 0o777).toBe(0o700);
 
     const linked = join(scratch, "linked");
     git(layout.root, "worktree", "add", "--detach", linked);
     const alternateLayout = loadLayout(linked);
     mkdirSync(alternateLayout.varDir);
-    expect(() => fileAuthorityTarget(alternateLayout, { create: true })).toThrow(
+    expect(() => fileAuthorityTarget(TEST_GIT, alternateLayout, { create: true })).toThrow(
       "file-authority-non-primary-checkout",
     );
     expect(existsSync(join(alternateLayout.varDir, "coordination"))).toBe(false);
 
     renameSync(target, join(scratch, "private-target"));
     writeFileSync(join(layout.root, ".gitignore"), "/unrelated/\n");
-    expect(() => fileAuthorityTarget(layout, { create: true })).toThrow(
+    expect(() => fileAuthorityTarget(TEST_GIT, layout, { create: true })).toThrow(
       "file-authority-non-primary-checkout",
     );
     expect(existsSync(target)).toBe(false);
@@ -128,24 +147,24 @@ describe("filesystem authority", () => {
     git(layout.root, "worktree", "add", "--detach", linked);
     mkdirSync(join(linked, "var", "coordination"), { recursive: true });
     const verify = vi.fn();
-    expect(() => prepareFileAuthority(loadLayout(linked), source, EVIDENCE, verify)).toThrow(
-      "file-authority-non-primary-checkout",
-    );
+    expect(() =>
+      prepareFileAuthority(TEST_GIT, loadLayout(linked), source, EVIDENCE, verify),
+    ).toThrow("file-authority-non-primary-checkout");
     const alias = join(scratch, "alias");
     symlinkSync(layout.root, alias, "dir");
-    expect(() => prepareFileAuthority(loadLayout(alias), source, EVIDENCE, verify)).toThrow(
-      "file-authority-non-primary-checkout",
-    );
+    expect(() =>
+      prepareFileAuthority(TEST_GIT, loadLayout(alias), source, EVIDENCE, verify),
+    ).toThrow("file-authority-non-primary-checkout");
     const original = join(scratch, "target");
     renameSync(target, original);
     symlinkSync(original, target, "dir");
-    expect(() => prepareFileAuthority(layout, source, EVIDENCE, verify)).toThrow(
+    expect(() => prepareFileAuthority(TEST_GIT, layout, source, EVIDENCE, verify)).toThrow(
       "file-authority-target-directory",
     );
     const detachedVar = join(scratch, "var");
     renameSync(layout.varDir, detachedVar);
     symlinkSync(detachedVar, layout.varDir, "dir");
-    expect(() => prepareFileAuthority(layout, source, EVIDENCE, verify)).toThrow(
+    expect(() => prepareFileAuthority(TEST_GIT, layout, source, EVIDENCE, verify)).toThrow(
       "file-authority-non-primary-checkout",
     );
     expect(verify).not.toHaveBeenCalled();
@@ -154,25 +173,26 @@ describe("filesystem authority", () => {
   it("qualifies the final source head and refuses the older evidence after a concurrent append", () => {
     const { layout, source } = fixture();
     const verify = vi.fn();
-    const first = prepareFileAuthority(layout, source, EVIDENCE, verify);
-    const legacy = Store.open(source);
+    const first = prepareFileAuthority(TEST_GIT, layout, source, EVIDENCE, verify);
+    const legacy = Store.open(TEST_CLOCK, source);
     try {
       append(legacy, "one");
-      expect(() => activateFileAuthority(layout, source, first.id, verify)).toThrow(
+      expect(() => activateFileAuthority(TEST_GIT, layout, source, first.id, verify)).toThrow(
         "file-authority-source-head-changed",
       );
-      expect(fileAuthority(layout, source)).toEqual({ kind: "sqlite", path: source });
+      expect(fileAuthority(TEST_GIT, layout, source)).toEqual({ kind: "sqlite", path: source });
       const second = prepareFileAuthority(
+        TEST_GIT,
         layout,
         source,
         { head: legacy.head(), proof: PROOF },
         verify,
       );
       expect(second.id).not.toBe(first.id);
-      expect(() => activateFileAuthority(layout, source, first.id, verify)).toThrow(
+      expect(() => activateFileAuthority(TEST_GIT, layout, source, first.id, verify)).toThrow(
         "file-authority-cutover-receipt-mismatch",
       );
-      const active = activateFileAuthority(layout, source, second.id, verify);
+      const active = activateFileAuthority(TEST_GIT, layout, source, second.id, verify);
       expect(active.head).toEqual(legacy.head());
       expect(() => append(legacy, "two")).toThrow("store-authority-frozen");
       expect(legacy.events().map((event) => event.key)).toEqual(["one"]);
@@ -184,15 +204,17 @@ describe("filesystem authority", () => {
   it("recovers an interruption after the SQLite fence with the original receipt", () => {
     const { layout, source, target } = fixture();
     const verify = vi.fn();
-    const receipt = prepareFileAuthority(layout, source, EVIDENCE, verify);
-    const preUpgrade = Store.open(source);
+    const receipt = prepareFileAuthority(TEST_GIT, layout, source, EVIDENCE, verify);
+    const preUpgrade = Store.open(TEST_CLOCK, source);
     try {
       expect(() =>
-        activateFileAuthority(layout, source, receipt.id, verify, {
+        activateFileAuthority(TEST_GIT, layout, source, receipt.id, verify, {
           onFrozen: () => {
             expect(() => append(preUpgrade, "late")).toThrow("store-authority-frozen");
-            expect(() => fileAuthority(layout, source)).toThrow("file-authority-cutover-pending");
-            expect(inspectFileAuthority(layout, source)).toEqual({
+            expect(() => fileAuthority(TEST_GIT, layout, source)).toThrow(
+              "file-authority-cutover-pending",
+            );
+            expect(inspectFileAuthority(TEST_GIT, layout, source)).toEqual({
               kind: "pending",
               path: target,
               receipt,
@@ -202,21 +224,23 @@ describe("filesystem authority", () => {
         }),
       ).toThrow("interrupted");
       expect(() =>
-        activateFileAuthority(layout, source, receipt.id, () => {
+        activateFileAuthority(TEST_GIT, layout, source, receipt.id, () => {
           throw new Error("proof mismatch");
         }),
       ).toThrow("proof mismatch");
-      expect(() => fileAuthority(layout, source)).toThrow("file-authority-cutover-pending");
+      expect(() => fileAuthority(TEST_GIT, layout, source)).toThrow(
+        "file-authority-cutover-pending",
+      );
 
-      const active = activateFileAuthority(layout, source, receipt.id, verify);
+      const active = activateFileAuthority(TEST_GIT, layout, source, receipt.id, verify);
       expect(active).toEqual({ ...receipt, phase: "active" });
-      expect(fileAuthority(layout, source)).toEqual({
+      expect(fileAuthority(TEST_GIT, layout, source)).toEqual({
         kind: "files",
         path: target,
         receipt: active,
       });
       verify.mockClear();
-      expect(activateFileAuthority(layout, source, receipt.id, verify)).toEqual(active);
+      expect(activateFileAuthority(TEST_GIT, layout, source, receipt.id, verify)).toEqual(active);
       expect(verify).not.toHaveBeenCalled();
     } finally {
       preUpgrade.close();
@@ -225,7 +249,7 @@ describe("filesystem authority", () => {
 
   it("excludes a competing legacy writer throughout final proof checking", () => {
     const { layout, source } = fixture();
-    const receipt = prepareFileAuthority(layout, source, EVIDENCE, vi.fn());
+    const receipt = prepareFileAuthority(TEST_GIT, layout, source, EVIDENCE, vi.fn());
     const inspectCompetingWriter = () => {
       const script = `
         import { DatabaseSync } from "node:sqlite";
@@ -243,19 +267,19 @@ describe("filesystem authority", () => {
         stdio: "pipe",
       });
     };
-    expect(activateFileAuthority(layout, source, receipt.id, inspectCompetingWriter).phase).toBe(
-      "active",
-    );
+    expect(
+      activateFileAuthority(TEST_GIT, layout, source, receipt.id, inspectCompetingWriter).phase,
+    ).toBe("active");
   });
 
   it("leaves SQLite writable if proof verification returns unfinished async work", () => {
     const { layout, source } = fixture();
-    const receipt = prepareFileAuthority(layout, source, EVIDENCE, vi.fn());
-    expect(() => activateFileAuthority(layout, source, receipt.id, async () => {})).toThrow(
-      "file-authority-proof-async",
-    );
-    expect(fileAuthority(layout, source)).toEqual({ kind: "sqlite", path: source });
-    const legacy = Store.open(source);
+    const receipt = prepareFileAuthority(TEST_GIT, layout, source, EVIDENCE, vi.fn());
+    expect(() =>
+      activateFileAuthority(TEST_GIT, layout, source, receipt.id, async () => {}),
+    ).toThrow("file-authority-proof-async");
+    expect(fileAuthority(TEST_GIT, layout, source)).toEqual({ kind: "sqlite", path: source });
+    const legacy = Store.open(TEST_CLOCK, source);
     try {
       expect(append(legacy, "still-live").duplicate).toBe(false);
     } finally {
@@ -266,44 +290,56 @@ describe("filesystem authority", () => {
   it("requires the target fence witness to be the original regular file", () => {
     const { layout, scratch, source, target } = fixture();
     const verify = vi.fn();
-    const receipt = prepareFileAuthority(layout, source, EVIDENCE, verify);
-    activateFileAuthority(layout, source, receipt.id, verify);
+    const receipt = prepareFileAuthority(TEST_GIT, layout, source, EVIDENCE, verify);
+    activateFileAuthority(TEST_GIT, layout, source, receipt.id, verify);
     const witness = join(target, "source-fence.json");
     const original = join(scratch, "target-fence");
     renameSync(witness, original);
-    expect(() => fileAuthority(layout, source)).toThrow("file-authority-source-fence-mismatch");
+    expect(() => fileAuthority(TEST_GIT, layout, source)).toThrow(
+      "file-authority-source-fence-mismatch",
+    );
     symlinkSync(original, witness);
-    expect(() => fileAuthority(layout, source)).toThrow("file-authority-selector-invalid");
+    expect(() => fileAuthority(TEST_GIT, layout, source)).toThrow(
+      "file-authority-selector-invalid",
+    );
   });
 
   it("rejects a lost selector with both the original source and an unfenced replacement", () => {
     const { layout, scratch, selector, source } = fixture();
     const verify = vi.fn();
-    const receipt = prepareFileAuthority(layout, source, EVIDENCE, verify);
-    activateFileAuthority(layout, source, receipt.id, verify);
+    const receipt = prepareFileAuthority(TEST_GIT, layout, source, EVIDENCE, verify);
+    activateFileAuthority(TEST_GIT, layout, source, receipt.id, verify);
     renameSync(selector, join(scratch, "saved-selector"));
-    expect(() => fileAuthority(layout, source)).toThrow("file-authority-selector-missing");
+    expect(() => fileAuthority(TEST_GIT, layout, source)).toThrow(
+      "file-authority-selector-missing",
+    );
     renameSync(source, join(scratch, "saved-source"));
-    const replacement = Store.open(source);
+    const replacement = Store.open(TEST_CLOCK, source);
     replacement.close();
-    expect(() => fileAuthority(layout, source)).toThrow("file-authority-selector-missing");
+    expect(() => fileAuthority(TEST_GIT, layout, source)).toThrow(
+      "file-authority-selector-missing",
+    );
   });
 
   it("fails closed on a corrupt active selector or a removed frozen trigger", () => {
     const { layout, scratch, selector, source } = fixture();
     const verify = vi.fn();
-    const receipt = prepareFileAuthority(layout, source, EVIDENCE, verify);
-    activateFileAuthority(layout, source, receipt.id, verify);
+    const receipt = prepareFileAuthority(TEST_GIT, layout, source, EVIDENCE, verify);
+    activateFileAuthority(TEST_GIT, layout, source, receipt.id, verify);
     const original = join(scratch, "saved-selector");
     renameSync(selector, original);
     writeFileSync(selector, "{}");
-    expect(() => fileAuthority(layout, source)).toThrow("file-authority-selector-invalid");
+    expect(() => fileAuthority(TEST_GIT, layout, source)).toThrow(
+      "file-authority-selector-invalid",
+    );
     renameSync(original, selector);
 
-    const legacy = Store.open(source);
+    const legacy = Store.open(TEST_CLOCK, source);
     try {
       legacy.db.exec("DROP TRIGGER coordination_file_authority_no_insert");
-      expect(() => fileAuthority(layout, source)).toThrow("file-authority-source-fence-invalid");
+      expect(() => fileAuthority(TEST_GIT, layout, source)).toThrow(
+        "file-authority-source-fence-invalid",
+      );
     } finally {
       legacy.close();
     }
@@ -313,13 +349,13 @@ describe("filesystem authority", () => {
     const { layout, source } = fixture();
     const alternate = fixture();
     const verify = vi.fn();
-    const receipt = prepareFileAuthority(layout, source, EVIDENCE, verify);
-    activateFileAuthority(layout, source, receipt.id, verify);
-    expect(() => fileAuthority(alternate.layout, source)).toThrow(
+    const receipt = prepareFileAuthority(TEST_GIT, layout, source, EVIDENCE, verify);
+    activateFileAuthority(TEST_GIT, layout, source, receipt.id, verify);
+    expect(() => fileAuthority(TEST_GIT, alternate.layout, source)).toThrow(
       "file-authority-selector-missing",
     );
-    expect(() => prepareFileAuthority(alternate.layout, source, EVIDENCE, verify)).toThrow(
-      "file-authority-already-fenced",
-    );
+    expect(() =>
+      prepareFileAuthority(TEST_GIT, alternate.layout, source, EVIDENCE, verify),
+    ).toThrow("file-authority-already-fenced");
   });
 });

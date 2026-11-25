@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK } from "../core/io.ts";
 import { loadLayout } from "../core/layout.ts";
+import { TEST_CONTEXT } from "../core/testFixtures.ts";
 import { Store, storePath } from "../store/db.ts";
 import { StoreError } from "../store/types.ts";
 import { importApprovalLedger } from "./approvals.ts";
@@ -188,7 +189,7 @@ describe("approval-ledger import", () => {
       holds: { insert: 0, unchanged: 4 },
       retained: { insert: 0, unchanged: 2 },
     });
-    const store = Store.forLayout(loadLayout(made.root));
+    const store = Store.forLayout(TEST_CONTEXT, loadLayout(made.root));
     expect(store.events({ kinds: ["hold.imported"] }).map((event) => event.payload.owner)).toEqual([
       ROLES.coordinator,
       null,

@@ -53,6 +53,11 @@ import { registry, type StoreServiceContext, withStore } from "./service.ts";
 import { type Actor, type NativeQuestionIdentity, StoreError, type WorkRef } from "./types.ts";
 import { wakeRecipient, type WakeStatus } from "./wake.ts";
 
+/** The answer verbs' context: the host name decision text must not contain. */
+export interface AnswerContext extends StoreServiceContext {
+  readonly hostname: string;
+}
+
 interface QuestionContext extends StoreServiceContext {
   readonly questionEvidence?: QuestionEvidence;
 }
@@ -308,21 +313,21 @@ function projectAnswer(
 }
 
 function answerProjection(
-  context: StoreServiceContext,
+  context: AnswerContext,
   options: CallerOptions,
   id: string,
   request: AnswerInput | undefined,
   wake: true,
 ): Promise<AnswerOutput>;
 function answerProjection(
-  context: StoreServiceContext,
+  context: AnswerContext,
   options: CallerOptions,
   id: string,
   request: AnswerInput | undefined,
   wake: false,
 ): Promise<AnswerProjectionOutput>;
 function answerProjection(
-  context: StoreServiceContext,
+  context: AnswerContext,
   options: CallerOptions,
   id: string,
   request: AnswerInput | undefined,
@@ -331,7 +336,7 @@ function answerProjection(
   const roles = registry(context);
   const actor = resolveCaller(roles, context.env, options);
   return withStore(context, async (store) => {
-    const result = recordQuestionAnswer(store, actor, id, request);
+    const result = recordQuestionAnswer(context.hostname, store, actor, id, request);
     const projected = projectAnswer(store, actor, result, () =>
       mainWorkFile(
         systemGit(context.env),
@@ -347,7 +352,7 @@ function answerProjection(
 
 /** Record the explicit answer, then independently attempt its Markdown projection and a wake. */
 export function storeQuestionAnswer(
-  context: StoreServiceContext,
+  context: AnswerContext,
   options: CallerOptions,
   id: string,
   request: AnswerInput,
@@ -357,7 +362,7 @@ export function storeQuestionAnswer(
 
 /** Retry only the Markdown projection of the caller's recorded answer. */
 export function storeQuestionProject(
-  context: StoreServiceContext,
+  context: AnswerContext,
   options: CallerOptions,
   id: string,
 ): Promise<AnswerProjectionOutput> {

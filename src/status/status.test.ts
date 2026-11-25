@@ -24,6 +24,7 @@ import {
   CLAUDE_TECH,
   CODEX_TECH,
   stateRootFixture,
+  TEST_CLOCK,
 } from "../core/testFixtures.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
 import { Store } from "../store/db.ts";
@@ -234,7 +235,7 @@ async function buildFixture(): Promise<Fixture> {
   git(kit, "update-ref", "refs/remotes/origin/main", sha.sk2);
 
   const layout = loadLayout(root);
-  createRegistry(layout, {
+  createRegistry(TEST_CLOCK, layout, {
     harness: "claude",
     host: { nativeProjectId: "project-1", root: "." },
     operations: {},
@@ -279,7 +280,7 @@ async function buildFixture(): Promise<Fixture> {
   writeFileSync(join(events, `${sha.sg9}.state`), "{}\n");
 
   const stateRoot = stateRootFixture(layout);
-  const store = Store.open(join(stateRoot, "coordination.db"));
+  const store = Store.open(TEST_CLOCK, join(stateRoot, "coordination.db"));
   const importer = { nativeId: null, role: "game-coordinator" };
   importRequest(
     store,

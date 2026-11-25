@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { clockAt, TEST_CLOCK } from "../../core/testFixtures.ts";
 import { MEMORY, Store } from "../db.ts";
 import { canonicalJson, sha256 } from "../eventCodec.ts";
 import type { FileProjection } from "../fileProjection.ts";
@@ -146,12 +147,12 @@ function operationalState(store: Store) {
 
 describe("qualified compacted store replay", () => {
   it("preserves projections, explicit expiry, exact deduplication and ordinary appends", () => {
-    const source = Store.open(MEMORY, { now: () => CLOCK });
+    const source = Store.open(clockAt(CLOCK), MEMORY);
     try {
       const { legacy, oldSession, oldTick, proof } = fixture(source);
       const tail: StoredEvent[] = [];
       const projection = { ...journal(tail), checkpoint: proof };
-      const store = Store.openFileProjection(MEMORY, projection, { now: () => CLOCK });
+      const store = Store.openFileProjection(clockAt(CLOCK), MEMORY, projection);
       try {
         expect(store.verify()).toEqual(source.verify());
         expect(operationalState(store)).toEqual(operationalState(source));
@@ -215,7 +216,7 @@ describe("qualified compacted store replay", () => {
         sendMessage(store, SENDER, sent);
         sendMessage(source, SENDER, sent);
         expect(tail).toEqual(source.events({ afterSeq: proof.receipt.head.seq }));
-        const reopened = Store.openFileProjection(MEMORY, projection, { now: () => CLOCK });
+        const reopened = Store.openFileProjection(clockAt(CLOCK), MEMORY, projection);
         try {
           expect(reopened.rebuild()).toEqual(source.verify());
           expect(operationalState(reopened)).toEqual(operationalState(source));
@@ -233,19 +234,24 @@ describe("qualified compacted store replay", () => {
   });
 
   it("requires a qualified receipt and rejects modified reduced events during verify and rebuild", () => {
-    const source = Store.open(MEMORY, { now: () => CLOCK });
+    const source = Store.open(clockAt(CLOCK), MEMORY);
     try {
       const { checkpoint, oldSession, proof } = fixture(source);
       const prefix = checkpoint.entries.map(({ event }) => event);
-      expect(() => Store.openFileProjection(MEMORY, journal(prefix))).toThrow("chain-broken");
+      expect(() => Store.openFileProjection(TEST_CLOCK, MEMORY, journal(prefix))).toThrow(
+        "chain-broken",
+      );
       expect(() =>
-        Store.openFileProjection(MEMORY, {
+        Store.openFileProjection(TEST_CLOCK, MEMORY, {
           ...journal([]),
           checkpoint: { ...proof, receipt: { ...proof.receipt, digest: "unqualified" } },
         }),
       ).toThrow("checkpoint-digest-mismatch");
       const tail: StoredEvent[] = [];
-      const store = Store.openFileProjection(MEMORY, { ...journal(tail), checkpoint: proof });
+      const store = Store.openFileProjection(TEST_CLOCK, MEMORY, {
+        ...journal(tail),
+        checkpoint: proof,
+      });
       try {
         const unread = source.append({
           actor: RUNNER,

@@ -4,7 +4,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { fsyncDirectory, readJson, writeJsonDurable } from "../../core/durable.ts";
-import { systemGit } from "../../core/git.ts";
+import type { GitRunner } from "../../core/git.ts";
 import type { Layout } from "../../core/layout.ts";
 import { withLock } from "../../core/lock.ts";
 import { isRecord } from "../../core/pyjson.ts";
@@ -131,8 +131,9 @@ function canonicalAbsolute(path: string): boolean {
   return isAbsolute(path) && resolve(path) === path && !path.includes("\0");
 }
 
-/** Resolve the ignored target in the explicitly selected primary checkout. */
+/** Resolve the ignored target in the explicitly selected primary checkout, checked with `git`. */
 export function fileAuthorityTarget(
+  git: GitRunner,
   layout: Layout,
   options: { readonly create?: boolean } = {},
 ): string {
@@ -152,7 +153,6 @@ export function fileAuthorityTarget(
     throw new StoreError("file-authority-target-directory");
   }
 
-  const git = systemGit(process.env);
   const paths = [`var/${TARGET}`, `var/${MARKER}`, `var/${LOCK}`];
   try {
     const checkout = git(root, ["rev-parse", "--show-toplevel", "--absolute-git-dir"]).trim();
@@ -301,7 +301,11 @@ function assertFence(receipt: CutoverReceipt, fence: CutoverReceipt | undefined)
 }
 
 /** Read the validated selector and freeze together, including an interrupted cutover. */
-export function inspectFileAuthority(layout: Layout, legacyPath: string): FileAuthorityStatus {
+export function inspectFileAuthority(
+  git: GitRunner,
+  layout: Layout,
+  legacyPath: string,
+): FileAuthorityStatus {
   const receipt = readReceipt(join(layout.varDir, MARKER));
   const fence = frozenSource(legacyPath);
   if (receipt === undefined) {
@@ -310,7 +314,7 @@ export function inspectFileAuthority(layout: Layout, legacyPath: string): FileAu
     }
     return { kind: "sqlite", path: legacyPath };
   }
-  const target = fileAuthorityTarget(layout);
+  const target = fileAuthorityTarget(git, layout);
   assertBinding(layout, legacyPath, receipt);
   if (receipt.phase === "prepared") {
     if (fence !== undefined) {
@@ -331,8 +335,8 @@ export function inspectFileAuthority(layout: Layout, legacyPath: string): FileAu
 }
 
 /** An absent selector only permits SQLite when the legacy source has never been fenced. */
-export function fileAuthority(layout: Layout, legacyPath: string): FileAuthority {
-  const selection = inspectFileAuthority(layout, legacyPath);
+export function fileAuthority(git: GitRunner, layout: Layout, legacyPath: string): FileAuthority {
+  const selection = inspectFileAuthority(git, layout, legacyPath);
   if (selection.kind === "pending") {
     throw new StoreError("file-authority-cutover-pending");
   }
@@ -362,12 +366,13 @@ function authorityLock<T>(layout: Layout, operation: () => T): T {
 
 /** Record an inspected candidate. SQLite remains authoritative until activation freezes it. */
 export function prepareFileAuthority(
+  git: GitRunner,
   layout: Layout,
   legacyPath: string,
   evidence: CutoverEvidence,
   verifyTarget: VerifyCutoverTarget,
 ): CutoverReceipt {
-  const target = fileAuthorityTarget(layout);
+  const target = fileAuthorityTarget(git, layout);
   const verified = parseEvidence(evidence);
   return authorityLock(layout, () =>
     withSourceWriter(legacyPath, (source) => {
@@ -405,6 +410,7 @@ export function prepareFileAuthority(
 
 /** Freeze SQLite before publishing the active selector. Retry with the same receipt after a crash. */
 export function activateFileAuthority(
+  git: GitRunner,
   layout: Layout,
   legacyPath: string,
   id: string,
@@ -413,7 +419,7 @@ export function activateFileAuthority(
     /** Test hook between the source commit and selector publication. */ readonly onFrozen?: () => void;
   } = {},
 ): CutoverReceipt {
-  const target = fileAuthorityTarget(layout);
+  const target = fileAuthorityTarget(git, layout);
   return authorityLock(layout, () => {
     const receipt = readReceipt(join(layout.varDir, MARKER));
     if (receipt === undefined || receipt.id !== id) {

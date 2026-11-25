@@ -1,10 +1,8 @@
 // Decision graph queries over the coordinator's registered repositories and the
 // store. Each prints one JSON object (or DOT for `graph --format dot`); a refusal prints
 // `coordination-kit: CODE` and exits 1, a usage error exits 2.
-import { parseArgs } from "node:util";
-
 import { type GitRunner, systemGit } from "../core/git.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
+import type { Handler } from "../core/io.ts";
 import { Store } from "../store/db.ts";
 import {
   buildGraph,
@@ -17,7 +15,7 @@ import {
   why,
 } from "../work/graph.ts";
 import { type Coordinator, openCoordinator } from "../work/live.ts";
-import { refusalCode, Usage } from "./args.ts";
+import { Usage, verbFamily } from "./args.ts";
 
 export const GRAPH_OPTIONS = {
   depth: { type: "string" },
@@ -26,8 +24,12 @@ export const GRAPH_OPTIONS = {
 } as const;
 export const GRAPH_WHY_OPTIONS = { decision: { type: "string" } } as const;
 
-function load(git: GitRunner, coordinator: Coordinator): Graph {
-  const store = Store.readLayout(coordinator.layout);
+function load(
+  context: { readonly env: NodeJS.ProcessEnv; readonly git: GitRunner },
+  coordinator: Coordinator,
+): Graph {
+  const { git } = context;
+  const store = Store.readLayout(context, coordinator.layout);
   try {
     return buildGraph(git, coordinator, store);
   } finally {
@@ -35,76 +37,49 @@ function load(git: GitRunner, coordinator: Coordinator): Graph {
   }
 }
 
-function run(
-  io: Io,
-  command: string,
-  args: string[],
-  options: Record<string, { readonly type: "string" | "boolean" }>,
-  action: (values: Record<string, string | boolean | undefined>) => string,
-): number {
-  let values: Record<string, string | boolean | undefined>;
-  try {
-    values = parseArgs({ args, options, strict: true }).values as typeof values;
-    if (Object.values(values).some((value) => typeof value === "string" && value.trim() === "")) {
-      throw new Usage();
-    }
-  } catch {
-    io.err(`coordination-kit: invalid_graph_options (${command})\n`);
-    return EXIT_USAGE;
-  }
-  try {
-    io.out(action(values));
-    return EXIT_OK;
-  } catch (error) {
-    if (error instanceof Usage) {
-      io.err(`coordination-kit: invalid_graph_options (${command})\n`);
-      return EXIT_USAGE;
-    }
-    io.err(`coordination-kit: ${refusalCode(error, "graph_operation_failed")}\n`);
-    return EXIT_INVALID;
-  }
-}
+/** The graph verbs' wrapper: Git over the real environment and the coordinator `--root` names. */
+const graphVerb = verbFamily("graph", (io, root) => ({
+  env: io.env,
+  git: systemGit(io.env),
+  root,
+}));
 
-export const graph: Handler = (io, root, args) =>
-  run(io, "graph", args, GRAPH_OPTIONS, (values) => {
-    const format = (values.format as string | undefined) ?? "json";
-    const depthText = values.depth as string | undefined;
-    if (
-      !["json", "dot"].includes(format) ||
-      (depthText !== undefined && !/^(?:[0-9]|[1-9][0-9])$/.test(depthText))
-    ) {
-      throw new Usage();
-    }
-    const git = systemGit(io.env);
-    const current = load(git, openCoordinator(git, root));
-    const work = values.work as string | undefined;
-    const selected =
-      work === undefined
-        ? current
-        : neighbourhood(current, findWork(current, work), Number(depthText ?? 2));
-    if (format === "dot") {
-      return graphDot(selected);
-    }
-    return `${JSON.stringify({
-      kind: "graph",
-      schema: 2,
-      unavailable: current.unavailable,
-      ...graphJson(selected),
-    })}\n`;
-  });
+export const graph: Handler = graphVerb("graph", GRAPH_OPTIONS, (context, values) => {
+  const format = (values.format as string | undefined) ?? "json";
+  const depthText = values.depth as string | undefined;
+  if (
+    !["json", "dot"].includes(format) ||
+    (depthText !== undefined && !/^(?:[0-9]|[1-9][0-9])$/.test(depthText))
+  ) {
+    throw new Usage();
+  }
+  const current = load(context, openCoordinator(context.git, context.root));
+  const work = values.work as string | undefined;
+  const selected =
+    work === undefined
+      ? current
+      : neighbourhood(current, findWork(current, work), Number(depthText ?? 2));
+  if (format === "dot") {
+    return graphDot(selected);
+  }
+  return {
+    kind: "graph",
+    schema: 2,
+    unavailable: current.unavailable,
+    ...graphJson(selected),
+  };
+});
 
-export const graphWhy: Handler = (io, root, args) =>
-  run(io, "graph why", args, GRAPH_WHY_OPTIONS, (values) => {
-    const decision = values.decision as string | undefined;
-    if (decision === undefined) {
-      throw new Usage();
-    }
-    const git = systemGit(io.env);
-    const current = load(git, openCoordinator(git, root));
-    return `${JSON.stringify({
-      kind: "graph-why",
-      schema: 2,
-      unavailable: current.unavailable,
-      ...why(current, findDecision(current, decision)),
-    })}\n`;
-  });
+export const graphWhy: Handler = graphVerb("graph why", GRAPH_WHY_OPTIONS, (context, values) => {
+  const decision = values.decision as string | undefined;
+  if (decision === undefined) {
+    throw new Usage();
+  }
+  const current = load(context, openCoordinator(context.git, context.root));
+  return {
+    kind: "graph-why",
+    schema: 2,
+    unavailable: current.unavailable,
+    ...why(current, findDecision(current, decision)),
+  };
+});

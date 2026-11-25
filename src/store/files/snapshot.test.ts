@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 
 import { gameLayout } from "../../core/layout.ts";
+import { clockAt, TEST_CLOCK, TEST_HOST } from "../../core/testFixtures.ts";
 import { Store, storePath } from "../db.ts";
 import { canonicalJson } from "../eventCodec.ts";
 import { sendMessage } from "../messages.ts";
@@ -49,11 +50,14 @@ function populate(store: Store): void {
   });
   openQuestion(store, OWNER, { id: "pending-fixture", title: "Pending fixture", work: WORK.id });
   openQuestion(store, OWNER, { id: "answered-fixture", title: "Answered fixture", work: WORK.id });
-  recordQuestionAnswer(store, OWNER, "answered-fixture", {
+  recordQuestionAnswer(TEST_HOST, store, OWNER, "answered-fixture", {
     text: "Example decision",
     work: WORK.id,
   });
-  answerQuestion(store, OWNER, "answered-fixture", { text: "Example decision", work: WORK.id });
+  answerQuestion(TEST_HOST, store, OWNER, "answered-fixture", {
+    text: "Example decision",
+    work: WORK.id,
+  });
   startWork(store, OWNER, { owner: OWNER.role, parent: null, ref: WORK });
   recordEvidence(store, OWNER, { ref: WORK, sha: SHA, stage: "implemented" });
   setHold(store, OWNER, {
@@ -100,7 +104,7 @@ describe("SQLite migration snapshots", () => {
     const source = storePath(layout);
     const backup = join(base, "backup.db");
     const restored = join(base, "restored.db");
-    const store = Store.open(source, { now: () => AT });
+    const store = Store.open(clockAt(AT), source);
     try {
       populate(store);
       const expected = inspectSqliteState(source);
@@ -145,7 +149,7 @@ describe("SQLite migration snapshots", () => {
         Array.from({ length: expected.events }, (_, index) => index + 1),
       );
       expect(transferred.events.at(-1)?.kind).toBe("review.unknown");
-      const runtime = Store.open(":memory:", { now: () => AT });
+      const runtime = Store.open(clockAt(AT), ":memory:");
       try {
         for (const event of transferred.events) {
           expect(runtime.append(event).event).toEqual(event);
@@ -163,7 +167,7 @@ describe("SQLite migration snapshots", () => {
     const { base, layout } = storeFixture();
     const source = storePath(layout);
     const backup = join(base, "backup.db");
-    const store = Store.open(source, { now: () => AT });
+    const store = Store.open(clockAt(AT), source);
     try {
       populate(store);
       const expected = inspectSqliteConnection(store.db);
@@ -189,7 +193,7 @@ describe("SQLite migration snapshots", () => {
     const { base, layout } = storeFixture();
     const source = storePath(layout);
     const backup = join(base, "backup.db");
-    Store.open(source).close();
+    Store.open(TEST_CLOCK, source).close();
     const writer = new DatabaseSync(source);
     try {
       writer.exec("PRAGMA journal_mode = DELETE; BEGIN EXCLUSIVE");
@@ -204,7 +208,7 @@ describe("SQLite migration snapshots", () => {
     const { base, layout } = storeFixture();
     const source = storePath(layout);
     const backup = join(base, "backup.db");
-    const store = Store.open(source, { now: () => AT });
+    const store = Store.open(clockAt(AT), source);
     try {
       store.db.exec("DROP TABLE question_answers; CREATE TABLE edges (key TEXT)");
       expect(inspectSqliteConnection(store.db)).toMatchObject({
@@ -226,7 +230,7 @@ describe("SQLite migration snapshots", () => {
     const { base, layout } = storeFixture();
     const source = storePath(layout);
     const backup = join(base, "backup.db");
-    const store = Store.open(source, { now: () => AT });
+    const store = Store.open(clockAt(AT), source);
     populate(store);
     store.close();
     const raw = new DatabaseSync(source);

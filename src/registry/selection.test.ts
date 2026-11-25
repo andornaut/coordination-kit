@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { loadLayout, roleKeys } from "../core/layout.ts";
 import { holdLock, LockBusy } from "../core/lock.ts";
-import { makeFixture, registryInput, writeFixtureJson } from "../core/testFixtures.ts";
+import { makeFixture, registryInput, TEST_CLOCK, writeFixtureJson } from "../core/testFixtures.ts";
 import {
   createRegistry,
   readRegistry,
@@ -49,7 +49,7 @@ function setup() {
     Registry,
     "revision" | "updatedAt"
   >;
-  createRegistry(layout, input);
+  createRegistry(TEST_CLOCK, layout, input);
   return layout;
 }
 
@@ -71,7 +71,10 @@ describe("selectHarness", () => {
   it("changes only selected overrides and preserves Ada, Chibi, kits and operational evidence", () => {
     const layout = setup();
     const before = readRegistry(layout);
-    const next = selectHarness(layout, before.revision, { harness: "claude", games: [ARCHIE] });
+    const next = selectHarness(TEST_CLOCK, layout, before.revision, {
+      harness: "claude",
+      games: [ARCHIE],
+    });
     const expected = structuredClone(before.roles) as RegistryDraft["roles"];
     for (const role of layout.config.games[ARCHIE]!.roles) {
       expected[`${ARCHIE}/${role}`]!.harness = "claude";
@@ -88,8 +91,8 @@ describe("selectHarness", () => {
 
   it("clears only selected overrides for default and resolves the global transport", () => {
     const layout = setup();
-    const selected = selectHarness(layout, 1, { harness: "claude", games: [ARCHIE] });
-    const next = selectHarness(layout, selected.revision, {
+    const selected = selectHarness(TEST_CLOCK, layout, 1, { harness: "claude", games: [ARCHIE] });
+    const next = selectHarness(TEST_CLOCK, layout, selected.revision, {
       harness: "default",
       roles: [`${ARCHIE}/tech`],
     });
@@ -103,35 +106,38 @@ describe("selectHarness", () => {
     const layout = setup();
     const before = readFileSync(layout.registryFile);
     expect(() =>
-      selectHarness(layout, 1, { harness: "claude", roles: [`${ARCHIE}/tech`, "absent"] }),
+      selectHarness(TEST_CLOCK, layout, 1, {
+        harness: "claude",
+        roles: [`${ARCHIE}/tech`, "absent"],
+      }),
     ).toThrow(UnknownRole);
     expect(readFileSync(layout.registryFile)).toEqual(before);
   });
 
   it("rejects an unavailable selected ID without falling back to the other provider", () => {
     const layout = setup();
-    const registry = updateRegistry(layout, 1, (draft) => {
+    const registry = updateRegistry(TEST_CLOCK, layout, 1, (draft) => {
       draft.roles[`${ARCHIE}/art`]!.conversations.claude = null;
     });
     const before = readFileSync(layout.registryFile);
     expect(() =>
-      selectHarness(layout, registry.revision, { harness: "claude", games: [ARCHIE] }),
+      selectHarness(TEST_CLOCK, layout, registry.revision, { harness: "claude", games: [ARCHIE] }),
     ).toThrow(/selected conversation is unavailable/);
     expect(readFileSync(layout.registryFile)).toEqual(before);
   });
 
   it("checks the revision before resolving selection against the locked current registry", () => {
     const layout = setup();
-    updateRegistry(layout, 1, (draft) => {
+    updateRegistry(TEST_CLOCK, layout, 1, (draft) => {
       delete draft.roles["art-kit"];
     });
     const before = readFileSync(layout.registryFile);
-    expect(() => selectHarness(layout, 1, { harness: "claude", roles: ["art-kit"] })).toThrow(
-      RevisionConflict,
-    );
-    expect(() => selectHarness(layout, 2, { harness: "claude", roles: ["art-kit"] })).toThrow(
-      UnknownRole,
-    );
+    expect(() =>
+      selectHarness(TEST_CLOCK, layout, 1, { harness: "claude", roles: ["art-kit"] }),
+    ).toThrow(RevisionConflict);
+    expect(() =>
+      selectHarness(TEST_CLOCK, layout, 2, { harness: "claude", roles: ["art-kit"] }),
+    ).toThrow(UnknownRole);
     expect(readFileSync(layout.registryFile)).toEqual(before);
   });
 
@@ -142,6 +148,7 @@ describe("selectHarness", () => {
     try {
       expect(() =>
         selectHarness(
+          TEST_CLOCK,
           layout,
           1,
           { harness: "claude", roles: ["game-coordinator"] },
@@ -150,8 +157,13 @@ describe("selectHarness", () => {
       ).toThrow(LockBusy);
       expect(readFileSync(layout.registryFile)).toEqual(before);
       expect(
-        selectHarness(layout, 1, { harness: "claude", roles: ["game-coordinator"] }, { held })
-          .revision,
+        selectHarness(
+          TEST_CLOCK,
+          layout,
+          1,
+          { harness: "claude", roles: ["game-coordinator"] },
+          { held },
+        ).revision,
       ).toBe(2);
     } finally {
       held.release();

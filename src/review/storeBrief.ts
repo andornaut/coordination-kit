@@ -9,7 +9,7 @@ import type { GameLayout, Layout } from "../core/layout.ts";
 import type { ReviewResult } from "../core/outcome.ts";
 import { resolveRole } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
-import { Store } from "../store/db.ts";
+import { Store, type StoreContext } from "../store/db.ts";
 import { DELIVERY_KIT_ACTOR } from "../store/identity.ts";
 import { unreadMessages } from "../store/messageWake.ts";
 import { derivedId, storeNotice } from "../store/notices.ts";
@@ -44,11 +44,9 @@ export const BRIEF_MAX_BYTES = 4096;
 
 type Row = Record<string, SQLInputValue>;
 
-interface StoreReviewContext {
+interface StoreReviewContext extends StoreContext {
   readonly layout: Layout;
-  readonly env: NodeJS.ProcessEnv;
   readonly ports?: WakePorts;
-  readonly now?: () => string;
   /** Test hook: replaces the Codex control connection and the legacy collectors. */
   readonly collect?: NativeCollect;
 }
@@ -642,8 +640,7 @@ export async function storeReview(
     return route;
   }
   const { recipient } = route;
-  const options = context.now === undefined ? {} : { now: context.now };
-  const beforeSurvey = Store.forLayout(context.layout, options);
+  const beforeSurvey = Store.forLayout(context, context.layout);
   try {
     const earlier = recordedBrief(beforeSurvey, game.id, slot);
     if (earlier !== undefined) {
@@ -655,6 +652,7 @@ export async function storeReview(
   // Native checks run outside the transaction. Select the current store after they finish.
   const native = await surveyNative(
     {
+      clock: context.clock,
       env: context.env,
       layout: context.layout,
       ...(context.collect === undefined ? {} : { collect: context.collect }),
@@ -662,7 +660,7 @@ export async function storeReview(
     },
     slot,
   );
-  const store = Store.forLayout(context.layout, options);
+  const store = Store.forLayout(context, context.layout);
   try {
     const outcome = store.transaction((): { result: ReviewResult; fresh: boolean } => {
       const recorded = recordedBrief(store, game.id, slot);
@@ -739,10 +737,11 @@ export async function storeReview(
 
 /** The recorded brief for a slot, or the latest one (of a game, or of any game). */
 export function showBrief(
+  context: Pick<StoreContext, "env">,
   layout: Layout,
   selection: { readonly game?: string; readonly slot?: number },
 ): BriefRecord & { readonly body: string; readonly at: string } {
-  const store = Store.readLayout(layout);
+  const store = Store.readLayout(context, layout);
   if (store === null) {
     throw new StoreError("brief-missing");
   }

@@ -1,5 +1,56 @@
 # Upgrading
 
+## Coordination Kit 7.0
+
+7.0.0 parses every command's options by one rule and takes the clock, environment and host name
+as explicit parameters. Upgrade Delivery Kit first, then game-coordinator and its pin together.
+
+1. Delivery Kit: widen `COORDINATOR_CLI_RANGE` in `src/compatibility.ts` to include 7.x, such as
+   `>=3.0.0 <8.0.0`, update its expected string and the `7.0.0` row in
+   `src/compatibility.test.ts`, and release it on the existing drained adoption path. The runner
+   seam is unchanged: `review deliver`, `events ingest` and `--version --json` keep their
+   arguments, schema 1 replies, reason tokens and exit codes. The bundled `build/registry`,
+   `build/review` and `build/shared` modules come from Delivery Kit's own pinned dependency, inside
+   `COORDINATION_KIT_RANGE`, and do not change. When Delivery Kit later moves that dependency to
+   7.x, pass a clock as the first argument of `createRegistry` in `src/cli.test.ts` and
+   `src/commands/control.test.ts`, such as `createRegistry(() => new Date(TIME), layout, ...)`.
+2. game-coordinator, in the same change as the 7.0.0 pin: widen the kit version check in
+   `scripts/role-tools.mjs` from `^[3-6]\.` to include 7. `resolveCodexControlSocket({ env })` in
+   `scripts/sessions.mjs` is unchanged; the managed socket now comes from `env.HOME`.
+3. No script, test or document in Delivery Kit, game-coordinator or the game repositories passes a
+   repeated single-value option.
+4. Breaking CLI changes ([options and refusals](commands.md#options-and-refusals)):
+   - Every command refuses a single-value option given more than once with exit 2. The `work`
+     store verbs, `graph`, `graph why`, `work check`, `status`, `claude channel`,
+     `review deliver`, `review show` and `events ingest` took the last value. The store verbs and
+     `harness select` already refused one. Options that `--help` shows with `...` still repeat.
+   - The store and `work` verbs refuse a blank positional, such as `msg done " "`, as a usage
+     error, exit 2.
+   - A `work` store verb failure that is not a store refusal prints `work_operation_failed`
+     instead of `store_operation_failed`.
+   - `question attach` with verified native evidence prints `store-read-only` where 6.4.0 printed
+     `store_operation_failed`. It still records nothing: the attach service opens the store
+     read-only before linking, as in 6.4.0.
+5. Breaking API changes. Each clock is a `Clock`, `() => Date`, exported from `build/shared`:
+   - `build/registry`: `createRegistry(clock, layout, initial, options?)`,
+     `updateRegistry(clock, layout, expectedRevision, mutate, options?)` and
+     `selectHarness(clock, layout, expectedRevision, selection, options?)`. `UpdateOptions.now` is
+     removed.
+   - `build/store`: `Store.open(clock, path)`, `Store.openFileProjection(clock, path, files)`,
+     `Store.forLayout({clock, env}, layout, options?)` and `Store.readLayout({env}, layout)`.
+     `OpenOptions` is removed and `StoreContext` added; a `readLayout` store refuses to time an
+     event with `store-read-only`. `StoreServiceContext` and `IngestContext` require `clock` in
+     place of the optional `now`. `storeRetire` takes the archive date from `clock` and no longer
+     accepts `date`. `publicText(hostname, value)` and
+     `answerQuestion(hostname, store, actor, id, input)` take the host name to refuse;
+     `storeQuestionAnswer` and `storeQuestionProject` take an `AnswerContext` with `hostname`.
+   - `build/review`: `deliverReview(options, layout, game, slot, signal?)`, where `options`
+     requires `clock` and `env`; `storeReview` and `surveyNative` contexts require `clock`;
+     `showBrief({env}, layout, selection)` and
+     `coordinationEmit({clock, env}, layout, game, project)`.
+   - `build/shared`: `resolveCodexControlSocket(options)` requires `options.env` and takes the
+     managed home from `options.home`, else `env.HOME`, not the operating system's home lookup.
+
 ## Coordination Kit 6.0
 
 6.0.0 is a coordinated cutover. Upgrade Delivery Kit first, then game-coordinator and its pin

@@ -92,7 +92,7 @@ conversation IDs. This example uses a Codex binding.
 import { createRegistry, loadLayout } from "@andornaut/coordination-kit/build/registry";
 
 export function registerCoordinator(coordinatorRoot, nativeProjectId, conversationId) {
-  return createRegistry(loadLayout(coordinatorRoot), {
+  return createRegistry(() => new Date(), loadLayout(coordinatorRoot), {
     schema: 1,
     harness: "codex",
     host: { nativeProjectId, root: "." },

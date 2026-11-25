@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { TEST_CLOCK } from "../../core/testFixtures.ts";
 import type { Registry } from "../../registry/schema.ts";
 import { readRegistry } from "../../registry/store.ts";
 import { Store } from "../db.ts";
@@ -26,7 +27,7 @@ function reviewed(
   registry: Registry,
   workers: readonly JsonObject[] = [worker(ART_ROLE, ART)],
 ): StoredEvent {
-  const store = Store.open(":memory:");
+  const store = Store.open(TEST_CLOCK, ":memory:");
   try {
     return store.append({
       actor: DELIVERY_KIT_ACTOR,

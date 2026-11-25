@@ -1,9 +1,9 @@
 // Endpoint selection is separate from socket availability, authentication and readiness.
-import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
 export interface CodexControlSocketOptions {
-  readonly env?: NodeJS.ProcessEnv;
+  /** The environment: `CODEX_CONTROL_SOCKET`, and `HOME` when `home` is absent. */
+  readonly env: NodeJS.ProcessEnv;
   readonly home?: string;
   readonly controlSocket?: string;
 }
@@ -31,16 +31,16 @@ function endpoint(
 
 /** Select a path without reading it. Explicit invalid configuration never falls back. */
 export function resolveCodexControlSocket(
-  options: CodexControlSocketOptions = {},
+  options: CodexControlSocketOptions,
 ): CodexControlSocketEndpoint {
-  const env = options.env ?? process.env;
+  const { env } = options;
   if (options.controlSocket !== undefined) {
     return endpoint("option", options.controlSocket);
   }
   if (Object.hasOwn(env, "CODEX_CONTROL_SOCKET")) {
     return endpoint("environment", env.CODEX_CONTROL_SOCKET);
   }
-  const home = options.home ?? homedir();
+  const home = options.home ?? env.HOME;
   if (!absolutePath(home)) {
     throw new Error(INVALID_PATH);
   }

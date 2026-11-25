@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { systemGit } from "../core/git.ts";
 import { loadLayout } from "../core/layout.ts";
+import { TEST_CLOCK } from "../core/testFixtures.ts";
 import { Store, storePath } from "../store/db.ts";
 import {
   workBlock,
@@ -111,7 +112,7 @@ describe("status with store work records", () => {
       "docs/work/ada-0304.md": workFile("ada-0304", "An independently completed item", "done"),
     });
     const deploy = (type: string, status: string) => {
-      const db = Store.open(storePath(loadLayout(fixture.root)));
+      const db = Store.open(TEST_CLOCK, storePath(loadLayout(fixture.root)));
       try {
         db.append({
           actor: { nativeId: null, role: "delivery-kit" },

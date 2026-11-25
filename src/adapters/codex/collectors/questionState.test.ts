@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { NativeTimeout, type RpcClient } from "../rpc.ts";
 import { collectQuestionState } from "./questionState.ts";
 
-type QuestionStateOptions = NonNullable<Parameters<typeof collectQuestionState>[4]>;
+type QuestionStateOptions = NonNullable<Parameters<typeof collectQuestionState>[5]>;
 
 const P = "00000000-0000-0000-0000-000000000001";
 const OTHER = "00000000-0000-0000-0000-000000000002";
@@ -148,7 +148,8 @@ class Native implements RpcClient {
   close(): void {}
 }
 
-const CLOCK: QuestionStateOptions = { monotonic: () => 100, time: () => NOW };
+const BOUNDS: QuestionStateOptions = { monotonic: () => 100 };
+const CLOCK = () => new Date(NOW * 1000);
 
 async function collect(
   native = new Native(),
@@ -156,8 +157,8 @@ async function collect(
   maxPages = 10,
   options: QuestionStateOptions = {},
 ): Promise<Outcome> {
-  const output = await collectQuestionState(native, { [P]: owner }, [P], maxPages, {
-    ...CLOCK,
+  const output = await collectQuestionState(CLOCK, native, { [P]: owner }, [P], maxPages, {
+    ...BOUNDS,
     ...options,
   });
   const result = output[P] as unknown as Outcome;
@@ -201,7 +202,9 @@ describe("collectQuestionState", () => {
       if (owner === null) {
         // Cases run in order, one fake each.
         // eslint-disable-next-line no-await-in-loop
-        const output = await collectQuestionState(native, {}, [P], 10, { monotonic: () => 100 });
+        const output = await collectQuestionState(CLOCK, native, {}, [P], 10, {
+          monotonic: () => 100,
+        });
         result = output[P] as unknown as Outcome;
       } else {
         // Cases run in order, one fake each.
@@ -426,7 +429,7 @@ describe("collectQuestionState", () => {
 
     native = new Native();
     native.deadline = 99;
-    const output = await collectQuestionState(native, {}, [P], 10, { monotonic: () => 100 });
+    const output = await collectQuestionState(CLOCK, native, {}, [P], 10, { monotonic: () => 100 });
     result = output[P] as unknown as Outcome;
     expect(native.calls).toEqual([]);
     expect(native.deadline).toBe(99);
@@ -452,13 +455,13 @@ describe("collectQuestionState", () => {
       const native = new Native();
       // Cases run in order, one fake each.
       // eslint-disable-next-line no-await-in-loop
-      await expect(collectQuestionState(native, {}, recipients)).rejects.toThrow();
+      await expect(collectQuestionState(CLOCK, native, {}, recipients)).rejects.toThrow();
       expect(native.calls).toEqual([]);
     }
     for (const maxPages of [0, true as unknown as number, 101]) {
       // Cases run in order, one fake each.
       // eslint-disable-next-line no-await-in-loop
-      await expect(collectQuestionState(new Native(), {}, [P], maxPages)).rejects.toThrow();
+      await expect(collectQuestionState(CLOCK, new Native(), {}, [P], maxPages)).rejects.toThrow();
     }
     for (const resolutions of [[resolution(), resolution()], [{}], "invalid"]) {
       // Cases run in order, one fake each.
