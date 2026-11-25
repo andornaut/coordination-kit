@@ -56,7 +56,7 @@ export class NativeTimeout extends Error {
   }
 }
 
-export interface Frame {
+interface Frame {
   readonly fin: boolean;
   readonly opcode: number;
   readonly payload: Buffer;

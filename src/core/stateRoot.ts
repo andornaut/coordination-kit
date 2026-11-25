@@ -9,9 +9,9 @@ import { readJsonIfExists } from "./durable.ts";
 import type { Layout } from "./layout.ts";
 import { isRecord } from "./pyjson.ts";
 
-export const STATE_ROOT_SCHEMA = 2;
+const STATE_ROOT_SCHEMA = 2;
 
-export type StateRootCode = "invalid-state-root-config" | "state-root-excluded";
+type StateRootCode = "invalid-state-root-config" | "state-root-excluded";
 
 export class StateRootError extends Error {
   readonly code: StateRootCode;

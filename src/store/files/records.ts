@@ -6,17 +6,17 @@ import { handoffHoldId } from "../projections/handoffs.ts";
 import { WORK_KINDS } from "../projections/work.ts";
 import { type Json, type JsonObject, type StoredEvent, StoreError } from "../types.ts";
 
-export interface FileRecord {
+interface FileRecord {
   readonly path: string;
   readonly data: Json;
 }
 
-export interface MessageOwnership {
+interface MessageOwnership {
   readonly sender: string | null;
   readonly recipient: string | null;
 }
 
-export interface VerifiedWorkerBinding {
+interface VerifiedWorkerBinding {
   readonly parentRole: string;
   readonly parentNativeId: string;
   readonly workerNativeId: string;

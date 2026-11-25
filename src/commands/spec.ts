@@ -61,8 +61,7 @@ import {
   WORK_START_OPTIONS,
   WORK_WRITE_OPTIONS,
 } from "./work.ts";
-export type { CommandSpec, Options } from "../core/usage.ts";
-export const BINARY = "coordination-kit";
+const BINARY = "coordination-kit";
 /** The placeholder each string option shows in help. */
 const VALUES: Readonly<Record<string, string>> = {
   approval: "REF",
@@ -114,7 +113,7 @@ export const GROUPS = {
   graph: "decision graph",
 } as const;
 /* eslint-enable sort-keys */
-export interface GroupedSpec extends CommandSpec {
+interface GroupedSpec extends CommandSpec {
   readonly group: keyof typeof GROUPS;
 }
 const SCOPE = {

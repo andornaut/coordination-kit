@@ -12,7 +12,7 @@ import { withLock } from "../../core/lock.ts";
 import { isRecord } from "../../core/pyjson.ts";
 import { stateRoot } from "../../core/stateRoot.ts";
 
-export interface Wake {
+interface Wake {
   readonly seq: number;
   readonly role: string;
   readonly count: number;

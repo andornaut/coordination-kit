@@ -8,7 +8,7 @@ export interface FileRecord {
   readonly data: Json;
 }
 
-export interface FileJournalReader {
+interface FileJournalReader {
   events(afterSeq?: number): StoredEvent[];
 }
 
@@ -17,7 +17,7 @@ export interface FileJournalWriter extends FileJournalReader {
 }
 
 /** The canonical journal owns serialization and publishes a complete transaction. */
-export interface FileJournalPort extends FileJournalReader {
+interface FileJournalPort extends FileJournalReader {
   withWriter<T>(body: (writer: FileJournalWriter) => T): T;
 }
 

@@ -11,7 +11,7 @@ const DESIGN_PREFIX = "docs/design/";
 const ID_TOKEN = /(?<![\w-])([a-z][a-z0-9]*-\d{4,})(?!\w)/g;
 const SHA = /^[0-9a-f]{40}$/;
 
-export type LandingRule = "done-flip" | "id" | "title";
+type LandingRule = "done-flip" | "id" | "title";
 
 export interface Landing {
   readonly sha: string;
@@ -20,14 +20,14 @@ export interface Landing {
   readonly rule: LandingRule;
 }
 
-export interface LandingItem {
+interface LandingItem {
   readonly id: string;
   /** Repository-relative work file path. */
   readonly path: string;
   readonly title: string | null;
 }
 
-export interface Landings {
+interface Landings {
   readonly landing: ReadonlyMap<string, Landing>;
   /** The oldest commit on `main` that added each item's work file (its proposal or approval). */
   readonly addedIn: ReadonlyMap<string, string>;
@@ -201,7 +201,7 @@ export function releasePoints(history: History): DeployPoint[] {
   );
 }
 
-export interface BusRead {
+interface BusRead {
   /** `absent` when the game has neither an events directory nor a `last-deploy.sha` yet. */
   readonly status: "available" | "absent";
   readonly points: readonly DeployPoint[];

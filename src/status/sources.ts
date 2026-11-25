@@ -12,7 +12,7 @@ import type { UnreadMessage } from "../store/types.ts";
 import { readWorkRecords, type WorkRecord } from "../store/work.ts";
 import { type DeployPoint, storedDeployPoint } from "./delivery.ts";
 
-export type StoreSourceState =
+type StoreSourceState =
   | { readonly status: "available" }
   | { readonly status: "absent" }
   | { readonly status: "unavailable"; readonly reason: string };

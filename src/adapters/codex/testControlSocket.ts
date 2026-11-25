@@ -6,15 +6,15 @@ import { join } from "node:path";
 
 import { acceptKey, decodeFrames, encodeFrame, MessageAssembler, OPCODE } from "./rpc.ts";
 
-export type FakeReply =
+type FakeReply =
   | { readonly result: unknown }
   | { readonly error: { readonly code: number; readonly message: string } }
   | { readonly drop: true }
   | { readonly silent: true };
 
-export type FakeHandler = (method: string, params: Record<string, unknown>) => FakeReply;
+type FakeHandler = (method: string, params: Record<string, unknown>) => FakeReply;
 
-export interface FakeCall {
+interface FakeCall {
   readonly method: string;
   readonly params: Record<string, unknown>;
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { RECIPIENT } from "../../review/fixtures.ts";
-import { BLOCKED_REASON, MISSING_REASON, recipientAvailability, sessionStatus } from "./agents.ts";
+import { BLOCKED_REASON, MISSING_REASON, recipientAvailability } from "./agents.ts";
 
 const interactive = (status: unknown) => ({ kind: "interactive", sessionId: RECIPIENT, status });
 
@@ -39,11 +39,5 @@ describe("recipientAvailability", () => {
         RECIPIENT,
       ),
     ).toEqual({ reason: BLOCKED_REASON, status: null });
-  });
-
-  it("leaves sessionStatus reporting the raw token", () => {
-    expect(sessionStatus([interactive("waiting")], RECIPIENT)).toBe("waiting");
-    expect(sessionStatus([interactive("shell")], RECIPIENT)).toBe("shell");
-    expect(sessionStatus([interactive("Bad token")], RECIPIENT)).toBe("unknown");
   });
 });

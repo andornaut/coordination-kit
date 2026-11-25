@@ -27,13 +27,13 @@ import {
 import { CONVENTION_FILE, parseFrontMatter } from "../workfiles/files.ts";
 import { type Coordinator, openCoordinator } from "./live.ts";
 
-export const APPROVAL_LEDGER_SOURCE = "approval-ledger";
+const APPROVAL_LEDGER_SOURCE = "approval-ledger";
 /** The only role that may import: the approval ledger's sole writer. */
 const IMPORTER = "game-coordinator";
 /** The next boundary of an imported retained item whose ledger entry names none. */
-export const DEFAULT_NEXT_BOUNDARY = "next scheduled review";
+const DEFAULT_NEXT_BOUNDARY = "next scheduled review";
 
-export const IMPORT_OUTCOMES = [
+const IMPORT_OUTCOMES = [
   "mapped-id",
   "mapped-title",
   "no-work-file",
@@ -42,7 +42,7 @@ export const IMPORT_OUTCOMES = [
   "repository-unavailable",
   "invalid",
 ] as const;
-export type ImportOutcome = (typeof IMPORT_OUTCOMES)[number];
+type ImportOutcome = (typeof IMPORT_OUTCOMES)[number];
 
 type Raw = Readonly<Record<string, unknown>>;
 
@@ -51,7 +51,7 @@ interface Counts {
   unchanged: number;
 }
 
-export interface ApprovalImportReport {
+interface ApprovalImportReport {
   readonly schema: 1;
   readonly kind: "approval-ledger-import";
   readonly dryRun: boolean;
@@ -328,7 +328,7 @@ function holdKey(id: string): string {
 }
 
 /** Read and shape-check the ledger file; refuses `approval-ledger-invalid`. */
-export function readApprovalLedger(path: string): Raw {
+function readApprovalLedger(path: string): Raw {
   let value: unknown;
   try {
     value = JSON.parse(readFileSync(path, "utf8"));
@@ -345,7 +345,7 @@ export function readApprovalLedger(path: string): Raw {
   return value;
 }
 
-export interface ApprovalImportContext {
+interface ApprovalImportContext {
   readonly env: NodeJS.ProcessEnv;
   readonly git: GitRunner;
   readonly coordinatorRoot: string;

@@ -115,7 +115,7 @@ function checkConversations(issues: Issues, at: string, value: unknown): void {
 }
 
 /** The edit a pre-3.0 registry needs, reported instead of a bare unknown key. */
-export const DUTIES_REMOVED =
+const DUTIES_REMOVED =
   "duties were removed in 3.0.0; remove this field and name roles explicitly " +
   "(scheduled reviews go to each game's reports.recipient)";
 

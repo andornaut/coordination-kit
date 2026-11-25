@@ -44,7 +44,7 @@ export const BRIEF_MAX_BYTES = 4096;
 
 type Row = Record<string, SQLInputValue>;
 
-export interface StoreReviewContext {
+interface StoreReviewContext {
   readonly layout: Layout;
   readonly env: NodeJS.ProcessEnv;
   readonly ports?: WakePorts;

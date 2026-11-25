@@ -21,7 +21,7 @@ import type { Registry } from "../registry/schema.ts";
 import { readRegistry, RegistryMissing } from "../registry/store.ts";
 import { SPECS } from "./spec.ts";
 
-export interface ChannelStreams {
+interface ChannelStreams {
   readonly input: NodeJS.ReadableStream;
   readonly write: LineWriter;
 }
@@ -102,7 +102,7 @@ function lineageRole(
   return null;
 }
 
-export interface ChannelOptions {
+interface ChannelOptions {
   /** Claude's transcript directory; defaults to `claudeProjectsDir` of the environment. */
   readonly projectsDir?: string | null;
   /** Milliseconds since the epoch; defaults to `Date.now`. */

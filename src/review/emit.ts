@@ -4,7 +4,7 @@
 import type { GameLayout, Layout } from "../core/layout.ts";
 import { Store } from "../store/db.ts";
 import { clean, derivedId, type Notice, reportsRecipient, storeNotice } from "../store/notices.ts";
-export type HealthEmit = (kind: string, key: string, message: string) => void;
+type HealthEmit = (kind: string, key: string, message: string) => void;
 
 /** The stored form of one coordination event; its ID derives from (game, kind, key). */
 export function coordinationNotice(

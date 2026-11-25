@@ -15,7 +15,7 @@ const FIELDS = [
   "answer_item_id",
 ] as const;
 
-export type DecisionRecord = Readonly<Record<string, unknown>>;
+type DecisionRecord = Readonly<Record<string, unknown>>;
 
 export type DecisionMarkerDiagnostic =
   | { readonly state: "clear" | "pending" | "absent" | "unreadable" }
@@ -73,10 +73,7 @@ export function inspectDecisionMarker(
 }
 
 /** Validate an in-memory marker using the same rules as the wake guard. */
-export function inspectDecisionRecord(
-  marker: unknown,
-  recipient: string,
-): DecisionMarkerInspection {
+function inspectDecisionRecord(marker: unknown, recipient: string): DecisionMarkerInspection {
   if (typeof marker !== "object" || marker === null || Array.isArray(marker)) {
     return { reason: "record", record: null, state: "invalid" };
   }

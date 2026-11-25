@@ -18,7 +18,7 @@ export const FINISH_STATUSES = ["done", "superseded", "cancelled"] as const;
 export type FinishStatus = (typeof FINISH_STATUSES)[number];
 /** `<prefix>-` and a zero-padded sequence, as in the work-file convention. */
 export const WORK_ID = /^[a-z][a-z0-9]*-\d{4,}$/;
-export const REPOSITORY_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const REPOSITORY_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 /** A Git object name: abbreviated (7 or more) up to a full SHA-1 or SHA-256, lower case. */
 export const SHA = /^[0-9a-f]{7,64}$/;
 const MAX_TEXT = 2000;
@@ -35,7 +35,7 @@ export interface WorkEvidence {
   readonly actor: string | null;
 }
 
-export interface WorkRetained {
+interface WorkRetained {
   readonly owner: string | null;
   readonly reason: string;
   readonly nextBoundary: string;
@@ -44,7 +44,7 @@ export interface WorkRetained {
   readonly at: string;
 }
 
-export interface WorkBlock {
+interface WorkBlock {
   readonly reason: string;
   readonly owner: string | null;
   readonly at: string;
@@ -259,7 +259,7 @@ export function evidenceKey(input: EvidenceInput): string {
   ).slice(0, 16)}`;
 }
 
-export function checkEvidence(input: EvidenceInput): EvidenceInput {
+function checkEvidence(input: EvidenceInput): EvidenceInput {
   checkRef(input.ref);
   ensure((WORK_STAGES as readonly string[]).includes(input.stage), "invalid-stage");
   ensure(SHA.test(input.sha), "invalid-sha");

@@ -3,7 +3,7 @@
 // `answers` and `supersedes` are optional and in that order. A supersedes target is a decision of
 // the same item (`D1`) or of another item (`ck-0006/D1`). Other bullets in the section are prose.
 
-export interface DecisionLine {
+interface DecisionLine {
   /** `D<n>`. */
   readonly id: string;
   /** 1-based line number in the file. */
@@ -18,12 +18,12 @@ export interface DecisionLine {
   readonly text: string;
 }
 
-export interface DecisionProblem {
+interface DecisionProblem {
   readonly line: number;
   readonly reason: string;
 }
 
-export interface Decisions {
+interface Decisions {
   readonly decisions: readonly DecisionLine[];
   readonly problems: readonly DecisionProblem[];
 }

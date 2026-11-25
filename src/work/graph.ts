@@ -19,19 +19,11 @@ import {
 } from "../workfiles/files.ts";
 import { type Coordinator, storeDecisions, workOwner } from "./live.ts";
 
-export const EDGE_KINDS = [
-  "decides",
-  "answers",
-  "owned-by",
-  "supersedes",
-  "related",
-  "implements",
-  "parent",
-] as const;
-export type EdgeKind = (typeof EDGE_KINDS)[number];
-export type NodeType = "work" | "decision" | "question" | "role" | "commit";
+type EdgeKind =
+  "decides" | "answers" | "owned-by" | "supersedes" | "related" | "implements" | "parent";
+type NodeType = "work" | "decision" | "question" | "role" | "commit";
 
-export interface GraphNode {
+interface GraphNode {
   /** `TYPE:ID`, such as `work:coordination-kit:ck-0018` or `decision:coordination-kit:ck-0018/D1`. */
   readonly key: string;
   readonly type: NodeType;
@@ -39,7 +31,7 @@ export interface GraphNode {
   readonly attrs: Readonly<Record<string, string | null>>;
 }
 
-export interface GraphEdge {
+interface GraphEdge {
   readonly kind: EdgeKind;
   readonly from: string;
   readonly to: string;
@@ -57,12 +49,8 @@ export interface Graph {
 
 const WORK_DIRECTORY = "docs/work";
 
-export function workKey(repository: string, id: string): string {
+function workKey(repository: string, id: string): string {
   return `work:${repository}:${id}`;
-}
-
-export function decisionKey(repository: string, work: string, decision: string): string {
-  return `decision:${repository}:${work}/${decision}`;
 }
 
 class Builder {
@@ -365,7 +353,7 @@ export function neighbourhood(graph: Graph, start: string, depth: number): Graph
   };
 }
 
-export interface GraphJson {
+interface GraphJson {
   readonly nodes: readonly GraphNode[];
   readonly edges: readonly GraphEdge[];
 }
@@ -404,7 +392,7 @@ function shape(type: NodeType): string {
   ];
 }
 
-export interface WhyStep {
+interface WhyStep {
   readonly key: string;
   readonly decision: string;
   readonly by: string | null;
@@ -416,7 +404,7 @@ export interface WhyStep {
   readonly approved: string | null;
 }
 
-export interface WhyResult {
+interface WhyResult {
   readonly decision: WhyStep;
   /** Older decisions this one replaces, nearest first. */
   readonly supersedes: readonly WhyStep[];

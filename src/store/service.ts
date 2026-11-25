@@ -83,7 +83,7 @@ function registered(roles: Registry, role: string, code: string): string {
   }
 }
 
-export interface SendRequest {
+interface SendRequest {
   readonly to: string;
   readonly body: string;
   readonly intent?: MessageIntent;
@@ -91,7 +91,7 @@ export interface SendRequest {
   readonly links?: readonly MessageLink[];
 }
 
-export interface SendOutput {
+interface SendOutput {
   readonly schema: 1;
   readonly message: MessageView;
   readonly duplicate: boolean;
@@ -145,7 +145,7 @@ export async function storeSend(
   });
 }
 
-export interface InboxOutput {
+interface InboxOutput {
   readonly schema: 1;
   readonly role: string;
   readonly delivered: number;
@@ -193,7 +193,7 @@ export async function storeInboxPeek(
   );
 }
 
-export interface WriteOutput {
+interface WriteOutput {
   readonly schema: 1;
   readonly message: MessageView;
   readonly duplicate: boolean;

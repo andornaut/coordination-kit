@@ -73,7 +73,7 @@ export async function queueEntries(
  * The inventory payload: the text of a single plain text input, which with the client message ID
  * rebuilds the exact payload signature input; any other input shape as its Python JSON form.
  */
-export function queuePayload(entry: QueueEntry): string {
+function queuePayload(entry: QueueEntry): string {
   const [first, ...rest] = entry.input;
   if (
     rest.length === 0 &&
@@ -87,7 +87,7 @@ export function queuePayload(entry: QueueEntry): string {
   return dumpsJson(entry.input);
 }
 
-export type AckOutcome =
+type AckOutcome =
   | "ambiguous"
   | "changed_payload"
   | "confirmed_absent"

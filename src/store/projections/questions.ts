@@ -5,7 +5,7 @@ import { payloadText as text } from "../eventCodec.ts";
 import type { JsonObject, Projection, StoredEvent } from "../types.ts";
 
 /** Ledger hold states that no longer hold anything; an imported hold in one is history only. */
-export const CLOSED_HOLD_STATES: readonly string[] = [
+const CLOSED_HOLD_STATES: readonly string[] = [
   "answered",
   "cancelled",
   "cleared",

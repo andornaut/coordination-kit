@@ -76,19 +76,9 @@ import {
   type Io,
 } from "./core/io.ts";
 import { cliIdentity, VERSION } from "./core/version.ts";
-export {
-  EXIT_INVALID,
-  EXIT_OK,
-  EXIT_REFUSED,
-  EXIT_USAGE,
-  type Handler,
-  type Io,
-} from "./core/io.ts";
-export { SOURCE_DIGEST, VERSION } from "./core/version.ts";
-export const COMMANDS: readonly Command[] = Object.keys(SPECS) as Command[];
-export type { Command };
+const COMMANDS: readonly Command[] = Object.keys(SPECS) as Command[];
 /** Help text, generated from each command's parser options and grouped by audience. */
-export const USAGE = [
+const USAGE = [
   "usage: coordination-kit COMMAND [options] [--root DIR]",
   ...Object.entries(GROUPS).flatMap(([group, heading]) => [
     "",

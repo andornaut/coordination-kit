@@ -34,7 +34,7 @@ const REBUILDABLE_TABLES = new Set(["edges", "graph_nodes", "graph_index"]);
 const RETIRED = new Set(RETIRED_TABLES);
 const EVENT_TABLE = "events";
 
-export interface SqliteTableState {
+interface SqliteTableState {
   readonly rows: number;
   readonly sha256: string;
 }
@@ -49,7 +49,7 @@ export interface SqliteState {
   readonly derivedTables: readonly string[];
 }
 
-export interface SqliteSnapshot {
+interface SqliteSnapshot {
   readonly state: SqliteState;
   /** Private event transfer material. Public qualification receipts use only `state`. */
   readonly events: readonly StoredEvent[];
@@ -374,7 +374,7 @@ export function restoreSqliteSnapshot(backupPath: string, isolatedPath: string):
   return makeCopy(backupPath, isolatedPath);
 }
 
-export interface SourceStateEntry {
+interface SourceStateEntry {
   /** Relative to the named scope. These are known runtime paths, never credential paths. */
   readonly path: string;
   readonly scope: "coordinator" | "sqlite-state" | "game";

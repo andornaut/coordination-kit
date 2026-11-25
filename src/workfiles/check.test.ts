@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
+import { main } from "../cli.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
 import { checkWork, type FindingCode } from "./check.ts";
 import { parseFrontMatter } from "./files.ts";
 

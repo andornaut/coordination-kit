@@ -7,7 +7,7 @@ import type { Store } from "./db.ts";
 import { secretShape } from "./secrets.ts";
 import { type Actor, ensure, type Json } from "./types.ts";
 
-export const REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const WORK_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 export interface RequestRecord {
@@ -76,7 +76,7 @@ export function readRequests(db: DatabaseSync): RequestRecord[] {
   return (db.prepare("SELECT * FROM requests ORDER BY imported_seq").all() as Row[]).map(view);
 }
 
-export function readRequest(store: Store, id: string): RequestRecord | undefined {
+function readRequest(store: Store, id: string): RequestRecord | undefined {
   const row = store.db.prepare("SELECT * FROM requests WHERE id = ?").get(id) as Row | undefined;
   return row === undefined ? undefined : view(row);
 }

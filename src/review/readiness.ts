@@ -12,7 +12,7 @@ import { resolveHarness } from "../registry/resolve.ts";
 import type { Harness, Registry } from "../registry/schema.ts";
 import { type HarnessSelection, resolveSelectedRoles } from "../registry/selection.ts";
 
-export interface RoleReadiness {
+interface RoleReadiness {
   readonly role: string;
   readonly conversation: string | null;
   readonly status: "resolved" | "unavailable";
@@ -27,7 +27,7 @@ interface SelectedRoleReadiness extends RoleReadiness {
   readonly probed_harness: Harness;
 }
 
-export interface Readiness {
+interface Readiness {
   readonly harness: Harness;
   readonly adapter: {
     readonly status: "available" | "unavailable";
@@ -37,7 +37,7 @@ export interface Readiness {
   readonly ready: boolean;
 }
 
-export interface EffectiveReadiness {
+interface EffectiveReadiness {
   readonly harness: "mixed";
   readonly adapters: Readonly<Partial<Record<Harness, Readiness["adapter"]>>>;
   readonly roles: readonly SelectedRoleReadiness[];

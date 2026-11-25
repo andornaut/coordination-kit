@@ -33,7 +33,7 @@ export function handle(write: LineWriter, message: Message): boolean {
   return false;
 }
 
-export interface ServeOptions {
+interface ServeOptions {
   readonly pollMs: number;
   /** Polled after every message and every poll; each seq increase emits one notification. */
   readonly wake?: WakeWatcher;

@@ -11,7 +11,7 @@ export const ART = "00000000-0000-4000-8000-0000000000d3";
 export const GAMEPLAY = "00000000-0000-4000-8000-0000000000c4";
 export const GAME = "archies-dog-walks";
 
-export interface StoreFixture {
+interface StoreFixture {
   readonly root: string;
   readonly base: string;
   readonly layout: Layout;
@@ -62,7 +62,7 @@ export function storeFixture(
   return { base, layout, root };
 }
 
-export interface FakeCodex {
+interface FakeCodex {
   readonly client: RpcClient;
   readonly calls: { readonly method: string; readonly params: Record<string, unknown> }[];
   adds(): Record<string, unknown>[];

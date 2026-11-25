@@ -43,7 +43,7 @@ const RESERVED = {
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 /** The slot start in epoch seconds: an ISO instant on a whole minute. */
-export function slotSeconds(text: string): number {
+function slotSeconds(text: string): number {
   const ms = ISO.test(text) ? Date.parse(text) : Number.NaN;
   if (!Number.isFinite(ms) || ms % 60_000 !== 0) {
     throw new Usage(
@@ -132,7 +132,7 @@ export const reviewDeliver: Handler = async (io, root, args) => {
 };
 
 /** The one stdout line of `events ingest`: the seam keys plus the ingest counts. */
-export function eventsIngestLine(cli: CliIdentity, game: string, result: IngestResult): string {
+function eventsIngestLine(cli: CliIdentity, game: string, result: IngestResult): string {
   return `${JSON.stringify(
     Object.fromEntries([
       ["schema", 1],

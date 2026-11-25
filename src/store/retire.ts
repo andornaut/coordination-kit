@@ -40,7 +40,7 @@ const RETIRED_KEY = "store.retired:phase4";
 const CLOSED_STATES: ReadonlySet<string> = new Set(["completed", "cancelled", "superseded"]);
 const WORK_ID = /^[a-z][a-z0-9]{0,15}-\d{4}$/;
 
-export interface RetiredPath {
+interface RetiredPath {
   /** Relative to the state root, or `var/...` for the coordinator's fence file. */
   readonly path: string;
   readonly present: boolean;
@@ -142,7 +142,7 @@ function stringOrNull(value: unknown): string | null {
 }
 
 /** The store record of one open ledger request. */
-export function requestImport(request: LedgerRequest): RequestImport {
+function requestImport(request: LedgerRequest): RequestImport {
   const owner = stringOrNull(request.assignment?.ownerRole) ?? request.createdBy;
   const work = new Set<string>();
   for (const id of [request.id, ...(request.targets ?? []).map((target) => target.id)]) {
@@ -239,7 +239,7 @@ async function writeArchive(
   await promisify(execFile)("tar", args, { maxBuffer: 1024 * 1024 });
 }
 
-export interface RetireOptions {
+interface RetireOptions {
   readonly apply: boolean;
   /** The UTC date of the archive name; defaults to today. */
   readonly date?: string;

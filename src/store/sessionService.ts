@@ -36,7 +36,7 @@ import { type Actor, StoreError } from "./types.ts";
 import type { WakeStatus } from "./wake.ts";
 
 /** A refusal that carries a short reason printed after its code. */
-export class ReasonedStoreError extends StoreError {
+class ReasonedStoreError extends StoreError {
   readonly reason: string;
 
   constructor(code: string, reason: string) {
@@ -90,7 +90,7 @@ export interface SessionOutput {
   readonly rotation?: SessionRotation;
 }
 
-export interface SessionRotation {
+interface SessionRotation {
   /** The Claude conversation the role was bound to before the rebind. */
   readonly from: string;
   /** The registry revision the rebind wrote. */

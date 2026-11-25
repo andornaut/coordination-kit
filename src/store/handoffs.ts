@@ -31,7 +31,7 @@ export const HANDOFF_TRANSITIONS: Readonly<Record<string, readonly HandoffState[
   sent: ["prepared"],
 };
 
-export const HANDOFF_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const HANDOFF_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export interface HandoffRoleView {
   readonly role: string;

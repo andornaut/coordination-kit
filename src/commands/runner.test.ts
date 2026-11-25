@@ -4,8 +4,9 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
-import { REASON_TOKENS, reasonToken } from "../core/outcome.ts";
+import { main } from "../cli.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
+import { REASON_TOKENS } from "../core/outcome.ts";
 import { reviewResultsDir } from "../review/deliver.ts";
 import { type ClaudeFixture, claudeFixture, GAME, SLOT } from "../review/fixtures.ts";
 
@@ -161,93 +162,7 @@ describe("review deliver", () => {
 });
 
 describe("reason tokens", () => {
-  it("maps each existing deferral text and receipt status to a fixed token", () => {
-    const cases: [string, string | null, string][] = [
-      [
-        "deferred",
-        "review route is unavailable or invalid; its owner must verify identities and ownership",
-        "route-unavailable",
-      ],
-      [
-        "deferred",
-        'var/route.json schema 1 is not supported: remove "monitor"',
-        "route-unavailable",
-      ],
-      [
-        "deferred",
-        "workerParents requires parents in the active review route",
-        "route-unavailable",
-      ],
-      ["deferred", "worker parents must be in the active review route", "route-unavailable"],
-      [
-        "deferred",
-        "worker parents require conversations for the active harness",
-        "route-unavailable",
-      ],
-      [
-        "deferred",
-        "worker parents require membership in the active review route",
-        "route-unavailable",
-      ],
-      ["deferred", "recipient transport requires the Claude harness", "route-unavailable"],
-      ["deferred", "review route endpoint harness missing or invalid", "route-unavailable"],
-      ["blocked", "review route or state unavailable", "route-unavailable"],
-      [
-        "deferred",
-        "provide CODEX_CONTROL_SOCKET and the installed unblock helper",
-        "recipient-unavailable",
-      ],
-      [
-        "deferred",
-        "set CODEX_CONTROL_SOCKET to an available absolute Codex control socket path",
-        "recipient-unavailable",
-      ],
-      ["deferred", "recipient has no conversation for the active harness", "recipient-unavailable"],
-      [
-        "deferred",
-        "channel consumer has not claimed an earlier review brief",
-        "recipient-unavailable",
-      ],
-      ["deferred", "claude agents listing unavailable", "recipient-unavailable"],
-      ["deferred", "recipient session missing from claude agents listing", "recipient-unavailable"],
-      ["deferred", "recipient session state unknown (reported: unknown)", "recipient-unavailable"],
-      ["deferred", "recipient input availability unknown", "recipient-unavailable"],
-      [
-        "deferred",
-        "queue inventory incomplete; inspect snapshot and retry reconciliation",
-        "recipient-unavailable",
-      ],
-      ["blocked", "native metadata unavailable", "recipient-unavailable"],
-      ["rejected", null, "recipient-unavailable"],
-      ["deferred", "recipient session blocked", "recipient-busy"],
-      [
-        "deferred",
-        "recipient state ambiguous or interrupted; no automatic resume",
-        "recipient-busy",
-      ],
-      ["busy", null, "recipient-busy"],
-      ["sending", null, "in-flight"],
-      [
-        "deferred",
-        "recipient-bound user-decision clearance missing, invalid or pending",
-        "question-pending",
-      ],
-      ["deferred", "recipient waiting on a question or approval", "question-pending"],
-      [
-        "deferred",
-        "native question pending: question_turn_id=t question_item_id=i",
-        "question-pending",
-      ],
-      ["deferred", "native question history incomplete or unknown", "question-pending"],
-      ["deferred", "recipient resolution record missing or invalid", "question-pending"],
-      ["deferred", "native answer proof requires the same completed head", "question-pending"],
-      ["deferred", "recipient decision clearance changed", "question-pending"],
-      ["ambiguous", "send outcome unavailable; do not resend", "receipt-ambiguous"],
-      ["deferred", "previous send outcome unknown or refused; do not resend", "receipt-ambiguous"],
-    ];
-    for (const [status, reason, token] of cases) {
-      expect(reasonToken(status, reason), `${status}: ${reason}`).toBe(token);
-    }
+  it("keeps the fixed token set", () => {
     expect([...REASON_TOKENS].sort()).toEqual(
       [
         "already-delivered",

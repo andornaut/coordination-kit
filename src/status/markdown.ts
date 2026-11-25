@@ -10,7 +10,7 @@ export const DIGEST_HEADINGS = [
   "Outstanding",
   "Waiting on the user",
 ] as const;
-export type DigestHeading = (typeof DIGEST_HEADINGS)[number];
+type DigestHeading = (typeof DIGEST_HEADINGS)[number];
 
 const BY_STATUS: Readonly<Record<DerivedStatus, DigestHeading>> = {
   approved: "Outstanding",
@@ -26,7 +26,7 @@ const BY_STATUS: Readonly<Record<DerivedStatus, DigestHeading>> = {
 };
 
 /** Waiting on the user first (proposed, or a pending question), then by derived status. */
-export function digestHeading(item: StatusItem): DigestHeading {
+function digestHeading(item: StatusItem): DigestHeading {
   return item.waitingOnUser ? "Waiting on the user" : BY_STATUS[item.status];
 }
 

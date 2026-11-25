@@ -63,7 +63,7 @@ export interface QuestionOutput {
   readonly duplicate: boolean;
 }
 
-export interface AnswerProjectionOutput extends QuestionOutput {
+interface AnswerProjectionOutput extends QuestionOutput {
   readonly decision: DecisionRow | null;
   /** The main checkout work file, left unstaged when changed. */
   readonly workFile: {

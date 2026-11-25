@@ -14,7 +14,7 @@ import { stateRoot } from "../../core/stateRoot.ts";
 
 const ROLE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$/;
 
-export interface ChannelStatus {
+interface ChannelStatus {
   readonly schema: 2;
   readonly role: string;
   /** The role's Claude conversation when the channel wrote the file. */

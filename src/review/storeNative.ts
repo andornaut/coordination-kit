@@ -57,7 +57,7 @@ function pendingProven(owner: string, question: Json): boolean {
 const CONNECT_MS = 25_000;
 const TITLE_CHARS = 80;
 
-export type QuestionStatus = "pending" | "clear" | "unknown";
+type QuestionStatus = "pending" | "clear" | "unknown";
 
 export interface NativeQuestion {
   readonly role: string;
@@ -108,7 +108,7 @@ export interface NativeSurvey {
 /** The collectors' entry point; the default connects and runs `collectAll`. */
 export type NativeCollect = (request: CollectRequest) => Promise<Collected>;
 
-export interface NativeContext {
+interface NativeContext {
   readonly layout: Layout;
   readonly env: NodeJS.ProcessEnv;
   /** The Codex control connection, as for wakes; defaults to the resolved control socket. */

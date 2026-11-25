@@ -8,7 +8,7 @@ const SERVER_NAME = "delivery-kit-channel";
 const LEGACY_PROTOCOLS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] as const;
 const DEFAULT_PROTOCOL = "2025-06-18";
 
-export interface ChannelNotification {
+interface ChannelNotification {
   readonly jsonrpc: "2.0";
   readonly method: "notifications/claude/channel";
   readonly params: { readonly content: string; readonly meta: Readonly<Record<string, string>> };

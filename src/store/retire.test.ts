@@ -5,7 +5,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
+import { main } from "../cli.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
 import { stateRootFixture } from "../core/testFixtures.ts";
 import { Store } from "./db.ts";
 import { readRequests } from "./requests.ts";

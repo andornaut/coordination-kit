@@ -3,7 +3,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
+import { main } from "../cli.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
 import { readRegistry, updateRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
 import { checkpointPath, rebindAfterClear } from "../store/sessionService.ts";

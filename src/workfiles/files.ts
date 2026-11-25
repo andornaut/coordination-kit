@@ -16,13 +16,12 @@ export const STATUSES = [
   "cancelled",
   "superseded",
 ] as const;
-export type WorkStatus = (typeof STATUSES)[number];
 export const REQUIRED_FIELDS = ["id", "title", "status", "approved", "design"] as const;
 export const OPTIONAL_FIELDS = ["related", "supersedes", "owner"] as const;
 
 export type FrontMatterValue = string | readonly string[];
 
-export interface FrontMatter {
+interface FrontMatter {
   readonly fields: Readonly<Record<string, FrontMatterValue>>;
   /** Malformed lines, each as `line N: reason`. */
   readonly problems: readonly string[];
@@ -38,7 +37,7 @@ export interface WorkFile {
   readonly frontMatter: FrontMatter | null;
 }
 
-export interface IndexRow {
+interface IndexRow {
   /** Repository-relative design file holding the row. */
   readonly path: string;
   /** 1-based line number. */
@@ -153,7 +152,7 @@ const SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
  * The blob URL prefix of the repository's default branch, `https://github.com/OWNER/REPO/blob/main/`,
  * from the `repository` field of its package.json; null without one or for a non-GitHub repository.
  */
-export function repositoryBlobBase(root: string): string | null {
+function repositoryBlobBase(root: string): string | null {
   let repository: unknown;
   try {
     repository = (

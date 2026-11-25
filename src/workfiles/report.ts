@@ -3,7 +3,7 @@
 import { loadLayout } from "../core/layout.ts";
 import { field, readWorkFiles, type WorkFile } from "./files.ts";
 
-export interface WorkReportItem {
+interface WorkReportItem {
   readonly id: string | null;
   readonly path: string;
   readonly title: string | null;
@@ -11,12 +11,12 @@ export interface WorkReportItem {
   readonly design: string | null;
 }
 
-export type CoordinatorState =
+type CoordinatorState =
   | { readonly status: "absent" }
   | { readonly status: "available"; readonly root: string }
   | { readonly status: "unavailable"; readonly root: string; readonly reason: string };
 
-export interface WorkReport {
+interface WorkReport {
   readonly coordinator: CoordinatorState;
   readonly items: readonly WorkReportItem[];
 }

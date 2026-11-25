@@ -1,7 +1,7 @@
 // One derived status per item, by documented precedence over front matter, store records,
 // imported request state and delivery evidence. Pure; see docs/commands.md#status.
 
-export const DERIVED_STATUSES = [
+const DERIVED_STATUSES = [
   "requested",
   "proposed",
   "approved",
@@ -21,7 +21,7 @@ export type DeploymentChannel = "bus" | "release-tag" | "none";
 /** Front matter `done` set before this instant without deployment evidence reads as assumed. */
 export const DEFAULT_VERIFY_SINCE = "2026-11-19T02:00:00Z";
 
-export interface WorkFileEvidence {
+interface WorkFileEvidence {
   /** The front-matter `status` on `main`. */
   readonly frontMatter: string | null;
   /** The ID of an active work file on `main` whose `supersedes` names this item. */
@@ -37,7 +37,7 @@ export interface WorkFileEvidence {
   readonly verifySince: string;
 }
 
-export interface Derived {
+interface Derived {
   readonly status: DerivedStatus;
   readonly replacement: string | null;
   /** True with deployment evidence; false for `done` without it after the cutoff; else null. */

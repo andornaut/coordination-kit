@@ -52,7 +52,7 @@ export interface Finding {
   readonly message: string;
 }
 
-export interface WorkCheck {
+interface WorkCheck {
   readonly ok: boolean;
   readonly workItems: number;
   readonly designAreas: number;
@@ -60,7 +60,7 @@ export interface WorkCheck {
 }
 
 /** `<prefix>-` and a zero-padded sequence of at least four digits, for example ck-0001. */
-export const ID_PATTERN = /^[a-z][a-z0-9]*-\d{4,}$/;
+const ID_PATTERN = /^[a-z][a-z0-9]*-\d{4,}$/;
 const HOME_PATH = /\/(?:home|Users)\/[A-Za-z0-9._-]+|(?<![\w.-])\/root(?=\/)/;
 const SESSION_UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
 /** A registry role name, as `owner` names it. */

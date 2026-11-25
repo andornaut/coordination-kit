@@ -4,7 +4,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
+import { main } from "../cli.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
 import { loadLayout } from "../core/layout.ts";
 import { Store, storePath } from "../store/db.ts";
 import { openFileJournal } from "../store/files/journal.ts";

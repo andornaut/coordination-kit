@@ -68,7 +68,7 @@ export function commit(
   return git(repo, "rev-parse", "HEAD");
 }
 
-export interface WorkFileOptions {
+interface WorkFileOptions {
   readonly design?: string;
   readonly owner?: string;
   readonly supersedes?: string | readonly string[];
@@ -110,7 +110,7 @@ export function workFile(
   ].join("\n");
 }
 
-export interface LiveFixture {
+interface LiveFixture {
   readonly base: string;
   readonly root: string;
   readonly kit: string;

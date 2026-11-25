@@ -80,11 +80,7 @@ export function openCoordinator(git: GitRunner, root: string | undefined): Coord
 }
 
 /** The registered repository that holds `worktree`. */
-export function repositoryAt(
-  git: GitRunner,
-  coordinator: Coordinator,
-  worktree: string,
-): Repository {
+function repositoryAt(git: GitRunner, coordinator: Coordinator, worktree: string): Repository {
   let path: string;
   try {
     path = realpathSync(repositoryRoot(git, worktree));
@@ -98,7 +94,7 @@ export function repositoryAt(
   return found;
 }
 
-export function repositoryNamed(coordinator: Coordinator, name: string): Repository {
+function repositoryNamed(coordinator: Coordinator, name: string): Repository {
   const found = coordinator.repositories.find((repository) => repository.name === name);
   if (found === undefined) {
     throw new StoreError("repository-unregistered");
@@ -106,7 +102,7 @@ export function repositoryNamed(coordinator: Coordinator, name: string): Reposit
   return found;
 }
 
-export interface MainWorkFile {
+interface MainWorkFile {
   readonly path: string;
   readonly fields: Readonly<Record<string, FrontMatterValue>>;
   readonly text: string;
@@ -115,11 +111,7 @@ export interface MainWorkFile {
 }
 
 /** `docs/work/<id>.md` as committed on the repository's local `main`, or null when absent. */
-export function readMainWorkFile(
-  git: GitRunner,
-  repository: Repository,
-  id: string,
-): MainWorkFile | null {
+function readMainWorkFile(git: GitRunner, repository: Repository, id: string): MainWorkFile | null {
   const path = `docs/work/${id}.md`;
   let text: string;
   try {
@@ -140,7 +132,7 @@ export function readMainWorkFile(
  * `id`, in ID order. One `git grep` for the ID narrows the candidates, which are then parsed. The
  * item's own file always matches, so a failing grep is a repository error.
  */
-export function mainSuccessors(git: GitRunner, repository: Repository, id: string): string[] {
+function mainSuccessors(git: GitRunner, repository: Repository, id: string): string[] {
   const prefix = "refs/heads/main:";
   let listing: string;
   try {
@@ -285,7 +277,7 @@ function withStore<T>(
   }
 }
 
-export interface WorkOutput {
+interface WorkOutput {
   readonly schema: 1;
   readonly repository: string;
   readonly id: string;
@@ -463,7 +455,7 @@ export function workFinish(
   );
 }
 
-export interface ShowOutput {
+interface ShowOutput {
   readonly schema: 1;
   readonly repository: string;
   readonly id: string;
@@ -528,7 +520,7 @@ export function workHistoryOf(
 }
 
 /** A decision record as `graph` and `work check --decisions` read it. */
-export interface StoreDecision {
+interface StoreDecision {
   readonly id: string;
   readonly work: string;
   readonly repository: string | null;

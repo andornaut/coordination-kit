@@ -15,14 +15,14 @@ import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Harness, Registry } from "../registry/schema.ts";
 import { resolveSelectedRoles, type RoleSelection } from "../registry/selection.ts";
 
-export type DiagnosticStatus = "available" | "unavailable" | "unknown" | "held";
-export type DiagnosticLayer = "adapter" | "service" | "frontend" | "bridge" | "channel";
-export interface LayerDiagnostic {
+type DiagnosticStatus = "available" | "unavailable" | "unknown" | "held";
+type DiagnosticLayer = "adapter" | "service" | "frontend" | "bridge" | "channel";
+interface LayerDiagnostic {
   readonly status: DiagnosticStatus;
   readonly code: string;
 }
 
-export interface RoleDiagnosis {
+interface RoleDiagnosis {
   readonly role: string;
   readonly effective_harness: Harness;
   readonly native_id: string | null;
@@ -49,7 +49,7 @@ export interface RoleDiagnosis {
     "verify_endpoint_configuration" | "inspect_native_session" | "native_owner_required" | "none";
 }
 
-export interface ChannelCommand {
+interface ChannelCommand {
   readonly status: "stable" | "unstable" | "unknown";
   readonly code:
     | "stable_path"
@@ -64,7 +64,7 @@ export interface ChannelCommand {
   readonly expected: readonly string[];
 }
 
-export interface ChannelServer {
+interface ChannelServer {
   readonly status: "reported" | "unknown";
   readonly code: "status_file_read" | "status_file_missing";
   readonly version: string | null;
@@ -75,7 +75,7 @@ export interface ChannelServer {
 }
 
 /** The channel MCP config game-coordinator's Claude sessions launch with. */
-export const CHANNEL_CONFIG = join("var", "claude-channel.mcp.json");
+const CHANNEL_CONFIG = join("var", "claude-channel.mcp.json");
 
 /** `node <root>/node_modules/@andornaut/coordination-kit/dist/cli.js --root <root> claude channel`. */
 export function stableChannelCommand(root: string): string[] {
@@ -97,7 +97,7 @@ function channelArgs(args: readonly unknown[]): boolean {
  * Compare the configured channel server's launch command with the stable path. Read-only: the
  * config is read, never written, and no server is contacted. Anything unreadable is unknown.
  */
-export function channelCommand(layout: Layout): ChannelCommand {
+function channelCommand(layout: Layout): ChannelCommand {
   const config = join(layout.root, CHANNEL_CONFIG);
   const expected = stableChannelCommand(layout.root);
   const base = { command: null, config, expected, server: null };
@@ -160,7 +160,7 @@ export function channelServer(layout: Layout, role: string): ChannelServer {
       };
 }
 
-export interface HarnessDiagnosis {
+interface HarnessDiagnosis {
   readonly schema: 1;
   readonly roles: readonly RoleDiagnosis[];
 }

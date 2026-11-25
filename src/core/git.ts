@@ -7,7 +7,7 @@ import { dirname } from "node:path";
 /** Runs one read-only git command in `cwd` and returns stdout; throws on a nonzero exit. */
 export type GitRunner = (cwd: string, args: readonly string[]) => string;
 
-export class GitError extends Error {
+class GitError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "GitError";
@@ -61,7 +61,7 @@ export function repositoryRoot(git: GitRunner, worktree: string): string {
   return common.endsWith("/.git") ? dirname(common) : common;
 }
 
-export interface Change {
+interface Change {
   /** A, M, D, R, C or T. */
   readonly status: string;
   readonly path: string;
@@ -169,7 +169,7 @@ export function readHistory(git: GitRunner, repository: string): History {
   return { commits, main, originMain };
 }
 
-export interface MainFile {
+interface MainFile {
   readonly path: string;
   readonly text: string;
   /** The newest first-parent commit on `main` that changed the file. */
@@ -182,7 +182,7 @@ export interface CommitRef {
   readonly at: string;
 }
 
-export interface MainFiles {
+interface MainFiles {
   readonly files: ReadonlyMap<string, MainFile>;
   /** The latest first-parent status transition for each current path. */
   readonly statusAt: ReadonlyMap<string, CommitRef>;

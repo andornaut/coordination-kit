@@ -4,21 +4,13 @@ import { describe, expect, it } from "vitest";
 
 import { gameLayout, type Layout, loadLayout } from "../../core/layout.ts";
 import {
-  CLAUDE_COORDINATOR,
-  CLAUDE_TECH,
-  CODEX_TECH,
   makeFixture,
   projectConfig,
   registryInput,
   writeFixtureJson,
 } from "../../core/testFixtures.ts";
-import {
-  createRegistry,
-  readRegistry,
-  type Registry,
-  updateRegistry,
-} from "../../registry/index.ts";
-import { readRoleRoute, RouteError, routeRecipient, routeScope, sendRoute } from "./route.ts";
+import { createRegistry, type Registry, updateRegistry } from "../../registry/index.ts";
+import { readRoleRoute, RouteError, routeRecipient } from "./route.ts";
 
 const CODEX_COORDINATOR = "00000000-0000-4000-8000-000000000004";
 
@@ -41,19 +33,6 @@ const ROUTE = {
 };
 
 describe("role-name route", () => {
-  it("returns nonhost and held without resolving", () => {
-    const layout = setup({ ...ROUTE, state: "held" });
-    const route = readRoleRoute(layout)!;
-    expect(sendRoute(readRegistry(layout), "game-coordinator", route, "chibis-way-home")).toEqual({
-      status: "nonhost",
-    });
-    expect(sendRoute(readRegistry(layout), "game-coordinator", route, "archies-dog-walks")).toEqual(
-      {
-        status: "held",
-      },
-    );
-  });
-
   it("refuses every malformed route", () => {
     const changes: [string, Record<string, unknown>][] = [
       ["an unknown role", { targets: ["archies-dog-walks/qa"] }],
@@ -90,67 +69,5 @@ describe("routeRecipient host configuration", () => {
     (config.reports as Record<string, unknown>).workerParents = "game-coordinator";
     writeFixtureJson(file, config);
     expect(() => routeRecipient(layout, route)).toThrow(RouteError);
-  });
-});
-
-describe("mixed route transports", () => {
-  it("keeps the recipient transport independent and resolves changed target overrides at each call", () => {
-    const layout = setup(ROUTE);
-    const route = readRoleRoute(layout)!;
-    const mixed = updateRegistry(layout, 2, (draft) => {
-      draft.roles["game-coordinator"]!.harness = "codex";
-    });
-    const send = sendRoute(mixed, "game-coordinator", route, "archies-dog-walks");
-    expect(send).toMatchObject({
-      harness: "codex",
-      recipient: { conversation: CODEX_COORDINATOR, harness: "codex" },
-      targets: [
-        { conversation: CLAUDE_TECH, harness: "claude" },
-        { conversation: null, harness: "claude" },
-      ],
-    });
-    expect(routeScope(mixed, "game-coordinator", route)).toMatchObject({
-      harness: "codex",
-      harnesses: { [CODEX_COORDINATOR]: "codex", [CLAUDE_TECH]: "claude" },
-      recipient: CODEX_COORDINATOR,
-      targets: [{ harness: "claude", sessionId: CLAUDE_TECH }],
-    });
-    const changed = updateRegistry(layout, mixed.revision, (draft) => {
-      draft.roles["archies-dog-walks/tech"]!.harness = "codex";
-    });
-    expect(routeScope(changed, "game-coordinator", route)!.peers).toEqual([CODEX_TECH]);
-    expect(routeScope(changed, "game-coordinator", route)!.harnesses).toEqual({
-      [CODEX_COORDINATOR]: "codex",
-      [CODEX_TECH]: "codex",
-    });
-  });
-
-  it("keeps an unavailable selected target null instead of using its inactive ID", () => {
-    const layout = setup(ROUTE);
-    const registry = updateRegistry(layout, 2, (draft) => {
-      draft.roles["archies-dog-walks/tech"]!.harness = "codex";
-      draft.roles["archies-dog-walks/tech"]!.conversations.codex = null;
-    });
-    const scope = routeScope(registry, "game-coordinator", readRoleRoute(layout)!);
-    expect(scope!.targets).toEqual([]);
-    expect(scope!.harnesses).toEqual({ [CLAUDE_COORDINATOR]: "claude" });
-  });
-
-  it("rejects a cross-harness UUID collision between target and recipient", () => {
-    const layout = setup(ROUTE);
-    const registry = updateRegistry(layout, 2, (draft) => {
-      draft.roles["archies-dog-walks/tech"]!.harness = "codex";
-      draft.roles["archies-dog-walks/tech"]!.conversations.codex = CLAUDE_COORDINATOR;
-    });
-    expect(routeScope(registry, "game-coordinator", readRoleRoute(layout)!)).toBeNull();
-  });
-
-  it("returns no active scope when only an inactive recipient ID exists", () => {
-    const layout = setup(ROUTE);
-    const registry = updateRegistry(layout, 2, (draft) => {
-      draft.roles["game-coordinator"]!.harness = "codex";
-      draft.roles["game-coordinator"]!.conversations.codex = null;
-    });
-    expect(routeScope(registry, "game-coordinator", readRoleRoute(layout)!)).toBeNull();
   });
 });

@@ -29,7 +29,7 @@ export interface VerifiedWorkerCaller {
 }
 
 /** A trusted, synchronous proof source supplied by the coordination authority. */
-export type WorkerProof = (nativeId: string) => VerifiedWorkerCaller | null;
+type WorkerProof = (nativeId: string) => VerifiedWorkerCaller | null;
 
 /** Require the exact active Codex parent and an unambiguous worker outside registered roles. */
 export function matchesVerifiedWorker(

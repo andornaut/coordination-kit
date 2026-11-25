@@ -1,5 +1,5 @@
 // Safe delivery diagnostics are finite metadata, never native messages or context.
-export const DIAGNOSTIC_METHODS = [
+const DIAGNOSTIC_METHODS = [
   "initialize",
   "thread/read",
   "thread/turns/list",
@@ -30,8 +30,8 @@ const CATEGORIES = [
 ] as const;
 const CLASSIFICATIONS = ["guarded", "native-rejected", "outcome-unknown", "unavailable"] as const;
 const RPC_CODES = [-32700, -32600, -32601, -32602, -32603, -32000] as const;
-export type NativeRpcCode = (typeof RPC_CODES)[number];
-export type NativeQuestionRef = {
+type NativeRpcCode = (typeof RPC_CODES)[number];
+type NativeQuestionRef = {
   readonly turnId: string;
   readonly itemId: string;
 };
@@ -45,7 +45,7 @@ export type DeliveryDiagnostic = {
 };
 const SAFE_NATIVE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
-export function safeNativeQuestionRef(value: unknown): NativeQuestionRef | undefined {
+function safeNativeQuestionRef(value: unknown): NativeQuestionRef | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return undefined;
   }
@@ -94,44 +94,8 @@ export function safeDeliveryDiagnostic(value: unknown): DeliveryDiagnostic | und
   };
 }
 
-// Harness adapter contract shared by the Claude and Codex implementations.
-export type DeliveryStatus =
-  | "unavailable"
-  | "accepted"
-  | "ambiguous"
-  | "blocked"
-  | "busy"
-  | "deduplicated"
-  | "deferred"
-  | "rejected"
-  | "sending"
-  | "unchanged";
-
-export interface DeliveryReceipt {
-  readonly diagnostic?: DeliveryDiagnostic;
-  readonly status: DeliveryStatus;
-  readonly requestId: string;
-  readonly reason?: string;
-}
-
-export interface Availability {
-  readonly status: "available" | "busy" | "blocked" | "missing" | "unavailable";
-  readonly reason?: string;
-}
-
-export interface InventoryEntry {
-  readonly queueId: string;
-  readonly payload: string;
-  readonly clientUserMessageId?: string;
-}
-
-export interface Inventory {
-  readonly status: "available" | "unavailable";
-  readonly entries: readonly InventoryEntry[];
-  readonly reason?: string;
-}
-
-export type CollectorRecord = Readonly<Record<string, unknown>>;
+// What the review asks the native collectors for and what they return.
+type CollectorRecord = Readonly<Record<string, unknown>>;
 
 /** What a snapshot asks the harness collectors for. */
 export interface CollectRequest {
@@ -148,32 +112,4 @@ export interface Collected {
   readonly question_state: CollectorRecord;
   readonly worker_health: CollectorRecord;
   readonly collection_budget: CollectorRecord;
-}
-
-/** Native history, question, worker and process collection over one harness connection. */
-export interface HarnessCollectors {
-  collect(request: CollectRequest): Promise<Collected>;
-}
-
-export type Disposition = "handled" | "retained" | "superseded";
-
-export interface HarnessAdapter {
-  readonly harness: "claude" | "codex";
-  /** Absent when the harness has no native collectors: every capability is then unavailable. */
-  readonly collectors?: HarnessCollectors;
-  status(conversationId: string): Promise<Availability>;
-  deliver(
-    receiptPath: string,
-    requestId: string,
-    conversationId: string,
-    text: string,
-  ): Promise<DeliveryReceipt>;
-  inventory(conversationId: string): Promise<Inventory>;
-  ack(
-    conversationId: string,
-    queueId: string,
-    payload: string,
-    disposition: Disposition,
-    reason?: string,
-  ): Promise<DeliveryReceipt>;
 }

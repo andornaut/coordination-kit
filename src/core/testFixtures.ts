@@ -81,7 +81,7 @@ export function registryInput(): Record<string, unknown> {
   };
 }
 
-export interface Fixture {
+interface Fixture {
   /** The game-coordinator root. */
   readonly root: string;
   readonly base: string;

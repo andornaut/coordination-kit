@@ -3,12 +3,6 @@
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import {
-  type ActiveScope,
-  readRoleRoute,
-  routeRecipient,
-  routeScope,
-} from "../adapters/shared/route.ts";
 import { type GameLayout, gameLayout, type Layout, loadLayout } from "../core/layout.ts";
 import {
   CLAUDE_COORDINATOR,
@@ -16,11 +10,10 @@ import {
   makeFixture,
   registryInput,
 } from "../core/testFixtures.ts";
-import { createRegistry, readRegistry, type Registry } from "../registry/index.ts";
+import { createRegistry, type Registry } from "../registry/index.ts";
 
 export const RECIPIENT = CLAUDE_COORDINATOR;
-export const TECH = CLAUDE_TECH;
-export const HELD = "00000000-0000-4000-8000-000000000009";
+const TECH = CLAUDE_TECH;
 export const GAME = "archies-dog-walks";
 export const SLOT = 1793556000;
 
@@ -46,7 +39,7 @@ function routeValue(change: Record<string, unknown> = {}): Record<string, unknow
   };
 }
 
-export function idle(sessionId: string = RECIPIENT): Record<string, unknown> {
+function idle(sessionId: string = RECIPIENT): Record<string, unknown> {
   return { kind: "interactive", sessionId, status: "idle" };
 }
 
@@ -103,14 +96,3 @@ export function claudeFixture(): ClaudeFixture {
 }
 
 /** The fixture route resolved through the fixture registry, as a send resolves it. */
-export function activeRoute(fixture: ClaudeFixture): ActiveScope {
-  const route = readRoleRoute(fixture.layout);
-  const scope =
-    route === null
-      ? null
-      : routeScope(readRegistry(fixture.layout), routeRecipient(fixture.layout, route), route);
-  if (scope === null) {
-    throw new Error("fixture route must be active");
-  }
-  return scope;
-}

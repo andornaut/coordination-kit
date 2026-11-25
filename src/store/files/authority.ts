@@ -46,16 +46,15 @@ interface ActiveFileAuthority {
   readonly receipt: CutoverReceipt;
 }
 
-export type FileAuthority =
-  { readonly kind: "sqlite"; readonly path: string } | ActiveFileAuthority;
+type FileAuthority = { readonly kind: "sqlite"; readonly path: string } | ActiveFileAuthority;
 
-export type FileAuthorityStatus =
+type FileAuthorityStatus =
   | { readonly kind: "sqlite"; readonly path: string; readonly receipt?: CutoverReceipt }
   | { readonly kind: "pending"; readonly path: string; readonly receipt: CutoverReceipt }
   | ActiveFileAuthority;
 
 /** Inspect the target and any unfenced source within the source write transaction. */
-export type VerifyCutoverTarget = (
+type VerifyCutoverTarget = (
   path: string,
   receipt: CutoverReceipt,
   unfencedSource?: DatabaseSync,

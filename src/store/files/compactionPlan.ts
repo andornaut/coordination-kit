@@ -58,7 +58,7 @@ interface Stream {
   readonly protected: readonly ({ readonly reason: Reason } & Tally)[];
 }
 
-export interface CompactionPlan {
+interface CompactionPlan {
   readonly schema: 1;
   readonly kind: "file-compaction-plan";
   readonly head: Head;

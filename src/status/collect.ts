@@ -35,7 +35,7 @@ import {
 } from "./derive.ts";
 import { readStoreWork, type StoreWorkSnapshot } from "./sources.ts";
 
-export const STATUS_SCHEMA = 2;
+const STATUS_SCHEMA = 2;
 const WORK_DIRECTORY = "docs/work";
 
 export class StatusUsageError extends Error {
@@ -56,9 +56,9 @@ export interface StatusOptions {
   readonly verifySince: string;
 }
 
-export type RepositoryKind = "game" | "kit" | "coordinator" | "other";
+type RepositoryKind = "game" | "kit" | "coordinator" | "other";
 
-export interface RepositoryStatus {
+interface RepositoryStatus {
   readonly name: string;
   readonly kind: RepositoryKind;
   readonly path: string;
@@ -75,7 +75,7 @@ export interface RepositoryStatus {
   };
 }
 
-export interface RequestEntry {
+interface RequestEntry {
   readonly id: string;
   readonly kind: string;
   readonly state: string;
@@ -87,7 +87,7 @@ export interface RequestEntry {
   readonly userSource: boolean;
 }
 
-export interface UnmatchedRequest extends RequestEntry {
+interface UnmatchedRequest extends RequestEntry {
   readonly repository: string | null;
   readonly summary: string;
   readonly work: readonly string[];
@@ -165,7 +165,7 @@ export interface StatusReport {
   readonly recentCompletions: readonly WorkTime[];
 }
 
-export interface StatusContext {
+interface StatusContext {
   readonly io: Pick<Io, "env">;
   readonly git: GitRunner;
 }

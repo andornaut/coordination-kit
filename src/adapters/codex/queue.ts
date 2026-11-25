@@ -6,7 +6,7 @@ import { isCanonicalUuid } from "../../core/ids.ts";
 import { holdLockAsync } from "../../core/lock.ts";
 import { isRecord } from "../../core/pyjson.ts";
 import { type DeliveryDiagnostic, safeDeliveryDiagnostic } from "../types.ts";
-import { acknowledgeEntry, queueEntries, type QueueEntry } from "./inventory.ts";
+import { queueEntries, type QueueEntry } from "./inventory.ts";
 import { type RpcClient, RpcError } from "./rpc.ts";
 
 /** The service resolves ownership and parent hops before selecting a transport. */
@@ -83,7 +83,7 @@ function exact(value: unknown, message: NativeMessage): value is QueueEntry {
   );
 }
 
-export async function rootRecipient(client: RpcClient, recipient: string): Promise<boolean> {
+async function rootRecipient(client: RpcClient, recipient: string): Promise<boolean> {
   const read = await client.call("thread/read", { includeTurns: false, threadId: recipient });
   const thread = isRecord(read) ? read.thread : null;
   if (!isRecord(thread) || thread.id !== recipient || thread.parentThreadId != null) {
@@ -197,7 +197,6 @@ async function operate(
   client: RpcClient | null,
   path: string,
   message: NativeMessage,
-  reconciliationOnly: boolean,
   guards?: QueueGuards,
 ): Promise<TransportReceipt> {
   if (!valid(message)) {
@@ -304,9 +303,6 @@ async function operate(
     if (isRecord(previous)) {
       return await reconcile(client, path, message, previous);
     }
-    if (reconciliationOnly) {
-      return result(message, "ambiguous", "receipt unavailable; do not resend");
-    }
     try {
       const clearance = await guards.beforeAdd(client, message);
       if (clearance.status !== "clear") {
@@ -385,7 +381,7 @@ export function queueMessage(
   guards?: QueueGuards,
 ): Promise<TransportReceipt> {
   const admission = { started: true };
-  return operate(admission, client, path, message, false, guards).catch(() =>
+  return operate(admission, client, path, message, guards).catch(() =>
     result(
       message,
       admission.started ? "ambiguous" : "unavailable",
@@ -395,20 +391,6 @@ export function queueMessage(
     ),
   );
 }
-
-export function reconcileQueueMessage(
-  client: RpcClient,
-  path: string,
-  message: NativeMessage,
-  guards?: QueueGuards,
-): Promise<TransportReceipt> {
-  return operate({ started: true }, client, path, message, true, guards).catch(() =>
-    result(message, "ambiguous", "receipt or transport unavailable; do not resend"),
-  );
-}
-
-/** Preserve the existing inventory helper's exact payload representation for acknowledgement. */
-export { acknowledgeEntry, queueEntries };
 
 /** The caller supplies existing connectControl routing, never a new frontend. */
 export function codexQueueTransport(ports: {

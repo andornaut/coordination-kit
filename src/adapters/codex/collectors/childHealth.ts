@@ -32,7 +32,7 @@ const TURN_STATUSES: ReadonlySet<string> = new Set([
 const HEALTH_STATUSES: readonly unknown[] = ["complete", "partial", "unavailable"];
 const PAGE_SIZE = 50;
 const MAX_CHILDREN = 100;
-export const MAX_CALLS = 256;
+const MAX_CALLS = 256;
 
 type Metadata = { status: { type: string }; updatedAt: number };
 

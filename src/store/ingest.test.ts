@@ -12,7 +12,8 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { EXIT_OK, EXIT_USAGE, main } from "../cli.ts";
+import { main } from "../cli.ts";
+import { EXIT_OK, EXIT_USAGE } from "../core/io.ts";
 import { type GameLayout, gameLayout, type Layout } from "../core/layout.ts";
 import { Store } from "./db.ts";
 import {

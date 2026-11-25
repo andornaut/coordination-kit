@@ -7,10 +7,10 @@ import type { CliIdentity } from "./outcome.ts";
 declare const __CK_VERSION__: string;
 
 /** The version a CLI run from source reports; builds replace it with the package version. */
-export const SOURCE_VERSION = "0.0.0-source";
+const SOURCE_VERSION = "0.0.0-source";
 export const VERSION = typeof __CK_VERSION__ === "string" ? __CK_VERSION__ : SOURCE_VERSION;
 /** The digest a CLI run from source reports, since no dist/cli.js runs: 64 zeros. */
-export const SOURCE_DIGEST = "0".repeat(64);
+const SOURCE_DIGEST = "0".repeat(64);
 
 const digests = new Map<string, string>();
 
