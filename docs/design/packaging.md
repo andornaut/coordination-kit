@@ -20,3 +20,4 @@ Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
 | ------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | ck-0011 | Check packaged docs on docs-only changes              | [ck-0011.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0011.md) |
 | ck-0012 | Link packaged docs to unpackaged work files on GitHub | [ck-0012.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0012.md) |
+| ck-0047 | Refactor for structure, encapsulation and simplicity  | [ck-0047.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0047.md) |
