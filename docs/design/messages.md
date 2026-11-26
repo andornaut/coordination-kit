@@ -22,3 +22,4 @@ Reference: [messages](../messages.md), [store wakes](../store.md#wakes),
 | ck-0024 | Read exact messages and clarify retention                              | [ck-0024.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0024.md) |
 | ck-0045 | One wake path that follows the role on both harnesses                  | [ck-0045.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0045.md) |
 | ck-0051 | Resolve channels across project directories and report unresolved ones | [ck-0051.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0051.md) |
+| ck-0057 | Allow messages from unbound senders                                    | [ck-0057.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0057.md) |
