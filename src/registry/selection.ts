@@ -1,12 +1,14 @@
 // Scoped transport selection changes no activation or ownership evidence.
 import type { Clock } from "../core/clock.ts";
-import type { Layout } from "../core/layout.ts";
+import { appRoleKeys, type Layout } from "../core/layout.ts";
 import { checkArray, checkEnum, checkObject, checkString, Issues } from "../core/validate.ts";
 import { resolveRole } from "./resolve.ts";
 import { type Harness, HARNESSES, type Registry } from "./schema.ts";
 import { type UpdateOptions, updateRegistry } from "./store.ts";
 
 export interface RoleSelection {
+  readonly apps?: readonly string[];
+  /** Compatibility spelling for selecting an app. */
   readonly games?: readonly string[];
   /** Registered role keys. */
   readonly roles?: readonly string[];
@@ -23,8 +25,8 @@ export function resolveSelectedRoles(
   selection: RoleSelection,
 ): readonly string[] {
   const issues = new Issues();
-  if (checkObject(issues, "", { optional: ["games", "roles"], required: [] }, selection)) {
-    for (const key of ["games", "roles"] as const) {
+  if (checkObject(issues, "", { optional: ["apps", "games", "roles"], required: [] }, selection)) {
+    for (const key of ["apps", "games", "roles"] as const) {
       const names = selection[key];
       if (
         names !== undefined &&
@@ -33,18 +35,28 @@ export function resolveSelectedRoles(
         names.forEach((name, index) => checkString(issues, `/${key}/${index}`, null, name));
       }
     }
-    if (selection.games === undefined && selection.roles === undefined) {
-      issues.add("/", "select at least one game or role");
+    if (selection.apps !== undefined && selection.games !== undefined) {
+      issues.add("/", "use apps or games for the app selection");
+    }
+    if (
+      selection.apps === undefined &&
+      selection.games === undefined &&
+      selection.roles === undefined
+    ) {
+      issues.add("/", "select at least one app or role");
     }
   }
   issues.throwIfAny("role selection");
   const names = [...(selection.roles ?? [])];
-  for (const game of selection.games ?? []) {
-    const entry = Object.hasOwn(layout.config.games, game) ? layout.config.games[game] : undefined;
-    if (entry === undefined) {
-      issues.add("/games", `unknown game: ${game}`);
+  for (const app of selection.apps ?? selection.games ?? []) {
+    if (!Object.hasOwn(layout.config.apps, app)) {
+      if (selection.apps === undefined) {
+        issues.add("/games", `unknown game: ${app}`);
+      } else {
+        issues.add("/apps", `unknown app: ${app}`);
+      }
     } else {
-      names.push(...entry.roles.map((role) => `${game}/${role}`));
+      names.push(...appRoleKeys(layout.config, app));
     }
   }
   issues.throwIfAny("role selection");
@@ -66,13 +78,19 @@ export function selectHarness(
     (draft) => {
       const issues = new Issues();
       if (
-        checkObject(issues, "", { optional: ["games", "roles"], required: ["harness"] }, selection)
+        checkObject(
+          issues,
+          "",
+          { optional: ["apps", "games", "roles"], required: ["harness"] },
+          selection,
+        )
       ) {
         checkEnum(issues, "/harness", [...HARNESSES, "default"], selection.harness);
       }
       issues.throwIfAny("harness selection");
-      const { games, roles } = selection;
+      const { apps, games, roles } = selection;
       const keys = resolveSelectedRoles(layout, draft, {
+        ...(apps === undefined ? {} : { apps }),
         ...(games === undefined ? {} : { games }),
         ...(roles === undefined ? {} : { roles }),
       });

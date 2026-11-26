@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { type Layout, loadLayout } from "../core/layout.ts";
+import { type Layout, loadLayout, validateWorkspaceConfig } from "../core/layout.ts";
 import { holdLock, LockBusy, LockError, lockIsFree } from "../core/lock.ts";
 import {
   CLAUDE_COORDINATOR,
@@ -66,6 +66,63 @@ describe("createRegistry and readRegistry", () => {
     expect(registry.updatedAt).toBe("2026-11-04T03:00:00.000Z");
     expect(RegistrySchema.validate(layout.config, registry)).toEqual(registry);
     expect(() => createRegistry(TEST_CLOCK, layout, registry)).toThrow(RegistryExists);
+  });
+});
+
+describe("app operations", () => {
+  const config = validateWorkspaceConfig({
+    apps: { dashboard: { name: "Dashboard", path: "../dashboard", roles: ["operator"] } },
+    kits: {},
+    permissions: { operator: { apps: { dashboard: ["delivery:operate"] }, workspace: [] } },
+    schema: 1,
+    sharedRoles: [],
+    timezone: "UTC",
+    wakeMinutes: [],
+  });
+  const operator = {
+    conversations: { codex: CODEX_TECH },
+    ownership: "active",
+    worktree: "../dashboard",
+  };
+  const registry = {
+    harness: "codex",
+    host: { nativeProjectId: "project-1", root: "." },
+    operations: { dashboard: { busOwner: "operator" } },
+    revision: 1,
+    roles: { operator },
+    schema: 1,
+    transfers: [],
+    updatedAt: TEST_CLOCK().toISOString(),
+  };
+
+  it("accepts one operator registered under the exact configured role key", () => {
+    expect(RegistrySchema.validate(config, registry)).toEqual(registry);
+    expect(() =>
+      RegistrySchema.validate(config, {
+        ...registry,
+        operations: { dashboard: { busOwner: "dashboard/operator" } },
+        roles: { "dashboard/operator": operator },
+      }),
+    ).toThrow("/roles/dashboard/operator: is not a role in config.json");
+  });
+
+  it("rejects unknown apps and unregistered bus owners without changing the operations format", () => {
+    expect(() =>
+      RegistrySchema.validate(config, {
+        ...registry,
+        operations: { unknown: { busOwner: "unregistered" } },
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        issues: [
+          "/operations/unknown: is not an app in config.json",
+          "/operations/unknown/busOwner: is not a registered role",
+        ],
+      }),
+    );
+    expect(() =>
+      RegistrySchema.validate(undefined, { ...registry, operations: { Bad_ID: {} } }),
+    ).toThrow("/operations/Bad_ID: app ID must match");
   });
 });
 

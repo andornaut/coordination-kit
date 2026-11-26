@@ -1,10 +1,18 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { loadLayout, roleKeys } from "../core/layout.ts";
 import { holdLock, LockBusy } from "../core/lock.ts";
-import { makeFixture, registryInput, TEST_CLOCK, writeFixtureJson } from "../core/testFixtures.ts";
+import {
+  CLAUDE_TECH,
+  CODEX_TECH,
+  makeFixture,
+  registryInput,
+  TEST_CLOCK,
+  writeFixtureJson,
+} from "../core/testFixtures.ts";
 import {
   createRegistry,
   readRegistry,
@@ -64,6 +72,45 @@ describe("resolveSelectedRoles", () => {
         roles: ["game-coordinator", `${ARCHIE}/tech`],
       }),
     ).toEqual([`${ARCHIE}/art`, `${ARCHIE}/gameplay`, `${ARCHIE}/tech`, "game-coordinator"]);
+  });
+
+  it("selects a configured unprefixed app role using either app selector", () => {
+    const { root } = makeFixture();
+    writeFixtureJson(join(root, "config.json"), {
+      apps: { dashboard: { name: "Dashboard", path: "../dashboard", roles: ["operator"] } },
+      kits: {},
+      permissions: {},
+      schema: 1,
+      sharedRoles: [],
+      timezone: "UTC",
+      wakeMinutes: [],
+    });
+    const layout = loadLayout(root);
+    const registry = createRegistry(TEST_CLOCK, layout, {
+      harness: "codex",
+      host: { nativeProjectId: "project-1", root: "." },
+      operations: { dashboard: { busOwner: "operator" } },
+      roles: {
+        operator: {
+          conversations: { claude: CLAUDE_TECH, codex: CODEX_TECH },
+          ownership: "active",
+          worktree: "../dashboard",
+        },
+      },
+      schema: 1,
+      transfers: [],
+    });
+    expect(resolveSelectedRoles(layout, registry, { apps: ["dashboard"] })).toEqual(["operator"]);
+    expect(resolveSelectedRoles(layout, registry, { games: ["dashboard"] })).toEqual(["operator"]);
+    expect(() =>
+      resolveSelectedRoles(layout, registry, { apps: ["dashboard"], games: ["dashboard"] }),
+    ).toThrow("use apps or games for the app selection");
+    const updated = selectHarness(TEST_CLOCK, layout, registry.revision, {
+      apps: ["dashboard"],
+      harness: "claude",
+    });
+    expect(updated.roles.operator?.harness).toBe("claude");
+    expect(updated.operations).toEqual(registry.operations);
   });
 });
 

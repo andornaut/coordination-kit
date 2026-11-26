@@ -1,7 +1,7 @@
 // var/registry.json schema version 1, shared by coordination-kit, delivery-kit and the game-sessions skills.
 // The skills own every field except operations.*.lastAdoption, reserved for supported resident-adoption recording.
 // Registry state records ownership; it never proves activation on its own.
-import { type GameCoordinatorConfig, roleKeys } from "../core/layout.ts";
+import { type GameCoordinatorConfig, ROLE_KEY_PATTERN, roleKeys } from "../core/layout.ts";
 import {
   checkArray,
   checkEnum,
@@ -12,6 +12,7 @@ import {
   checkRelativePath,
   checkString,
   CONVERSATION_ID_PATTERN,
+  ID_PATTERN,
   Issues,
 } from "../core/validate.ts";
 
@@ -85,7 +86,6 @@ export type RegistryDraft = Mutable<Registry>;
 const TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const ISO_UTC_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?Z$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
-const ROLE_KEY_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}(\/[a-z0-9][a-z0-9-]{0,63})?$/;
 
 function checkTimestamp(issues: Issues, at: string, value: unknown): void {
   if (checkString(issues, at, ISO_UTC_PATTERN, value) && Number.isNaN(Date.parse(value))) {
@@ -243,14 +243,18 @@ function checkStructure(issues: Issues, value: unknown): value is Registry {
   if (checkMap(issues, "/roles", value.roles)) {
     for (const [key, role] of Object.entries(value.roles)) {
       if (!ROLE_KEY_PATTERN.test(key)) {
-        issues.add(`/roles/${key}`, "role key must be <game>/<role> or a shared role name");
+        issues.add(`/roles/${key}`, "role key must be a name or a namespaced role key");
       }
       checkRole(issues, `/roles/${key}`, role);
     }
   }
   if (checkMap(issues, "/operations", value.operations)) {
-    for (const [game, operation] of Object.entries(value.operations)) {
-      checkOperation(issues, `/operations/${game}`, operation);
+    for (const [app, operation] of Object.entries(value.operations)) {
+      const at = `/operations/${app}`;
+      if (!ID_PATTERN.test(app)) {
+        issues.add(at, `app ID must match ${String(ID_PATTERN)}`);
+      }
+      checkOperation(issues, at, operation);
     }
   }
   if (checkArray(issues, "/transfers", {}, value.transfers)) {
@@ -261,7 +265,7 @@ function checkStructure(issues: Issues, value: unknown): value is Registry {
   return issues.list.length === 0;
 }
 
-/** Keys and names must agree with config.json: role keys, games and role references. */
+/** Keys and names must agree with config.json: roles, apps and role references. */
 function checkAgainstConfig(
   issues: Issues,
   config: GameCoordinatorConfig,
@@ -273,12 +277,12 @@ function checkAgainstConfig(
       issues.add(`/roles/${key}`, "is not a role in config.json");
     }
   }
-  for (const [game, operation] of Object.entries(registry.operations)) {
-    if (!Object.hasOwn(config.games, game)) {
-      issues.add(`/operations/${game}`, "is not a game in config.json");
+  for (const [app, operation] of Object.entries(registry.operations)) {
+    if (!Object.hasOwn(config.apps ?? config.games, app)) {
+      issues.add(`/operations/${app}`, "is not an app in config.json");
     }
     if (!Object.hasOwn(registry.roles, operation.busOwner)) {
-      issues.add(`/operations/${game}/busOwner`, "is not a registered role");
+      issues.add(`/operations/${app}/busOwner`, "is not a registered role");
     }
   }
   registry.transfers.forEach((transfer, index) =>
