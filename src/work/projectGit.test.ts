@@ -157,4 +157,27 @@ describe("standalone project Git proofs", () => {
       targetSha,
     });
   });
+
+  it("requires the supplied merge proof even when the reviewed head is reachable", () => {
+    const { candidate, root } = fixture();
+    run(root, "switch", BRANCH);
+    run(root, "merge", "--no-ff", "-m", "Provider merge", candidate.headSha);
+    const mergeSha = run(root, "rev-parse", "HEAD");
+    run(root, "update-ref", TARGET, mergeSha);
+    const verified = { headSha: candidate.headSha, mergeSha, remoteRef: TARGET };
+    expect(projectLanding(git, root, candidate, verified)).toMatchObject({
+      kind: "provider-merge",
+      landedSha: mergeSha,
+    });
+    expect(() =>
+      projectLanding(git, root, candidate, { ...verified, headSha: candidate.baseSha }),
+    ).toThrow("project-merge-binding-mismatch");
+    expect(() => projectLanding(git, root, candidate, { ...verified, mergeSha: "HEAD" })).toThrow(
+      "project-merge-invalid",
+    );
+    const unpushed = commit(root, "Unpushed merge evidence", "local.txt");
+    expect(() => projectLanding(git, root, candidate, { ...verified, mergeSha: unpushed })).toThrow(
+      "project-merge-not-landed",
+    );
+  });
 });

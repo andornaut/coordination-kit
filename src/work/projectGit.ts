@@ -153,7 +153,7 @@ export function projectCandidate(
   return { baseSha, changedPaths, headSha, remoteRef, targetSha };
 }
 
-/** Check the reviewed head or a provider-verified merge against the current tracking branch. */
+/** Verify the supplied provider merge or, for a direct push, the exact reviewed head. */
 export function projectLanding(
   git: GitRunner,
   repository: string,
@@ -167,11 +167,11 @@ export function projectLanding(
 } {
   const { baseSha, headSha, remoteRef } = candidate;
   const targetSha = checkedTarget(git, repository, candidate);
-  if (ancestor(git, repository, headSha, targetSha)) {
-    return { headSha, kind: "exact", landedSha: headSha, targetSha };
-  }
   if (verifiedMerge === undefined) {
-    throw new StoreError("project-candidate-not-landed");
+    if (!ancestor(git, repository, headSha, targetSha)) {
+      throw new StoreError("project-candidate-not-landed");
+    }
+    return { headSha, kind: "exact", landedSha: headSha, targetSha };
   }
   if (verifiedMerge.headSha !== headSha || verifiedMerge.remoteRef !== remoteRef) {
     throw new StoreError("project-merge-binding-mismatch");

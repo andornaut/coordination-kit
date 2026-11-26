@@ -21,7 +21,8 @@ vi.mock("../adapters/forge/index.ts", async (importOriginal) => ({
   createForge: () => forge,
 }));
 
-it.each(["chat", "pr"])("runs standalone %s review through exact landing", async (review) => {
+async function exactLanding(mode: "chat" | "pr-squash" | "pr-merge"): Promise<void> {
+  const review = mode === "chat" ? "chat" : "pr";
   vi.resetAllMocks();
   const scratch = mkdtempSync(join(tmpdir(), "ck-project-"));
   try {
@@ -208,19 +209,28 @@ it.each(["chat", "pr"])("runs standalone %s review through exact landing", async
       await ok(OWNER, "task", "open-review", TASK);
       expect(forge.create).toHaveBeenCalledWith(expect.objectContaining({ headSha: head }));
 
-      // Simulate the human's squash merge and verify that CI is read against its new SHA.
+      // Simulate the provider merge after a human action and check the exact merge SHA.
       git("checkout", "main");
-      git("merge", "--squash", "task/input");
-      git("commit", "-m", "Human squash merge");
+      if (mode === "pr-squash") {
+        git("merge", "--squash", "task/input");
+        git("commit", "-m", "Human squash merge");
+      } else {
+        git("merge", "--no-ff", "-m", "Human merge commit", "task/input");
+        git("merge-base", "--is-ancestor", head, "HEAD");
+      }
       git("push", "origin", "main");
       const merge = git("rev-parse", "HEAD");
       expect(merge).not.toBe(head);
       forge.read.mockResolvedValue({ ...open, mergeSha: merge, state: "merged" });
-      forge.verifyCi.mockResolvedValueOnce({ sha: merge, state: "pending" });
+      let state = "pending";
+      forge.verifyCi.mockImplementation((sha: string) =>
+        Promise.resolve({ sha, state: sha === merge ? state : "passed" }),
+      );
       expect(JSON.parse(await ok(OWNER, "task", "verify", TASK))).toMatchObject({
+        ci: { sha: merge, state: "pending" },
         task: { mergedSha: merge, state: "merged" },
       });
-      forge.verifyCi.mockResolvedValueOnce({ sha: merge, state: "passed" });
+      state = "passed";
       expect(JSON.parse(await ok(OWNER, "task", "verify", TASK))).toMatchObject({
         task: { mergedSha: merge, state: "landed" },
       });
@@ -233,4 +243,9 @@ it.each(["chat", "pr"])("runs standalone %s review through exact landing", async
   } finally {
     rmSync(scratch, { force: true, recursive: true });
   }
-});
+}
+
+it.each(["chat", "pr-squash", "pr-merge"] as const)(
+  "runs standalone %s review through exact landing",
+  exactLanding,
+);
