@@ -1,5 +1,5 @@
 import type { Store } from "./db.ts";
-import { safeWakeBlocker, safeWakeReason } from "./projections/messageWake.ts";
+import { safeWakeReason, storedWakeBlocker } from "./projections/messageWake.ts";
 import type { MessageState, MessageWakeView, UnreadMessage } from "./types.ts";
 
 type Reader = Pick<Store, "db">;
@@ -43,7 +43,7 @@ const LATEST = `LEFT JOIN message_wakes mw ON mw.message_id = m.id AND mw.seq = 
 ) LEFT JOIN wakes w ON w.id = mw.wake_id`;
 const EVIDENCE = "mw.wake_id, mw.coalesced, w.outcome, w.detail, mw.blocker";
 
-function evidence(to: string, state: MessageState, row?: WakeRow): MessageWakeView {
+function evidence(store: Reader, to: string, state: MessageState, row?: WakeRow): MessageWakeView {
   const wake = row?.wake_id ?? null;
   const storedOutcome = row?.outcome;
   const outcome =
@@ -66,7 +66,7 @@ function evidence(to: string, state: MessageState, row?: WakeRow): MessageWakeVi
           ? "prior-wake-outstanding"
           : safeWakeReason(row?.detail, `wake-${outcome}`);
   const blocker =
-    safeWakeBlocker(row?.blocker == null ? null : JSON.parse(row.blocker), to) ??
+    storedWakeBlocker(store.db, row?.blocker == null ? null : JSON.parse(row.blocker), to) ??
     (wake !== null && outcome !== "accepted" ? { id: wake, kind: "wake", owner: to } : null);
   let nextAction: MessageWakeView["nextAction"] = "none";
   if (state === "sent") {
@@ -97,7 +97,7 @@ export function messageWake(
         .prepare(`SELECT ${EVIDENCE} FROM messages m ${LATEST} WHERE m.id = ?`)
         .get(id) as unknown as WakeRow | undefined)
     : undefined;
-  return evidence(to, state, row);
+  return evidence(store, to, state, row);
 }
 
 /** Earliest exact association, including a coalesced wake that predates this original. */
@@ -117,7 +117,7 @@ export function firstMessageWake(
   if (row === undefined) {
     return null;
   }
-  const { blocker, outcome, reason, wake } = evidence(to, "sent", row);
+  const { blocker, outcome, reason, wake } = evidence(store, to, "sent", row);
   return { blocker, outcome, reason, wake };
 }
 
@@ -131,7 +131,7 @@ export function unreadMessages(store: Reader, role: string | null): UnreadMessag
       from: from_role,
       id,
       to: to_role,
-      wake: evidence(to_role, "sent"),
+      wake: evidence(store, to_role, "sent"),
     }));
   }
   const rows = store.db
@@ -144,6 +144,6 @@ export function unreadMessages(store: Reader, role: string | null): UnreadMessag
     from: row.from_role,
     id: row.id,
     to: row.to_role,
-    wake: evidence(row.to_role, "sent", row),
+    wake: evidence(store, row.to_role, "sent", row),
   }));
 }

@@ -31,9 +31,13 @@ function safeId(value: unknown): value is string {
   return typeof value === "string" && ID.test(value) && secretShape(value) === null;
 }
 
-export function safeWakeBlocker(input: unknown, owner: string): WakeBlocker | null {
+export function safeWakeBlocker(
+  input: unknown,
+  owner: string,
+  policyIssuer?: string,
+): WakeBlocker | null {
   const value = record(input);
-  const blockerOwner = value?.kind === "policy-hold" ? value.owner : owner;
+  const blockerOwner = value?.kind === "policy-hold" ? policyIssuer : owner;
   if (
     value === null ||
     value.owner !== blockerOwner ||
@@ -65,12 +69,25 @@ export function safeWakeBlocker(input: unknown, owner: string): WakeBlocker | nu
   };
 }
 
+export function storedWakeBlocker(
+  db: DatabaseSync,
+  input: unknown,
+  owner: string,
+): WakeBlocker | null {
+  const value = record(input);
+  const issuer =
+    value?.kind === "policy-hold" && safeId(value.id)
+      ? db.prepare("SELECT issuer FROM policy_holds WHERE id = ?").get(value.id)?.issuer
+      : undefined;
+  return safeWakeBlocker(input, owner, typeof issuer === "string" ? issuer : undefined);
+}
+
 function exactMessages(db: DatabaseSync, event: StoredEvent): void {
   const { blocker, messages, role, wake } = event.payload;
   if (!Array.isArray(messages) || typeof role !== "string" || typeof wake !== "string") {
     return;
   }
-  const safe = safeWakeBlocker(blocker, role);
+  const safe = storedWakeBlocker(db, blocker, role);
   const insert = db.prepare(
     `INSERT INTO message_wakes (message_id, wake_id, seq, coalesced, blocker)
      SELECT m.id, ?, ?, ?, ? FROM messages m WHERE m.id = ? AND m.to_role = ?
@@ -99,7 +116,7 @@ export const MESSAGE_WAKE_PROJECTION: Projection = {
       const { blocker, role, wake } = event.payload;
       if (typeof role === "string" && typeof wake === "string") {
         db.prepare("UPDATE message_wakes SET blocker = ? WHERE wake_id = ? AND coalesced = 0").run(
-          encode(safeWakeBlocker(blocker, role)),
+          encode(storedWakeBlocker(db, blocker, role)),
           wake,
         );
       }

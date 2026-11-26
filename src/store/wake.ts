@@ -22,7 +22,12 @@ import type { Harness } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 import { type Store, storeRoot } from "./db.ts";
 import { coalescedMessages } from "./messageWake.ts";
-import { blockerPayload, safeWakeBlocker, safeWakeReason } from "./projections/messageWake.ts";
+import {
+  blockerPayload,
+  safeWakeBlocker,
+  safeWakeReason,
+  storedWakeBlocker,
+} from "./projections/messageWake.ts";
 import { questionHoldGuard } from "./questions.ts";
 import {
   type Actor,
@@ -223,7 +228,7 @@ const claudeWake: WakeAdapter = (context, role, target, wake) => {
   const guard = checkStoreGuard(context, role, target.harness);
   if (guard.status !== "clear") {
     return Promise.resolve({
-      blocker: safeWakeBlocker(guard.blocker, role),
+      blocker: safeWakeBlocker(guard.blocker, role, guard.blocker?.owner),
       detail: safeWakeReason(guard.reason, "store-guard"),
       outcome: "guarded",
     });
@@ -397,7 +402,7 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
         key: `wake.guarded:${wake}`,
         kind: "wake.guarded",
         payload: {
-          blocker: blockerPayload(safeWakeBlocker(guard.blocker, role)),
+          blocker: blockerPayload(storedWakeBlocker(store.db, guard.blocker, role)),
           count,
           harness: target.harness,
           messages,
@@ -445,7 +450,7 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
     key: `wake.completed:${wake}`,
     kind: "wake.completed",
     payload: {
-      blocker: blockerPayload(delivery.blocker),
+      blocker: blockerPayload(storedWakeBlocker(store.db, delivery.blocker, role)),
       detail: delivery.detail,
       outcome: delivery.outcome,
       role,

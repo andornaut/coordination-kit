@@ -18,11 +18,12 @@ describe("per-original wake status", () => {
   it("binds question references to the recipient and policy holds to their issuer", () => {
     const ref = { itemId: "item-17", turnId: "turn-17" };
     const question = { id: "q-art-17", kind: "question", native: ref, owner: ART_ROLE };
-    const policy = { id: "policy-art-pause", kind: "policy-hold", owner: "game-coordinator" };
+    const policy = { id: "policy-art-pause", kind: "policy-hold", owner: "workspace-operator" };
     expect(safeWakeBlocker(question, ART_ROLE)).toEqual(question);
     expect(safeWakeBlocker(question, TECH_ROLE)).toBeNull();
-    expect(safeWakeBlocker(policy, ART_ROLE)).toEqual(policy);
-    expect(safeWakeBlocker({ ...policy, owner: ART_ROLE }, ART_ROLE)).toBeNull();
+    expect(safeWakeBlocker(policy, ART_ROLE)).toBeNull();
+    expect(safeWakeBlocker(policy, ART_ROLE, policy.owner)).toEqual(policy);
+    expect(safeWakeBlocker({ ...policy, owner: ART_ROLE }, ART_ROLE, policy.owner)).toBeNull();
   });
 
   it("keeps a guarded original visible to its recipient and never retries an identical send", async () => {

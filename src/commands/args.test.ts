@@ -115,7 +115,6 @@ describe("the verb wrapper", () => {
       "harness ready",
       "store compaction-plan",
       "store migration-status",
-      "store rebuild",
       "task list",
       "task show",
       "task work-file",
