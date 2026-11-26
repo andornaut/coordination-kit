@@ -1,8 +1,13 @@
-// game-coordinator's committed config.json and the ignored var/ state paths derived from it.
-// Every path in config.json is relative to the game-coordinator root.
+// Committed configuration and ignored state paths for a coordinator or standalone Git project.
 import { resolve } from "node:path";
 
-import { readJson } from "./durable.ts";
+import { readJson, readJsonIfExists } from "./durable.ts";
+import {
+  STANDALONE_CONFIG_FILE,
+  STANDALONE_STATE_DIR,
+  type StandaloneConfig,
+  validateStandaloneConfig,
+} from "./standalone.ts";
 import {
   checkArray,
   checkInteger,
@@ -38,7 +43,7 @@ export interface GameCoordinatorConfig {
 }
 
 export interface Layout {
-  /** Absolute game-coordinator root. */
+  /** Absolute coordination root. */
   readonly root: string;
   readonly config: GameCoordinatorConfig;
   readonly configFile: string;
@@ -49,6 +54,7 @@ export interface Layout {
   readonly handoffsDir: string;
   /** Review and inbox state: snapshots, health history, acknowledgements and retentions. */
   readonly reviewDir: string;
+  readonly project?: StandaloneConfig;
 }
 
 export interface GameLayout {
@@ -134,13 +140,27 @@ export function validateGameCoordinatorConfig(value: unknown): GameCoordinatorCo
 
 export function loadLayout(coordinatorRoot: string): Layout {
   const root = resolve(coordinatorRoot);
-  const configFile = resolve(root, CONFIG_FILE);
-  const config = validateGameCoordinatorConfig(readJson(configFile));
-  const varDir = resolve(root, "var");
+  const standaloneFile = resolve(root, STANDALONE_CONFIG_FILE);
+  const source = readJsonIfExists(standaloneFile);
+  const project = source === undefined ? undefined : validateStandaloneConfig(source);
+  const configFile = project === undefined ? resolve(root, CONFIG_FILE) : standaloneFile;
+  const config: GameCoordinatorConfig =
+    project === undefined
+      ? validateGameCoordinatorConfig(readJson(configFile))
+      : {
+          games: {},
+          kits: {},
+          schema: 1,
+          sharedRoles: project.project.roles,
+          timezone: "UTC",
+          wakeMinutes: [],
+        };
+  const varDir = resolve(root, project === undefined ? "var" : STANDALONE_STATE_DIR);
   return {
     config,
     configFile,
     handoffsDir: resolve(varDir, "handoffs"),
+    ...(project === undefined ? {} : { project }),
     registryFile: resolve(varDir, "registry.json"),
     registryLock: resolve(varDir, "registry.lock"),
     // CLEANUP (added 2026-11-13): Retain persisted review/inbox state until an approved state migration.
