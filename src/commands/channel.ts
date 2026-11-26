@@ -25,8 +25,11 @@ const DEFAULT_POLL_SECONDS = 5;
 
 class ChannelUsage extends Error {}
 
-/** The one reports.recipient the selected (or every) game names, which must be on Claude. */
-function recipientRole(root: string, games: string[] | undefined): string {
+/** The selected games' Claude recipient and its binding at launch. */
+function recipientBinding(
+  root: string,
+  games: string[] | undefined,
+): { conversation: string | null; role: string } {
   const layout = loadLayout(root);
   const recipients = gameRecipients(layout, games ?? Object.keys(layout.config.games));
   if (recipients.length !== 1) {
@@ -51,17 +54,22 @@ function recipientRole(root: string, games: string[] | undefined): string {
   if (resolveHarness(registry, role) !== "claude") {
     throw new Error(`channel requires the claude harness for the recipient ${role}`);
   }
-  return role;
+  return { conversation: resolveConversation(registry, role), role };
+}
+
+interface ChannelBinding {
+  readonly conversation: string;
+  readonly role: string;
 }
 
 /** The one role whose effective Claude conversation is `conversation`, else null. */
-function boundRole(registry: Registry, conversation: string): string | null {
+function boundConversation(registry: Registry, conversation: string): ChannelBinding | null {
   const roles = Object.keys(registry.roles).filter(
     (role) =>
       resolveHarness(registry, role) === "claude" &&
       resolveConversation(registry, role) === conversation,
   );
-  return roles.length === 1 ? (roles[0] as string) : null;
+  return roles.length === 1 ? { conversation, role: roles[0]! } : null;
 }
 
 /** The most /clear steps followed from a launch conversation to a bound one. */
@@ -77,11 +85,11 @@ const STATUS_CHECK_MS = 60_000;
  * old ID. Each step needs exactly one cleared successor in any project directory; none or
  * several stops the walk.
  */
-function lineageRole(
+function lineageBinding(
   registry: Registry,
   projectsDir: string | null,
   conversation: string,
-): string | null {
+): ChannelBinding | null {
   if (projectsDir === null) {
     return null;
   }
@@ -91,9 +99,9 @@ function lineageRole(
     if (next === null) {
       return null;
     }
-    const role = boundRole(registry, next);
-    if (role !== null) {
-      return role;
+    const binding = boundConversation(registry, next);
+    if (binding !== null) {
+      return binding;
     }
     current = next;
   }
@@ -143,6 +151,7 @@ export async function channel(
   const write = options.write ?? writeStdoutLine;
   let conversation: string | undefined;
   let role: string | undefined;
+  let proven: string | null = null;
   let pollSeconds: number;
   try {
     const { values } = parseOptions(SPECS["claude channel"].options, args);
@@ -161,26 +170,40 @@ export async function channel(
       values.game.forEach((game) => gameLayout(layout, game));
     }
     conversation = values.conversation;
-    role = conversation === undefined ? recipientRole(root, values.game) : undefined;
+    if (conversation === undefined) {
+      const recipient = recipientBinding(root, values.game);
+      role = recipient.role;
+      proven = recipient.conversation;
+    }
   } catch (error) {
     const message = errorMessage(error);
     io.err(`coordination-kit: ${message}\n`);
     return error instanceof ChannelUsage || error instanceof Usage ? EXIT_USAGE : EXIT_INVALID;
   }
-  // The conversation the status file names. It is written when the role is known and rewritten
-  // when a later check finds the role rebound, so the file names the binding the channel serves.
-  // Diagnostic only, so a failure never stops the channel.
+  const projectsDir =
+    options.projectsDir === undefined ? claudeProjectsDir(io.env) : options.projectsDir;
+  // Report the last proven binding. A registry replacement alone proves nothing about this
+  // running channel. Status is diagnostic, so a failure never stops the channel.
   let reported: string | undefined;
   let checked: number | undefined;
   let startedAt: string | undefined;
   const report = (layout: Layout, known: string, at: number): void => {
-    if (checked !== undefined && at - checked < STATUS_CHECK_MS) {
+    if (proven === null || (checked !== undefined && at - checked < STATUS_CHECK_MS)) {
       return;
     }
     checked = at;
     try {
-      const current = (resolveConversation(readRegistry(layout), known) ?? conversation) as string;
-      if (current === reported) {
+      const registry = readRegistry(layout);
+      if (
+        resolveHarness(registry, known) === "claude" &&
+        resolveConversation(registry, known) !== proven
+      ) {
+        const successor = lineageBinding(registry, projectsDir, proven);
+        if (successor?.role === known) {
+          proven = successor.conversation;
+        }
+      }
+      if (proven === reported) {
         return;
       }
       const identity = cliIdentity(io.entry);
@@ -188,7 +211,7 @@ export async function channel(
       if (
         writeChannelStatus(layout, {
           argv: process.argv,
-          conversation: current,
+          conversation: proven,
           distSha256: identity.distSha256,
           pid: process.pid,
           role: known,
@@ -197,7 +220,7 @@ export async function channel(
           version: identity.version,
         })
       ) {
-        reported = current;
+        reported = proven;
       }
     } catch {
       // The channel serves without its status file.
@@ -206,8 +229,6 @@ export async function channel(
   // `--conversation` names the role by its binding, else by the binding its /clear lineage
   // reaches, at start or at a later poll that finds one; the role then stays fixed while its
   // binding rotates.
-  const projectsDir =
-    options.projectsDir === undefined ? claudeProjectsDir(io.env) : options.projectsDir;
   const now = options.now ?? Date.now;
   let scanned: number | undefined;
   const locate = (): string => {
@@ -215,15 +236,16 @@ export async function channel(
     const at = now();
     if (role === undefined) {
       const registry = readRegistry(layout);
-      let found = boundRole(registry, conversation!);
+      let found = boundConversation(registry, conversation!);
       if (found === null && (scanned === undefined || at - scanned >= LINEAGE_SCAN_MS)) {
         scanned = at;
-        found = lineageRole(registry, projectsDir, conversation!);
+        found = lineageBinding(registry, projectsDir, conversation!);
       }
       if (found === null) {
         throw new Error(`no single claude role is bound to ${conversation}`);
       }
-      role = found;
+      role = found.role;
+      proven = found.conversation;
     }
     report(layout, role, at);
     return wakeFilePath(layout, role);

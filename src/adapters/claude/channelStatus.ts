@@ -1,6 +1,6 @@
 // The channel server's status file: `<stateRoot>/channel/roles/<role>.json` (or
-// `var/channel/roles/` without a configured state root), written when `claude channel` knows its
-// role and rewritten when it finds the role rebound. It is keyed by role like the wake files, so
+// `var/channel/roles/` without a configured state root), written when `claude channel` resolves
+// its binding and rewritten after it verifies /clear lineage to a replacement. It is keyed by role, so
 // `harness doctor` and the scheduled review find it after a /clear rebind. It names the binding
 // the server serves, the CLI version and dist digest it loaded and its launch command, so both
 // can report what a session is running and whether its channel follows the current binding
@@ -19,7 +19,7 @@ const ROLE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,6
 interface ChannelStatus {
   readonly schema: 2;
   readonly role: string;
-  /** The role's Claude binding when the channel last wrote the file. */
+  /** The last Claude binding the channel proved it serves. */
   readonly conversation: string;
   readonly version: string;
   readonly distSha256: string;

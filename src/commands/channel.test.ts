@@ -355,10 +355,31 @@ describe("claude channel launched with a rotated conversation", () => {
     }
   });
 
-  it("rewrites its status file within the interval after a rebind", async () => {
-    const { dir } = transcripts([[id(0xe1), OLD, "clear"]]);
+  it("keeps its last proven status after an unrelated registry replacement", async () => {
+    const { dir } = transcripts([
+      [id(0xe1), OLD, "clear"],
+      [id(0xe2), id(0xe1), "resume"],
+    ]);
     let clock = 1_000_000;
     const served = await launch(id(0xe1), dir, () => clock);
+    try {
+      const first = readChannelStatus(served.layout, ROLE);
+      expect(first).toMatchObject({ conversation: id(0xe1) });
+      updateRegistry(TEST_CLOCK, served.layout, 2, (draft) => {
+        draft.roles[ROLE]!.conversations.claude = id(0xe2);
+      });
+      clock += 60_000;
+      await served.poll();
+      expect(readChannelStatus(served.layout, ROLE)).toEqual(first);
+    } finally {
+      await served.stop();
+    }
+  });
+
+  it("advances the status file once the registry replacement has verified /clear lineage", async () => {
+    const lineage = transcripts([[id(0xe1), OLD, "clear"]]);
+    let clock = 1_000_000;
+    const served = await launch(id(0xe1), lineage.dir, () => clock);
     try {
       await served.poll();
       const first = readChannelStatus(served.layout, ROLE);
@@ -366,9 +387,13 @@ describe("claude channel launched with a rotated conversation", () => {
       updateRegistry(TEST_CLOCK, served.layout, 2, (draft) => {
         draft.roles[ROLE]!.conversations.claude = id(0xe2);
       });
+      clock += 60_000;
+      await served.poll();
+      expect(readChannelStatus(served.layout, ROLE)).toEqual(first);
+      lineage.add([id(0xe2), id(0xe1), "clear", "-home-user-other"]);
       clock += 60_000 - 1;
       await served.poll();
-      expect(readChannelStatus(served.layout, ROLE)).toMatchObject({ conversation: id(0xe1) });
+      expect(readChannelStatus(served.layout, ROLE)).toEqual(first);
       clock += 1;
       await served.poll();
       expect(readChannelStatus(served.layout, ROLE)).toEqual({

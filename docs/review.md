@@ -262,11 +262,12 @@ payload: the recipient reads its messages with `coordination-kit inbox`.
 ## Channel status file
 
 `claude channel` writes `<stateRoot>/channel/roles/<role>.json` (`var/channel/roles/` without a
-configured state root) when it knows its role, with the conversation bound to the role then. It
-compares the role's binding with the file at most once a minute and rewrites the file with the new
-binding after `session start` rebinds the role after `/clear`; `pid`, `startedAt` and `argv` stay
-those of the running server. A game role's file is `<game>/<role>.json` there. Like the wake file
-it is keyed by role, so `harness doctor` and the scheduled review find it after a rebind:
+configured state root) when it resolves its binding. At most once a minute it checks for a
+replacement. A running channel updates the file only after verifying `/clear` lineage from its
+previously proven conversation to the new binding. An unrelated replacement leaves the earlier
+conversation reported until a channel connects for the new binding. On an update, `pid`,
+`startedAt` and `argv` stay those of the running server. A game role's file is `<game>/<role>.json`
+there. The role is the lookup key for `harness doctor` and the scheduled review:
 
 ```json
 {
