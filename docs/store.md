@@ -299,7 +299,12 @@ that holds no secret is rephrased:
 Every writing verb (`msg send`, `inbox`, `msg done`, `msg retain`, `store import`, the `work`
 writes, `question open|answer|project|cancel|close-legacy`, `hold set|release`, `request close`,
 `store retire --apply`, `session start` and `handoff open|ready|state|active`) identifies its
-caller before opening the store. `inbox --peek` identifies the recipient for its read-only view.
+caller before opening the store. `msg send` accepts `caller-unbound` and `caller-unidentified`
+as a local unbound sender to a registered recipient. It stores `[unbound]` as the sender, keeps
+no native ID or worker attribution, and uses queue intent even when `--intent unblock` was
+supplied. The existing guarded wake and recipient lifecycle apply. Sender identity, work
+authorization and every other command's registry requirements are independent of this queue
+entry. `inbox --peek` identifies the recipient for its read-only view.
 `msg status` and `msg history` also identify the caller when
 passed `--include-body`. The caller is the registry role whose effective harness
 conversation ID equals the caller's native ID. The native ID is `--native-id ID`, else, for each

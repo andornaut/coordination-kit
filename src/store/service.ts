@@ -1,6 +1,5 @@
-// The message verbs as the CLI runs them: resolve the caller through the registry fence, open the
-// store at the layout's root, apply one write, then attempt at most one wake. Every send reads
-// var/registry.json; nothing is cached across calls.
+// The message verbs as the CLI runs them: read the live registry, open the store, apply one
+// write, then attempt at most one wake. Only send can accept a caller without a binding.
 import { randomUUID } from "node:crypto";
 
 import { isCanonicalUuid } from "../core/ids.ts";
@@ -32,6 +31,7 @@ import {
   type MessageView,
   type MessageWakeView,
   StoreError,
+  UNBOUND_MESSAGE_SENDER,
   type UnreadMessage,
 } from "./types.ts";
 import { type WakePorts, wakeRecipient, type WakeStatus } from "./wake.ts";
@@ -80,6 +80,20 @@ function registered(roles: Registry, role: string, code: string): string {
   }
 }
 
+function sender(roles: Registry, env: NodeJS.ProcessEnv, options: CallerOptions): Actor {
+  try {
+    return resolveCaller(roles, env, options);
+  } catch (error) {
+    if (
+      error instanceof StoreError &&
+      (error.code === "caller-unbound" || error.code === "caller-unidentified")
+    ) {
+      return { nativeId: null, role: UNBOUND_MESSAGE_SENDER };
+    }
+    throw error;
+  }
+}
+
 interface SendRequest {
   readonly to: string;
   readonly body: string;
@@ -102,7 +116,7 @@ export async function storeSend(
   request: SendRequest,
 ): Promise<SendOutput> {
   const roles = registry(context);
-  const actor = resolveCaller(roles, context.env, options);
+  const actor = sender(roles, context.env, options);
   const to = registered(roles, request.to, "recipient-unregistered");
   const id = request.id ?? randomUUID();
   if (!isCanonicalUuid(id)) {

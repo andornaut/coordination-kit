@@ -191,17 +191,16 @@ suite("store messages", () => {
     }
   });
 
-  contract("refuses a caller whose native ID is not the role's effective binding", async () => {
+  contract("keeps a caller with a mismatched binding unbound", async () => {
     const ws = workspace();
     configure(ws);
     const command = impl.bare(ws, ["msg", "send", "--to", `${ws.game}/tech`, "--body", "x"]);
     // Art's Codex ID in the Claude variable binds no role.
     command.env = { ...command.env, CLAUDE_CODE_SESSION_ID: ART };
     const result = await execute(command);
-    expect([result.code, result.stdout, result.stderr]).toEqual([
-      1,
-      "",
-      "coordination-kit: caller-unbound\n",
-    ]);
+    expect(result.code, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      message: { from: "[unbound]", intent: "queue", to: `${ws.game}/tech` },
+    });
   });
 });

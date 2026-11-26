@@ -4,7 +4,14 @@ import { isCanonicalUuid } from "../../core/ids.ts";
 import { payloadText as text } from "../eventCodec.ts";
 import { handoffHoldId } from "../projections/handoffs.ts";
 import { WORK_KINDS } from "../projections/work.ts";
-import { type Json, type JsonObject, ROLE, type StoredEvent, StoreError } from "../types.ts";
+import {
+  type Json,
+  type JsonObject,
+  ROLE,
+  type StoredEvent,
+  StoreError,
+  UNBOUND_MESSAGE_SENDER,
+} from "../types.ts";
 
 interface FileRecord {
   readonly path: string;
@@ -200,10 +207,17 @@ function originalMessage(
   const to = text(payload, "to");
   const sender = imported ? registered(context, from) : actorOwner(context, event, from);
   const recipient = registered(context, to);
+  const unbound =
+    from === UNBOUND_MESSAGE_SENDER &&
+    event.actor.role === UNBOUND_MESSAGE_SENDER &&
+    event.actor.nativeId === null &&
+    event.actor.worker === undefined &&
+    payload.intent === "queue" &&
+    payload.worker === null;
   if (owners.messages.has(id)) {
     throw new StoreError("filesystem-record-conflict");
   }
-  if (!imported && sender === null) {
+  if (!imported && sender === null && !unbound) {
     owners.messages.set(id, { recipient: null, sender: null });
     return [quarantine(event, "message-sender-unverified")];
   }

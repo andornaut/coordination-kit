@@ -13,6 +13,7 @@ import { openFileJournal } from "../store/files/journal.ts";
 import { activateMigration, prepareMigration } from "../store/files/migration.ts";
 import { sendMessage } from "../store/messages.ts";
 import { ART, COORDINATOR, GAMEPLAY, storeFixture, TECH } from "../store/testStore.ts";
+import { UNBOUND_MESSAGE_SENDER } from "../store/types.ts";
 
 const ID = "00000000-0000-4000-8000-000000000301";
 const TECH_ROLE = "archies-dog-walks/tech";
@@ -258,16 +259,83 @@ describe("store message commands", () => {
     expect(rebuilt.json).toMatchObject({ events: expect.any(Number), schema: 1, verified: true });
   });
 
-  it("refuses an unbound caller, a non-recipient close, a secret body and an unknown recipient", async () => {
-    const { base, root } = storeFixture();
-    const coordinator = cli(root, base, { CLAUDE_CODE_SESSION_ID: COORDINATOR });
+  it("accepts an unbound queue original and keeps its recipient lifecycle after a filesystem rebuild", async () => {
+    const { base, layout, root } = storeFixture();
+    execFileSync("git", ["-C", root, "init", "-q", "--initial-branch=main"]);
+    writeFileSync(join(root, ".gitignore"), "/var/\n");
+    writeFileSync(
+      join(layout.varDir, "work-protocol.json"),
+      JSON.stringify({ schema: 2, stateRoot: join(base, "external-state") }),
+    );
+    Store.forLayout(TEST_CONTEXT, layout).close();
+    const { receipt } = prepareMigration(
+      TEST_GIT,
+      layout,
+      join(base, "backup.db"),
+      join(base, "restore.db"),
+    );
+    activateMigration(TEST_GIT, layout, receipt.id);
+
+    const claimedId = "00000000-0000-4000-8000-0000000000ff";
+    const recipientRole = "archies-dog-walks/gameplay";
     const stranger = cli(root, base, {
-      CLAUDE_CODE_SESSION_ID: "00000000-0000-4000-8000-0000000000ff",
+      CLAUDE_CODE_SESSION_ID: claimedId,
     });
-    expect(await stranger("msg", "send", "--to", TECH_ROLE, "--body", "x")).toMatchObject({
+    const recipient = cli(root, base, { CLAUDE_CODE_SESSION_ID: GAMEPLAY });
+    const args = ["msg", "send", "--to", recipientRole, "--body", "Original.", "--id", ID];
+    expect(await stranger(...args, "--intent", "unblock", "--worker", "claimed")).toMatchObject({
+      code: EXIT_OK,
+      json: {
+        duplicate: false,
+        message: { from: UNBOUND_MESSAGE_SENDER, intent: "queue", worker: null },
+        wake: { status: "guarded" },
+      },
+    });
+    expect(await cli(root, base, {})(...args)).toMatchObject({
+      code: EXIT_OK,
+      json: { duplicate: true },
+    });
+    expect(await stranger("msg", "status", ID, "--include-body")).toMatchObject({
       code: EXIT_INVALID,
       err: "coordination-kit: caller-unbound\n",
     });
+    expect(await stranger("msg", "done", ID)).toMatchObject({ code: EXIT_INVALID });
+    const opened = Store.forLayout(TEST_CONTEXT, layout);
+    try {
+      expect(opened.eventByKey(`msg.sent:${ID}`)?.actor).toEqual({
+        nativeId: null,
+        role: UNBOUND_MESSAGE_SENDER,
+      });
+      expect(opened.rebuild()).toMatchObject({ events: expect.any(Number) });
+    } finally {
+      opened.close();
+    }
+    expect(await recipient("inbox", "--include-body")).toMatchObject({
+      code: EXIT_OK,
+      json: {
+        delivered: 1,
+        messages: [{ body: "Original.", from: UNBOUND_MESSAGE_SENDER, state: "delivered" }],
+      },
+    });
+    expect(await recipient("msg", "done", ID)).toMatchObject({
+      code: EXIT_OK,
+      json: { message: { state: "handled" } },
+    });
+    const dispositions = join(
+      layout.varDir,
+      "coordination",
+      "roles",
+      encodeURIComponent(recipientRole),
+      "messages",
+      "dispositions",
+      ID,
+    );
+    expect(readdirSync(dispositions)).toHaveLength(3);
+  });
+
+  it("refuses an unidentified inbox, a non-recipient close, a secret body and an unknown recipient", async () => {
+    const { base, root } = storeFixture();
+    const coordinator = cli(root, base, { CLAUDE_CODE_SESSION_ID: COORDINATOR });
     expect(await cli(root, base, {})("inbox")).toMatchObject({
       code: EXIT_INVALID,
       err: "coordination-kit: caller-unidentified\n",
@@ -279,12 +347,14 @@ describe("store message commands", () => {
     });
     writeFileSync(join(base, "key.txt"), ["-----BEGIN RSA", "PRIVATE KEY-----"].join(" "));
     expect(
-      await coordinator("msg", "send", "--to", TECH_ROLE, "--body-file", "key.txt"),
+      await cli(root, base, {})("msg", "send", "--to", TECH_ROLE, "--body-file", "key.txt"),
     ).toMatchObject({
       code: EXIT_INVALID,
       err: "coordination-kit: secret-shaped-body\n",
     });
-    expect(await coordinator("msg", "send", "--to", "kits/unknown", "--body", "x")).toMatchObject({
+    expect(
+      await cli(root, base, {})("msg", "send", "--to", "kits/unknown", "--body", "x"),
+    ).toMatchObject({
       code: EXIT_INVALID,
       err: "coordination-kit: recipient-unregistered\n",
     });

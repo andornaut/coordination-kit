@@ -78,6 +78,8 @@ export const MESSAGE_STATES: readonly MessageState[] = [
   "superseded",
 ];
 export type MessageIntent = "queue" | "unblock";
+/** Sender shown for local queue traffic without a binding, outside the registry role grammar. */
+export const UNBOUND_MESSAGE_SENDER = "[unbound]";
 
 export interface MessageLink {
   readonly kind: string;

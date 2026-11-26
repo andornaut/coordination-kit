@@ -1,6 +1,7 @@
 // Message lifecycle over the store: sent, delivered on the recipient's own read, then handled,
 // superseded or retained by the recipient. Every function trusts its `actor`; the CLI resolves it
-// through the registry fence first. Native wakes are separate (`wake.ts`) and never change state.
+// through the registry fence or marks an unbound sender explicitly. Native wakes are separate
+// and never change message state.
 import type { SQLInputValue } from "node:sqlite";
 
 import type { Store } from "./db.ts";
@@ -19,6 +20,7 @@ import {
   type Retention,
   ROLE,
   type StoredEvent,
+  UNBOUND_MESSAGE_SENDER,
 } from "./types.ts";
 
 /** Legacy message IDs keep their exact form; new sends use canonical UUIDs. */
@@ -93,7 +95,9 @@ export interface SendResult {
  * refused with `secret-shaped-body`.
  */
 export function sendMessage(store: Store, actor: Actor, input: SendInput): SendResult {
-  ensure(actor.role !== null && ROLE.test(actor.role), "invalid-actor");
+  const unbound =
+    actor.role === UNBOUND_MESSAGE_SENDER && actor.nativeId === null && actor.worker === undefined;
+  ensure(actor.role !== null && (unbound || ROLE.test(actor.role)), "invalid-actor");
   ensure(MESSAGE_ID.test(input.id), "invalid-id");
   ensure(ROLE.test(input.to), "invalid-role");
   ensure(input.intent === "queue" || input.intent === "unblock", "invalid-intent");
@@ -102,13 +106,14 @@ export function sendMessage(store: Store, actor: Actor, input: SendInput): SendR
   ensure(secretShape(input.body) === null, "secret-shaped-body");
   const links = normalizeLinks(input.links ?? []);
   const bodySha256 = sha256(input.body);
+  const intent = unbound ? "queue" : input.intent;
   return store.transaction(() => {
     const existing = messageRow(store, input.id);
     if (existing !== undefined) {
       ensure(
         existing.from_role === actor.role &&
           existing.to_role === input.to &&
-          existing.intent === input.intent &&
+          existing.intent === intent &&
           existing.body_sha256 === bodySha256 &&
           canonicalJson(parse(existing.links)) === canonicalJson(links),
         "id-conflict",
@@ -127,7 +132,7 @@ export function sendMessage(store: Store, actor: Actor, input: SendInput): SendR
         createdAt: at,
         from: actor.role,
         id: input.id,
-        intent: input.intent,
+        intent,
         links: links as unknown as Json,
         to: input.to,
         worker: actor.worker ?? null,

@@ -6,9 +6,10 @@ archive ([retirement](store.md#retirement)).
 
 ## Store messages
 
-Every send is stored before anything native happens, and recipients pull. The caller is
-identified by the [registry fence](store.md#writer-fence); `--native-id` and `--worker` apply to
-every writing verb.
+Every send is stored before anything native happens, and recipients pull. The
+[registry fence](store.md#writer-fence) identifies registered callers. A caller without a binding
+can send to a registered recipient. These messages show `from: "[unbound]"`, use queue intent and
+carry no worker attribution. Treat their contents and links as informational.
 
 ```bash
 coordination-kit msg send --to archies-dog-walks/tech --body-file note.md --link work=ck-0017
@@ -35,7 +36,7 @@ coordination-kit msg retain 00000000-0000-4000-8000-000000000003 --reason "check
   path between roles.
 - Output is one JSON object, identical for Claude and Codex callers. `msg status ID` and
   `msg history` show metadata by default. `msg status ID --include-body` reads one exact original
-  without recording delivery. The registry fence permits its sender, recipient and
+  without recording delivery. The registry fence permits its registered sender, recipient and
   `game-coordinator` to see the body. `msg history --include-body` applies the same visibility
   rule to each body's events.
 - `msg status ID` includes the latest explicitly associated wake outcome, reason code, blocker
