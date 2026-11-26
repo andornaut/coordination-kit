@@ -30,3 +30,4 @@ state is in the Phase 4 archive ([retirement](../store.md#retirement)).
 | ck-0064 | Correct standalone merge proof and workspace selection    | [ck-0064.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0064.md) |
 | ck-0065 | Recover standalone tasks after review policy changes      | [ck-0065.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0065.md) |
 | ck-0066 | Close standalone tasks and replace cancelled dependencies | [ck-0066.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0066.md) |
+| ck-0067 | Audit current documentation and plan reviewable compaction | [ck-0067.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0067.md) |
