@@ -35,9 +35,10 @@ See the [upgrade guide](docs/upgrading.md#coordination-kit-73).
 
 Commands resolve game-coordinator from
 `--root DIR`, else `COORDINATION_KIT_ROOT`, else `DELIVERY_KIT_ROOT`, else the working directory.
-`--root` may appear anywhere on the command line, at most once. `--game` is always explicit. The
-`work` commands read `--root` as the repository to inspect (default: the working directory) and
-take the coordinator root only from `COORDINATION_KIT_ROOT` or `DELIVERY_KIT_ROOT`.
+`--root` may appear anywhere on the command line, at most once. Commands that require a game
+take `--game ID`. The `work` commands read `--root` as the repository to inspect and default to
+the working directory. They take the coordinator root only from `COORDINATION_KIT_ROOT` or
+`DELIVERY_KIT_ROOT`.
 
 | Group      | Verbs                                                                                                  | Purpose                                                                                                  |
 | ---------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
