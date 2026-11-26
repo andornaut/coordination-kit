@@ -56,7 +56,15 @@ describe("standalone init", () => {
     expect(existsSync(join(root, ".coordination-kit", "coordination.db"))).toBe(false);
 
     git(root, ["add", "coordination-kit.json", ".gitignore"]);
-    git(root, ["-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "init"]);
+    git(root, [
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.test",
+      "commit",
+      "-qm",
+      "init",
+    ]);
     const parent = mkdtempSync(join(tmpdir(), "standalone-linked-"));
     const linked = join(parent, "worktree");
     git(root, ["worktree", "add", "--detach", linked, "HEAD"]);

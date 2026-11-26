@@ -203,7 +203,9 @@ async function exactLanding(mode: "chat" | "pr-squash" | "pr-merge"): Promise<vo
       writeFileSync(policyFile, JSON.stringify(changed));
       const refusal = { code: 1, err: "coordination-kit: project-review-policy-changed\n" };
       expect(await invoke(OWNER, "task", "open-review", TASK)).toMatchObject(refusal);
-      expect(await invoke(OWNER, "task", "link-review", TASK, "--number", "4")).toMatchObject(refusal);
+      expect(await invoke(OWNER, "task", "link-review", TASK, "--number", "4")).toMatchObject(
+        refusal,
+      );
       expect(forge.create).not.toHaveBeenCalled();
       expect(forge.read).not.toHaveBeenCalled();
       writeFileSync(policyFile, policy);
