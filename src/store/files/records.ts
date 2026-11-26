@@ -4,6 +4,7 @@ import { isCanonicalUuid } from "../../core/ids.ts";
 import { payloadText as text } from "../eventCodec.ts";
 import { handoffHoldId } from "../projections/handoffs.ts";
 import { WORK_KINDS } from "../projections/work.ts";
+import { PROJECT_TASK_KINDS } from "../projectTasks.ts";
 import {
   type Json,
   type JsonObject,
@@ -420,6 +421,13 @@ function eventRecords(
   }
   if (id === null || pathId === null) {
     return [quarantine(event, "record-id-unverified")];
+  }
+  if (PROJECT_TASK_KINDS.has(kind)) {
+    const owner = registered(context, text(payload, "owner"));
+    const reporter = registered(context, event.actor.role);
+    return owner === null || reporter === null || event.actor.nativeId === null
+      ? [quarantine(event, "project-task-owner-or-actor-unverified")]
+      : [roleRecord(context, event, owner, `project-tasks/${pathId}/${sequence}`)];
   }
   switch (kind) {
     case "msg.sent":
