@@ -44,6 +44,34 @@ async function run(handler: Handler, root: string, ...args: string[]) {
 }
 
 describe("standalone init", () => {
+  it("registers a role added to an existing project configuration", async () => {
+    const root = fixture();
+    await run(init, root, "--project", "sample");
+    const config = join(root, "coordination-kit.json");
+    writeFileSync(
+      config,
+      JSON.stringify({
+        project: { id: "sample", roles: ["maintainer", "constructor"] },
+        review: "off",
+        schema: 1,
+      }),
+    );
+    const result = await run(
+      projectRegister,
+      root,
+      "--role",
+      "constructor",
+      "--harness",
+      "codex",
+      "--native-id",
+      REVIEWER,
+    );
+    expect(result).toMatchObject({ code: EXIT_OK, json: { revision: 2, role: "constructor" } });
+    const roles = readRegistry(loadLayout(root)).roles;
+    expect(Object.hasOwn(roles, "constructor")).toBe(true);
+    expect(roles.constructor).toMatchObject({ conversations: { codex: REVIEWER } });
+  });
+
   it("scaffolds scoped Git files, leaves unrelated config and state intact and repeats unchanged", async () => {
     const root = fixture();
     const unrelated = join(root, "config.json");

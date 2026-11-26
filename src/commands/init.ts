@@ -346,7 +346,7 @@ export const projectRegister: Handler = (io, root, args) => {
     if (!layout.config.sharedRoles.includes(role)) {
       throw new Error(`${role}: is not a declared project role`);
     }
-    const binding = current.roles[role];
+    const binding = Object.hasOwn(current.roles, role) ? current.roles[role] : undefined;
     const worktree = qualifyWorktree(git, repo, values.worktree ?? binding?.worktree ?? ".");
     const nativeProjectId = values["native-project-id"] ?? current.host.nativeProjectId;
     const duplicate =
@@ -368,11 +368,10 @@ export const projectRegister: Handler = (io, root, args) => {
       }
       registry = updateRegistry(systemClock, layout, current.revision, (draft) => {
         draft.host.nativeProjectId = nativeProjectId;
-        const entry = (draft.roles[role] ??= {
-          conversations: {},
-          ownership: "active",
-          worktree,
-        });
+        if (!Object.hasOwn(draft.roles, role)) {
+          draft.roles[role] = { conversations: {}, ownership: "active", worktree };
+        }
+        const entry = draft.roles[role]!;
         entry.conversations[harness] = nativeId;
         entry.harness = harness;
         entry.worktree = worktree;
