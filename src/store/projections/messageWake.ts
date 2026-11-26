@@ -33,10 +33,13 @@ function safeId(value: unknown): value is string {
 
 export function safeWakeBlocker(input: unknown, owner: string): WakeBlocker | null {
   const value = record(input);
-  const blockerOwner = value?.kind === "policy-hold" ? "game-coordinator" : owner;
+  const blockerOwner = value?.kind === "policy-hold" ? value.owner : owner;
   if (
     value === null ||
     value.owner !== blockerOwner ||
+    typeof blockerOwner !== "string" ||
+    !ROLE.test(blockerOwner) ||
+    secretShape(blockerOwner) !== null ||
     !ROLE.test(owner) ||
     typeof value.kind !== "string" ||
     !BLOCKER_KINDS.includes(value.kind) ||

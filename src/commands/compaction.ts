@@ -39,6 +39,7 @@ import {
 } from "../store/files/journal.ts";
 import { resolveCaller } from "../store/identity.ts";
 import { MESSAGE_ID } from "../store/messages.ts";
+import { requirePermission } from "../store/permissions.ts";
 import { registry, type StoreServiceContext } from "../store/service.ts";
 import { ROLE, type StoredEvent, StoreError } from "../store/types.ts";
 import { callerOf, required, text, type Values } from "./args.ts";
@@ -202,17 +203,10 @@ function evidence(path: string, events: readonly StoredEvent[]) {
   };
 }
 
-function coordinator(context: StoreServiceContext, values: Values) {
+function maintainer(context: StoreServiceContext, values: Values) {
   const roles = registry(context);
   const actor = resolveCaller(roles, context.env, callerOf(values));
-  const binding = roles.roles[actor.role];
-  if (
-    actor.role !== "game-coordinator" ||
-    binding?.ownership !== "active" ||
-    (binding.phase !== undefined && binding.phase !== "active")
-  ) {
-    throw new StoreError("not-coordinator");
-  }
+  requirePermission(context.layout, roles, actor, "store:maintain");
   return roles;
 }
 
@@ -225,13 +219,13 @@ function files(context: StoreServiceContext) {
   return source;
 }
 
-function coordinatorLock<T>(
+function maintenanceLock<T>(
   context: StoreServiceContext,
   values: Values,
-  action: (roles: ReturnType<typeof coordinator>) => T,
+  action: (roles: ReturnType<typeof maintainer>) => T,
 ): T {
-  coordinator(context, values);
-  return withLock(context.layout.registryLock, () => action(coordinator(context, values)), {
+  maintainer(context, values);
+  return withLock(context.layout.registryLock, () => action(maintainer(context, values)), {
     readOnly: true,
     timeoutSeconds: 5,
   });
@@ -262,7 +256,7 @@ function reservationCommand(cancel: boolean): Handler {
     cancel ? "store compaction-cancel" : "store compaction-reserve",
     cancel ? COMPACTION_CANCEL_OPTIONS : COMPACTION_RESERVATION_OPTIONS,
     (context, values) =>
-      coordinatorLock(context, values, ({ revision }) => {
+      maintenanceLock(context, values, ({ revision }) => {
         const reservation = expectedReservation(values);
         const { baseline, path } = fileCheckpointJournal(files(context).path);
         if (cancel) {
@@ -302,7 +296,7 @@ function operation(context: StoreServiceContext, values: Values) {
   const initial = evidence(proofPath, restoredSource.events);
   function scope(): CompactionScope {
     const current = evidence(proofPath, restoredSource.events);
-    const { revision, roles } = coordinator(context, values);
+    const { revision, roles } = maintainer(context, values);
     if (current.digest !== initial.digest || current.selectors.registryRevision !== revision) {
       throw new StoreError("compaction-evidence-changed");
     }
@@ -354,7 +348,7 @@ export const compactionPrepare: Handler = storeVerb(
   "store compaction-prepare",
   COMPACTION_PREPARE_OPTIONS,
   (context, values) =>
-    coordinatorLock(context, values, () => {
+    maintenanceLock(context, values, () => {
       const input = operation(context, values);
       const { path } = fileCheckpointJournal(input.path);
       if (readFileJournalFence(path) !== undefined) {
@@ -402,7 +396,7 @@ export const compactionActivate: Handler = storeVerb(
     if (!isCanonicalUuid(id) || !reference(approval, REF)) {
       throw new StoreError("compaction-activation-invalid");
     }
-    return coordinatorLock(context, values, () => {
+    return maintenanceLock(context, values, () => {
       const input = operation(context, values);
       const saved = regularJson(input.file);
       if (!isRecord(saved) || !reference(saved.restoreDigest, HEX)) {

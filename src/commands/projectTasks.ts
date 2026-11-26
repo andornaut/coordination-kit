@@ -146,7 +146,8 @@ async function mutate<T>(
         );
         return withStore(context, (store) => {
           ensure(
-            holdGuard(store, actor.role, resolveHarness(roles, actor.role)).status === "clear",
+            holdGuard(store, actor.role, resolveHarness(roles, actor.role), context.layout)
+              .status === "clear",
             "project-role-held",
           );
           return action(store, actor);

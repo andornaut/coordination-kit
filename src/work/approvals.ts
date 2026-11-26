@@ -12,6 +12,7 @@ import type { Repository } from "../status/collect.ts";
 import { MEMORY, READ_ONLY_CLOCK, Store, type StoreContext } from "../store/db.ts";
 import { sha256 } from "../store/eventCodec.ts";
 import { type CallerOptions, resolveCaller } from "../store/identity.ts";
+import { requirePermission } from "../store/permissions.ts";
 import { holdOpen } from "../store/projections/questions.ts";
 import { type Actor, type Json, StoreError, type WorkRef } from "../store/types.ts";
 import {
@@ -29,8 +30,6 @@ import { CONVENTION_FILE, parseFrontMatter } from "../workfiles/files.ts";
 import { type Coordinator, openCoordinator } from "./live.ts";
 
 const APPROVAL_LEDGER_SOURCE = "approval-ledger";
-/** The only role that may import: the approval ledger's sole writer. */
-const IMPORTER = "game-coordinator";
 /** The next boundary of an imported retained item whose ledger entry names none. */
 const DEFAULT_NEXT_BOUNDARY = "next scheduled review";
 
@@ -558,7 +557,7 @@ function applyImport(
 /**
  * Map and import the ledger. A dry run takes no caller and writes nothing; it reads the store when
  * one exists (else an in-memory store) to report which events are already recorded. A real import
- * requires the caller to be game-coordinator.
+ * requires a bound caller with store maintenance permission.
  */
 export function importApprovalLedger(
   context: ApprovalImportContext,
@@ -569,9 +568,7 @@ export function importApprovalLedger(
   let actor: Actor = { nativeId: null, role: null };
   if (!selection.dryRun) {
     actor = resolveCaller(coordinator.registry, context.env, options);
-    if (actor.role !== IMPORTER) {
-      throw new StoreError("not-coordinator");
-    }
+    requirePermission(coordinator.layout, coordinator.registry, actor, "store:maintain");
   }
   const ledger = readApprovalLedger(selection.file);
   const work = new Map<string, RepositoryWork | null>();

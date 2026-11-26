@@ -4,8 +4,8 @@ import { storePath } from "../store/db.ts";
 import { inspectFileAuthority } from "../store/files/authority.ts";
 import { activateMigration, prepareMigration } from "../store/files/migration.ts";
 import { resolveCaller } from "../store/identity.ts";
+import { requirePermission } from "../store/permissions.ts";
 import { registry, type StoreServiceContext } from "../store/service.ts";
-import { StoreError } from "../store/types.ts";
 import { callerOf, required } from "./args.ts";
 import { storeVerb } from "./store.ts";
 
@@ -22,20 +22,13 @@ export const MIGRATION_ACTIVATE_OPTIONS = {
   id: { type: "string" },
 } as const;
 
-function verifyCoordinator(
+function verifyMaintainer(
   context: StoreServiceContext,
   options: ReturnType<typeof callerOf>,
 ): void {
   const roles = registry(context);
   const actor = resolveCaller(roles, context.env, options);
-  const binding = roles.roles[actor.role];
-  if (
-    actor.role !== "game-coordinator" ||
-    binding?.ownership !== "active" ||
-    (binding.phase !== undefined && binding.phase !== "active")
-  ) {
-    throw new StoreError("not-coordinator");
-  }
+  requirePermission(context.layout, roles, actor, "store:maintain");
 }
 
 export const migrationStatus: Handler = storeVerb(
@@ -51,7 +44,7 @@ export const migrationPrepare: Handler = storeVerb(
   "store migration-prepare",
   MIGRATION_PREPARE_OPTIONS,
   (context, values) => {
-    verifyCoordinator(context, callerOf(values));
+    verifyMaintainer(context, callerOf(values));
     return {
       ...prepareMigration(
         systemGit(context.env),
@@ -68,7 +61,7 @@ export const migrationActivate: Handler = storeVerb(
   "store migration-activate",
   MIGRATION_ACTIVATE_OPTIONS,
   (context, values) => {
-    verifyCoordinator(context, callerOf(values));
+    verifyMaintainer(context, callerOf(values));
     return {
       receipt: activateMigration(systemGit(context.env), context.layout, required(values, "id")),
       schema: 1,

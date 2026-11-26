@@ -1,11 +1,14 @@
 import type { SQLInputValue } from "node:sqlite";
 
+import type { Layout } from "../core/layout.ts";
+import { isPermitted } from "../registry/permissions.ts";
+import type { Registry } from "../registry/schema.ts";
 import type { Store } from "./db.ts";
+import { requirePermission } from "./permissions.ts";
 import { secretShape } from "./secrets.ts";
 import { type Actor, ROLE, StoreError, type WorkRef } from "./types.ts";
 import { checkRef } from "./work.ts";
 
-const ISSUER = "game-coordinator";
 const POLICY_ID = /^policy-[a-z0-9][a-z0-9-]{0,120}$/;
 const TOKEN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
@@ -35,13 +38,14 @@ export interface HoldView {
 
 export type PolicyHoldTarget =
   | { readonly kind: "role"; readonly role: string }
+  | { readonly kind: "app"; readonly app: string }
   | { readonly kind: "game"; readonly game: string }
   | ({ readonly kind: "work" } & WorkRef);
 
 export interface PolicyHoldView extends HoldView {
   readonly source: "user-policy";
   readonly policy: {
-    readonly issuer: typeof ISSUER;
+    readonly issuer: string;
     readonly target: PolicyHoldTarget;
     readonly approval: string;
     readonly releaseApproval: string | null;
@@ -55,10 +59,43 @@ export interface PolicyHoldInput {
   readonly scope: string;
 }
 
-function requireIssuer(actor: Actor): void {
-  if (actor.role !== ISSUER || actor.nativeId === null || actor.worker !== undefined) {
-    throw new StoreError("not-coordinator");
+export interface PolicyHoldAuthority {
+  readonly layout: Layout;
+  readonly registry: Registry;
+}
+
+export function requirePolicyIssuer(authority: PolicyHoldAuthority, actor: Actor): void {
+  const { layout, registry } = authority;
+  if (
+    !Object.keys(layout.config.apps).some((app) =>
+      isPermitted(layout, registry, actor, "policy:manage", app),
+    )
+  ) {
+    requirePermission(layout, registry, actor, "policy:manage");
   }
+}
+
+function requireTargetPermission(
+  authority: PolicyHoldAuthority,
+  actor: Actor,
+  target: PolicyHoldTarget,
+): void {
+  const { layout, registry } = authority;
+  const app =
+    target.kind === "app"
+      ? target.app
+      : target.kind === "game"
+        ? target.game
+        : target.kind === "work"
+          ? target.repository
+          : undefined;
+  requirePermission(
+    layout,
+    registry,
+    actor,
+    "policy:manage",
+    app !== undefined && Object.hasOwn(layout.config.apps, app) ? app : undefined,
+  );
 }
 
 function requireId(id: string): void {
@@ -86,6 +123,9 @@ export function policyHoldTarget(scope: string): PolicyHoldTarget {
     if (kind === "game" && TOKEN.test(value)) {
       return { game: value, kind };
     }
+    if (kind === "app" && TOKEN.test(value)) {
+      return { app: value, kind };
+    }
   }
   if (kind === "work" && value !== undefined && id !== undefined && rest.length === 0) {
     return { ...checkRef({ id, repository: value }), kind };
@@ -94,10 +134,20 @@ export function policyHoldTarget(scope: string): PolicyHoldTarget {
 }
 
 /** A work-only policy hold has no effect on a role's inbox wake or session count. */
-export function policyTargetCoversRole(target: PolicyHoldTarget, role: string): boolean {
+export function policyTargetCoversRole(
+  target: PolicyHoldTarget,
+  role: string,
+  layout?: Layout,
+): boolean {
+  if (target.kind === "app") {
+    return layout?.config.apps[target.app]?.roles.includes(role) === true;
+  }
   return (
     (target.kind === "role" && target.role === role) ||
-    (target.kind === "game" && role.startsWith(`${target.game}/`))
+    (target.kind === "game" &&
+      (layout === undefined
+        ? role.startsWith(`${target.game}/`)
+        : layout.config.apps[target.game]?.roles.includes(role) === true))
   );
 }
 
@@ -108,7 +158,7 @@ function policyView(row: Row): PolicyHoldView {
     id: row.id as string,
     policy: {
       approval: row.approval as string,
-      issuer: row.issuer as typeof ISSUER,
+      issuer: row.issuer as string,
       releaseApproval: (row.release_approval as string | null) ?? null,
       target,
     },
@@ -132,13 +182,17 @@ export function policyHoldIdExists(store: Reader, id: string): boolean {
 
 export function setPolicyHold(
   store: Store,
+  authority: PolicyHoldAuthority,
   actor: Actor,
   input: PolicyHoldInput,
 ): { readonly duplicate: boolean; readonly hold: PolicyHoldView } {
-  requireIssuer(actor);
   const { id, scope } = input;
+  const target = policyHoldTarget(scope);
+  requireTargetPermission(authority, actor, target);
+  if (target.kind === "app" && !Object.hasOwn(authority.layout.config.apps, target.app)) {
+    throw new StoreError("policy-app-unregistered");
+  }
   requireId(id);
-  policyHoldTarget(scope);
   const approval = policyText(input.approval, "invalid-approval");
   const reason = policyText(input.reason, "invalid-reason");
   return store.transaction(() => {
@@ -161,7 +215,7 @@ export function setPolicyHold(
       actor,
       key: `hold.policy-set:${id}`,
       kind: "hold.policy-set",
-      payload: { approval, id, issuer: ISSUER, reason, scope },
+      payload: { approval, id, issuer: actor.role, reason, scope },
     });
     return { duplicate: false, hold: policyView(policyRow(store, id)!) };
   });
@@ -169,10 +223,11 @@ export function setPolicyHold(
 
 export function releasePolicyHold(
   store: Store,
+  authority: PolicyHoldAuthority,
   actor: Actor,
   input: { readonly id: string; readonly approval: string },
 ): { readonly duplicate: boolean; readonly hold: PolicyHoldView } {
-  requireIssuer(actor);
+  requirePolicyIssuer(authority, actor);
   const { id } = input;
   requireId(id);
   const approval = policyText(input.approval, "invalid-approval");
@@ -181,6 +236,7 @@ export function releasePolicyHold(
     if (existing === undefined) {
       throw new StoreError("missing");
     }
+    requireTargetPermission(authority, actor, policyHoldTarget(existing.scope as string));
     if (existing.state === "released") {
       if (existing.release_approval !== approval) {
         throw new StoreError("id-conflict");
@@ -191,7 +247,7 @@ export function releasePolicyHold(
       actor,
       key: `hold.policy-released:${id}`,
       kind: "hold.policy-released",
-      payload: { approval, id, issuer: ISSUER },
+      payload: { approval, id, issuer: actor.role },
     });
     return { duplicate: false, hold: policyView(policyRow(store, id)!) };
   });
@@ -218,15 +274,8 @@ export function policyHoldEntries(
   ).map((row) => ({ hold: policyView(row), seq: Number(row.set_seq) }));
 }
 
-export function activePolicyHoldsForRole(store: Reader, role: string): number {
-  const split = role.indexOf("/");
-  return Number(
-    (
-      store.db
-        .prepare(
-          "SELECT count(*) AS n FROM policy_holds WHERE state = 'active' AND scope IN (?, ?)",
-        )
-        .get(`role:${role}`, split === -1 ? "" : `game:${role.slice(0, split)}`) as Row
-    ).n,
-  );
+export function activePolicyHoldsForRole(store: Reader, role: string, layout?: Layout): number {
+  return policyHoldEntries(store, ["active"]).filter(({ hold }) =>
+    policyTargetCoversRole(hold.policy.target, role, layout),
+  ).length;
 }

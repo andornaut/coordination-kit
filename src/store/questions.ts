@@ -4,6 +4,7 @@
 // through the registry fence first, and these functions refuse any other owner's record.
 import type { SQLInputValue } from "node:sqlite";
 
+import type { Layout } from "../core/layout.ts";
 import type { Harness } from "../registry/schema.ts";
 import { type CodexQuestion, normalizeCodexQuestion, readCodexQuestion } from "./codexQuestions.ts";
 import type { Store } from "./db.ts";
@@ -740,6 +741,7 @@ export function releaseHold(store: Store, actor: Actor, id: string): HoldResult 
 export function listHolds(
   store: Pick<Store, "db">,
   filter: { readonly role?: string; readonly states?: readonly HoldState[] } = {},
+  layout?: Layout,
 ): HoldView[] {
   const states = filter.states ?? HOLD_STATES;
   const rows = store.db
@@ -750,7 +752,7 @@ export function listHolds(
     .all(filter.role ?? null, filter.role ?? null, ...states) as Row[];
   const policy = policyHoldEntries(store, states).filter(
     ({ hold }) =>
-      filter.role === undefined || policyTargetCoversRole(hold.policy.target, filter.role),
+      filter.role === undefined || policyTargetCoversRole(hold.policy.target, filter.role, layout),
   );
   return [...rows.map((row) => ({ hold: holdView(row), seq: Number(row.set_seq) })), ...policy]
     .sort((a, b) => a.seq - b.seq)
@@ -768,7 +770,7 @@ type GuardResult = WakeGuard & {
 
 /**
  * The store wake guard for send-time wakes: a recipient with a pending question, an active `role`
- * hold or a policy hold for its exact role or game gets no wake. A wake never answers or clears
+ * hold or a policy hold for its exact role or app gets no wake. A wake never answers or clears
  * either. The scheduled review wakes with `holdGuard` instead, so a pending question delays a
  * wake by at most one review slot.
  */
@@ -776,6 +778,7 @@ export function questionHoldGuard(
   store: Store,
   role: string,
   harness?: string | null,
+  layout?: Layout,
 ): GuardResult {
   const pending = store.db
     .prepare(
@@ -783,7 +786,7 @@ export function questionHoldGuard(
     )
     .get(role) as { id: string } | undefined;
   if (pending === undefined) {
-    return holdGuard(store, role, harness);
+    return holdGuard(store, role, harness, layout);
   }
   const native = readCodexQuestion(store, pending.id)?.native;
   return {
@@ -799,9 +802,14 @@ export function questionHoldGuard(
 }
 
 /** The wake guard without the pending-question check: role holds and policy holds only. */
-export function holdGuard(store: Store, role: string, harness?: string | null): GuardResult {
+export function holdGuard(
+  store: Store,
+  role: string,
+  harness?: string | null,
+  layout?: Layout,
+): GuardResult {
   const policy = policyHoldEntries(store, ["active"]).find(({ hold }) =>
-    policyTargetCoversRole(hold.policy.target, role),
+    policyTargetCoversRole(hold.policy.target, role, layout),
   );
   if (policy !== undefined) {
     return {
@@ -866,6 +874,9 @@ export const storeHolds: HoldLookup = (store, ref, cover) => {
       }
       if (target.kind === "game") {
         return target.game === cover?.game;
+      }
+      if (target.kind === "app") {
+        return target.app === ref.repository;
       }
       return target.id === ref.id && target.repository === ref.repository;
     })

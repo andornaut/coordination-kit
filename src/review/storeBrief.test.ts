@@ -12,7 +12,7 @@ import { EXIT_OK } from "../core/io.ts";
 import { gameLayout, type Layout } from "../core/layout.ts";
 import { stateRoot } from "../core/stateRoot.ts";
 import { clockAt, TEST_CLOCK, TEST_CONTEXT, TEST_GIT, TEST_NOW } from "../core/testFixtures.ts";
-import { updateRegistry } from "../registry/store.ts";
+import { readRegistry, updateRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
 import {
   prepareFileCheckpoint,
@@ -304,6 +304,7 @@ describe("stored review brief", () => {
     const store = Store.forLayout(TEST_CONTEXT, layout);
     setPolicyHold(
       store,
+      { layout, registry: readRegistry(layout) },
       { ...ACTOR, nativeId: COORDINATOR },
       {
         approval: "request-1",

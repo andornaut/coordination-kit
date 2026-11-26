@@ -3,6 +3,7 @@
 import { isCanonicalUuid } from "../../core/ids.ts";
 import { payloadText as text } from "../eventCodec.ts";
 import { handoffHoldId } from "../projections/handoffs.ts";
+import { recordedPolicyIssuer } from "../projections/policyHolds.ts";
 import { WORK_KINDS } from "../projections/work.ts";
 import { PROJECT_TASK_KINDS } from "../projectTasks.ts";
 import {
@@ -415,9 +416,11 @@ function eventRecords(
       : [quarantine(event, "delivery-actor-unverified")];
   }
   if (kind === "store.retired") {
-    return event.actor.role === COORDINATOR
+    // The journal records the bound actor at the authorized write, even if its role is retired.
+    const { nativeId, role, worker } = event.actor;
+    return role !== null && ROLE.test(role) && nativeId !== null && worker === undefined
       ? [coordinatorRecord(event, "cutover")]
-      : [quarantine(event, "coordinator-actor-unverified")];
+      : [quarantine(event, "maintenance-actor-unverified")];
   }
   if (id === null || pathId === null) {
     return [quarantine(event, "record-id-unverified")];
@@ -464,7 +467,7 @@ function eventRecords(
     }
     case "hold.policy-set":
     case "hold.policy-released":
-      return event.actor.role === COORDINATOR && payload.issuer === COORDINATOR
+      return recordedPolicyIssuer(event) !== null
         ? [coordinatorRecord(event, `holds/${pathId}`)]
         : [quarantine(event, "policy-issuer-unverified")];
     case "reminder.claimed":

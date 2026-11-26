@@ -7,6 +7,7 @@ import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
 import { loadLayout } from "../core/layout.ts";
 import { TEST_CONTEXT, TEST_HOST } from "../core/testFixtures.ts";
+import { readRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
 import { releasePolicyHold, setPolicyHold } from "../store/policyHolds.ts";
 import {
@@ -176,11 +177,18 @@ describe("work verbs", () => {
 
   it("checks exact policy targets before start and keeps other work available", () => {
     const fixture = kitFixture();
-    const store = Store.forLayout(TEST_CONTEXT, loadLayout(fixture.root));
+    const layout = loadLayout(fixture.root);
+    const store = Store.forLayout(TEST_CONTEXT, layout);
+    const authority = { layout, registry: readRegistry(layout) };
     const actor = { nativeId: IDS.coordinator, role: ROLES.coordinator };
     const item = (id: string) => ({ id, worktree: fixture.game });
     const set = (id: string, scope: string) =>
-      setPolicyHold(store, actor, { approval: "request-1", id, reason: "User paused.", scope });
+      setPolicyHold(store, authority, actor, {
+        approval: "request-1",
+        id,
+        reason: "User paused.",
+        scope,
+      });
     set("policy-exact", `work:${GAME}:sg-0001`);
     set("policy-game", `game:${GAME}`);
     set("policy-art", `role:${ROLES.art}`);
@@ -193,9 +201,9 @@ describe("work verbs", () => {
     expect(
       workStart(live(fixture, IDS.kit), {}, { id: "sk-0001", worktree: fixture.kit }).record.state,
     ).toBe("started");
-    releasePolicyHold(store, actor, { approval: "request-2", id: "policy-game" });
+    releasePolicyHold(store, authority, actor, { approval: "request-2", id: "policy-game" });
     expect(code(() => workStart(live(fixture, IDS.tech), {}, item("sg-0001")))).toBe("work-held");
-    releasePolicyHold(store, actor, { approval: "request-3", id: "policy-exact" });
+    releasePolicyHold(store, authority, actor, { approval: "request-3", id: "policy-exact" });
     expect(workStart(live(fixture, IDS.tech), {}, item("sg-0001")).record.state).toBe("started");
     expect(code(() => workStart(live(fixture, IDS.art), {}, item("sg-0002")))).toBe("work-held");
     const before = workShow(live(fixture), item("sg-0002")).holds;

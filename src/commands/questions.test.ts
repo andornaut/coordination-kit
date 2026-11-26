@@ -7,8 +7,9 @@ import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
-import { TEST_CLOCK, TEST_CONTEXT } from "../core/testFixtures.ts";
-import { updateRegistry } from "../registry/index.ts";
+import { loadLayout } from "../core/layout.ts";
+import { makeFixture, TEST_CLOCK, TEST_CONTEXT } from "../core/testFixtures.ts";
+import { createRegistry, updateRegistry } from "../registry/index.ts";
 import { dependentQuestions } from "../store/codexQuestions.ts";
 import { Store } from "../store/db.ts";
 import { ART, COORDINATOR, GAME, storeFixture, TECH } from "../store/testStore.ts";
@@ -474,6 +475,103 @@ describe("question commands", () => {
 });
 
 describe("hold commands", () => {
+  it("applies an app policy grant only to its app and wakes only exact configured members on release", async () => {
+    const operatorRole = "workspace-operator";
+    const memberRole = "release-engineer";
+    const decoyRole = "alpha/decoy";
+    const { base, root } = makeFixture();
+    writeFileSync(
+      join(root, "config.json"),
+      JSON.stringify({
+        apps: {
+          alpha: { name: "Alpha", path: "../archies-dog-walks", roles: [memberRole] },
+          beta: { name: "Beta", path: "../chibis-way-home", roles: [decoyRole] },
+        },
+        kits: {},
+        permissions: { [operatorRole]: { apps: { alpha: ["policy:manage"] }, workspace: [] } },
+        schema: 1,
+        sharedRoles: [operatorRole],
+        timezone: "UTC",
+        wakeMinutes: [],
+      }),
+    );
+    const layout = loadLayout(root);
+    createRegistry(TEST_CLOCK, layout, {
+      harness: "claude",
+      host: { nativeProjectId: "project-1", root: "." },
+      operations: {},
+      roles: {
+        [decoyRole]: { conversations: { claude: OTHER }, ownership: "active", worktree: "." },
+        [memberRole]: { conversations: { claude: TECH }, ownership: "active", worktree: "." },
+        [operatorRole]: {
+          conversations: { claude: COORDINATOR },
+          ownership: "active",
+          worktree: ".",
+        },
+      },
+      schema: 1,
+      transfers: [],
+    });
+    const operator = cli(root, base, { CLAUDE_CODE_SESSION_ID: COORDINATOR });
+    const member = cli(root, base, { CLAUDE_CODE_SESSION_ID: TECH });
+    const reader = cli(root, base, {});
+    const set = (scope: string) =>
+      operator(
+        "hold",
+        "policy-set",
+        "--id",
+        "policy-alpha",
+        "--scope",
+        scope,
+        "--reason",
+        "User paused the app.",
+        "--approval",
+        "request-1",
+      );
+    expect((await set("app:beta")).err).toContain("permission-denied");
+    expect((await set(`role:${memberRole}`)).err).toContain("permission-denied");
+    const held = await set("app:alpha");
+    expect(held.code, held.err).toBe(EXIT_OK);
+    expect(held.json).toMatchObject({
+      hold: { policy: { issuer: operatorRole, target: { app: "alpha", kind: "app" } } },
+    });
+    expect((await reader("hold", "list", "--role", memberRole)).json).toMatchObject({
+      holds: [{ id: "policy-alpha" }],
+    });
+    expect((await reader("hold", "list", "--role", decoyRole)).json).toMatchObject({ holds: [] });
+    const sent = await operator("msg", "send", "--to", memberRole, "--body", "Queued work.");
+    expect(sent.json).toMatchObject({
+      wake: { status: "guarded" },
+    });
+    const store = Store.forLayout(TEST_CONTEXT, layout);
+    try {
+      const blocker = store.db.prepare("SELECT blocker FROM message_wakes").get()?.blocker;
+      expect(JSON.parse(String(blocker))).toMatchObject({
+        id: "policy-alpha",
+        owner: operatorRole,
+      });
+    } finally {
+      store.close();
+    }
+    expect((await member("session", "start")).json).toMatchObject({ counts: { holds: 1 } });
+    expect(
+      (await member("hold", "policy-release", "--id", "policy-alpha", "--approval", "request-2"))
+        .err,
+    ).toContain("permission-denied");
+    const released = await operator(
+      "hold",
+      "policy-release",
+      "--id",
+      "policy-alpha",
+      "--approval",
+      "request-2",
+    );
+    expect(released.json).toMatchObject({
+      hold: { state: "released" },
+      wakes: [{ role: memberRole, status: "accepted" }],
+    });
+  });
+
   it("fences set and release to the owner and lists holds", async () => {
     const { coordinator, reader, stranger, tech } = setup();
     expect(

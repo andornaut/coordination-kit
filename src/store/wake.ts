@@ -36,7 +36,12 @@ import {
  * The store question and hold check, run after the registry checks. The default,
  * `questionHoldGuard`, blocks pending questions, recipient role holds and scoped policy holds.
  */
-export type StoreWakeGuard = (store: Store, role: string, harness?: Harness | null) => WakeGuard;
+export type StoreWakeGuard = (
+  store: Store,
+  role: string,
+  harness?: Harness | null,
+  layout?: Layout,
+) => WakeGuard;
 
 /** A guard that passes every recipient, for callers that check questions and holds themselves. */
 export const NO_STORE_GUARD: StoreWakeGuard = () => ({ status: "clear" });
@@ -125,7 +130,12 @@ function sameTarget(layout: Layout, role: string, target: Target): boolean {
 }
 
 function checkStoreGuard(context: WakeContext, role: string, harness: Harness): WakeGuard {
-  return (context.ports?.storeGuard ?? questionHoldGuard)(context.store, role, harness);
+  return (context.ports?.storeGuard ?? questionHoldGuard)(
+    context.store,
+    role,
+    harness,
+    context.layout,
+  );
 }
 
 const SYSTEM: Actor = { nativeId: null, role: null };

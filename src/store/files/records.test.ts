@@ -40,6 +40,38 @@ function recordMap(events: readonly StoredEvent[], context = CONTEXT) {
 }
 
 describe("filesystem role records", () => {
+  it("preserves authorization provenance after a privileged role leaves the registry", () => {
+    const retired = "former-maintainer";
+    const records = recordMap([
+      event(1, "hold.policy-set", retired, {
+        approval: "decision:fixture",
+        id: "policy-task",
+        issuer: retired,
+        reason: "User paused.",
+        scope: `role:${TECH}`,
+      }),
+      event(2, "hold.policy-released", retired, {
+        approval: "decision:fixture-release",
+        id: "policy-task",
+        issuer: retired,
+      }),
+      event(3, "store.retired", retired, {}),
+      event(4, "hold.policy-set", TECH, { id: "policy-invalid", issuer: retired }),
+      event(5, "store.retired", retired, {}, { nativeId: null }),
+    ]);
+    expect(Object.keys(records)).toEqual([
+      "coordinator/holds/policy-task/1.json",
+      "coordinator/holds/policy-task/2.json",
+      "coordinator/cutover/3.json",
+      "legacy/quarantine/4.json",
+      "legacy/quarantine/5.json",
+    ]);
+    expect(records["coordinator/holds/policy-task/1.json"]).toMatchObject({
+      actor: { role: retired },
+      payload: { approval: "decision:fixture", issuer: retired },
+    });
+  });
+
   it("keeps exact sender originals and one body-free recipient disposition per transition", () => {
     const id = "legacy:123";
     const payload = { body: "Imported.", from: ART, id, state: "delivered", to: TECH };

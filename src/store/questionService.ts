@@ -22,6 +22,7 @@ import {
   policyHoldTarget,
   policyTargetCoversRole,
   releasePolicyHold,
+  requirePolicyIssuer,
   setPolicyHold,
 } from "./policyHolds.ts";
 import {
@@ -330,19 +331,10 @@ export async function storeHoldRelease(
 }
 
 function policyIssuer(context: StoreServiceContext, options: CallerOptions) {
-  const roles = registry(context);
-  const actor = resolveCaller(roles, context.env, options);
-  const binding = roles.roles[actor.role]!;
-  if (
-    actor.role !== "game-coordinator" ||
-    actor.worker !== undefined ||
-    binding.ownership !== "active" ||
-    binding.phase === "held" ||
-    binding.phase === "source-held"
-  ) {
-    throw new StoreError("not-coordinator");
-  }
-  return { actor, roles };
+  const authority = { layout: context.layout, registry: registry(context) };
+  const actor = resolveCaller(authority.registry, context.env, options);
+  requirePolicyIssuer(authority, actor);
+  return { actor, authority };
 }
 
 export async function storePolicyHoldSet(
@@ -350,24 +342,31 @@ export async function storePolicyHoldSet(
   options: CallerOptions,
   request: PolicyHoldInput,
 ): Promise<HoldOutput> {
-  const { actor, roles } = policyIssuer(context, options);
+  const { actor, authority } = policyIssuer(context, options);
   const target = policyHoldTarget(request.scope);
-  const { games, kits } = context.layout.config;
-  if (target.kind === "role" && !Object.hasOwn(roles.roles, target.role)) {
+  const { apps, games, kits } = context.layout.config;
+  if (target.kind === "role" && !Object.hasOwn(authority.registry.roles, target.role)) {
     throw new StoreError("policy-role-unregistered");
+  }
+  if (target.kind === "app" && !Object.hasOwn(apps, target.app)) {
+    throw new StoreError("policy-app-unregistered");
   }
   if (target.kind === "game" && !Object.hasOwn(games, target.game)) {
     throw new StoreError("policy-game-unregistered");
   }
   if (
     target.kind === "work" &&
-    target.repository !== "game-coordinator" &&
+    !(context.layout.mode === "legacy" && target.repository === "game-coordinator") &&
+    target.repository !== context.layout.project?.project.id &&
     !Object.hasOwn(games, target.repository) &&
     !Object.hasOwn(kits, target.repository)
   ) {
     throw new StoreError("policy-repository-unregistered");
   }
-  return withStore(context, (store) => ({ ...setPolicyHold(store, actor, request), schema: 1 }));
+  return withStore(context, (store) => ({
+    ...setPolicyHold(store, authority, actor, request),
+    schema: 1,
+  }));
 }
 
 export async function storePolicyHoldRelease(
@@ -379,12 +378,12 @@ export async function storePolicyHoldRelease(
     readonly wakes: readonly { readonly role: string; readonly status: WakeStatus }[];
   }
 > {
-  const { actor, roles } = policyIssuer(context, options);
+  const { actor, authority } = policyIssuer(context, options);
   return withStore(context, async (store) => {
-    const result = releasePolicyHold(store, actor, request);
-    const targets = Object.keys(roles.roles)
+    const result = releasePolicyHold(store, authority, actor, request);
+    const targets = Object.keys(authority.registry.roles)
       .sort()
-      .filter((role) => policyTargetCoversRole(result.hold.policy.target, role));
+      .filter((role) => policyTargetCoversRole(result.hold.policy.target, role, context.layout));
     const wakes = await Promise.all(
       targets.map(async (role) => ({ role, ...(await wakeOwner(context, store, role)) })),
     );
@@ -396,9 +395,13 @@ export async function storeHoldList(
   context: StoreServiceContext,
   filter: { readonly role?: string; readonly states?: readonly HoldState[] },
 ): Promise<{ readonly schema: 1; readonly holds: readonly HoldView[] }> {
-  return withStore(context, (store) => ({ holds: listHolds(store, filter), schema: 1 as const }), {
-    createMissing: false,
-  });
+  return withStore(
+    context,
+    (store) => ({ holds: listHolds(store, filter, context.layout), schema: 1 as const }),
+    {
+      createMissing: false,
+    },
+  );
 }
 
 export async function storeDecisionList(

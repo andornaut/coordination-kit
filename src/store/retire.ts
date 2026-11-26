@@ -22,6 +22,7 @@ import { stateRoot } from "../core/stateRoot.ts";
 import { Store } from "./db.ts";
 import { sha256 } from "./eventCodec.ts";
 import { type CallerOptions, resolveCaller } from "./identity.ts";
+import { requirePermission } from "./permissions.ts";
 import { importRequest, type RequestImport } from "./requests.ts";
 import { registry, type StoreServiceContext } from "./service.ts";
 import { type Actor, type JsonObject, StoreError } from "./types.ts";
@@ -245,9 +246,8 @@ interface RetireOptions {
 }
 
 /**
- * The retirement. A dry run takes no caller and writes nothing. An apply requires the caller to be
- * game-coordinator through the registry fence, then archives, writes the manifest and records the
- * imports and `store.retired` in one transaction.
+ * The retirement. A dry run takes no caller and writes nothing. An apply requires a bound caller
+ * with store maintenance permission, then archives and records the imports and retirement.
  */
 export async function storeRetire(
   context: StoreServiceContext,
@@ -256,10 +256,9 @@ export async function storeRetire(
 ): Promise<RetireOutput> {
   let actor: Actor = { nativeId: null, role: null };
   if (options.apply) {
-    actor = resolveCaller(registry(context), context.env, callerOptions);
-    if (actor.role !== COORDINATOR_ROLE) {
-      throw new StoreError("not-coordinator");
-    }
+    const roles = registry(context);
+    actor = resolveCaller(roles, context.env, callerOptions);
+    requirePermission(context.layout, roles, actor, "store:maintain");
   }
   const root = stateRoot(context.layout);
   // The UTC date of the archive name.

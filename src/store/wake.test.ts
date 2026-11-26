@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { wakeFilePath } from "../adapters/claude/wakeFile.ts";
 import { NativeTimeout, RpcError } from "../adapters/codex/rpc.ts";
 import { TEST_CLOCK, TEST_CONTEXT } from "../core/testFixtures.ts";
-import { updateRegistry } from "../registry/store.ts";
+import { readRegistry, updateRegistry } from "../registry/store.ts";
 import { Store } from "./db.ts";
 import { readInbox, sendMessage } from "./messages.ts";
 import { messageWake } from "./messageWake.ts";
@@ -246,7 +246,7 @@ describe("Codex wakes", () => {
     const { layout, send, store } = setup({
       connect: () => {
         const writer = Store.forLayout(TEST_CONTEXT, layout);
-        setPolicyHold(writer, SENDER, {
+        setPolicyHold(writer, { layout, registry: readRegistry(layout) }, SENDER, {
           approval: "request-1",
           id: "policy-art",
           reason: "User paused.",
