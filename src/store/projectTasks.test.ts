@@ -157,6 +157,159 @@ describe("standalone project tasks", () => {
     ).toBeNull();
   });
 
+  it("starts a distinct same-head review attempt even when the previous check policy returns", () => {
+    begin(store, "change");
+    const policyA = { ...candidate(), targetPolicySha: "f".repeat(64) };
+    const policyB = { ...policyA, policySha: "1".repeat(64) };
+    const initial = readyProjectTask(store, OWNER, "change", policyA).task;
+    approveProjectReview(store, MAINTAINER, "change", FIRST, REVIEW_APPROVAL);
+    expect(() => readyProjectTask(store, OWNER, "change", policyB)).toThrow(
+      "project-candidate-conflict",
+    );
+    expect(() =>
+      readyProjectTask(store, OWNER, "change", { ...policyB, baseSha: SECOND }, true),
+    ).toThrow("project-candidate-conflict");
+    expect(() =>
+      readyProjectTask(store, OWNER, "change", { ...policyB, branch: "changed/branch" }, true),
+    ).toThrow("project-candidate-conflict");
+    expect(() =>
+      readyProjectTask(store, OWNER, "change", { ...policyB, headSha: SECOND }, true),
+    ).toThrow("project-policy-refresh-head-mismatch");
+    expect(() => readyProjectTask(store, MAINTAINER, "change", policyB, true)).toThrow("not-owner");
+    expect(() =>
+      readyProjectTask(store, OWNER, "change", { ...policyB, targetPolicySha: "short" }, true),
+    ).toThrow("invalid-project-target-policy-sha");
+
+    const refreshed = readyProjectTask(store, OWNER, "change", policyB, true).task;
+    expect(refreshed).toMatchObject({
+      candidate: policyB,
+      requiresRevisionApproval: true,
+      reviewApproval: null,
+      reviewRequest: null,
+      state: "ready",
+    });
+    expect(refreshed.candidateRevision).not.toEqual(initial.candidateRevision);
+    expect(readyProjectTask(store, OWNER, "change", policyB, true).duplicate).toBe(true);
+    expect(() => mergeProjectTask(store, OWNER, "change", FIRST, MERGED)).toThrow(
+      "project-review-not-approved",
+    );
+    expect(() => approveProjectReview(store, MAINTAINER, "change", FIRST, REVIEW_APPROVAL)).toThrow(
+      "project-candidate-revision-mismatch",
+    );
+    expect(() =>
+      approveProjectReview(
+        store,
+        MAINTAINER,
+        "change",
+        FIRST,
+        REVIEW_APPROVAL,
+        refreshed.candidateRevision!,
+      ),
+    ).toThrow("project-review-approval-reused");
+    const approvalB = { ...REVIEW_APPROVAL, ref: "conversation:fixture/message-b" };
+    approveProjectReview(
+      store,
+      MAINTAINER,
+      "change",
+      FIRST,
+      approvalB,
+      refreshed.candidateRevision!,
+    );
+
+    const restored = readyProjectTask(store, OWNER, "change", policyA, true).task;
+    expect(restored.candidateRevision).not.toEqual(initial.candidateRevision);
+    expect(restored.candidateRevision).not.toEqual(refreshed.candidateRevision);
+    expect(() =>
+      approveProjectReview(
+        store,
+        MAINTAINER,
+        "change",
+        FIRST,
+        approvalB,
+        refreshed.candidateRevision!,
+      ),
+    ).toThrow("project-candidate-revision-mismatch");
+    const fresh = { ...REVIEW_APPROVAL, ref: "conversation:fixture/message-a" };
+    const approved = approveProjectReview(
+      store,
+      MAINTAINER,
+      "change",
+      FIRST,
+      fresh,
+      restored.candidateRevision!,
+    );
+    expect(approved.task.reviewApproval?.candidateRevision).toEqual(restored.candidateRevision);
+    expect(
+      approveProjectReview(store, MAINTAINER, "change", FIRST, fresh, restored.candidateRevision!)
+        .duplicate,
+    ).toBe(true);
+    mergeProjectTask(store, OWNER, "change", FIRST, MERGED);
+    expect(() => readyProjectTask(store, OWNER, "change", policyB, true)).toThrow(
+      "project-task-not-ready",
+    );
+    const landed = landProjectTask(store, OWNER, "change", FIRST, MERGED, EVIDENCE).task;
+    store.rebuild();
+    expect(readProjectTask(store.db, "change")).toEqual(landed);
+  });
+
+  it("allows a new PR link after an explicit same-head policy refresh", () => {
+    begin(store, "change");
+    const original = candidate(FIRST, "pr");
+    readyProjectTask(store, OWNER, "change", original);
+    const previous = linkProjectReview(store, OWNER, "change", FIRST, {
+      number: 7,
+      url: "https://example.invalid/project/pull/7",
+    });
+    const changed = readyProjectTask(
+      store,
+      OWNER,
+      "change",
+      { ...original, policySha: "1".repeat(64) },
+      true,
+    ).task;
+    expect(changed.reviewRequest).toBeNull();
+    expect(() => mergeProjectTask(store, OWNER, "change", FIRST, MERGED)).toThrow(
+      "project-review-not-linked",
+    );
+    const current = linkProjectReview(store, OWNER, "change", FIRST, {
+      number: 8,
+      url: "https://example.invalid/project/pull/8",
+    });
+    expect(current.task.reviewRequest).toMatchObject({
+      candidateRevision: changed.candidateRevision,
+      number: 8,
+    });
+    expect(previous.task.reviewRequest?.candidateRevision).not.toEqual(
+      current.task.reviewRequest?.candidateRevision,
+    );
+    mergeProjectTask(store, OWNER, "change", FIRST, MERGED);
+    expect(landProjectTask(store, OWNER, "change", FIRST, MERGED, EVIDENCE).task.state).toBe(
+      "landed",
+    );
+  });
+
+  it("recovers candidate and review revisions from a legacy query projection", () => {
+    begin(store, "change");
+    readyProjectTask(store, OWNER, "change", candidate());
+    const expected = approveProjectReview(store, MAINTAINER, "change", FIRST, REVIEW_APPROVAL).task;
+    store.db
+      .prepare(
+        `UPDATE project_tasks
+      SET record = json_set(
+        json_remove(record, '$.requiresRevisionApproval', '$.reviewApproval.candidateRevision'),
+        '$.candidateRevision', NULL
+      ) WHERE id = ?`,
+      )
+      .run("change");
+
+    expect(readProjectTask(store.db, "change")).toEqual(expected);
+    expect(readyProjectTask(store, OWNER, "change", candidate()).duplicate).toBe(true);
+    expect(
+      approveProjectReview(store, MAINTAINER, "change", FIRST, REVIEW_APPROVAL).duplicate,
+    ).toBe(true);
+    expect(mergeProjectTask(store, OWNER, "change", FIRST, MERGED).task.state).toBe("merged");
+  });
+
   it("projects role-owned records and restores task events unchanged through a checkpoint", () => {
     begin(store, "change");
     readyProjectTask(store, OWNER, "change", candidate(FIRST, "off"));

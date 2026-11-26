@@ -38,6 +38,7 @@ export interface ProjectTaskCandidate {
   readonly baseSha: string;
   readonly headSha: string;
   readonly policySha: string;
+  readonly targetPolicySha?: string;
   readonly branch: string;
   readonly summary: string;
   readonly evidence: string;
@@ -56,11 +57,18 @@ export interface ProjectTask extends ProjectTaskProposal {
   readonly approval: ApprovalReceipt | null;
   readonly start: Receipt | null;
   readonly candidate: ProjectTaskCandidate | null;
-  readonly reviewApproval: (ApprovalReceipt & { readonly headSha: string }) | null;
-  readonly reviewRequest: (ProjectReviewLink & Receipt & { readonly headSha: string }) | null;
+  readonly candidateRevision: string | null;
+  readonly requiresRevisionApproval: boolean;
+  readonly reviewApproval: (ApprovalReceipt & CandidateReceipt) | null;
+  readonly reviewRequest: (ProjectReviewLink & Receipt & CandidateReceipt) | null;
   readonly mergedSha: string | null;
   readonly landingEvidence: string | null;
   readonly updatedAt: string;
+}
+
+interface CandidateReceipt {
+  readonly headSha: string;
+  readonly candidateRevision: string;
 }
 
 interface TaskWrite {
@@ -70,6 +78,7 @@ interface TaskWrite {
 
 const TASK_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const FULL_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+const SHA256 = /^[0-9a-f]{64}$/;
 const EVENT = {
   approved: "project-task.approved",
   landed: "project-task.landed",
@@ -90,19 +99,54 @@ CREATE TABLE IF NOT EXISTS project_tasks (
 );
 `;
 
-function taskRow(row: { record?: unknown } | undefined): ProjectTask | null {
-  return row === undefined ? null : (JSON.parse(row.record as string) as ProjectTask);
+function taskRow(db: DatabaseSync, row: { record?: unknown } | undefined): ProjectTask | null {
+  if (row === undefined) {
+    return null;
+  }
+  const task = JSON.parse(row.record as string) as ProjectTask;
+  if (
+    task.candidateRevision != null ||
+    (task.candidate === null && task.candidateRevision === null)
+  ) {
+    return task;
+  }
+  // Compatibility for an existing SQLite projection built before ready attempts carried revisions.
+  const previous =
+    task.candidate === null
+      ? undefined
+      : db
+          .prepare(
+            `SELECT hash, json_extract(payload, '$.policyRefresh') AS refreshed FROM events
+                  WHERE kind = ? AND json_extract(payload, '$.id') = ?
+                    AND json_extract(payload, '$.candidate.headSha') = ?
+                  ORDER BY seq DESC LIMIT 1`,
+          )
+          .get(EVENT.ready, task.id, task.candidate.headSha);
+  const candidateRevision = (previous?.hash as string | undefined) ?? null;
+  return {
+    ...task,
+    candidateRevision,
+    requiresRevisionApproval: previous?.refreshed === 1,
+    ...(candidateRevision === null
+      ? {}
+      : {
+          reviewApproval:
+            task.reviewApproval === null ? null : { ...task.reviewApproval, candidateRevision },
+          reviewRequest:
+            task.reviewRequest === null ? null : { ...task.reviewRequest, candidateRevision },
+        }),
+  };
 }
 
 export function readProjectTask(db: DatabaseSync, id: string): ProjectTask | null {
-  return taskRow(db.prepare("SELECT record FROM project_tasks WHERE id = ?").get(id));
+  return taskRow(db, db.prepare("SELECT record FROM project_tasks WHERE id = ?").get(id));
 }
 
 export function listProjectTasks(db: DatabaseSync): ProjectTask[] {
   return db
     .prepare("SELECT record FROM project_tasks ORDER BY id")
     .all()
-    .map((row) => taskRow(row)!);
+    .map((row) => taskRow(db, row)!);
 }
 
 function requiredTask(db: DatabaseSync, id: string): ProjectTask {
@@ -132,12 +176,14 @@ function applyTask(db: DatabaseSync, event: StoredEvent): void {
     const task: ProjectTask = {
       approval: null,
       candidate: null,
+      candidateRevision: null,
       dependsOn: payload.dependsOn as string[],
       id,
       landingEvidence: null,
       mergedSha: null,
       owner: payload.owner as string,
       proposal: receipt,
+      requiresRevisionApproval: false,
       reviewApproval: null,
       reviewRequest: null,
       scope: payload.scope as string,
@@ -152,12 +198,18 @@ function applyTask(db: DatabaseSync, event: StoredEvent): void {
     );
     return;
   }
-  const patch = taskUpdate(event.kind, payload, receipt);
-  const task = { ...requiredTask(db, id), ...patch, updatedAt: event.at };
+  const previous = requiredTask(db, id);
+  const patch = taskUpdate(event, previous, receipt);
+  const task = { ...previous, ...patch, updatedAt: event.at };
   db.prepare("UPDATE project_tasks SET record = ? WHERE id = ?").run(JSON.stringify(task), id);
 }
 
-function taskUpdate(kind: string, payload: JsonObject, receipt: Receipt): Partial<ProjectTask> {
+function taskUpdate(
+  event: StoredEvent,
+  previous: ProjectTask,
+  receipt: Receipt,
+): Partial<ProjectTask> {
+  const { kind, payload } = event;
   const approval = (payload.approval ?? {}) as JsonObject;
   const approvalReceipt = {
     ...receipt,
@@ -172,18 +224,27 @@ function taskUpdate(kind: string, payload: JsonObject, receipt: Receipt): Partia
     case EVENT.ready:
       return {
         candidate: payload.candidate as unknown as ProjectTaskCandidate,
+        candidateRevision: event.hash,
         landingEvidence: null,
         mergedSha: null,
+        requiresRevisionApproval: payload.policyRefresh === true,
         reviewApproval: null,
         reviewRequest: null,
         state: "ready",
       };
     case EVENT.reviewApproved:
-      return { reviewApproval: { ...approvalReceipt, headSha: payload.headSha as string } };
+      return {
+        reviewApproval: {
+          ...approvalReceipt,
+          candidateRevision: revisionOf(previous),
+          headSha: payload.headSha as string,
+        },
+      };
     case EVENT.reviewLinked:
       return {
         reviewRequest: {
           ...receipt,
+          candidateRevision: revisionOf(previous),
           headSha: payload.headSha as string,
           number: payload.number as number,
           url: payload.url as string,
@@ -210,9 +271,9 @@ function change(
   kind: TaskEventKind,
   task: { readonly id: string; readonly owner: string },
   payload: JsonObject = {},
-  headSha?: string,
+  keySuffix?: string,
 ): TaskWrite {
-  const key = `${kind}:${task.id}${headSha === undefined ? "" : `:${headSha}`}`;
+  const key = `${kind}:${task.id}${keySuffix === undefined ? "" : `:${keySuffix}`}`;
   ensure(store.eventByKey(key) === undefined, "project-task-transition-conflict");
   store.append({ actor, key, kind, payload: { ...payload, id: task.id, owner: task.owner } });
   return { duplicate: false, task: requiredTask(store.db, task.id) };
@@ -305,12 +366,16 @@ export function startProjectTask(store: Store, actor: Actor, id: string): TaskWr
 }
 
 function checkedCandidate(candidate: ProjectTaskCandidate): JsonObject {
-  const { baseSha, headSha, policySha, review } = candidate;
+  const { baseSha, headSha, policySha, review, targetPolicySha } = candidate;
   ensure(
     FULL_SHA.test(baseSha) && FULL_SHA.test(headSha) && baseSha !== headSha,
     "invalid-project-task-sha",
   );
-  ensure(/^[0-9a-f]{64}$/.test(policySha), "invalid-project-policy-sha");
+  ensure(SHA256.test(policySha), "invalid-project-policy-sha");
+  ensure(
+    targetPolicySha === undefined || SHA256.test(targetPolicySha),
+    "invalid-project-target-policy-sha",
+  );
   ensure(review === "off" || review === "chat" || review === "pr", "invalid-project-review-policy");
   return {
     baseSha,
@@ -320,6 +385,7 @@ function checkedCandidate(candidate: ProjectTaskCandidate): JsonObject {
     policySha,
     review,
     summary: workText(candidate.summary, "invalid-project-task-summary"),
+    ...(targetPolicySha === undefined ? {} : { targetPolicySha }),
   };
 }
 
@@ -328,19 +394,37 @@ export function readyProjectTask(
   actor: Actor,
   id: string,
   input: ProjectTaskCandidate,
+  refreshPolicy = false,
 ): TaskWrite {
   bound(actor);
   const candidate = checkedCandidate(input);
   return store.transaction(() => {
     const task = requiredTask(store.db, id);
     ensure(task.owner === actor.role, "not-owner");
-    if (task.candidate?.headSha === input.headSha) {
+    const previous = task.candidate;
+    if (previous?.headSha === input.headSha) {
+      if (canonicalJson(previous) === canonicalJson(candidate)) {
+        return duplicate(task);
+      }
       ensure(
-        canonicalJson(task.candidate) === canonicalJson(candidate),
+        refreshPolicy &&
+          previous.policySha !== input.policySha &&
+          previous.baseSha === input.baseSha &&
+          previous.branch === input.branch,
         "project-candidate-conflict",
       );
-      return duplicate(task);
+      ensure(task.state === "ready", "project-task-not-ready");
+      // A policy can recur for the same head, so its digest is not an attempt identity.
+      return change(
+        store,
+        actor,
+        EVENT.ready,
+        task,
+        { candidate, policyRefresh: true },
+        `${input.headSha}:${store.head().seq + 1}`,
+      );
     }
+    ensure(!refreshPolicy, "project-policy-refresh-head-mismatch");
     ensure(
       task.state === "in-progress" || task.state === "ready" || task.state === "merged",
       "project-task-not-started",
@@ -355,24 +439,60 @@ function candidateFor(task: ProjectTask, headSha: string): ProjectTaskCandidate 
   return task.candidate;
 }
 
+function revisionOf(task: ProjectTask): string {
+  ensure(task.candidateRevision !== null, "project-candidate-revision-missing");
+  return task.candidateRevision;
+}
+
+function attemptKey(task: ProjectTask, headSha: string): string {
+  return task.requiresRevisionApproval ? `revision:${revisionOf(task)}` : headSha;
+}
+
+function requireFreshApproval(store: Store, task: ProjectTask, headSha: string, ref: string): void {
+  const previous = store.db
+    .prepare(
+      `SELECT 1 FROM events
+              WHERE kind = ? AND json_extract(payload, '$.id') = ?
+                AND json_extract(payload, '$.headSha') = ?
+                AND json_extract(payload, '$.approval.ref') = ?
+              LIMIT 1`,
+    )
+    .get(EVENT.reviewApproved, task.id, headSha, ref);
+  ensure(previous === undefined, "project-review-approval-reused");
+}
+
 export function approveProjectReview(
   store: Store,
   actor: Actor,
   id: string,
   headSha: string,
   input: ProjectApproval,
+  revision?: string,
 ): TaskWrite {
   bound(actor);
   const approval = checkedApproval(input);
   return store.transaction(() => {
     const task = requiredTask(store.db, id);
     ensure(candidateFor(task, headSha).review !== "off", "project-review-disabled");
+    if (task.requiresRevisionApproval || revision !== undefined) {
+      ensure(revision === revisionOf(task), "project-candidate-revision-mismatch");
+    }
     if (task.reviewApproval !== null) {
       ensure(sameApproval(task.reviewApproval, input), "project-review-approval-conflict");
       return duplicate(task);
     }
     ensure(task.state === "ready", "project-task-not-ready");
-    return change(store, actor, EVENT.reviewApproved, task, { approval, headSha }, headSha);
+    if (task.requiresRevisionApproval) {
+      requireFreshApproval(store, task, headSha, input.ref);
+    }
+    return change(
+      store,
+      actor,
+      EVENT.reviewApproved,
+      task,
+      { approval, headSha },
+      attemptKey(task, headSha),
+    );
   });
 }
 
@@ -403,7 +523,7 @@ export function linkProjectReview(
       EVENT.reviewLinked,
       task,
       { headSha, number: input.number, url },
-      headSha,
+      attemptKey(task, headSha),
     );
   });
 }
@@ -426,12 +546,25 @@ export function mergeProjectTask(
     }
     ensure(task.state === "ready", "project-task-not-ready");
     if (review === "chat") {
-      ensure(task.reviewApproval?.headSha === headSha, "project-review-not-approved");
+      ensure(
+        task.reviewApproval?.candidateRevision === revisionOf(task),
+        "project-review-not-approved",
+      );
     }
     if (review === "pr") {
-      ensure(task.reviewRequest?.headSha === headSha, "project-review-not-linked");
+      ensure(
+        task.reviewRequest?.candidateRevision === revisionOf(task),
+        "project-review-not-linked",
+      );
     }
-    return change(store, actor, EVENT.merged, task, { headSha, landedSha }, headSha);
+    return change(
+      store,
+      actor,
+      EVENT.merged,
+      task,
+      { headSha, landedSha },
+      attemptKey(task, headSha),
+    );
   });
 }
 
@@ -454,6 +587,13 @@ export function landProjectTask(
       return duplicate(task);
     }
     ensure(task.state === "merged", "project-task-not-merged");
-    return change(store, actor, EVENT.landed, task, { evidence, headSha, landedSha }, headSha);
+    return change(
+      store,
+      actor,
+      EVENT.landed,
+      task,
+      { evidence, headSha, landedSha },
+      attemptKey(task, headSha),
+    );
   });
 }
