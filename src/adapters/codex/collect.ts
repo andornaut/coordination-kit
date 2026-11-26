@@ -20,7 +20,7 @@ const QUESTION_BOUND = 32768;
 /** The bounded RPC client for one collection phase. */
 class BudgetClient implements RpcClient {
   private readonly client: RpcClient;
-  private readonly maxCalls: number;
+  readonly maxCalls: number;
   /** Read by collectors that stop early. */
   readonly deadline: number;
   callsUsed = 0;
@@ -32,7 +32,7 @@ class BudgetClient implements RpcClient {
     this.maxCalls = maxCalls;
   }
 
-  async call(method: string, params: unknown): Promise<unknown> {
+  async call(method: string, params: unknown, deadline = this.deadline): Promise<unknown> {
     if (performance.now() >= this.deadline) {
       this.reasonCode = "collection_deadline_exhausted";
     }
@@ -44,9 +44,9 @@ class BudgetClient implements RpcClient {
     }
     this.callsUsed += 1;
     try {
-      return await this.client.call(method, params, this.deadline);
+      return await this.client.call(method, params, Math.min(deadline, this.deadline));
     } catch (error) {
-      if (error instanceof NativeTimeout) {
+      if (error instanceof NativeTimeout && deadline >= this.deadline) {
         this.reasonCode = "collection_timeout";
       }
       throw error;

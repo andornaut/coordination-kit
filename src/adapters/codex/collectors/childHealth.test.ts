@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { clockAt, TEST_CLOCK } from "../../../core/testFixtures.ts";
 import { NativeTimeout, type RpcClient } from "../rpc.ts";
@@ -393,7 +393,7 @@ describe("workerHealth", () => {
     }
   });
 
-  it("halts native work on a timeout and marks omissions", async () => {
+  it("marks each timed-out stream without exhausting the shared budget", async () => {
     let calls = 0;
     const native: RpcClient = {
       call: async () => {
@@ -403,11 +403,60 @@ describe("workerHealth", () => {
       close: () => undefined,
     };
     const results = await collect(native, [P, N]);
-    expect(calls).toBe(1);
+    expect(calls).toBe(4);
     for (const result of Object.values(results)) {
       expect(result.diagnostics).toContain("native_timeout");
-      expect(result.budget.exhausted).toBe(true);
+      expect(result.budget.exhausted).toBe(false);
       expect(json(result)).not.toContain(PRIVATE);
+    }
+  });
+
+  it("keeps half the calls for newest turns when inventory continues paging", async () => {
+    const native = new ScopedNative(Array<number>(14).fill(500));
+    const results = await collect(native, native.parents);
+    expect(native.calls.filter(([method]) => method === "thread/list")).toHaveLength(128);
+    expect(native.calls.filter(([method]) => method === "thread/turns/list")).toHaveLength(128);
+    for (const parent of native.parents) {
+      expect(results[parent]?.counts.observed).toBeGreaterThan(0);
+      expect(results[parent]?.inventories.active).toMatchObject({
+        complete: false,
+        diagnostics: ["inventory_budget_exhausted"],
+        status: "partial",
+      });
+    }
+  });
+
+  it("stops paging in time to observe children from every parent", async () => {
+    const native = new ScopedNative([500, 500, 500, 500]);
+    let now = 0;
+    let firstTurnAt: number | undefined;
+    const monotonic = vi.spyOn(performance, "now").mockImplementation(() => now);
+    const client = {
+      call: async (method: string, params: unknown, cutoff?: number) => {
+        if (method === "thread/list") {
+          if (now + 190 >= cutoff!) {
+            now = cutoff!;
+            throw new NativeTimeout("response");
+          }
+          now += 190;
+        } else {
+          firstTurnAt ??= now;
+          now += 1;
+        }
+        return native.call(method, params);
+      },
+      close: () => undefined,
+      deadline: 8000,
+    };
+    try {
+      const results = await collect(client, native.parents);
+      expect(firstTurnAt).toBe(6000);
+      expect(now).toBeLessThan(client.deadline);
+      for (const parent of native.parents) {
+        expect(results[parent]?.counts.observed).toBeGreaterThan(0);
+      }
+    } finally {
+      monotonic.mockRestore();
     }
   });
 

@@ -35,6 +35,9 @@ const PAGE_SIZE = 50;
 const MAX_PAGES = 10;
 const MAX_CHILDREN = 100;
 const MAX_CALLS = 256;
+// The shared connection handles one response at a time. Bound each worker request so
+// one slow parent cannot use the worker phase's remaining time.
+const REQUEST_MS = 200;
 
 type Metadata = { status: { type: string }; updatedAt: number };
 
@@ -109,23 +112,23 @@ class BudgetExhausted extends Error {
  * performance.now() value, as connectControl takes) that the caller has already reserved.
  */
 class Budget {
-  readonly client: RpcClient;
+  readonly client: RpcClient & { readonly deadline?: number; readonly maxCalls?: number };
   readonly maxCalls: number;
   callsUsed = 0;
   reason: string | null = null;
 
-  constructor(client: RpcClient, maxCalls: number) {
+  constructor(client: Budget["client"]) {
     this.client = client;
-    this.maxCalls = maxCalls;
+    this.maxCalls = Math.min(MAX_CALLS, client.maxCalls ?? MAX_CALLS);
+  }
+
+  get deadline(): number {
+    const { deadline } = this.client;
+    return typeof deadline === "number" && Number.isFinite(deadline) ? deadline : Infinity;
   }
 
   check(): void {
-    const { deadline } = this.client as RpcClient & { readonly deadline?: unknown };
-    if (
-      typeof deadline === "number" &&
-      Number.isFinite(deadline) &&
-      performance.now() >= deadline
-    ) {
+    if (performance.now() >= this.deadline) {
       this.reason = "native_deadline_exhausted";
     }
     if (this.reason === null && this.callsUsed >= this.maxCalls) {
@@ -136,15 +139,19 @@ class Budget {
     }
   }
 
-  async call(method: string, params: Record<string, unknown>): Promise<unknown> {
+  async call(
+    method: string,
+    params: Record<string, unknown>,
+    cutoff = this.deadline,
+  ): Promise<unknown> {
     this.check();
     this.callsUsed += 1;
     try {
-      return await this.client.call(method, params);
+      const deadline = Math.min(cutoff, performance.now() + REQUEST_MS);
+      return await this.client.call(method, params, deadline);
     } catch (error) {
       if (error instanceof NativeTimeout) {
-        this.reason = "native_timeout";
-        throw new BudgetExhausted(this.reason);
+        throw new BudgetExhausted("native_timeout");
       }
       // A failure that arrives after the deadline reports the exhausted budget instead.
       this.check();
@@ -342,7 +349,7 @@ async function childHealth(
   return [result, observedTurn];
 }
 
-function requestPage(budget: Budget, stream: Stream): Promise<unknown> {
+function requestPage(budget: Budget, stream: Stream, cutoff: number): Promise<unknown> {
   const params: Record<string, unknown> = {
     archived: stream.archived,
     limit: PAGE_SIZE,
@@ -353,7 +360,7 @@ function requestPage(budget: Budget, stream: Stream): Promise<unknown> {
   if (stream.cursor !== null) {
     params.cursor = stream.cursor;
   }
-  return budget.call("thread/list", params);
+  return budget.call("thread/list", params, cutoff);
 }
 
 /** Records one inventory page; true when the stream has a further page to request. */
@@ -405,8 +412,9 @@ function applyPage(stream: Stream, page: unknown): boolean {
  * metadata supplies each child's initial observation. One newest-turn read observes a child; only
  * typed failed candidates receive a fresh metadata read and newest-turn reread before becoming
  * actionable. Round-robin child visits inspect at most 100 children per parent. Each inventory
- * stream reads at most 10 pages (50 rows/page), with 256 calls overall and the client's optional
- * deadline. The caller bounds transport time.
+ * stream reads at most 10 pages (50 rows/page), with at most 256 calls overall and the client's
+ * optional deadline. Inventory yields calls and time to turn reads. A per-request timeout
+ * affects that read alone while the shared bounds still admit other requests.
  *
  * counts.discovered counts unique verified listed IDs, excluding conflicting lineage; it never
  * counts unknown unlisted children. counts.observed counts successful newest-turn observations,
@@ -424,7 +432,7 @@ async function collectChildHealth(
     throw new Error("invalid_parent_scope");
   }
   const observed = isoformat(clock());
-  const budget = new Budget(client, MAX_CALLS);
+  const budget = new Budget(client);
   const states: ParentState[] = [...new Set(parents)].map((parent) => ({
     children: new Map(),
     health: {
@@ -454,11 +462,21 @@ async function collectChildHealth(
       streams.push({ archived, cursor: null, cursors: new Set(), inventory, state });
     }
   }
+  // Prefer a first page for every stream to continuations. Keep the last quarter of
+  // the phase and (where the first pages allow) half the calls for newest-turn reads.
+  const started = performance.now();
+  const inventoryCutoff = started + (budget.deadline - started) * 0.75;
+  const inventoryCalls = Math.max(streams.length, Math.floor(budget.maxCalls / 2));
   for (let stream = streams.shift(); stream !== undefined; stream = streams.shift()) {
     try {
       // Every stream's first page precedes any second page under the shared call budget.
+      if (budget.callsUsed >= inventoryCalls || performance.now() >= inventoryCutoff) {
+        budget.check();
+        stream.inventory.diagnostics.push("inventory_budget_exhausted");
+        continue;
+      }
       // eslint-disable-next-line no-await-in-loop
-      const page = await requestPage(budget, stream);
+      const page = await requestPage(budget, stream, inventoryCutoff);
       if (applyPage(stream, page)) {
         if (stream.inventory.pages < MAX_PAGES) {
           streams.push(stream);

@@ -35,12 +35,12 @@ it("reserves worker calls when question history exhausts its share", async () =>
     [
       "thread/list",
       expect.objectContaining({ archived: false, parentThreadId: parent }),
-      deadline - 5000,
+      expect.any(Number),
     ],
     [
       "thread/list",
       expect.objectContaining({ archived: true, parentThreadId: parent }),
-      deadline - 5000,
+      expect.any(Number),
     ],
   ]);
 });
@@ -61,9 +61,108 @@ it("preserves the worker deadline after a question response times out", async ()
   });
   expect(records.question_state[parent]).toMatchObject({ complete: false });
   expect(records.worker_health[parent]).toMatchObject({ complete: true, status: "complete" });
-  expect(call.mock.calls.map(([method, , limit]) => [method, limit])).toEqual([
-    ["thread/items/list", deadline - 13_000],
-    ["thread/list", deadline - 5000],
-    ["thread/list", deadline - 5000],
+  expect(call.mock.calls[0]?.[2]).toBe(deadline - 13_000);
+  expect(call.mock.calls.slice(1).map(([method]) => method)).toEqual([
+    "thread/list",
+    "thread/list",
   ]);
+  for (const [, , limit] of call.mock.calls.slice(1)) {
+    expect(limit).toBeLessThan(deadline - 5000);
+  }
+});
+
+it("bounds slow inventory pages while preserving a later parent's verified failure", async () => {
+  const slow = recipient(1);
+  const paged = recipient(2);
+  const later = recipient(3);
+  const child = recipient(4);
+  const turn = recipient(5);
+  const slowChild = recipient(6);
+  const thread = {
+    id: child,
+    parentThreadId: later,
+    status: { type: "idle" },
+    updatedAt: 1,
+  };
+  const newest = {
+    error: { codexErrorInfo: "serverOverloaded" },
+    id: turn,
+    status: "failed",
+  };
+  const slices: number[] = [];
+  let now = 1000;
+  const monotonic = vi.spyOn(performance, "now").mockImplementation(() => now);
+  const timeOut = (deadline: number): never => {
+    slices.push(deadline - now);
+    now = deadline;
+    throw new NativeTimeout("response");
+  };
+  const call = vi.fn<RpcClient["call"]>(async (method, params, deadline) => {
+    const request = params as Record<string, unknown>;
+    if (method === "thread/read") {
+      return { thread };
+    }
+    if (method === "thread/turns/list") {
+      if (request.threadId === slowChild) {
+        timeOut(deadline!);
+      }
+      return { data: [newest] };
+    }
+    if (request.archived === true) {
+      return { data: [] };
+    }
+    if (request.parentThreadId === slow || request.cursor === "next") {
+      timeOut(deadline!);
+    }
+    if (request.parentThreadId === paged) {
+      return {
+        data: [{ ...thread, id: slowChild, parentThreadId: paged }],
+        nextCursor: "next",
+      };
+    }
+    return { data: [thread] };
+  });
+  try {
+    const result = await collectAll(TEST_CLOCK, { call, close() {} }, now + 13_000, {
+      decisionRecords: {},
+      parents: [slow, paged, later],
+      recipients: [],
+      slot: 1,
+    });
+    expect(slices).toEqual([200, 200, 200]);
+    expect(call.mock.calls.map(([method]) => method)).toEqual([
+      ...Array<string>(7).fill("thread/list"),
+      "thread/turns/list",
+      "thread/turns/list",
+      "thread/read",
+      "thread/turns/list",
+    ]);
+    expect(result.collection_budget).toMatchObject({ calls_used: 11, max_calls: 256 });
+    expect(result.worker_health[slow]).toMatchObject({
+      diagnostics: ["native_timeout"],
+      status: "partial",
+    });
+    expect(result.worker_health[paged]).toMatchObject({
+      children: [
+        { child_id: slowChild, diagnostics: ["native_timeout"], requires_parent_action: false },
+      ],
+      inventories: { active: { diagnostics: ["native_timeout"], pages: 1, status: "partial" } },
+      status: "partial",
+    });
+    expect(result.worker_health[later]).toMatchObject({
+      children: [
+        {
+          child_id: child,
+          classification: "server_capacity",
+          lineage_verified: true,
+          requires_parent_action: true,
+          turn_id: turn,
+        },
+      ],
+      complete: true,
+      status: "complete",
+    });
+  } finally {
+    monotonic.mockRestore();
+  }
 });
