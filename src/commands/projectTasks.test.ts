@@ -16,9 +16,13 @@ const forge = vi.hoisted(() => ({
   read: vi.fn(),
   verifyCi: vi.fn(),
 }));
+const forgeTarget = vi.hoisted(() => vi.fn());
 vi.mock("../adapters/forge/index.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../adapters/forge/index.ts")>()),
-  createForge: () => forge,
+  createForge: (target: unknown) => {
+    forgeTarget(target);
+    return forge;
+  },
 }));
 
 async function exactLanding(mode: "chat" | "pr-squash" | "pr-merge"): Promise<void> {
@@ -223,6 +227,47 @@ async function exactLanding(mode: "chat" | "pr-squash" | "pr-merge"): Promise<vo
       await ok(OWNER, "task", "open-review", TASK);
       expect(forge.create).toHaveBeenCalledWith(expect.objectContaining({ headSha: head }));
 
+      // An unchanged head can return to review under a changed policy, with a new approval.
+      forge.read.mockResolvedValue(open);
+      writeFileSync(policyFile, JSON.stringify(changed));
+      const refreshed = JSON.parse(
+        await ok(
+          OWNER,
+          "task",
+          "ready",
+          TASK,
+          "--branch",
+          "task/input",
+          "--head",
+          head,
+          "--summary",
+          "Review again",
+          "--evidence",
+          "checks:refreshed",
+          "--refresh-policy",
+        ),
+      );
+      expect(refreshed.task).toMatchObject({
+        candidateRevision: expect.any(String),
+        requiresRevisionApproval: true,
+        reviewRequest: null,
+      });
+      const approve = [
+        "task",
+        "approve-review",
+        TASK,
+        "--head",
+        head,
+        "--approval",
+        "chat:refresh",
+      ];
+      expect(await invoke(MAINTAINER, ...approve)).toMatchObject({
+        code: 1,
+        err: "coordination-kit: project-candidate-revision-mismatch\n",
+      });
+      await setup(...approve, "--revision", refreshed.task.candidateRevision);
+      await ok(OWNER, "task", "link-review", TASK, "--number", "4");
+
       // Simulate the provider merge after a human action and check the exact merge SHA.
       git("checkout", "main");
       if (mode === "pr-squash") {
@@ -244,16 +289,64 @@ async function exactLanding(mode: "chat" | "pr-squash" | "pr-merge"): Promise<vo
         ci: { sha: merge, state: "pending" },
         task: { mergedSha: merge, state: "merged" },
       });
+      changed.integration.requiredChecks = ["landing-check"];
+      writeFileSync(policyFile, JSON.stringify(changed));
       state = "passed";
       expect(JSON.parse(await ok(OWNER, "task", "verify", TASK))).toMatchObject({
         task: { mergedSha: merge, state: "landed" },
       });
       expect(forge.verifyCi).toHaveBeenLastCalledWith(merge, "main");
+      expect(forgeTarget).toHaveBeenLastCalledWith(
+        expect.objectContaining({ requiredChecks: ["landing-check"] }),
+      );
       expect(forge.merge).not.toHaveBeenCalled();
     }
     expect(JSON.parse(await setup("task", "list"))).toMatchObject({
       tasks: [{ id: TASK, owner: "implementation", state: "landed" }],
     });
+    if (mode === "chat") {
+      const propose = ["task", "propose"] as const;
+      const scope = ["--owner", "implementation", "--scope", "Declared scope"] as const;
+      await setup(...propose, "old-prerequisite", ...scope, "--title", "Old prerequisite");
+      await setup(
+        ...propose,
+        "dependent",
+        ...scope,
+        "--title",
+        "Dependent work",
+        "--depends-on",
+        "old-prerequisite",
+      );
+      await setup("task", "approve", "dependent", "--approval", "chat:dependent-build");
+      await setup(
+        "task",
+        "close",
+        "old-prerequisite",
+        "--as",
+        "declined",
+        "--reason",
+        "Superseded scope",
+        "--approval",
+        "chat:decline",
+      );
+      expect(await invoke(OWNER, "task", "start", "dependent")).toMatchObject({ code: 1 });
+      const replace = [
+        "task",
+        "replace-dependency",
+        "dependent",
+        "--dependency",
+        "old-prerequisite",
+        "--replacement",
+        TASK,
+        "--approval",
+        "chat:replacement",
+      ];
+      expect(await invoke(OWNER, ...replace)).toMatchObject({ code: 1 });
+      await setup(...replace);
+      expect(JSON.parse(await ok(OWNER, "task", "start", "dependent"))).toMatchObject({
+        task: { dependsOn: [TASK], state: "in-progress" },
+      });
+    }
   } finally {
     rmSync(scratch, { force: true, recursive: true });
   }

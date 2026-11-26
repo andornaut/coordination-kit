@@ -7,9 +7,15 @@ import { createForge, ForgeError } from "../adapters/forge/index.ts";
 import { systemGit } from "../core/git.ts";
 import { loadLayout } from "../core/layout.ts";
 import { LockBusy, withLock } from "../core/lock.ts";
+import {
+  STANDALONE_CONFIG_FILE,
+  type StandaloneConfig,
+  validateStandaloneConfig,
+} from "../core/standalone.ts";
 import { resolveHarness } from "../registry/resolve.ts";
 import type { Store } from "../store/db.ts";
 import { resolveCaller } from "../store/identity.ts";
+import { closeProjectTask, replaceProjectDependency } from "../store/projectDependencies.ts";
 import {
   approveProjectReview,
   approveProjectTask,
@@ -49,9 +55,20 @@ export const TASK_PROPOSE_OPTIONS = {
   title: { type: "string" },
 } as const;
 export const TASK_APPROVE_OPTIONS = { ...CALLER, approval: { type: "string" } } as const;
+export const TASK_CLOSE_OPTIONS = {
+  ...TASK_APPROVE_OPTIONS,
+  as: { type: "string" },
+  reason: { type: "string" },
+} as const;
+export const TASK_REPLACE_OPTIONS = {
+  ...TASK_APPROVE_OPTIONS,
+  dependency: { type: "string" },
+  replacement: { type: "string" },
+} as const;
 export const TASK_REVIEW_APPROVE_OPTIONS = {
   ...TASK_APPROVE_OPTIONS,
   head: { type: "string" },
+  revision: { type: "string" },
 } as const;
 export const TASK_READY_OPTIONS = {
   ...CALLER,
@@ -59,6 +76,7 @@ export const TASK_READY_OPTIONS = {
   branch: { type: "string" },
   evidence: { type: "string" },
   head: { type: "string" },
+  "refresh-policy": { type: "boolean" },
   summary: { type: "string" },
 } as const;
 export const TASK_LINK_OPTIONS = { ...CALLER, number: { type: "string" } } as const;
@@ -210,10 +228,15 @@ function checkReview(context: Context, candidate: Candidate, review: Review): vo
 }
 
 function exactApproval(record: ProjectTask, candidate: Candidate): void {
-  ensure(record.reviewApproval?.headSha === candidate.headSha, "project-review-approval-required");
+  ensure(
+    record.reviewApproval?.headSha === candidate.headSha &&
+      record.reviewApproval.candidateRevision === record.candidateRevision,
+    "project-review-approval-required",
+  );
 }
 
 function taskFile(record: ProjectTask): string {
+  ensure(record.state !== "declined" && record.state !== "cancelled", "project-task-closed");
   ensure(record.approval !== null, "project-build-approval-required");
   return [
     `# ${record.title}`,
@@ -230,22 +253,52 @@ function taskFile(record: ProjectTask): string {
   ].join("\n");
 }
 
-function policySha(context: Context): string {
-  const integration = context.settings.integration;
-  return createHash("sha256")
-    .update(
-      JSON.stringify([
-        context.settings.review,
-        context.remote,
-        context.branch,
-        integration?.provider,
-        integration?.repository,
-        integration?.hostname,
-        integration?.mergeMethod,
-        [...(integration?.requiredChecks ?? [])].sort(),
-      ]),
-    )
-    .digest("hex");
+function hashPolicy(fields: readonly unknown[]): string {
+  return createHash("sha256").update(JSON.stringify(fields)).digest("hex");
+}
+
+function targetFields(settings: StandaloneConfig): readonly unknown[] {
+  return [
+    settings.remote ?? "origin",
+    settings.defaultBranch ?? "main",
+    settings.integration?.provider,
+    settings.integration?.repository,
+    settings.integration?.hostname,
+  ];
+}
+
+function policySha(settings: StandaloneConfig): string {
+  return hashPolicy([
+    settings.review,
+    ...targetFields(settings),
+    settings.integration?.mergeMethod,
+    [...(settings.integration?.requiredChecks ?? [])].sort(),
+  ]);
+}
+
+function originalTarget(context: Context, candidate: Candidate): void {
+  if (candidate.policySha === policySha(context.settings)) {
+    return;
+  }
+  let target = candidate.targetPolicySha;
+  if (target === undefined) {
+    // Legacy candidates carry only the full policy digest. Their committed base can prove
+    // which target was approved if it contains the exact settings used at readiness.
+    try {
+      const source = context.git(context.layout.root, [
+        "show",
+        `${candidate.baseSha}:${STANDALONE_CONFIG_FILE}`,
+      ]);
+      const prior = validateStandaloneConfig(JSON.parse(source));
+      if (policySha(prior) === candidate.policySha) {
+        target = hashPolicy(targetFields(prior));
+      }
+    } catch {
+      throw new StoreError("project-original-policy-unverified");
+    }
+  }
+  ensure(target !== undefined, "project-original-policy-unverified");
+  ensure(target === hashPolicy(targetFields(context.settings)), "project-merge-target-changed");
 }
 
 export const taskList = task("task list", TASK_READ_OPTIONS, (context) =>
@@ -308,17 +361,71 @@ export const taskStart = task(
   1,
 );
 
+export const taskClose = task(
+  "task close",
+  TASK_CLOSE_OPTIONS,
+  (context, values, [id]) =>
+    mutate(context, values, async (store, actor) => {
+      const decision = approval(context, values, actor.role);
+      const state = required(values, "as");
+      if (state !== "declined" && state !== "cancelled") {
+        throw new Usage();
+      }
+      const reason = required(values, "reason");
+      const record = exactTask(store, id!);
+      if (state === "cancelled" && record.state === "ready") {
+        await verifyUnmerged(context, record, candidateOf(record));
+      }
+      return closeProjectTask(store, actor, record.id, { approval: decision, reason, state });
+    }),
+  1,
+);
+
+export const taskReplaceDependency = task(
+  "task replace-dependency",
+  TASK_REPLACE_OPTIONS,
+  (context, values, [id]) =>
+    mutate(context, values, (store, actor) =>
+      replaceProjectDependency(store, actor, id!, {
+        approval: approval(context, values, actor.role),
+        dependency: required(values, "dependency"),
+        replacement: required(values, "replacement"),
+      }),
+    ),
+  1,
+);
+
 export const taskReady = task(
   "task ready",
   TASK_READY_OPTIONS,
   (context, values, [id]) =>
-    mutate(context, values, (store, actor) => {
+    mutate(context, values, async (store, actor) => {
       const record = exactTask(store, id!);
       owner(record, actor.role);
       const branch = branchOf(context, values);
       const headSha = required(values, "head");
+      const requestedBase = text(values, "base");
+      const refreshPolicy = values["refresh-policy"] === true;
+      const policy = policySha(context.settings);
+      const previous = record.candidate;
+      if (refreshPolicy) {
+        ensure(
+          record.state === "ready" &&
+            previous?.headSha === headSha &&
+            previous.policySha !== policy,
+          "project-policy-refresh-unavailable",
+        );
+        ensure(
+          previous.branch === branch &&
+            (requestedBase === undefined || requestedBase === previous.baseSha),
+          "project-candidate-conflict",
+        );
+        await verifyUnmerged(context, record, previous);
+      }
       const baseSha =
-        text(values, "base") ?? projectBase(context.git, context.layout.root, context.target);
+        requestedBase ??
+        (refreshPolicy ? previous?.baseSha : undefined) ??
+        projectBase(context.git, context.layout.root, context.target);
       const proof = projectCandidate(context.git, context.layout.root, {
         baseSha,
         headSha,
@@ -331,15 +438,26 @@ export const taskReady = task(
       );
       ensure(file === taskFile(record).trim(), "project-work-file-mismatch");
       return {
-        ...readyProjectTask(store, actor, record.id, {
-          baseSha,
-          branch,
-          evidence: required(values, "evidence"),
-          headSha,
-          policySha: policySha(context),
-          review: context.settings.review,
-          summary: required(values, "summary"),
-        }),
+        ...readyProjectTask(
+          store,
+          actor,
+          record.id,
+          {
+            baseSha,
+            branch,
+            evidence: required(values, "evidence"),
+            headSha,
+            policySha: policy,
+            review: context.settings.review,
+            summary: required(values, "summary"),
+            ...(previous?.headSha === headSha &&
+            previous.policySha === policy &&
+            previous.targetPolicySha === undefined
+              ? {}
+              : { targetPolicySha: hashPolicy(targetFields(context.settings)) }),
+          },
+          refreshPolicy,
+        ),
         changedPaths: proof.changedPaths,
       };
     }),
@@ -350,15 +468,18 @@ export const taskApproveReview = task(
   "task approve-review",
   TASK_REVIEW_APPROVE_OPTIONS,
   (context, values, [id]) =>
-    mutate(context, values, (store, actor) =>
-      approveProjectReview(
+    mutate(context, values, (store, actor) => {
+      const record = exactTask(store, id!);
+      changedPolicy(context, candidateOf(record));
+      return approveProjectReview(
         store,
         actor,
-        id!,
+        record.id,
         required(values, "head"),
         approval(context, values, actor.role),
-      ),
-    ),
+        text(values, "revision"),
+      );
+    }),
   1,
 );
 
@@ -430,19 +551,45 @@ function landing(context: Context, candidate: Candidate, review?: Review) {
   );
 }
 
-async function mergedReview(
+async function readLinkedReview(
   context: Context,
   record: ProjectTask,
   candidate: Candidate,
 ): Promise<Review> {
-  ensure(record.reviewRequest !== null, "project-review-link-required");
+  ensure(
+    record.reviewRequest !== null &&
+      record.reviewRequest.candidateRevision === record.candidateRevision,
+    "project-review-link-required",
+  );
   const review = await forge(context).read(record.reviewRequest.number);
   checkReview(context, candidate, review);
   return review;
 }
 
 function changedPolicy(context: Context, candidate: Candidate): void {
-  ensure(candidate.policySha === policySha(context), "project-review-policy-changed");
+  ensure(candidate.policySha === policySha(context.settings), "project-review-policy-changed");
+}
+
+async function verifyUnmerged(
+  context: Context,
+  record: ProjectTask,
+  candidate: Candidate,
+): Promise<void> {
+  originalTarget(context, candidate);
+  if (candidate.review === "pr" && record.reviewRequest !== null) {
+    const review = await readLinkedReview(context, record, candidate);
+    ensure(review.state !== "merged", "project-merge-already-observed");
+  }
+  refresh(context);
+  try {
+    landing(context, candidate);
+  } catch (error) {
+    if (error instanceof StoreError && error.code === "project-candidate-not-landed") {
+      return;
+    }
+    throw error;
+  }
+  throw new StoreError("project-merge-already-observed");
 }
 
 export const taskMerge = task(
@@ -459,7 +606,7 @@ export const taskMerge = task(
         exactApproval(record, candidate);
       }
       if (candidate.review === "pr") {
-        const review = await mergedReview(context, record, candidate);
+        const review = await readLinkedReview(context, record, candidate);
         ensure(review.state === "open", "project-review-not-open");
         await forge(context).merge({
           base: context.branch,
@@ -500,10 +647,10 @@ export const taskVerify = task(
         return { duplicate: true, task: record };
       }
       const candidate = candidateOf(record);
-      changedPolicy(context, candidate);
+      originalTarget(context, candidate);
       let review: Review | undefined;
       if (candidate.review === "pr") {
-        review = await mergedReview(context, record, candidate);
+        review = await readLinkedReview(context, record, candidate);
         ensure(review.state === "merged" && review.mergeSha !== null, "project-review-not-merged");
       }
       if (candidate.review === "chat") {

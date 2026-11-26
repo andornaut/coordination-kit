@@ -73,6 +73,17 @@ commit it alongside the implementation. Fetch the default branch before preparin
 A dependency declared with repeatable `--depends-on TASK_ID` must already exist. An owner can
 start a dependent task once those tasks have landed.
 
+Maintainers can decline a proposal or cancel approved, unmerged work with an explicit decision.
+A dependant waits until the maintainer records a replacement for the closed prerequisite
+and the replacement lands. The task record keeps the original dependency and approval.
+
+```sh
+ck task close task-0002 --as cancelled --reason "Replaced by the new parser task" \
+  --approval chat:cancel-decision
+ck task replace-dependency task-0003 --dependency task-0002 --replacement task-0004 \
+  --approval chat:replacement-decision
+```
+
 ```sh
 mkdir -p docs/work
 ck --root "$primary" task work-file task-0001 > docs/work/task-0001.md
@@ -104,6 +115,11 @@ existing PR or MR for that exact branch and head can be linked with `task link-r
 After an ambiguous external action, check the forge or target branch before submitting again.
 The provider's authentication, required checks and branch protection apply to all merges.
 
+If the review policy changes before merge and the target stays the same, run `task ready`
+again with the same head and `--refresh-policy`. The new packet includes a
+`candidateRevision`. When review is required, record the fresh approval with
+`task approve-review ID --head SHA --revision CANDIDATE_REVISION --approval REF`.
+
 For GitHub or GitLab use a configuration such as the following. GitHub uses the locally
 authenticated `gh` CLI. GitLab uses `glab`. Optionally configure `hostname` for a self-managed
 GitLab instance. `defaultBranch` and `remote` default to `main` and `origin`.
@@ -131,6 +147,8 @@ Run `task verify ID` as the owner after merge, whether the merge was submitted b
 performed in the forge. The command refreshes the target and checks the actual integrated SHA.
 For a squash merge, it uses the provider's exact head and merge evidence plus the Git target.
 When required forge checks are configured, it reads their results for the **merged SHA**.
+Verification uses the current check list after proving the merge against its original target.
+For older candidates, the committed policy at the recorded base can supply that proof.
 Use distinct check names if a workflow must run after a fast-forward to the default branch.
 A pending, failed or unavailable check leaves the task in `merged`. At a safe boundary,
 rerun verification or prepare a fix-forward candidate under the same review policy.

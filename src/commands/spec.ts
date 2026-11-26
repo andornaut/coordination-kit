@@ -17,10 +17,12 @@ import {
 } from "./migration.ts";
 import {
   TASK_APPROVE_OPTIONS,
+  TASK_CLOSE_OPTIONS,
   TASK_LINK_OPTIONS,
   TASK_PROPOSE_OPTIONS,
   TASK_READ_OPTIONS,
   TASK_READY_OPTIONS,
+  TASK_REPLACE_OPTIONS,
   TASK_REVIEW_APPROVE_OPTIONS,
   TASK_VERIFY_OPTIONS,
   TASK_WRITE_OPTIONS,
@@ -179,6 +181,20 @@ export const SPECS = {
     options: TASK_WRITE_OPTIONS,
     summary: "start an approved task as its owner",
   },
+  "task close": {
+    forms: [["ID", "as", "reason", "approval", "native-id?"]],
+    group: "project",
+    options: TASK_CLOSE_OPTIONS,
+    summary: "record a maintainer's decision to decline or cancel a task",
+    values: { as: "declined|cancelled" },
+  },
+  "task replace-dependency": {
+    forms: [["ID", "dependency", "replacement", "approval", "native-id?"]],
+    group: "project",
+    options: TASK_REPLACE_OPTIONS,
+    summary: "explicitly replace a closed prerequisite before the dependant starts",
+    values: { dependency: "TASK_ID", replacement: "TASK_ID" },
+  },
   "task work-file": {
     forms: [["ID"]],
     group: "project",
@@ -186,18 +202,20 @@ export const SPECS = {
     summary: "render the approved work file for the task branch",
   },
   "task ready": {
-    forms: [["ID", "branch", "head", "base?", "summary", "evidence", "native-id?"]],
+    forms: [
+      ["ID", "branch", "head", "base?", "summary", "evidence", "refresh-policy?", "native-id?"],
+    ],
     group: "project",
     options: TASK_READY_OPTIONS,
     summary: "record an exact candidate and print its review packet",
     values: { branch: "BRANCH", head: "SHA", base: "SHA", summary: "TEXT" },
   },
   "task approve-review": {
-    forms: [["ID", "head", "approval", "native-id?"]],
+    forms: [["ID", "head", "approval", "revision?", "native-id?"]],
     group: "project",
     options: TASK_REVIEW_APPROVE_OPTIONS,
     summary: "record the user's approval to merge this exact revision",
-    values: { head: "SHA" },
+    values: { head: "SHA", revision: "SHA" },
   },
   "task open-review": {
     forms: [["ID", "native-id?"]],
