@@ -47,3 +47,4 @@ Reference: [review](../review.md#scheduled-review-seam), [libraries](../librarie
 | ck-0044 | Own questions by role on both harnesses                    | [ck-0044.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0044.md) |
 | ck-0052 | Remove question attach and reask                           | [ck-0052.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0052.md) |
 | ck-0053 | Remove question reconcile                                  | [ck-0053.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0053.md) |
+| ck-0068 | Normalize app coordination and explicit role permissions | [ck-0068.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0068.md) |

@@ -27,3 +27,4 @@ Reference: [messages](../messages.md), [store wakes](../store.md#wakes),
 | ck-0051 | Resolve channels across project directories and report unresolved ones | [ck-0051.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0051.md) |
 | ck-0057 | Allow messages from unbound senders                                    | [ck-0057.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0057.md) |
 | ck-0062 | Make guarded wake and owner disposition evidence actionable            | [ck-0062.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0062.md) |
+| ck-0069 | Preserve a user decision for each unverified original | [ck-0069.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0069.md) |
