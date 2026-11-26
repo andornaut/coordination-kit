@@ -216,6 +216,15 @@ export interface WriteResult {
   readonly duplicate: boolean;
 }
 
+function evidenceRefs(input: readonly string[]): string[] {
+  const evidence = [...new Set(input)].sort();
+  ensure(
+    evidence.every((ref) => REF.test(ref)),
+    "invalid-evidence",
+  );
+  return evidence;
+}
+
 /**
  * Close the caller's own message in one write: `superseded` with `supersededBy`, else `handled`.
  * Repeating the same close is a no-op; any other change to a closed message is `already-closed`.
@@ -226,11 +235,7 @@ export function closeMessage(
   id: string,
   input: CloseInput = {},
 ): WriteResult {
-  const evidence = [...new Set(input.evidence ?? [])].sort();
-  ensure(
-    evidence.every((ref) => REF.test(ref)),
-    "invalid-evidence",
-  );
+  const evidence = evidenceRefs(input.evidence ?? []);
   ensure(input.work === undefined || REF.test(input.work), "invalid-work");
   const state: MessageState = input.supersededBy === undefined ? "handled" : "superseded";
   return store.transaction(() => {
@@ -267,6 +272,7 @@ export interface RetainInput {
   readonly owner: string;
   readonly reason: string;
   readonly nextBoundary: string;
+  readonly evidence?: readonly string[];
 }
 
 /** Retain the caller's own open message with an owner, reason and next review boundary. */
@@ -284,6 +290,7 @@ export function retainMessage(
     );
     ensure(secretShape(value) === null, "secret-shaped-body");
   }
+  const evidence = input.evidence === undefined ? undefined : evidenceRefs(input.evidence);
   return store.transaction(() => {
     const row = recipientRow(store, actor, id);
     ensure(row.state !== "handled" && row.state !== "superseded", "already-closed");
@@ -292,7 +299,9 @@ export function retainMessage(
       row.state === "retained" &&
       current?.owner === input.owner &&
       current.reason === input.reason &&
-      current.nextBoundary === input.nextBoundary
+      current.nextBoundary === input.nextBoundary &&
+      (evidence === undefined ||
+        canonicalJson(parse(row.evidence ?? "[]")) === canonicalJson(evidence))
     ) {
       return { duplicate: true, message: rowView(store, row, false) };
     }
@@ -300,7 +309,13 @@ export function retainMessage(
       actor,
       key: `msg.retained:${id}:${store.head().seq}`,
       kind: "msg.retained",
-      payload: { id, nextBoundary: input.nextBoundary, owner: input.owner, reason: input.reason },
+      payload: {
+        ...(evidence === undefined ? {} : { evidence }),
+        id,
+        nextBoundary: input.nextBoundary,
+        owner: input.owner,
+        reason: input.reason,
+      },
     });
     return { duplicate: false, message: rowView(store, messageRow(store, id)!, false) };
   });

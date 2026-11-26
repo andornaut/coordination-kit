@@ -266,10 +266,14 @@ transaction. `Store.verify()` is the same check without the rebuild.
 3. The recipient's own `inbox` records every listed `sent` message as `delivered` in one
    `inbox.read` event, which also clears its pending and outstanding wake. A read with nothing
    new and no wake state writes nothing.
-4. The recipient closes with one write: `msg done ID` (`handled`, or `superseded` with
+4. The recipient records one disposition with `msg done ID` (`handled`, or `superseded` with
    `--superseded-by`), or `msg retain ID` with an owner, reason and next boundary. A retained
    message stays open and can be retained again or closed. A close or retention of a message
    still `sent` also sets its delivery time, since the recipient acted on it.
+
+Both commands accept repeatable `--evidence REF` links. `msg status ID` exposes the evidence
+alongside the disposition. A retention that omits evidence keeps the existing refs. A retention
+with evidence replaces them with the supplied set.
 
 Only the recipient can deliver, close or retain its own messages (`not-recipient`). Repeating a
 send with the same ID and identical content, or the same close, is a no-op reported with

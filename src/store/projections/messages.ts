@@ -160,7 +160,7 @@ const retained = (db: DatabaseSync, event: StoredEvent): void => {
   const p = event.payload;
   db.prepare(
     `UPDATE messages SET state = 'retained', delivered_at = COALESCE(delivered_at, ?),
-       retention = ?, updated_seq = ?, updated_at = ?
+       retention = ?, evidence = COALESCE(?, evidence), updated_seq = ?, updated_at = ?
      WHERE id = ?`,
   ).run(
     event.at,
@@ -170,6 +170,7 @@ const retained = (db: DatabaseSync, event: StoredEvent): void => {
       owner: text(p, "owner"),
       reason: text(p, "reason"),
     }),
+    p.evidence === undefined ? null : json(p, "evidence"),
     event.seq,
     event.at,
     text(p, "id"),

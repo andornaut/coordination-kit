@@ -58,6 +58,7 @@ export const MSG_DONE_OPTIONS = {
 
 export const MSG_RETAIN_OPTIONS = {
   ...CALLER,
+  evidence: MSG_DONE_OPTIONS.evidence,
   "next-boundary": { type: "string" },
   "next-review": { type: "boolean" },
   owner: { type: "string" },
@@ -182,6 +183,7 @@ export const msgRetain: Handler = storeVerb(
   "msg retain",
   MSG_RETAIN_OPTIONS,
   (context, values, [id]) => {
+    const evidence = values.evidence as string[] | undefined;
     const owner = text(values, "owner");
     const boundary = text(values, "next-boundary");
     const until = text(values, "until");
@@ -194,6 +196,7 @@ export const msgRetain: Handler = storeVerb(
       throw new Usage();
     }
     return storeRetain(context, callerOf(values), id!, {
+      ...(evidence === undefined ? {} : { evidence }),
       nextBoundary:
         boundary ?? (deadline === null ? NEXT_REVIEW_BOUNDARY : new Date(deadline).toISOString()),
       reason: required(values, "reason"),

@@ -442,6 +442,52 @@ describe("store message commands", () => {
     });
   });
 
+  it("keeps recipient retention evidence on exact metadata reads and replay", async () => {
+    const { base, root } = storeFixture();
+    const coordinator = cli(root, base, { CLAUDE_CODE_SESSION_ID: COORDINATOR });
+    const tech = cli(root, base, { CLAUDE_CODE_SESSION_ID: TECH });
+    const reader = cli(root, base, {});
+    const retain = ["msg", "retain", ID, "--reason", "Deferred", "--next-review"];
+    const refs = ["artifact:owner-disposition.json", "commit:abc"] as const;
+    await coordinator("msg", "send", "--to", TECH_ROLE, "--body", "Original.", "--id", ID);
+
+    expect(await coordinator(...retain, "--evidence", refs[0])).toMatchObject({
+      code: EXIT_INVALID,
+      err: "coordination-kit: not-recipient\n",
+    });
+    expect(await tech(...retain)).toMatchObject({
+      code: EXIT_OK,
+      json: { duplicate: false, message: { evidence: [], state: "retained" } },
+    });
+    expect(await tech(...retain, "--evidence", refs[0], "--evidence", refs[1])).toMatchObject({
+      code: EXIT_OK,
+      json: { duplicate: false, message: { evidence: refs, state: "retained" } },
+    });
+    expect(
+      await tech(...retain, "--evidence", refs[1], "--evidence", refs[0], "--evidence", refs[1]),
+    ).toMatchObject({ code: EXIT_OK, json: { duplicate: true } });
+    expect(await tech(...retain, "--evidence", "invalid reference")).toMatchObject({
+      code: EXIT_INVALID,
+      err: "coordination-kit: invalid-evidence\n",
+    });
+    expect(
+      await tech("msg", "retain", ID, "--reason", "Still deferred", "--next-review"),
+    ).toMatchObject({
+      code: EXIT_OK,
+      json: { duplicate: false, message: { evidence: refs, state: "retained" } },
+    });
+    expect(await tech("store", "rebuild")).toMatchObject({
+      code: EXIT_OK,
+      json: { verified: true },
+    });
+    const status = await reader("msg", "status", ID);
+    expect(status).toMatchObject({
+      code: EXIT_OK,
+      json: { message: { evidence: refs, id: ID, state: "retained" } },
+    });
+    expect(status.json?.message).not.toHaveProperty("body");
+  });
+
   it("rejects malformed options as usage errors", async () => {
     const { base, root } = storeFixture();
     const run = cli(root, base, { CLAUDE_CODE_SESSION_ID: COORDINATOR });
@@ -474,9 +520,15 @@ describe("store message commands", () => {
     expect(help.out).toContain(
       "msg done ID [--work WORK_ID] [--superseded-by ID] [--evidence REF ...]",
     );
-    expect(help.out).toContain("msg retain ID --reason TEXT --next-boundary TEXT [--owner ROLE]");
-    expect(help.out).toContain("msg retain ID --reason TEXT --until ISO_TIMESTAMP [--owner ROLE]");
-    expect(help.out).toContain("msg retain ID --reason TEXT --next-review [--owner ROLE]");
+    expect(help.out).toContain(
+      "msg retain ID --reason TEXT --next-boundary TEXT [--owner ROLE] [--evidence REF ...]",
+    );
+    expect(help.out).toContain(
+      "msg retain ID --reason TEXT --until ISO_TIMESTAMP [--owner ROLE] [--evidence REF ...]",
+    );
+    expect(help.out).toContain(
+      "msg retain ID --reason TEXT --next-review [--owner ROLE] [--evidence REF ...]",
+    );
     expect(help.out).toContain("msg status ID --include-body");
     expect(help.out).toContain(
       "msg send --to ROLE --body-file FILE [--intent queue|unblock] [--id UUID] [--link KIND=REF ...]",

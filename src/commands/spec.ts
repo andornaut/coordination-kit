@@ -156,9 +156,9 @@ export const SPECS = {
   },
   "msg retain": {
     forms: [
-      ["ID", "reason", "next-boundary", "owner?", "native-id?", "worker?"],
-      ["ID", "reason", "until", "owner?", "native-id?", "worker?"],
-      ["ID", "reason", "next-review", "owner?", "native-id?", "worker?"],
+      ["ID", "reason", "next-boundary", "owner?", "evidence?", "native-id?", "worker?"],
+      ["ID", "reason", "until", "owner?", "evidence?", "native-id?", "worker?"],
+      ["ID", "reason", "next-review", "owner?", "evidence?", "native-id?", "worker?"],
     ],
     group: "msg",
     options: MSG_RETAIN_OPTIONS,

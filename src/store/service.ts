@@ -228,18 +228,19 @@ export async function storeRetain(
   context: StoreServiceContext,
   options: CallerOptions,
   id: string,
-  input: { readonly reason: string; readonly nextBoundary: string; readonly owner?: string },
+  input: {
+    readonly reason: string;
+    readonly nextBoundary: string;
+    readonly owner?: string;
+    readonly evidence?: readonly string[];
+  },
 ): Promise<WriteOutput> {
   const roles = registry(context);
   const actor = resolveCaller(roles, context.env, options);
   const owner = registered(roles, input.owner ?? actor.role, "owner-unregistered");
   return withStore(context, (store) =>
     store.transaction(() => {
-      const result = retainMessage(store, actor, id, {
-        nextBoundary: input.nextBoundary,
-        owner,
-        reason: input.reason,
-      });
+      const result = retainMessage(store, actor, id, { ...input, owner });
       return { ...result, schema: 1 as const };
     }),
   );
