@@ -25,3 +25,4 @@ Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
 | ck-0049 | Test internals through their module interfaces                   | [ck-0049.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0049.md) |
 | ck-0050 | One command wrapper and explicit clock, environment and hostname | [ck-0050.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0050.md) |
 | ck-0054 | Reject inline type-only imports that load their module           | [ck-0054.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0054.md) |
+| ck-0058 | Release Coordination Kit 7.3.0 and qualify client migration      | [ck-0058.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0058.md) |
