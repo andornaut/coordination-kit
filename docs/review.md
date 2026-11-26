@@ -111,7 +111,8 @@ project)` stores explicit events as messages from `delivery-kit` to the game's
 
 `review deliver` resolves the route as above: no route, a route this game does not
 host, a held route, an invalid route and an unregistered recipient give the same typed results.
-A slot already recorded returns its result at once. Otherwise, before any store write, the review
+A slot with a recorded result returns at once. Otherwise, a stored brief can resume its wake
+plan without repeating the survey. When there is no brief, before any store write, the review
 surveys every registered role under one registry revision. It uses one read-only Codex control
 connection (`CODEX_CONTROL_SOCKET`, else the managed socket) and a 256-call budget and deadline.
 When there are worker parents, the question phase leaves at least 96 calls and eight seconds
@@ -190,11 +191,19 @@ the full details, including every exact ID.
 
 The existing brief includes the counts of newly stalled originals and newly overdue retention
 boundaries. Continuing cases and exact original IDs stay visible in the detailed review.
-After the commit the review sends one wake to each recipient with unread originals, the route
-recipient first: it clears the recipient's outstanding wake and wakes it through its harness
-adapter, as for [store wakes](store.md#wakes). A pending question does not withhold this wake;
-role holds, policy holds and the Codex native input check still do, and a Codex wake still queued
-from earlier is not duplicated. A secret-shaped brief omits question titles.
+The brief commits the proposed wake recipients and their outstanding wakes, with the route
+recipient first. For each role the review commits an idempotent wake rearm before calling its
+harness adapter, as for [store wakes](store.md#wakes). A newer outstanding wake stays in place.
+A pending question does not withhold this wake. Role holds, policy holds and the Codex native
+input check still do, and a Codex wake still queued from earlier is not duplicated. A
+secret-shaped brief omits question titles.
+
+If the review stops before recording its result, retrying the same slot can wake planned roles
+that have no durable rearm. The rearm alone is enough to exclude a role from retry, even if its
+native outcome is unavailable. A newer brief for the game, a changed route recipient, or a
+legacy brief without a wake plan leaves no work to resume. The runner still owns cadence.
+The plan is an optional brief field. The rearm uses the existing `wake.rearmed` journal event
+with a slot-specific key. An older CLI can still return the brief result.
 
 `coordination-kit --root R review show [--game G] [--slot S]` prints the recorded brief for the
 slot, or the latest one, as one JSON line: `kind` `review-show`, the game, slot, recipient,

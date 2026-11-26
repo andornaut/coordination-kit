@@ -42,6 +42,17 @@ function setup(ports: WakePorts = {}) {
 }
 
 describe("Claude wakes", () => {
+  it("keeps an independent wake that replaced the review plan's outstanding wake", async () => {
+    const { send, store } = setup();
+    await send(TECH_ROLE);
+    const attempt = { key: "wake.rearmed:review:fixture", ...wakeState(store, TECH_ROLE) };
+    readInbox(store, { nativeId: TECH, role: TECH_ROLE });
+    const replacement = await send(TECH_ROLE);
+
+    expect(rearmWake(store, SENDER, TECH_ROLE, "review", attempt)).toBe(false);
+    expect(wakeState(store, TECH_ROLE).outstanding).toBe(replacement.wake);
+  });
+
   it("writes the wake file once per outstanding wake with no payload, and again after a pull", async () => {
     const { layout, send, store, wakes } = setup();
     expect(await send(TECH_ROLE)).toMatchObject({ status: "accepted" });

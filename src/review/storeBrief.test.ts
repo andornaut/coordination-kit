@@ -19,8 +19,9 @@ import {
 } from "../store/files/compactionGeneration.ts";
 import { activateMigration, prepareMigration } from "../store/files/migration.ts";
 import { recordSession } from "../store/handoffs.ts";
+import { DELIVERY_KIT_ACTOR } from "../store/identity.ts";
 import { messageStatus, retainMessage } from "../store/messages.ts";
-import { derivedId } from "../store/notices.ts";
+import { derivedId, storeNotice } from "../store/notices.ts";
 import { setPolicyHold } from "../store/policyHolds.ts";
 import { openQuestion, releaseHold, setHold } from "../store/questions.ts";
 import { storeSend } from "../store/service.ts";
@@ -205,11 +206,95 @@ describe("stored review brief", () => {
       expect.objectContaining({ from_role: "delivery-kit", id, to_role: "game-coordinator" }),
     ]);
     expect(briefs(layout)[0]!.body).toContain("Open messages: 2 (sent 2, delivered 0, retained 0)");
+    const wake = () => wakeSeq(wakeFilePath(layout, TECH_ROLE));
+    expect(wake()).toBe(2);
     expect(await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, SLOT)).toEqual(result);
+    expect(wake()).toBe(2);
     // Without the per-slot receipt the store still answers: no second message.
     rmSync(deliverRecord(game, SLOT));
     expect(await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, SLOT)).toEqual(result);
     expect(existsSync(deliverRecord(game, SLOT))).toBe(true);
+    expect(briefs(layout)).toHaveLength(1);
+    expect(wake()).toBe(2);
+  });
+
+  it("resumes an unattempted role without replaying completed or unconfirmed wakes", async () => {
+    const { layout } = await storeModeFixture();
+    const game = gameLayout(layout, GAME);
+    const codex = fakeCodex(ART);
+    const ports = { connect: () => Promise.resolve(codex.client) };
+    await send(layout, 1);
+    await storeSend(
+      { clock: TEST_CLOCK, env: SENDER, layout, ports },
+      {},
+      { body: "Art review task.", id: uuid(901), to: ART_ROLE },
+    );
+
+    const options = { ...TEST_CONTEXT, env: {}, wakePorts: ports };
+    const append = Store.prototype.append;
+    const interrupted = vi.spyOn(Store.prototype, "append").mockImplementation(function (
+      this: Store,
+      input,
+    ) {
+      if (input.kind === "wake.completed" && input.payload.role === ART_ROLE) {
+        throw new Error("Interrupted after the native wake.");
+      }
+      return append.call(this, input);
+    });
+    try {
+      await expect(deliverReview(options, layout, game, SLOT)).rejects.toThrow(
+        "Interrupted after the native wake.",
+      );
+    } finally {
+      interrupted.mockRestore();
+    }
+    const wakes = () => [
+      wakeSeq(wakeFilePath(layout, "game-coordinator")),
+      codex.adds().length,
+      wakeSeq(wakeFilePath(layout, TECH_ROLE)),
+    ];
+    expect(existsSync(deliverRecord(game, SLOT))).toBe(false);
+    const recorded = showBrief(TEST_CONTEXT, layout, { game: GAME, slot: SLOT });
+    expect(recorded.wakePlan?.map(({ role }) => role)).toEqual([
+      "game-coordinator",
+      ART_ROLE,
+      TECH_ROLE,
+    ]);
+    expect(wakes()).toEqual([1, 2, 1]);
+
+    expect(await deliverReview(options, layout, game, SLOT)).toEqual(recorded.result);
+    expect(wakes()).toEqual([1, 2, 2]);
+    expect(briefs(layout)).toHaveLength(1);
+    expect(await deliverReview(options, layout, game, SLOT)).toEqual(recorded.result);
+    expect(wakes()).toEqual([1, 2, 2]);
+  });
+
+  it("does not infer unattempted wakes from a legacy brief without a plan", async () => {
+    const { layout } = await storeModeFixture();
+    const game = gameLayout(layout, GAME);
+    const messageId = derivedId("review-brief", GAME, SLOT);
+    const result = { detail: "Legacy brief.", reason: null, status: "delivered" };
+    const recipient = "game-coordinator";
+    const store = Store.forLayout(TEST_CONTEXT, layout);
+    try {
+      storeNotice(store, {
+        body: result.detail,
+        fallback: result.detail,
+        id: messageId,
+        to: recipient,
+      });
+      store.append({
+        actor: DELIVERY_KIT_ACTOR,
+        key: `review.brief:${GAME}:${SLOT}`,
+        kind: "review.brief",
+        payload: { game: GAME, messageId, recipient, result, slot: SLOT },
+      });
+    } finally {
+      store.close();
+    }
+
+    expect(await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, SLOT)).toEqual(result);
+    expect(wakeSeq(wakeFilePath(layout, recipient))).toBe("absent");
     expect(briefs(layout)).toHaveLength(1);
   });
 

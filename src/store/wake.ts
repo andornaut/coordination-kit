@@ -164,20 +164,32 @@ export function pendingWakeRoles(store: Store): string[] {
 
 /**
  * Clear a recipient's outstanding wake so the next `wakeRecipient` may send one again. Only the
- * scheduled review calls this, at its slot boundary; it never touches message state.
+ * scheduled review calls this. A planned attempt is reserved before native I/O, even if there
+ * is nothing to clear. It never rearms a newer outstanding wake or reserves the same key twice.
  */
-export function rearmWake(store: Store, actor: Actor, role: string, reason: string): boolean {
+export function rearmWake(
+  store: Store,
+  actor: Actor,
+  role: string,
+  reason: string,
+  attempt?: { readonly key: string; readonly outstanding: string | null },
+): boolean {
   return store.transaction(() => {
-    if (wakeState(store, role).outstanding === null) {
+    const { outstanding } = wakeState(store, role);
+    if (
+      attempt === undefined
+        ? outstanding === null
+        : outstanding !== null && outstanding !== attempt.outstanding
+    ) {
       return false;
     }
-    store.append({
+    const { duplicate } = store.append({
       actor,
-      key: `wake.rearmed:${role}:${store.head().seq}`,
+      key: attempt?.key ?? `wake.rearmed:${role}:${store.head().seq}`,
       kind: "wake.rearmed",
       payload: { reason, role },
     });
-    return true;
+    return !duplicate;
   });
 }
 

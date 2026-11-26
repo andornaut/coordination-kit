@@ -1,7 +1,7 @@
 // The scheduled review brief in store mode: one stored message from delivery-kit to the route
 // recipient per (game, slot), capped at one page (60 lines, 4096 bytes) of counts and exceptions.
 // `review show` prints the full record. The message ID derives from (game, slot), so a repeated
-// call stores nothing and returns the recorded result. Native transports only wake.
+// call reuses the stored brief and may continue unattempted wakes. Native transports only wake.
 import type { SQLInputValue } from "node:sqlite";
 
 import { readRoleRoute, RouteError, routeRecipient } from "../adapters/shared/route.ts";
@@ -140,6 +140,8 @@ export interface BriefRecord {
   readonly open: readonly string[];
   /** The unread snapshot at this slot, before any wake attempt. Older briefs omit it. */
   readonly unread?: readonly UnreadMessage[];
+  /** The recipients eligible to wake at commit, including the new brief's recipient. */
+  readonly wakePlan?: readonly { readonly role: string; readonly outstanding: string | null }[];
   readonly result: ReviewResult;
   /** Store-recorded questions and decisions, with no claim about native visibility. */
   readonly decisions: RecordedDecisions;
@@ -626,10 +628,40 @@ export function composeBrief(
   return [...lines, ...tail].join("\n");
 }
 
-/**
- * Store this slot's brief once and wake the recipient. A recorded brief for (game, slot) returns
- * its recorded result. The brief includes first-episode counts based on the preceding slot.
- */
+/** Wake only the roles in this slot's plan which have no durable attempt yet. */
+async function wakeBrief(
+  context: StoreReviewContext,
+  store: Store,
+  record: BriefRecord,
+  recipient: string,
+): Promise<void> {
+  const { game, messageId, slot, wakePlan } = record;
+  if (wakePlan === undefined || record.recipient !== recipient) {
+    return;
+  }
+  if (
+    store.db.prepare("SELECT 1 FROM review_briefs WHERE game = ? AND slot > ?").get(game, slot) !==
+    undefined
+  ) {
+    return;
+  }
+  // A review ignores pending questions in the store, while role and policy holds still apply.
+  const wake = {
+    env: context.env,
+    layout: context.layout,
+    ports: { ...context.ports, storeGuard: context.ports?.storeGuard ?? holdGuard },
+    store,
+  };
+  for (const { outstanding, role } of wakePlan) {
+    const attempt = { key: `wake.rearmed:review:${messageId}:${role}`, outstanding };
+    if (rearmWake(store, DELIVERY_KIT_ACTOR, role, `review ${game} ${slot}`, attempt)) {
+      // eslint-disable-next-line no-await-in-loop
+      await wakeRecipient(wake, role);
+    }
+  }
+}
+
+/** Store this slot's brief once, then wake the recipients whose attempt has not begun. */
 export async function storeReview(
   context: StoreReviewContext,
   game: GameLayout,
@@ -644,6 +676,7 @@ export async function storeReview(
   try {
     const earlier = recordedBrief(beforeSurvey, game.id, slot);
     if (earlier !== undefined) {
+      await wakeBrief(context, beforeSurvey, earlier, recipient);
       return earlier.result;
     }
   } finally {
@@ -662,10 +695,10 @@ export async function storeReview(
   );
   const store = Store.forLayout(context, context.layout);
   try {
-    const outcome = store.transaction((): { result: ReviewResult; fresh: boolean } => {
+    const record = store.transaction((): BriefRecord => {
       const recorded = recordedBrief(store, game.id, slot);
       if (recorded !== undefined) {
-        return { fresh: false, result: recorded.result };
+        return recorded;
       }
       const previous = previousBrief(store, game.id, slot);
       const surveyed = survey(store, previous, native, slot);
@@ -701,6 +734,9 @@ export async function storeReview(
         recipient,
         result,
         slot,
+        wakePlan: pendingWakeRoles(store)
+          .sort((a, b) => Number(b === recipient) - Number(a === recipient))
+          .map((role) => ({ outstanding: wakeState(store, role).outstanding, role })),
       };
       store.append({
         actor: DELIVERY_KIT_ACTOR,
@@ -708,28 +744,10 @@ export async function storeReview(
         kind: "review.brief",
         payload: record as unknown as JsonObject,
       });
-      return { fresh: true, result };
+      return record;
     });
-    if (outcome.fresh) {
-      // One wake per recipient with unread originals, through its harness adapter. A pending
-      // question withholds send-time wakes only up to this boundary: the review wakes past it,
-      // while role holds and policy holds still apply.
-      const wake = {
-        env: context.env,
-        layout: context.layout,
-        ports: { ...context.ports, storeGuard: context.ports?.storeGuard ?? holdGuard },
-        store,
-      };
-      const roles = pendingWakeRoles(store).sort(
-        (a, b) => Number(b === recipient) - Number(a === recipient),
-      );
-      for (const role of roles) {
-        rearmWake(store, DELIVERY_KIT_ACTOR, role, `review ${game.id} ${slot}`);
-        // eslint-disable-next-line no-await-in-loop
-        await wakeRecipient(wake, role);
-      }
-    }
-    return outcome.result;
+    await wakeBrief(context, store, record, recipient);
+    return record.result;
   } finally {
     store.close();
   }
