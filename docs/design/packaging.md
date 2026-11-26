@@ -28,3 +28,4 @@ Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
 | ck-0058 | Release Coordination Kit 7.3.0 and qualify client migration      | [ck-0058.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0058.md) |
 | ck-0059 | Audit the Coordination Kit documentation                         | [ck-0059.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0059.md) |
 | ck-0060 | Add approved Dependabot coverage for Coordination Kit            | [ck-0060.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0060.md) |
+| ck-0070 | Document first use of Coordination Kit                           | [ck-0070.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0070.md) |
