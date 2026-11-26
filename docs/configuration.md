@@ -1,6 +1,6 @@
 # Configuration
 
-The coordinator root, game-coordinator's `config.json`, the fields of a game's `delivery-kit.json`
+The workspace root, its `config.json`, the fields of an app's `delivery-kit.json`
 that coordination reads, and where the kit keeps mutable state.
 
 Configuration never holds secret values. Use the operator's existing authentication and credential
@@ -18,19 +18,26 @@ Commands that use the coordinator root resolve it in this order.
 The `work` commands read `--root` as the repository to inspect (default: the working directory)
 and take the coordinator root only from `COORDINATION_KIT_ROOT`, else `DELIVERY_KIT_ROOT`.
 
-## game-coordinator `config.json`
+## Workspace `config.json`
 
-Committed in game-coordinator, schema 1. Every path is relative to game-coordinator. See the
-[example configuration](https://github.com/andornaut/coordination-kit/blob/main/examples/config.json).
+Commit schema 1 in the primary workspace checkout. All checkout paths are relative to that
+root. Use exactly one of `apps` and `games`.
 
 - `timezone` and `wakeMinutes` (integers 0 to 59): the scheduled review minutes. An empty
   `wakeMinutes` schedules no review.
-- `games.<id>`: `name` (the report name, for example `Archie`), `path` to the game checkout and
-  `roles`.
+- `apps.<id>`: report `name`, repository `path` and explicit registry `roles`, such as
+  `operator` or `dashboard/tech`. The app ID need not be part of a role key.
+- `games.<id>`: the legacy shape with the same entry fields and role names such as `tech`.
+  The kit expands each name to `<game>/<role>`. See the
+  [legacy example](https://github.com/andornaut/coordination-kit/blob/main/examples/config.json).
 - `kits.<id>.path` and `sharedRoles`.
+- `permissions` is required with `apps`. Each listed role has a `workspace` array and an
+  `apps` map of app IDs to grant arrays. An omitted role has no grants.
+  [Permission checks](store.md#app-mode-permissions) describe how grants apply.
+- `appStateDir` is optional with `apps`. It defaults to `apps`. Use `games` for an in-place
+  migration that preserves runtime paths.
 
-Role keys are `<game>/<role>` for each game role, then each shared role name. The registry, the
-route and every role reference must use these keys.
+Registry entries, review routes and recipient references use the exact configured role keys.
 
 ## Game `delivery-kit.json`
 
@@ -51,12 +58,87 @@ rules that delivery-kit loads its configuration with ([libraries](libraries.md))
 This kit uses only `reports`:
 
 - `project`: an optional legacy display name. Both readers still validate a supplied value.
-  Coordination reports take the display name from `games.<id>.name` in coordinator `config.json`.
+  Coordination reports take the display name from the app or game entry's `name` in `config.json`.
 - `scheduledTicks`: whether the game's runner reports scheduled departure slots.
 - `recipient`: a registered role key. It receives the game's events and, when the game hosts the
   route, its scheduled reviews. `claude channel` defaults to it.
 - `workerParents`: required list of role references retained for configuration compatibility. The
   current scheduled review derives native coverage from the registry.
+
+## Start an app workspace
+
+1. In the primary workspace checkout, commit `config.json` as below, the compatible checked
+   Coordination Kit pin and its lockfile, and `.gitignore` rules for `/var/` and `/node_modules/`. Install with
+   `npm ci`. In the app repository, commit `delivery-kit.json` if you plan to run reviews or
+   ingest runner events. In its `reports` section use the exact recipient key `operator`.
+2. Establish the actual Codex session from the app's worktree. Run the registry seed command
+   below from the primary workspace checkout using the verified native project and conversation IDs.
+3. In that session, use the workspace's installed CLI with the absolute workspace root and
+   run `session start` as in the [coordinator startup command](#start-a-fresh-coordinator).
+   Start with SQLite. Use the [filesystem migration guide](upgrading.md#filesystem-authority-migration)
+   to qualify and activate filesystem authority.
+
+```json
+{
+  "schema": 1,
+  "timezone": "UTC",
+  "wakeMinutes": [],
+  "apps": {
+    "dashboard": { "name": "Dashboard", "path": "../dashboard", "roles": ["operator"] }
+  },
+  "kits": {},
+  "sharedRoles": [],
+  "permissions": {
+    "operator": {
+      "workspace": ["store:maintain"],
+      "apps": { "dashboard": ["review:deliver", "events:ingest", "delivery:operate"] }
+    }
+  }
+}
+```
+
+Set `native_project_id` and `conversation_id` to the verified IDs before seeding the registry.
+
+```sh
+node --input-type=module - "${native_project_id:?}" "${conversation_id:?}" <<'JS'
+import { createRegistry, loadLayout } from "@andornaut/coordination-kit/build/registry";
+
+const [, , nativeProjectId, conversationId] = process.argv;
+const registry = createRegistry(() => new Date(), loadLayout(process.cwd()), {
+  schema: 1,
+  harness: "codex",
+  host: { nativeProjectId, root: "." },
+  roles: {
+    operator: {
+      ownership: "active",
+      worktree: "../dashboard",
+      conversations: { codex: conversationId },
+    },
+  },
+  operations: { dashboard: { busOwner: "operator" } },
+  transfers: [],
+});
+console.log(JSON.stringify({ revision: registry.revision }));
+JS
+```
+
+The workspace owner provisions the active runner binding and review route before enabling a
+scheduled runner. The example leaves scheduled reviews disabled with `wakeMinutes: []`.
+See the [review route](review.md#review-route) and [runner commands](store.md#runner-events).
+
+### Migrate a legacy coordinator in place
+
+1. Have the live workspace owner verify and adopt the compatible Coordination Kit reader
+   before adopting an app-mode Delivery Kit writer. Use the existing owner, runner controls
+   and scheduled cutover boundary.
+2. In `config.json`, replace `games` with `apps` and replace each legacy role name with its
+   current full registry key. For example, `games.dashboard.roles: ["tech"]` becomes
+   `apps.dashboard.roles: ["dashboard/tech"]`. Set `appStateDir: "games"` and add explicit
+   grants for the existing owners and the runner's verified binding.
+3. Retain the app IDs, checkout paths, registry bindings, `operations.<id>.busOwner`, route,
+   event and cursor files, and current store authority. The `games` state setting keeps
+   `var/games/<id>/bus/` and `var/game-dev/`. The live workspace owner adopts the config and
+   pins after verifying the exact bindings and their permissions.
 
 ## Start a fresh coordinator
 
@@ -137,11 +219,12 @@ JS
 
 | Location                                                                                  | Git                  | Content                                                                                                 |
 | ----------------------------------------------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------- |
-| `config.json`, `package.json`, `package-lock.json` in the coordinator                     | Tracked              | Game and role definitions and the installed kit pin.                                                    |
-| `delivery-kit.json` and project work files in each game repository                        | Tracked              | Delivery and reporting configuration, work definitions and decision lines.                              |
+| `config.json`, `package.json`, `package-lock.json` in the workspace                       | Tracked              | App or game definitions, role grants and the installed kit pin.                                         |
+| `delivery-kit.json` and project work files in each app repository                         | Tracked              | Delivery and reporting configuration, work definitions and decision lines.                              |
 | `var/registry.json`, `var/registry.lock`, `var/route.json`, `var/handoffs/`               | Ignored              | Local native bindings, review routing and role checkpoints.                                             |
 | `var/coordination/`, `var/coordination-authority.json`, `var/coordination-authority.lock` | Ignored              | [Filesystem journal and role records](store.md#filesystem-layout), authority receipt and switch lock.   |
-| `var/games/<game>/bus/`                                                                   | Ignored              | Runner state and event logs, ingest cursor and quarantine, review result receipts and decision markers. |
+| `var/apps/<id>/bus/` or `var/games/<id>/bus/`                                             | Ignored              | Runner state and event logs, ingest cursor and quarantine, review result receipts and decision markers. |
+| `var/reviews/` or `var/game-dev/`                                                         | Ignored              | Local review and inbox diagnostics, acknowledgements and retentions.                                    |
 | `var/work-protocol.json`                                                                  | Ignored              | Optional external state-root pointer for the SQLite source, channel and wake files, and artifacts.      |
 | External state root and independent backups                                               | Outside the checkout | `coordination.db`, transport state, artifacts and retirement archives.                                  |
 
@@ -152,17 +235,22 @@ A malformed pointer is `invalid-state-root-config`. Without a pointer, the sourc
 `wake/`, `channel/`, `artifacts/` and any retirement `archive/` are under `var/`. Filesystem
 activation moves store authority only. It retains the configured transport and artifact paths.
 
-Example coordinator checkout after filesystem activation. See the
+Example fresh app workspace and sibling repository after filesystem activation. See the
 [filesystem layout](store.md#filesystem-layout) for journal and role records.
 
 ```text
-coordinator/
-  config.json, package.json, package-lock.json    tracked
+workspace/
+  .gitignore, config.json, package.json, package-lock.json  tracked
+  node_modules/                                  ignored dependency install
   var/                                           ignored
-    registry.json, route.json, handoffs/
+    registry.json, registry.lock, route.json, handoffs/
     coordination-authority.json, coordination/
-    games/example-game/bus/
+    reviews/
+    apps/dashboard/bus/
+      events.jsonl, events.cursor
     work-protocol.json                           optional external state pointer
+dashboard/
+  delivery-kit.json, docs/work/                   tracked
 ```
 
 With SQLite selected and no pointer, the database is `var/coordination.db`. With a pointer,

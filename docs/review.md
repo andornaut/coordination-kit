@@ -5,24 +5,26 @@ kit, the stored brief, wake files, the Claude channel server and its status file
 
 ## Review route
 
-`var/route.json` (schema 2) names the scheduled review's host game and its targets by role:
+`var/route.json` (schema 2) names the scheduled review's host app and its targets by role.
+This solo app has no additional targets.
 
 ```json
 {
   "schema": 2,
   "state": "active",
-  "host": "archies-dog-walks",
-  "targets": ["archies-dog-walks/tech", "chibis-way-home/tech", "art-kit"]
+  "host": "dashboard",
+  "targets": []
 }
 ```
 
 - `state` is `active` or `held`. A held route, or no route, delivers no scheduled review, and a
   held route also defers events addressed to its recipient.
-- `host` is the game whose runner dispatches the scheduled review at the `config.json`
-  `wakeMinutes`. The review goes to the host's `reports.recipient`, which must be a role key in
-  `config.json`.
-- Every target must be a role key in `config.json`. Targets are distinct, an active route needs at
-  least one target, and an active route's targets exclude its recipient.
+- `host` is the app whose runner dispatches scheduled reviews at the `config.json`
+  `wakeMinutes`. In app mode the host's `reports.recipient` must be an exact role key in
+  the host app's `roles` or in the workspace's `sharedRoles`.
+- Every target must be a distinct role key in `config.json`. An active route's targets
+  exclude its recipient. App mode accepts an empty target list. Legacy game mode requires
+  at least one target for an active route.
 - The file has exactly these four keys. A schema 1 route is refused with the edit it needs.
 
 ## Scheduled review seam
@@ -34,7 +36,7 @@ state. This kit never imports delivery-kit.
 
 ### CLI seam
 
-`coordination-kit --root R review deliver --game G --slot S` stores the [brief](#stored-brief)
+`coordination-kit --root R review deliver --app A --slot S` stores the [brief](#stored-brief)
 for the slot that starts at `S`, an ISO 8601 instant with an offset on a whole minute. It prints
 exactly one stdout line, shown expanded here:
 
@@ -42,7 +44,7 @@ exactly one stdout line, shown expanded here:
 {
   "schema": 1,
   "kind": "review-deliver",
-  "game": "G",
+  "appId": "A",
   "slot": "S",
   "status": "delivered",
   "reason": null,
@@ -51,9 +53,13 @@ exactly one stdout line, shown expanded here:
 }
 ```
 
-`coordination-kit --root R events ingest --game G` ingests the runner's `events.jsonl` into the
+`coordination-kit --root R events ingest --app A` ingests the runner's `events.jsonl` into the
 store and prints the same keys with `kind` `events-ingest` and the counts `delivered`, `held`,
 `ingested`, `quarantined` and `completed`; see [runner events](store.md#runner-events).
+
+Use either `--app A` or the backward-compatible `--game A` selector. With `--game` the
+result uses the legacy `game` field. In app mode both calls require the active bound runner
+and the respective [app grant](store.md#app-mode-permissions).
 
 - `status` is `delivered`, `deferred` or `skipped`.
 - `reason` is `null` for `delivered`, otherwise a token from `REASON_TOKENS` (below).
@@ -61,8 +67,8 @@ store and prints the same keys with `kind` `events-ingest` and the counts `deliv
 - `cli` is the running package version and the sha256 of the `dist/cli.js` bytes, the same as
   `coordination-kit --version --json`. From source the digest is 64 zeros.
 
-Exit status is 0 for every typed result, 2 for a usage error (a missing or malformed `--game` or
-`--slot`, an unknown game or an unknown option) and 1 for an internal failure. An internal
+Exit status is 0 for every typed result, 2 for a usage error (conflicting selectors, a missing
+or invalid required option, or an unknown app) and 1 for a failed precondition or internal failure. An internal
 failure prints nothing on stdout and one `coordination-kit:` line on stderr; the runner reports
 it, a timeout or unparsable output as no delivery claimed, with the `cli-error` token.
 
@@ -213,8 +219,8 @@ legacy brief without a wake plan leaves no work to resume. The runner still owns
 The plan is an optional brief field. The rearm uses the existing `wake.rearmed` journal event
 with a slot-specific key. An older CLI can still return the brief result.
 
-`coordination-kit --root R review show [--game G] [--slot S]` prints the recorded brief for the
-slot, or the latest one, as one JSON line: `kind` `review-show`, the game, slot, recipient,
+`coordination-kit --root R review show [--app A] [--slot S]` prints the recorded brief for the
+slot, or the latest one, as one JSON line with `kind` `review-show`, the app ID, slot, recipient,
 message ID, recording time, result, counts, every exception, the open message IDs and the body.
 New briefs include `decisions` with store references and `native` with per-role evidence and the
 registry revision. `native.workers[].coverage` is `complete` for a complete bounded survey,

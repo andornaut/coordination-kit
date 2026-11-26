@@ -1,16 +1,17 @@
 # coordination-kit
 
-Shared coordination for the game and kit roles: the role registry, the coordination store
+Shared coordination for application, game and kit roles: the role registry, the coordination store
 with its message lifecycle, Claude and Codex wakes, work records, questions, holds and decisions,
-the scheduled review brief, plus checks for a repository's work files. The kit owns the mechanisms; `game-coordinator` owns `config.json`, the registry and
-mutable state. delivery-kit's resident runner decides when a scheduled review is due and calls
+the scheduled review brief, plus checks for a repository's work files. The workspace owner manages
+`config.json`, the registry and mutable state. Delivery Kit's resident runner decides when a scheduled review is due and calls
 this kit to compose and deliver it.
 
 The package is `@andornaut/coordination-kit`. Its operator tool is the `coordination-kit` CLI,
 bundled into `dist/cli.js`. The bundle imports only `node:` builtins. Its child processes are
 `flock`, `git`, `claude agents --json` and, for `store retire`, `tar`.
 
-[Start a fresh coordinator](docs/configuration.md#start-a-fresh-coordinator) with SQLite and
+[Start an app workspace](docs/configuration.md#start-an-app-workspace) or
+[bootstrap a legacy game coordinator](docs/configuration.md#start-a-fresh-coordinator) with SQLite and
 use the [upgrade guide](docs/upgrading.md#filesystem-authority-migration) to qualify and activate
 the file store. The [filesystem layout](docs/store.md#filesystem-layout) describes journal and
 role records. [Git boundaries](docs/configuration.md#state) cover tracked
@@ -22,8 +23,9 @@ Optional forge integration uses [`gh` or `glab` with existing authentication](do
 
 ## Install and pin
 
-Pin the release asset as a devDependency in the primary game-coordinator checkout and commit the
-lockfile. The CLI requires Node 24.21.0 or newer, and all roles use that installation.
+Pin the checked release asset as a devDependency in the primary workspace checkout and commit the
+lockfile. The CLI requires Node 24.21.0 or newer, and all roles use that installation. This
+example is a legacy game pin. App mode requires a checked release that supports `apps`.
 
 ```json
 "devDependencies": {
@@ -37,10 +39,12 @@ See the [upgrade guide](docs/upgrading.md#coordination-kit-73).
 
 ## Usage
 
-Commands resolve game-coordinator from
+Commands resolve the workspace from
 `--root DIR`, else `COORDINATION_KIT_ROOT`, else `DELIVERY_KIT_ROOT`, else the working directory.
-`--root` may appear anywhere on the command line, at most once. Commands that require a game
-take `--game ID`. The `work` commands read `--root` as the repository to inspect and default to
+`--root` may appear anywhere on the command line, at most once. The runner commands
+`review deliver`, `review show` and `events ingest` accept `--app ID` or `--game ID`.
+See [runner examples and compatibility](docs/store.md#runner-events). The `work` commands read
+`--root` as the repository to inspect and default to
 the working directory. They take the coordinator root only from `COORDINATION_KIT_ROOT` or
 `DELIVERY_KIT_ROOT`.
 

@@ -115,7 +115,7 @@ copies and backups through the review. Pruning after that review requires a sepa
 
 ## Filesystem compaction runbook
 
-The active game-coordinator runs these commands against the primary coordinator checkout.
+Run these commands from the primary workspace checkout as an active `store:maintain` operator.
 Use the existing scheduled review and operator approval lane.
 
 1. Run `store compaction-plan` and record the exact head and registry revision. Confirm the
@@ -280,6 +280,23 @@ send with the same ID and identical content, or the same close, is a no-op repor
 `duplicate: true`; any other reuse is `id-conflict` or `already-closed`. A send without `--id`
 gets a fresh UUID, so a retry that must not duplicate passes `--id`.
 
+### Unverified originals
+
+The recipient can collect and retain an unverified original. For each such original, the store
+tracks a separate decision tied to its message ID and body SHA-256. After collecting the exact
+original, the bound recipient displays the user prompt and records its reference with
+`msg decide ID --body-sha256 HASH --prompt REF`. The pending decision starts with display
+`unknown` and records display as `attested` on that write.
+
+After the user replies, the same recipient records
+`msg decide ID --body-sha256 HASH --approve --scope TEXT --user-reply REF` or
+`msg decide ID --body-sha256 HASH --decline --user-reply REF`. The reply reference is distinct
+from the prompt reference. Approval applies only to the recorded scope for this original.
+`msg done` requires approval for an unverified original. Decline closes it with the recorded
+decision `declined`. Older readers see the existing terminal state `handled`, which here means
+the original is closed without taking up the request. Check the decision in `msg status` or
+the inbox when verifying what happened. Approval does not grant any registry permission.
+
 `msg send` refuses a body over 1 MiB (`body-too-large`) and a body or retention text that matches
 a secret shape (`secret-shaped-body`). The shapes favour recall over precision; a refused body
 that holds no secret is rephrased:
@@ -309,6 +326,7 @@ no native ID or worker attribution, and uses queue intent even when `--intent un
 supplied. The existing guarded wake and recipient lifecycle apply. Sender identity, work
 authorization and every other command's registry requirements are independent of this queue
 entry. `inbox --peek` identifies the recipient for its read-only view.
+`msg decide` requires the recipient's own binding with no worker attribution.
 `msg status` and `msg history` also identify the caller when
 passed `--include-body`. The caller is the registry role whose effective harness
 conversation ID equals the caller's native ID. The native ID is `--native-id ID`, else, for each
@@ -338,9 +356,31 @@ CLI uses the actual child environment binding for this path. An explicit ID or a
 label alone retains role attribution. Missing and stale lineage stay unverified.
 
 Reads (`msg status` and `msg history` without `--include-body`, `question list`, `hold list`,
-`decision list`, `store export`, `store rebuild`, `store import --dry-run`,
+`decision list`, `store import --dry-run`,
 `store retire --dry-run`, `work show`,
 `work history`, `handoff show` and the `graph` commands) take no caller.
+Legacy game mode also allows `store export` and `store rebuild` without a caller.
+
+### App-mode permissions
+
+In an [app workspace](configuration.md#workspace-configjson), privileged operations check
+the caller's exact current native binding and active ownership. Held bindings cannot exercise
+these grants. A workspace grant applies across the workspace. An app grant applies only to
+checks for that app ID. A workspace-only check requires a workspace grant.
+
+- `review deliver` and `events ingest` require `review:deliver` and `events:ingest`
+  respectively for the selected app. Provision the active runner binding explicitly. The
+  same checks apply with `--game`. Unattended legacy game runners retain their established
+  route and operation checks.
+- `delivery:operate` grants the app permission for manual delivery. Delivery still requires
+  the existing verified operator check. The operation's `busOwner` is a registry reference.
+- `messages:read-all` is the workspace grant for reading other roles' message bodies. A
+  role's own inbox and dispositions retain the recipient checks above. `store export`
+  requires the same workspace grant.
+- Workspace-level administration uses `store:maintain` for store writes such as rebuild,
+  ledger import, migration and compaction, `handoff:manage` for coordinating cross-role handoffs,
+  and `registry:manage` for harness selection. A `policy:manage` grant can be scoped to
+  an app for its policy holds. Workspace-wide policy operations require a workspace grant.
 
 ## Wakes
 
@@ -396,7 +436,8 @@ delivery and handling to the recipient. Recorded reason codes from earlier wake 
 
 `msg history` prints message events in seq order without bodies. With `--include-body` the caller
 is resolved through the [writer fence](#writer-fence), and the `msg.sent` and `msg.imported`
-events of messages it sent or received carry their `body`; `game-coordinator` sees every body.
+events of messages it sent or received carry their `body`. The workspace `messages:read-all`
+grant allows access to all bodies.
 Other events stay metadata, and a caller the fence refuses gets no output.
 
 ## Questions, holds and decisions
@@ -558,17 +599,19 @@ Any other failed condition keeps `caller-unbound`. The registry revision and tha
 record of the rebind; `session.started` keeps its existing payload. Codex callers and every other
 verb are unchanged.
 
-A handoff moves a scope of roles from their current harness to `--to`:
+A handoff moves a scope of roles from their current harness to `--to`.
+The coordinator in the table uses the workspace `handoff:manage` grant. In a legacy workspace
+this is the configured `game-coordinator`.
 
 | Command                    | Caller                    | From state                      | To state    | Requires                                  |
 | -------------------------- | ------------------------- | ------------------------------- | ----------- | ----------------------------------------- |
-| `handoff open --scope ...` | game-coordinator          | none                            | `preparing` | No open handoff covering any role.        |
+| `handoff open --scope ...` | Coordinator               | none                            | `preparing` | No open handoff covering any role.        |
 | `handoff ready`            | each role, source binding | `preparing`                     | unchanged   | Sets the hold `handoff-<id>-<role>`.      |
-| `handoff state prepared`   | game-coordinator          | `preparing`                     | `prepared`  | Every role ready (`handoff-not-ready`).   |
-| `handoff state sent`       | game-coordinator          | `prepared`                      | `sent`      |                                           |
+| `handoff state prepared`   | Coordinator               | `preparing`                     | `prepared`  | Every role ready (`handoff-not-ready`).   |
+| `handoff state sent`       | Coordinator               | `prepared`                      | `sent`      |                                           |
 | `handoff active`           | each role, target binding | `sent`                          | unchanged   | Releases the role's handoff hold.         |
-| `handoff state completed`  | game-coordinator          | `sent`                          | `completed` | Every role active (`handoff-not-active`). |
-| `handoff state cancelled`  | game-coordinator          | `preparing`, `prepared`, `sent` | `cancelled` | Releases every handoff hold still active. |
+| `handoff state completed`  | Coordinator               | `sent`                          | `completed` | Every role active (`handoff-not-active`). |
+| `handoff state cancelled`  | Coordinator               | `preparing`, `prepared`, `sent` | `cancelled` | Releases every handoff hold still active. |
 
 - `--scope all` takes every registered role not already on the target harness; a named role
   already on it is `already-on-target`. Without `--id` the ID is `h-<n>`. Repeating `open` with
@@ -582,8 +625,8 @@ A handoff moves a scope of roles from their current harness to `--to`:
   the handoff's target harness, the guard skips that hold, so the target session can be woken to
   run `handoff active`. The role's `handoff active` or the coordinator's `cancelled` releases it,
   then attempts one guarded wake.
-- Order to complete: after `sent`, game-coordinator runs `harness select` for the scope, then each
-  target session runs `session start` and `handoff active`, then game-coordinator sets
+- Order to complete: after `sent`, a caller with `registry:manage` runs `harness select`
+  for the scope, then each target session runs `session start` and `handoff active`, then the coordinator sets
   `completed`. The fence admits a target session only after select, which also fences out the
   source sessions (`caller-unbound`).
 - `handoff show [--id ID]` prints the handoff, else the latest, with per-role ready and active
@@ -591,16 +634,33 @@ A handoff moves a scope of roles from their current harness to `--to`:
 
 ## Runner events
 
-`events ingest --game G` reads the runner's per-game log into the store. The runner is the only
-writer of `var/games/<g>/bus/events.jsonl` (one JSON object per line, `\n`-terminated, one
+`events ingest` reads the selected app's runner log into the store. From the primary
+workspace checkout, use the installed CLI as follows. Run delivery and ingest under the
+[authorized binding](#app-mode-permissions).
+
+```sh
+node node_modules/@andornaut/coordination-kit/dist/cli.js review deliver \
+  --app dashboard --slot 2026-11-26T17:30:00Z
+node node_modules/@andornaut/coordination-kit/dist/cli.js review show --app dashboard
+node node_modules/@andornaut/coordination-kit/dist/cli.js events ingest --app dashboard
+```
+
+`--game ID` is the backward-compatible selector for the same app and paths. Use one
+selector per invocation. The schema-1 response echoes the ID as `appId` for `--app`, or as
+`game` for `--game`. `review show` can omit the selector to look across apps and retains the
+legacy `game` result field in that form. Other response fields and exit codes are unchanged.
+
+The runner alone writes `var/apps/<id>/bus/events.jsonl`, or
+`var/games/<id>/bus/events.jsonl` with the legacy state layout
+(one JSON object per line, `\n`-terminated, one
 `O_APPEND` write under 4096 bytes) and rotates it to `events.<epochSeconds>.jsonl` when the cursor
 offset equals its size and the size exceeds 1 MiB. Ingest is the only reader:
 
 ```json
 {
   "schema": 1,
-  "id": "sha256(game\ntype\nkey)",
-  "game": "G",
+  "id": "sha256(appId\ntype\nkey)",
+  "appId": "dashboard",
   "kind": "deploy",
   "type": "deploy_success",
   "key": "K",
@@ -612,11 +672,15 @@ offset equals its size and the size exceeds 1 MiB. Ingest is the only reader:
 }
 ```
 
+- Schema 1 accepts `appId` or the legacy `game` member. Both can appear when both equal
+  the selected app ID. The event ID remains the SHA-256 of the app ID, event type and key
+  separated by newlines. Ingest normalizes both input forms to the existing stored payload.
+  Existing event identities, cursor format and path identities remain compatible.
 - `kind` is `attempt`, `gate`, `push`, `ci`, `deploy` or `runner`; `status` is `ok`, `failed`,
   `blocked`, `skipped`, `timeout` or `null` for a type with no outcome (such as `attempt` or
   `runner.started`); `type` is the exact legacy kind string, such as
-  `ci_success` or `blocked-full-gate`. A line whose `id` is not the sha256 of
-  `${game}\n${type}\n${key}`, whose `game` is another game, or that is not valid JSON in this
+  `ci_success` or `blocked-full-gate`. A line with the wrong event ID, an absent or different
+  app identity, or invalid JSON in this
   shape is malformed.
 - Each complete malformed line is appended to `bus/events.quarantine.jsonl` and skipped. An
   unterminated last line of `events.jsonl` is never consumed; the runner terminates a torn tail at
@@ -694,7 +758,7 @@ codes (0 for every typed result, 2 for a usage error, 1 for an internal failure)
 {
   "schema": 1,
   "kind": "events-ingest",
-  "game": "G",
+  "appId": "dashboard",
   "status": "delivered",
   "reason": null,
   "detail": "TEXT",
@@ -834,8 +898,8 @@ Both commands return schema 2 JSON and read Git and the selected store on every 
 `store import --approval-ledger FILE` maps each entry of the frozen approval ledger
 (`schemaVersion: 1`, `entries` as a list or keyed object, `independentHolds`) to a work item.
 `--dry-run` takes no caller and writes nothing (it reads the store when one exists, else uses an
-in-memory one); a real import requires the caller to be `game-coordinator` (`not-coordinator`),
-records everything in one transaction, and repeats as a no-op.
+in-memory one). A real import requires `store:maintain`, records everything in one transaction,
+and repeats as a no-op.
 
 | Ledger                                                     | Imported as                                                                                                                                                                                                                                                                                     |
 | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -945,8 +1009,7 @@ secret shape.
 `--dry-run` and `--apply` is required.
 
 - `--dry-run` takes no caller and writes nothing; it reads an existing store read-only.
-- `--apply` requires the caller to be `game-coordinator` through the
-  [writer fence](#writer-fence) (`not-coordinator`).
+- `--apply` requires `store:maintain` through the [writer fence](#writer-fence).
 
 It reads the frozen request ledger from `<stateRoot>/accounting/checkpoint.json`, which must be
 intact and cover every journal event (`ledger-checkpoint-stale`), and counts the pending intake
