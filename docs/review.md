@@ -119,6 +119,11 @@ surveys every registered role under one registry revision. It uses one read-only
 connection (`CODEX_CONTROL_SOCKET`, else the managed socket) and a 256-call budget and deadline.
 When there are worker parents, the question phase leaves at least 96 calls and eight seconds
 of the collection budget for worker evidence. A question timeout ends the question phase.
+Worker inventory gives every active and archived stream a chance at its first page before
+reading continuations. Inventory keeps the last quarter of the worker phase for newest-turn
+reads and uses at most half the worker calls when that leaves room for the first pages. Each
+worker RPC has up to 200 ms within the existing stage and phase limits. An individual timeout
+leaves other worker reads eligible while the shared budget permits.
 For each eligible role it checks the exact bound recipient's question history and verifies
 worker lineage under that role's native parent. The structured record includes exact validated
 Codex parent and child IDs under the observed registry revision. An unreadable child gets no
