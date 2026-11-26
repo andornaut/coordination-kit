@@ -17,7 +17,8 @@ import {
   type FrontMatterValue,
   parseFrontMatter,
 } from "../workfiles/files.ts";
-import { type Coordinator, storeDecisions, workOwner } from "./live.ts";
+import { workOwner } from "../workfiles/owner.ts";
+import { type Coordinator, storeDecisions } from "./live.ts";
 
 type EdgeKind =
   "decides" | "answers" | "owned-by" | "supersedes" | "related" | "implements" | "parent";

@@ -108,7 +108,7 @@ function work(
   id: string,
   title: string,
   status: string,
-  extra: { approved?: string; design?: string; supersedes?: string } = {},
+  extra: { approved?: string; design?: string; owner?: string; supersedes?: string } = {},
 ): string {
   return [
     "---",
@@ -117,6 +117,7 @@ function work(
     `status: ${status}`,
     `approved: ${extra.approved ?? "fixture, 2026-11-01"}`,
     `design: ${extra.design ?? "tech"}`,
+    ...(extra.owner === undefined ? [] : [`owner: ${extra.owner}`]),
     ...(extra.supersedes === undefined ? [] : [`supersedes: ${extra.supersedes}`]),
     "---",
     "",
@@ -668,6 +669,29 @@ describe("status", () => {
     expect(run(fixture, { scope: KIT }).unread).toEqual([]);
     expect(run(fixture, { scope: KIT }).activeHolds).toEqual([]);
     expect(() => run(fixture, { scope: "nowhere" })).toThrow(/--scope/);
+  });
+
+  it("scopes approved work using explicit owners and the Tech fallback before work starts", async () => {
+    const scoped = await buildFixture();
+    const art = `${GAME}/art`;
+    commit(scoped.game, "Assign approved work", {
+      "docs/work/sg-0017.md": work("sg-0017", "Assigned to Art", "approved", { owner: art }),
+      "docs/work/sg-0018.md": work("sg-0018", "Falls back to Tech", "approved", {
+        design: "integration",
+      }),
+      "docs/work/sg-0019.md": work("sg-0019", "Names an unregistered owner", "approved", {
+        owner: `${GAME}/gameplay`,
+      }),
+    });
+
+    const artItems = run(scoped, { scope: art, states: ["approved"] });
+    const techItems = run(scoped, { scope: TECH_ROLE, states: ["approved"] });
+
+    expect(item(artItems, "sg-0017")).toMatchObject({ status: "approved", store: null });
+    expect(item(techItems, "sg-0018")).toMatchObject({ status: "approved", store: null });
+    expect(artItems.items.map(({ id }) => id)).not.toContain("sg-0018");
+    expect(techItems.items.map(({ id }) => id)).not.toContain("sg-0017");
+    expect(techItems.items.map(({ id }) => id)).not.toContain("sg-0019");
   });
 
   it("prints JSON by default and a digest per repository with --format markdown", async () => {

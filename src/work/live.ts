@@ -46,6 +46,7 @@ import {
   parseFrontMatter,
   readWorkFiles,
 } from "../workfiles/files.ts";
+import { workOwner } from "../workfiles/owner.ts";
 
 export interface Coordinator {
   readonly layout: Layout;
@@ -162,33 +163,6 @@ function mainSuccessors(git: GitRunner, repository: Repository, id: string): str
       return file !== null && fieldIds(file.fields.supersedes).includes(id);
     })
     .sort();
-}
-
-/**
- * The role that owns a work item: its front-matter `owner`; else the repository's only role; else,
- * in a game, the role named by the item's `design` area (`<game>/<area>`), then the game's Tech.
- * Null when none applies. The owner must be one of the repository's roles.
- */
-export function workOwner(
-  repository: Repository,
-  fields: Readonly<Record<string, FrontMatterValue>>,
-): string | null {
-  const owner = fields.owner;
-  if (typeof owner === "string" && owner !== "") {
-    return repository.roles.includes(owner) ? owner : null;
-  }
-  if (repository.roles.length === 1) {
-    return repository.roles[0]!;
-  }
-  if (repository.kind === "game") {
-    const design = typeof fields.design === "string" ? fields.design : "";
-    for (const candidate of [`${repository.name}/${design}`, `${repository.name}/tech`]) {
-      if (repository.roles.includes(candidate)) {
-        return candidate;
-      }
-    }
-  }
-  return null;
 }
 
 interface Target {

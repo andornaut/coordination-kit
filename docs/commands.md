@@ -197,9 +197,11 @@ commands.
   `pendingQuestions` reports stored wording, ordered options and the opening thread of a question
   with a Codex record when available. `unread` lists exact original IDs and wake evidence within
   the selection. Reading status leaves delivery and native prompts untouched.
-- **Scope:** `all` (the default); a game or kit ID selects its repository; a registry role key
-  selects its repository and keeps the items that role owns as a request or in the store, or
-  whose `design` area is the role's name (a game's `art`, `gameplay` or `tech`).
+- **Scope.** The default `all` selects every repository. A game or kit ID selects its repository.
+  A registry role key selects its repository and keeps items owned by that role in a request,
+  store record or work file. The work commands and status both use the explicit `owner` if
+  given, then the repository's only role, then the game's registered `design` role with Tech
+  as the fallback.
 - **Filters:** `--state` is repeatable and keeps items with any named status; `--state unverified`
   keeps done items whose delivery is unverified. `--since` time-filters `recentActivity`,
   `recentCompletions` and closed items. Open items, pending questions and active holds remain

@@ -22,6 +22,7 @@ import type { RequestRecord } from "../store/requests.ts";
 import type { UnreadMessage } from "../store/types.ts";
 import type { WorkRecord } from "../store/work.ts";
 import { CONVENTION_FILE, fieldIds, parseFrontMatter } from "../workfiles/files.ts";
+import { type RepositoryKind, workOwner } from "../workfiles/owner.ts";
 import {
   deploymentMarks,
   type DeployPoint,
@@ -62,8 +63,6 @@ interface StatusOptions {
   /** Done items without evidence whose done commit is at or after this instant are unverified. */
   readonly verifySince: string;
 }
-
-type RepositoryKind = "game" | "kit" | "coordinator" | "other";
 
 interface RepositoryStatus {
   readonly name: string;
@@ -330,7 +329,7 @@ interface RepositoryItems {
 
 /** What one repository's history, work files and deployment points show. */
 interface RepositoryEvidence {
-  readonly repository: string;
+  readonly repository: Repository;
   readonly channel: DeploymentChannel;
   readonly history: History;
   readonly mainFiles: MainFiles;
@@ -350,6 +349,7 @@ function workFileEntries(files: MainFiles["files"]) {
       return {
         approved: text(fields.approved),
         design: text(fields.design),
+        fields,
         file,
         id: text(fields.id) ?? basename(file.path, ".md"),
         status: text(fields.status),
@@ -364,8 +364,9 @@ function repositoryItems(
   evidence: RepositoryEvidence,
   storeWork: StoreWorkSnapshot,
   verifySince: string,
+  role: string | null,
 ): Pick<RepositoryItems, "items" | "linked"> {
-  const { channel, history, points } = evidence;
+  const { channel, history, points, repository } = evidence;
   const { doneAt, files, statusAt } = evidence.mainFiles;
   const linked = new Set<string>();
   const onMain = reachable(history, history.main);
@@ -396,10 +397,20 @@ function repositoryItems(
     const linkedRequests = [...storeWork.requests.values()].filter(
       (request) => request.id === work.id || requestWork(request).includes(work.id),
     );
+    // A role filter must not turn a linked request into a standalone item.
     linkedRequests.forEach((request) => linked.add(request.id));
     const requests = linkedRequests
       .sort((left, right) => (left.id < right.id ? -1 : 1))
       .map(requestEntry);
+    const record = storeWork.records.get(`${repository.name}\n${work.id}`) ?? null;
+    if (
+      role !== null &&
+      record?.owner !== role &&
+      workOwner(repository, work.fields) !== role &&
+      !requests.some((request) => request.owner === role)
+    ) {
+      continue;
+    }
     const land = landing.get(work.id) ?? null;
     const covering = land === null ? undefined : marks.get(land.sha);
     const confirmedLanding = land?.rule === "done-flip";
@@ -414,7 +425,6 @@ function repositoryItems(
           : gitDeployment(confirmedCoverage, "landing");
     const heuristicDeployment =
       confirmedLanding || covering === undefined ? null : gitDeployment(covering, "landing");
-    const record = storeWork.records.get(`${evidence.repository}\n${work.id}`) ?? null;
     const storeLanded = record?.evidence.some((item) => item.stage === "merged") === true;
     const storeDeployed =
       record?.evidence.some(
@@ -475,7 +485,7 @@ function repositoryItems(
         ...linkedRequests.map((request) => request.closed?.at ?? request.updatedAt),
       ]),
       replacement: derived.replacement,
-      repository: evidence.repository,
+      repository: repository.name,
       requests,
       status: derived.status,
       store: record,
@@ -505,6 +515,7 @@ function readRepository(
   repository: Repository,
   storeWork: StoreWorkSnapshot,
   verifySince: string,
+  role: string | null,
 ): RepositoryItems {
   const channel: DeploymentChannel =
     repository.kind === "game" ? "bus" : repository.kind === "kit" ? "release-tag" : "none";
@@ -559,9 +570,10 @@ function readRepository(
     deployment = { channel, status: "available", unreadable: 0 };
   }
   const { items, linked } = repositoryItems(
-    { channel, history, mainFiles, points, repository: repository.name },
+    { channel, history, mainFiles, points, repository },
     storeWork,
     verifySince,
+    role,
   );
   return {
     items,
@@ -675,16 +687,6 @@ function selectScope(
   throw new StatusUsageError(`--scope names no game, kit or registered role: ${scope}`);
 }
 
-/** A role scope keeps items that role owns in the store or designs (games' areas). */
-function ownedBy(role: string, item: StatusItem): boolean {
-  const area = role.includes("/") ? role.split("/")[1] : null;
-  return (
-    item.requests.some((request) => request.owner === role) ||
-    item.store?.owner === role ||
-    (area !== null && item.workFile?.design === area)
-  );
-}
-
 /** Collect, derive and filter the status of every selected repository's items. */
 export function collectStatus(
   context: StatusContext,
@@ -698,7 +700,9 @@ export function collectStatus(
   const storeWork = readStoreWork(context.io.env, layout);
   const reports = repos
     .filter((repo) => selected.names.has(repo.name))
-    .map((repo) => readRepository(context, layout, repo, storeWork, options.verifySince));
+    .map((repo) =>
+      readRepository(context, layout, repo, storeWork, options.verifySince, selected.role),
+    );
   const linked = new Set(reports.flatMap((report) => [...report.linked]));
   const coordinator = repos.find((repo) => repo.kind === "coordinator")?.name ?? null;
   const repositoriesByRole = new Map(
@@ -752,6 +756,7 @@ export function collectStatus(
     .filter(
       (record) =>
         (options.scope === "all" || selected.names.has(record.repository)) &&
+        (selected.role === null || record.owner === selected.role) &&
         !workKeys.has(`${record.repository}\n${record.id}`),
     )
     .map(recordOnlyItem);
@@ -787,9 +792,6 @@ export function collectStatus(
           waitingOnUser: item.waitingOnUser || belonging.some(({ state }) => state === "pending"),
         };
   });
-  if (selected.role !== null) {
-    items = items.filter((item) => ownedBy(selected.role!, item));
-  }
   if (options.states.length > 0) {
     items = items.filter(
       (item) =>
