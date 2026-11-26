@@ -140,7 +140,10 @@ const SCOPE = {
   role: { multiple: true, type: "string" },
 } as const;
 const READY = {
-  forms: [["app?", "role?"], ["game", "role?"]],
+  forms: [
+    ["app?", "role?"],
+    ["game", "role?"],
+  ],
   group: "harness",
   options: SCOPE,
   summary:
@@ -325,8 +328,7 @@ export const SPECS = {
     forms: [["ID"], ["ID", "include-body", "native-id?", "worker?"]],
     group: "msg",
     options: MSG_STATUS_OPTIONS,
-    summary:
-      "read exact message and wake metadata, or include its body with message access",
+    summary: "read exact message and wake metadata, or include its body with message access",
   },
   "msg history": {
     forms: [
@@ -335,8 +337,7 @@ export const SPECS = {
     ],
     group: "msg",
     options: MSG_HISTORY_OPTIONS,
-    summary:
-      "read message events in order; --include-body requires message access",
+    summary: "read message events in order; --include-body requires message access",
   },
   "store import": {
     forms: [["approval-ledger", "dry-run?", "native-id?", "worker?"]],
@@ -575,7 +576,10 @@ export const SPECS = {
     summary: "diagnose explicitly selected roles without sending or activating",
   },
   "harness ready": {
-    forms: [["app?", "role?"], ["game", "role?"]],
+    forms: [
+      ["app?", "role?"],
+      ["game", "role?"],
+    ],
     group: "harness",
     options: SCOPE,
     summary: "probe each selected role's effective harness without sending or activating",
@@ -596,7 +600,10 @@ export const SPECS = {
     summary: "atomically select harness overrides for an explicit scope without activating roles",
   },
   "claude channel": {
-    forms: [["app?", "conversation?", "poll-seconds?"], ["game", "conversation?", "poll-seconds?"]],
+    forms: [
+      ["app?", "conversation?", "poll-seconds?"],
+      ["game", "conversation?", "poll-seconds?"],
+    ],
     group: "harness",
     options: {
       app: SCOPE.app,
@@ -608,13 +615,19 @@ export const SPECS = {
       "the stdio server the Claude recipient session starts; emits one notification per wake",
   },
   "review deliver": {
-    forms: [["app", "slot"], ["game", "slot"]],
+    forms: [
+      ["app", "slot"],
+      ["game", "slot"],
+    ],
     group: "review",
     options: REVIEW_DELIVER_OPTIONS,
     summary: "deliver the scheduled review for one slot once; prints one typed JSON result line",
   },
   "review show": {
-    forms: [["app?", "slot?"], ["game", "slot?"]],
+    forms: [
+      ["app?", "slot?"],
+      ["game", "slot?"],
+    ],
     group: "review",
     options: REVIEW_SHOW_OPTIONS,
     summary: "print a stored review brief's full record: the slot's, else the latest",
@@ -623,8 +636,7 @@ export const SPECS = {
     forms: [["app"], ["game"]],
     group: "review",
     options: EVENTS_INGEST_OPTIONS,
-    summary:
-      "ingest the app's runner event log from its cursor; prints one typed JSON result line",
+    summary: "ingest the app's runner event log from its cursor; prints one typed JSON result line",
   },
   status: {
     forms: [["scope?", "since?", "state?", "audit?", "verify-since?", "format?"]],

@@ -168,7 +168,9 @@ export async function channel(
     const apps = values.app ?? values.game;
     if (apps !== undefined) {
       if (apps.length !== new Set(apps).size) {
-        throw new ChannelUsage(`each --${values.app === undefined ? "game" : "app"} may appear once`);
+        throw new ChannelUsage(
+          `each --${values.app === undefined ? "game" : "app"} may appear once`,
+        );
       }
       const layout = loadLayout(root);
       const selectedLayout = values.app === undefined ? gameLayout : appLayout;

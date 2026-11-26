@@ -358,7 +358,10 @@ export async function storeExport(
   });
 }
 
-export async function storeRebuild(context: StoreServiceContext, options: CallerOptions = {}): Promise<{
+export async function storeRebuild(
+  context: StoreServiceContext,
+  options: CallerOptions = {},
+): Promise<{
   readonly schema: 1;
   readonly verified: true;
   readonly events: number;

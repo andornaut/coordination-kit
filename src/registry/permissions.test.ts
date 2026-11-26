@@ -23,7 +23,9 @@ describe("workspace permissions", () => {
         beta: { name: "Beta", path: "../beta", roles: ["beta-owner"] },
       },
       kits: {},
-      permissions: { operator: { apps: { alpha: ["events:ingest"] }, workspace: ["store:maintain"] } },
+      permissions: {
+        operator: { apps: { alpha: ["events:ingest"] }, workspace: ["store:maintain"] },
+      },
       schema: 1,
       sharedRoles: ["game-coordinator"],
       timezone: "UTC",
@@ -50,9 +52,9 @@ describe("workspace permissions", () => {
     expect(
       isPermitted(layout, registry, { ...operator, nativeId: oldLabel.nativeId }, "store:maintain"),
     ).toBe(false);
-    expect(
-      isPermitted(layout, registry, { ...operator, worker: "worker" }, "store:maintain"),
-    ).toBe(false);
+    expect(isPermitted(layout, registry, { ...operator, worker: "worker" }, "store:maintain")).toBe(
+      false,
+    );
     const held = {
       ...registry,
       roles: { ...registry.roles, operator: { ...registry.roles.operator!, phase: "source-held" } },

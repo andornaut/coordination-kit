@@ -22,7 +22,9 @@ export function hasPermission(
   const grants = permissions && Object.hasOwn(permissions, role) ? permissions[role] : undefined;
   return (
     grants?.workspace.includes(permission) === true ||
-    (appId !== undefined && grants !== undefined && Object.hasOwn(grants.apps, appId) &&
+    (appId !== undefined &&
+      grants !== undefined &&
+      Object.hasOwn(grants.apps, appId) &&
       grants.apps[appId]?.includes(permission) === true)
   );
 }
@@ -41,7 +43,8 @@ export function isPermitted(
     nativeId === null ||
     actor.worker !== undefined ||
     !Object.hasOwn(registry.roles, role)
-  ) return false;
+  )
+    return false;
   const record = registry.roles[role];
   return (
     record?.ownership === "active" &&

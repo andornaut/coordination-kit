@@ -441,7 +441,12 @@ export interface HistoryEntry {
   readonly detail: JsonObject;
 }
 
-function bodyVisibleTo(viewer: string | null, from: unknown, to: unknown, readAll: boolean): boolean {
+function bodyVisibleTo(
+  viewer: string | null,
+  from: unknown,
+  to: unknown,
+  readAll: boolean,
+): boolean {
   return viewer !== null && (readAll || viewer === from || viewer === to);
 }
 
