@@ -23,7 +23,7 @@ lockfile. The CLI requires Node 24.21.0 or newer, and all roles use that install
 
 ```json
 "devDependencies": {
-  "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v7.3.1/coordination-kit-7.3.1.tgz"
+  "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v7.3.2/coordination-kit-7.3.2.tgz"
 }
 ```
 
