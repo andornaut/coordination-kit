@@ -52,7 +52,7 @@ import {
   HANDOFF_STATE_OPTIONS,
   SESSION_START_OPTIONS,
 } from "./session.ts";
-import { STATUS_OPTIONS } from "./status.ts";
+import { STATUS_SPEC } from "./status.ts";
 import {
   INBOX_OPTIONS,
   MSG_DECIDE_OPTIONS,
@@ -639,20 +639,7 @@ export const SPECS = {
     options: EVENTS_INGEST_OPTIONS,
     summary: "ingest the app's runner event log from its cursor; prints one typed JSON result line",
   },
-  status: {
-    forms: [["scope?", "since?", "state?", "audit?", "verify-since?", "format?"]],
-    group: "status",
-    options: STATUS_OPTIONS,
-    summary:
-      "read-only status of each registered repository's work items, store records and imported requests",
-    values: {
-      format: "json|markdown",
-      scope: "all|APP|KIT|ROLE",
-      since: "ISO_TIMESTAMP",
-      state: "STATE",
-      "verify-since": "ISO_TIMESTAMP",
-    },
-  },
+  status: STATUS_SPEC,
   "work check": {
     forms: [["decisions?"]],
     group: "work",

@@ -2,13 +2,13 @@
 // a Markdown digest. --root names the coordinator, as for every non-work command.
 import { systemGit } from "../core/git.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
+import { type CommandSpec, formSynopsis, usageText } from "../core/usage.ts";
 import { collectStatus, incomplete, StatusUsageError } from "../status/collect.ts";
 import { DEFAULT_VERIFY_SINCE, STATE_FILTERS, type StateFilter } from "../status/derive.ts";
 import { renderMarkdown } from "../status/markdown.ts";
 import { errorMessage, parseOptions } from "./args.ts";
-import { commandUsage } from "./spec.ts";
 
-export const STATUS_OPTIONS = {
+const STATUS_OPTIONS = {
   audit: { type: "boolean" },
   format: { type: "string" },
   scope: { type: "string" },
@@ -17,12 +17,29 @@ export const STATUS_OPTIONS = {
   "verify-since": { type: "string" },
 } as const;
 
+export const STATUS_SPEC = {
+  forms: [["scope?", "since?", "state?", "audit?", "verify-since?", "format?"]],
+  group: "status",
+  options: STATUS_OPTIONS,
+  summary:
+    "read-only status of each registered repository's work items, store records and imported requests",
+  values: {
+    format: "json|markdown",
+    scope: "all|APP|KIT|ROLE",
+    since: "ISO_TIMESTAMP",
+    state: "STATE",
+    "verify-since": "ISO_TIMESTAMP",
+  },
+} as const satisfies CommandSpec & { group: "status" };
+
 const ISO = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
+const USAGE = usageText("coordination-kit", formSynopsis({}, "status", STATUS_SPEC));
+
 function usage(io: Io, reason?: string): number {
   if (reason !== undefined) {
     io.err(`coordination-kit: ${reason}\n`);
   }
-  io.err(`coordination-kit: ${commandUsage("status")} [--root DIR]\n`);
+  io.err(`coordination-kit: ${USAGE} [--root DIR]\n`);
   return EXIT_USAGE;
 }
 
