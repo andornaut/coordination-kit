@@ -82,21 +82,23 @@ it, a timeout or unparsable output as no delivery claimed, with the `cli-error` 
 | `outbox-unreadable`     | The ingest cursor cannot be read, so nothing is consumed.              |
 | `compaction-reserved`   | A manual compaction reservation is deferring journal writes.           |
 
-`review deliver` records each typed result at `games/<g>/bus/unblock/review-deliver/<slot>.json`,
+`review deliver` records each typed result at `var/games/<g>/bus/unblock/review-deliver/<slot>.json`,
 where `<slot>` is the slot start in epoch seconds, under that directory's `deliver.lock`. A repeated
 call for the same game and slot prints the recorded `status`, `reason` and `detail` with the
 current `cli` and calls nothing else. Contention on another call's `deliver.lock` is `deferred`
 with `recipient-busy` and is not recorded. An unreadable record is an internal failure.
 
 A write refused with `compaction-reserved` leaves the refusal out of the recorded review
-results. The CLI can retry that exact slot after the reservation ends. Delivery Kit 8.1.0
-continues at its next configured review slot. Refused ingest leaves the files and cursor at
+results. The CLI can retry that exact slot after the reservation ends. Delivery Kit 8.4.0
+automatically retries this typed deferral. A generic interruption requires an explicit call for
+the same slot before a newer brief is stored. Refused ingest leaves the files and cursor at
 their previous position for the runner's next ingest call. Journal keys deduplicate any
 records committed before the refusal.
 
-SIGTERM or an aborted signal before the brief is stored records nothing, prints nothing and exits
-
-1. A brief stored before the stop is recorded and printed.
+An abort observed before review processing starts exits 1 without writing a brief or printing
+a result to stdout. Once processing starts, the call can finish after SIGTERM. If the process
+exits after committing a brief and before recording the result, the stored brief can support
+the [same-slot recovery](#stored-brief) below.
 
 ### Library seam
 

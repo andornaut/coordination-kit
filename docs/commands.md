@@ -144,9 +144,9 @@ Reserve, prepare, activate and cancel require the active game-coordinator bindin
 - `review deliver` and `events ingest`: the runner seam. Each prints exactly one
   typed JSON line and exits 0 for every typed result, 2 for a usage error and 1 for an internal
   failure, with nothing on stdout. `--slot` is an ISO 8601 minute start with an offset. A repeated
-  `review deliver` for a slot prints the recorded result. SIGTERM before the brief is stored aborts it
-  with exit 1 and no result. `review deliver` stores the brief as a message. See
-  [review](review.md#cli-seam) and [runner events](store.md#runner-events).
+  `review deliver` for a slot prints the recorded result. SIGTERM observed before review
+  processing starts exits 1 without writing a brief or printing a result to stdout. See
+  [same-slot recovery](review.md#stored-brief) and [runner events](store.md#runner-events).
 - `review show`: prints the recorded stored brief for `--slot` (default: the latest) of `--game`
   (default: any game) as one JSON line; exit 1 with `brief-missing` when there is none.
 - `store retire`: exactly one of `--dry-run` and `--apply`. `--dry-run` takes no caller and

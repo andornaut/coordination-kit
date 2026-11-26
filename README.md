@@ -7,11 +7,8 @@ mutable state. delivery-kit's resident runner decides when a scheduled review is
 this kit to compose and deliver it.
 
 The package is `@andornaut/coordination-kit`. Its operator tool is the `coordination-kit` CLI,
-bundled into `dist/cli.js`. The bundle imports only `node:` builtins, has no dynamic `import()`,
-relative `require`, worker threads or source maps, never spawns its own files, and reads nothing
-from disk after startup except configuration, state and, for `--version --json` and the runner
-seam, its own bytes to hash them. Its child processes are `flock`, `git`,
-`claude agents --json` and, for `store retire`, `tar`.
+bundled into `dist/cli.js`. The bundle imports only `node:` builtins. Its child processes are
+`flock`, `git`, `claude agents --json` and, for `store retire`, `tar`.
 
 [Start a fresh coordinator](docs/configuration.md#start-a-fresh-coordinator) with SQLite and
 use the [upgrade guide](docs/upgrading.md#filesystem-authority-migration) to qualify and activate
@@ -21,22 +18,22 @@ configuration and ignored runtime state.
 
 ## Install and pin
 
-game-coordinator and each role that runs the CLI pin the release asset as a devDependency and
-commit the lockfile integrity:
+Pin the release asset as a devDependency in the primary game-coordinator checkout and commit the
+lockfile. The CLI requires Node 24.21.0 or newer, and all roles use that installation.
 
 ```json
 "devDependencies": {
-  "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v7.2.1/coordination-kit-7.2.1.tgz"
+  "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v7.3.0/coordination-kit-7.3.0.tgz"
 }
 ```
 
-A pin changes only by a devDependency bump and `npm ci`. delivery-kit's runner calls the
-coordinator-installed CLI for the review and event seam, and bundles only the registry and
-shared helpers.
+Use `npm ci` to install the committed pin. Delivery Kit's runner calls the coordinator-installed
+CLI for reviews and event ingest. Its bundled build libraries have a separate compatibility range.
+See the [upgrade guide](docs/upgrading.md#coordination-kit-73).
 
 ## Usage
 
-Every command is a noun group and its verb, except `status` and `graph`. Commands resolve game-coordinator from
+Commands resolve game-coordinator from
 `--root DIR`, else `COORDINATION_KIT_ROOT`, else `DELIVERY_KIT_ROOT`, else the working directory.
 `--root` may appear anywhere on the command line, at most once. `--game` is always explicit. The
 `work` commands read `--root` as the repository to inspect (default: the working directory) and

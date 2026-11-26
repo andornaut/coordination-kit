@@ -8,8 +8,7 @@ references.
 
 ## Coordinator root
 
-Every command except `work check` and `work report` resolves the game-coordinator root from, in
-order:
+Commands that use the coordinator root resolve it in this order.
 
 1. `--root DIR`, anywhere on the command line, at most once;
 2. `COORDINATION_KIT_ROOT`, unless empty;
@@ -63,10 +62,10 @@ This kit uses only `reports`:
 
 1. Prepare the primary Git checkout with a valid `config.json`, a pinned Coordination Kit
    dependency and its lockfile, and an ignore rule for `var/`. Install the dependency with
-   `npm ci`. An empty `games` map is valid. Use an empty `wakeMinutes` list if no review is due.
-2. Establish the actual role sessions and create the local registry with the public
-   [registry library](libraries.md#registry-library). It initializes revision 1 from the supplied
-   bindings. The packaged CLI has no general `init` or registry-create command.
+   `npm ci`. The [minimal example](#registry-seed-example) starts with the coordinator role.
+2. Establish the actual role sessions and [seed the registry](#registry-seed-example) with the
+   public [registry library](libraries.md#registry-library). It initializes revision 1 from
+   the supplied bindings.
 3. From an active registered session, set `coordinator_root` to the absolute primary checkout
    path and run `session start`.
    With the default authority, a successful first store open creates `coordination.db` in the
@@ -84,29 +83,43 @@ the [migration procedure](upgrading.md#filesystem-authority-migration). Creating
 
 ### Registry seed example
 
-For a coordinator-only workspace, include `game-coordinator` in `sharedRoles`. An operator tool
-in the coordinator checkout can create the initial registry with the existing project and
-conversation IDs. This example uses a Codex binding.
+For a coordinator-only workspace, commit this `config.json` in the primary checkout.
 
-```js
+```json
+{
+  "schema": 1,
+  "timezone": "America/Toronto",
+  "wakeMinutes": [],
+  "games": {},
+  "kits": {},
+  "sharedRoles": ["game-coordinator"]
+}
+```
+
+Run the following from that checkout after installing the pinned kit. Set `native_project_id`
+and `conversation_id` to the verified project and Codex conversation IDs for this workspace.
+
+```sh
+node --input-type=module - "${native_project_id:?}" "${conversation_id:?}" <<'JS'
 import { createRegistry, loadLayout } from "@andornaut/coordination-kit/build/registry";
 
-export function registerCoordinator(coordinatorRoot, nativeProjectId, conversationId) {
-  return createRegistry(() => new Date(), loadLayout(coordinatorRoot), {
-    schema: 1,
-    harness: "codex",
-    host: { nativeProjectId, root: "." },
-    roles: {
-      "game-coordinator": {
-        ownership: "active",
-        worktree: ".",
-        conversations: { codex: conversationId },
-      },
+const [, , nativeProjectId, conversationId] = process.argv;
+const registry = createRegistry(() => new Date(), loadLayout(process.cwd()), {
+  schema: 1,
+  harness: "codex",
+  host: { nativeProjectId, root: "." },
+  roles: {
+    "game-coordinator": {
+      ownership: "active",
+      worktree: ".",
+      conversations: { codex: conversationId },
     },
-    operations: {},
-    transfers: [],
-  });
-}
+  },
+  operations: {},
+  transfers: [],
+});
+console.log(JSON.stringify({ revision: registry.revision }));
+JS
 ```
 
 ## Add a game
@@ -138,6 +151,22 @@ every configured repository, registered worktree and Git checkout (`state-root-e
 A malformed pointer is `invalid-state-root-config`. Without a pointer, the source database,
 `wake/`, `channel/`, `artifacts/` and any retirement `archive/` are under `var/`. Filesystem
 activation moves store authority only. It retains the configured transport and artifact paths.
+
+Example coordinator checkout after filesystem activation. See the
+[filesystem layout](store.md#filesystem-layout) for journal and role records.
+
+```text
+coordinator/
+  config.json, package.json, package-lock.json    tracked
+  var/                                           ignored
+    registry.json, route.json, handoffs/
+    coordination-authority.json, coordination/
+    games/example-game/bus/
+    work-protocol.json                           optional external state pointer
+```
+
+With SQLite selected and no pointer, the database is `var/coordination.db`. With a pointer,
+the SQLite database, transport state and artifacts live under its external `stateRoot`.
 
 Only the runner writes `events.jsonl` and its rotated `events.<epochSeconds>.jsonl` logs.
 `events ingest` owns `events.cursor`, `events.quarantine.jsonl` and `events.ingest.lock`. See

@@ -9,7 +9,8 @@ archive ([retirement](store.md#retirement)).
 Every send is stored before anything native happens, and recipients pull. The
 [registry fence](store.md#writer-fence) identifies registered callers. A caller without a binding
 can send to a registered recipient. These messages show `from: "[unbound]"`, use queue intent and
-carry no worker attribution. Treat their contents and links as informational.
+carry no native ID or worker attribution. Their links and body supply context only. Verify work
+approval and role authority through the applicable work and decision records.
 
 ```bash
 coordination-kit msg send --to archies-dog-walks/tech --body-file note.md --link work=ck-0017

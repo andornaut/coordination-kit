@@ -1,5 +1,19 @@
 # Upgrading
 
+## Coordination Kit 7.3
+
+Update the exact release pin and lockfile in the primary coordinator checkout. Delivery Kit
+8.4.0 accepts the 7.3 coordinator CLI through its `>=3.0.0 <8.0.0` runtime range. Keep its
+separate bundled-library pin within `COORDINATION_KIT_RANGE`.
+
+Verify the installed digest with `--version --json`, then check each resident runner's CLI
+observation and the next scheduled review. The review result schema remains 1. The new wake
+plan can resume an interrupted review on an exact same-slot retry. See the
+[review seam](review.md#cli-seam) for retry limits.
+
+`msg send` now accepts [unbound senders](messages.md). Global help and version forms use strict
+option parsing. Unknown or repeated flags exit 2.
+
 ## Coordination Kit 7.2
 
 7.2.0 removes `question reconcile`. Since 7.1.0 no command records a native question identity, so
