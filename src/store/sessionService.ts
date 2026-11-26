@@ -1,5 +1,5 @@
 // `session start` and the `handoff` verbs as the CLI runs them. Each writer resolves its caller
-// through the registry fence; `handoff open` and `handoff state` also require game-coordinator.
+// through the registry fence; `handoff open` and `handoff state` also require handoff permission.
 // `session start` alone may rebind an unbound Claude caller whose transcript proves a /clear of
 // exactly one role's current binding.
 // `handoff ready` admits only the role's source binding and `handoff active` only its target
@@ -28,6 +28,7 @@ import {
   setHandoffState,
 } from "./handoffs.ts";
 import { type CallerOptions, NATIVE_ID_VARIABLES, resolveCaller } from "./identity.ts";
+import { requirePermission } from "./permissions.ts";
 import { activePolicyHoldsForRole, type HoldView } from "./policyHolds.ts";
 import { listQuestions, type QuestionView } from "./questions.ts";
 import { wakeOwner } from "./questionService.ts";
@@ -211,7 +212,7 @@ export async function storeSessionStart(
         : [];
     return {
       checkpoint:
-        context.layout.project === undefined
+        context.layout.mode === "legacy"
           ? checkpointPath(actor.role)
           : relative(
               context.layout.root,
@@ -225,7 +226,7 @@ export async function storeSessionStart(
              AND ((role = ? AND scope = 'role') OR scope = ?)`,
             actor.role,
             game === null ? "" : `game:${game}`,
-          ) + activePolicyHoldsForRole(store, actor.role),
+          ) + activePolicyHoldsForRole(store, actor.role, context.layout),
         inbox: n(
           `SELECT COUNT(*) AS n FROM messages WHERE to_role = ?
              AND state IN ('sent', 'delivered', 'retained')`,
@@ -271,11 +272,13 @@ export async function storeSessionStart(
   });
 }
 
-function coordinator(roles: Registry, context: StoreServiceContext, options: CallerOptions): Actor {
+function handoffOperator(
+  roles: Registry,
+  context: StoreServiceContext,
+  options: CallerOptions,
+): Actor {
   const actor = resolveCaller(roles, context.env, options);
-  if (actor.role !== COORDINATOR_ROLE) {
-    throw new StoreError("not-coordinator");
-  }
+  requirePermission(context.layout, roles, actor, "handoff:manage");
   return actor;
 }
 
@@ -290,7 +293,7 @@ export async function storeHandoffOpen(
   request: { readonly scope: readonly string[]; readonly to: Harness; readonly id?: string },
 ): Promise<HandoffOutput> {
   const roles = registry(context);
-  const actor = coordinator(roles, context, options);
+  const actor = handoffOperator(roles, context, options);
   const all = request.scope.includes("all");
   if (all && request.scope.length > 1) {
     throw new StoreError("invalid-scope");
@@ -351,7 +354,7 @@ export async function storeHandoffState(
   options: CallerOptions,
   request: { readonly id: string; readonly state: HandoffState },
 ): Promise<HandoffOutput & { readonly released: readonly string[] }> {
-  const actor = coordinator(registry(context), context, options);
+  const actor = handoffOperator(registry(context), context, options);
   return withStore(context, async (store) => {
     const result = setHandoffState(store, actor, request.id, request.state);
     for (const role of result.released) {

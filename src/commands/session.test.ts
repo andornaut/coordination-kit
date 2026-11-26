@@ -5,10 +5,16 @@ import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
-import { TEST_CLOCK, TEST_CONTEXT } from "../core/testFixtures.ts";
-import { readRegistry, updateRegistry } from "../registry/store.ts";
+import { loadLayout } from "../core/layout.ts";
+import { makeFixture, TEST_CLOCK, TEST_CONTEXT, writeFixtureJson } from "../core/testFixtures.ts";
+import { createRegistry, readRegistry, updateRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
-import { checkpointPath, storeSessionStart } from "../store/sessionService.ts";
+import {
+  checkpointPath,
+  storeHandoffOpen,
+  storeHandoffState,
+  storeSessionStart,
+} from "../store/sessionService.ts";
 import { COORDINATOR, GAMEPLAY, storeFixture, TECH, TECH_CODEX } from "../store/testStore.ts";
 
 const KIT = "art-kit";
@@ -257,6 +263,67 @@ describe("session start after /clear", () => {
 });
 
 describe("handoff", () => {
+  it("uses workspace permission on the bound app-mode caller", async () => {
+    const { root } = makeFixture();
+    writeFixtureJson(join(root, "config.json"), {
+      apps: {
+        "example-app": { name: "Example", path: "../example-app", roles: ["operator", "scoped"] },
+      },
+      kits: {},
+      permissions: {
+        operator: { apps: {}, workspace: ["handoff:manage"] },
+        scoped: { apps: { "example-app": ["handoff:manage"] }, workspace: [] },
+      },
+      schema: 1,
+      sharedRoles: ["game-coordinator"],
+      timezone: "UTC",
+      wakeMinutes: [],
+    });
+    const layout = loadLayout(root);
+    createRegistry(TEST_CLOCK, layout, {
+      harness: "claude",
+      host: { nativeProjectId: "fixture", root: "." },
+      operations: {},
+      roles: {
+        "game-coordinator": {
+          conversations: { claude: COORDINATOR },
+          ownership: "active",
+          worktree: ".",
+        },
+        operator: { conversations: { claude: TECH }, ownership: "active", worktree: "." },
+        scoped: { conversations: { claude: KIT_CLAUDE }, ownership: "active", worktree: "." },
+      },
+      schema: 1,
+      transfers: [],
+    });
+    const context = { ...TEST_CONTEXT, layout };
+    const operator = { nativeId: TECH };
+    const literal = { nativeId: COORDINATOR };
+    const id = "app-handoff";
+    const request = { id, scope: ["operator"], to: "codex" } as const;
+    await expect(
+      storeSessionStart(context, operator, { cwd: "/", version: "0.0.0-test" }),
+    ).resolves.toMatchObject({ checkpoint: "var/handoffs/operator/current.md", role: "operator" });
+    await expect(storeHandoffOpen(context, literal, request)).rejects.toMatchObject({
+      code: "permission-denied",
+    });
+    await expect(
+      storeHandoffOpen(context, { nativeId: KIT_CLAUDE }, request),
+    ).rejects.toMatchObject({
+      code: "permission-denied",
+    });
+    await expect(storeHandoffOpen(context, operator, request)).resolves.toMatchObject({
+      handoff: { id, roles: [{ role: "operator" }] },
+    });
+    const state = { id, state: "cancelled" } as const;
+    await expect(storeHandoffState(context, literal, state)).rejects.toMatchObject({
+      code: "permission-denied",
+    });
+    await expect(storeHandoffState(context, operator, state)).resolves.toMatchObject({
+      handoff: { id, state: "cancelled" },
+    });
+  });
+
   it("runs open, ready, prepared, sent, select, active and completed", async () => {
     const { coordinator, kit, kitTarget, reader, select, tech, techTarget } = setup();
     const opened = await coordinator(

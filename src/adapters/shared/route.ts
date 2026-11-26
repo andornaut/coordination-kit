@@ -1,13 +1,14 @@
 // The role-name review route, var/route.json schema 2. It names roles only; every send resolves
 // them through var/registry.json for each role's selected harness at that moment. The review's
-// recipient is the host game's reports.recipient.
+// recipient is the host app's reports.recipient.
 import { existsSync } from "node:fs";
 
 import { loadReportsConfig } from "../../core/config.ts";
 import { readJson } from "../../core/durable.ts";
 import {
+  appLayout,
+  appRoleKeys,
   type GameCoordinatorConfig,
-  gameLayout,
   type Layout,
   roleKeys,
 } from "../../core/layout.ts";
@@ -16,7 +17,7 @@ import { isRecord } from "../../core/pyjson.ts";
 export interface RoleRoute {
   readonly schema: 2;
   readonly state: "active" | "held";
-  /** The game whose runner dispatches the scheduled review. */
+  /** The app whose runner dispatches the scheduled review. */
   readonly host: string;
   readonly targets: readonly string[];
 }
@@ -36,7 +37,11 @@ export const ROUTE_SCHEMA_1 =
   "scheduled reviews go to the host game's reports.recipient";
 
 /** Validate a schema 2 route against config.json; throws RouteError when it is not one. */
-export function validateRoleRoute(config: GameCoordinatorConfig, value: unknown): RoleRoute {
+export function validateRoleRoute(
+  config: GameCoordinatorConfig,
+  value: unknown,
+  mode: Layout["mode"] = "legacy",
+): RoleRoute {
   if (isRecord(value) && (value.schema === 1 || Object.hasOwn(value, "monitor"))) {
     throw new RouteError(ROUTE_SCHEMA_1);
   }
@@ -47,7 +52,7 @@ export function validateRoleRoute(config: GameCoordinatorConfig, value: unknown)
     value.schema !== 2 ||
     (value.state !== "active" && value.state !== "held") ||
     typeof value.host !== "string" ||
-    !Object.hasOwn(config.games, value.host) ||
+    !Object.hasOwn(config.apps ?? config.games, value.host) ||
     !Array.isArray(value.targets)
   ) {
     throw new RouteError("invalid review route schema");
@@ -60,7 +65,7 @@ export function validateRoleRoute(config: GameCoordinatorConfig, value: unknown)
   if (new Set(names).size !== names.length) {
     throw new RouteError("route targets must be distinct");
   }
-  if (value.state === "active" && names.length === 0) {
+  if (mode !== "app" && value.state === "active" && names.length === 0) {
     throw new RouteError("an active route needs at least one target");
   }
   return { host: value.host, schema: 2, state: value.state, targets: names };
@@ -77,23 +82,31 @@ export function readRoleRoute(layout: Layout): RoleRoute | null {
   } catch {
     throw new RouteError("review route is unreadable");
   }
-  return validateRoleRoute(layout.config, value);
+  return validateRoleRoute(layout.config, value, layout.mode);
 }
 
-/**
- * The role that receives the route's scheduled review: the host game's reports.recipient, which
- * must be a role in config.json. An active route whose targets include it is invalid.
- */
-export function routeRecipient(layout: Layout, route: RoleRoute): string {
+/** A configured app's scheduled-review recipient. */
+export function configuredReviewRecipient(layout: Layout, appId: string): string {
   let recipient: string;
   try {
-    recipient = loadReportsConfig(gameLayout(layout, route.host).configFile).reports.recipient;
+    recipient = loadReportsConfig(appLayout(layout, appId).configFile).reports.recipient;
   } catch {
-    throw new RouteError(`the route host ${route.host} has no readable reports.recipient`);
+    throw new RouteError(`the route host ${appId} has no readable reports.recipient`);
   }
-  if (!roleKeys(layout.config).includes(recipient)) {
-    throw new RouteError(`the route recipient ${recipient} is not a role in config.json`);
+  const appMode = layout.mode === "app";
+  const roles = appMode
+    ? [...appRoleKeys(layout.config, appId), ...layout.config.sharedRoles]
+    : roleKeys(layout.config);
+  if (!roles.includes(recipient)) {
+    const scope = appMode ? `app ${appId} or sharedRoles` : "config.json";
+    throw new RouteError(`the route recipient ${recipient} is not a role in ${scope}`);
   }
+  return recipient;
+}
+
+/** The host's eligible recipient, which an active route excludes from its additional targets. */
+export function routeRecipient(layout: Layout, route: RoleRoute): string {
+  const recipient = configuredReviewRecipient(layout, route.host);
   if (route.state === "active" && route.targets.includes(recipient)) {
     throw new RouteError(`active route targets must not include the recipient ${recipient}`);
   }

@@ -5,7 +5,11 @@ import { performance } from "node:perf_hooks";
 import { listingOrNull } from "../adapters/claude/agents.ts";
 import { connectControl } from "../adapters/codex/rpc.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
-import { readRoleRoute, routeRecipient } from "../adapters/shared/route.ts";
+import {
+  configuredReviewRecipient,
+  readRoleRoute,
+  routeRecipient,
+} from "../adapters/shared/route.ts";
 import { gameRecipients } from "../core/config.ts";
 import type { Layout } from "../core/layout.ts";
 import { resolveHarness } from "../registry/resolve.ts";
@@ -84,15 +88,26 @@ function adapterStatus(env: NodeJS.ProcessEnv, harness: Harness): Promise<string
 }
 
 /**
- * The route recipient first, then each route target; without a route, every game's recipient.
+ * The route recipient first, then each route target; without a route, every app's recipient.
  * Null for an invalid route or an unreadable recipient, which is never ready.
  */
-function routeRoles(layout: Layout): string[] | null {
+function routeRoles(layout: Layout, registry: Registry): string[] | null {
   try {
     const route = readRoleRoute(layout);
-    return route === null
-      ? gameRecipients(layout, Object.keys(layout.config.games))
-      : [routeRecipient(layout, route), ...route.targets];
+    let roles: string[];
+    if (route !== null) {
+      roles = [routeRecipient(layout, route), ...route.targets];
+    } else if (layout.mode === "app") {
+      const recipients = Object.keys(layout.config.apps).map((app) =>
+        configuredReviewRecipient(layout, app),
+      );
+      roles = [...new Set(recipients)];
+    } else {
+      roles = gameRecipients(layout, Object.keys(layout.config.games));
+    }
+    return layout.mode !== "app" || roles.every((role) => Object.hasOwn(registry.roles, role))
+      ? roles
+      : null;
   } catch {
     return null;
   }
@@ -106,7 +121,9 @@ export async function harnessReadiness(
   scope?: ReadinessScope,
 ): Promise<Readiness> {
   const names =
-    scope === undefined ? routeRoles(layout) : resolveSelectedRoles(layout, registry, scope);
+    scope === undefined
+      ? routeRoles(layout, registry)
+      : resolveSelectedRoles(layout, registry, scope);
   const reason = await adapterStatus(env, harness);
   const roles = (names ?? []).map((role): RoleReadiness => {
     const conversation = registry.roles[role]?.conversations[harness] ?? null;
@@ -135,7 +152,9 @@ export async function effectiveReadiness(
   scope?: ReadinessScope,
 ): Promise<EffectiveReadiness> {
   const names =
-    scope === undefined ? routeRoles(layout) : resolveSelectedRoles(layout, registry, scope);
+    scope === undefined
+      ? routeRoles(layout, registry)
+      : resolveSelectedRoles(layout, registry, scope);
   const roles = (names ?? []).map((role): SelectedRoleReadiness => {
     const harness = resolveHarness(registry, role);
     const conversation = registry.roles[role]?.conversations[harness] ?? null;

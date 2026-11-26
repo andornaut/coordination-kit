@@ -1,8 +1,9 @@
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { gameLayout, type Layout, loadLayout } from "../../core/layout.ts";
+import { appLayout, gameLayout, type Layout, loadLayout } from "../../core/layout.ts";
 import {
   makeFixture,
   projectConfig,
@@ -70,5 +71,65 @@ describe("routeRecipient host configuration", () => {
     (config.reports as Record<string, unknown>).workerParents = "game-coordinator";
     writeFixtureJson(file, config);
     expect(() => routeRecipient(layout, route)).toThrow(RouteError);
+  });
+});
+
+describe("app review routes", () => {
+  function appRoute(recipient: string): Layout {
+    const { root } = makeFixture();
+    writeFixtureJson(join(root, "config.json"), {
+      apps: {
+        "example-app": {
+          name: "Example",
+          path: "../archies-dog-walks",
+          roles: ["operator"],
+        },
+        "another-app": {
+          name: "Another",
+          path: "../chibis-way-home",
+          roles: ["auditor"],
+        },
+      },
+      kits: {},
+      permissions: {},
+      schema: 1,
+      sharedRoles: ["workspace-reviewer"],
+      timezone: "UTC",
+      wakeMinutes: [30],
+    });
+    const layout = loadLayout(root);
+    const app = appLayout(layout, "example-app");
+    writeFixtureJson(app.configFile, {
+      ...projectConfig("Example"),
+      reports: { project: "Example", recipient, scheduledTicks: true, workerParents: ["operator"] },
+    });
+    mkdirSync(layout.varDir, { recursive: true });
+    writeFixtureJson(layout.routeFile, {
+      host: app.id,
+      schema: 2,
+      state: "active",
+      targets: [],
+    });
+    return layout;
+  }
+
+  it("runs an active route for a single app role without additional targets", () => {
+    const layout = appRoute("operator");
+    const route = readRoleRoute(layout)!;
+    expect(route.targets).toEqual([]);
+    expect(routeRecipient(layout, route)).toBe("operator");
+  });
+
+  it("refuses a configured recipient from another app", () => {
+    const layout = appRoute("auditor");
+    const route = readRoleRoute(layout)!;
+    expect(() => routeRecipient(layout, route)).toThrow(
+      "the route recipient auditor is not a role in app example-app or sharedRoles",
+    );
+  });
+
+  it("accepts an explicitly shared workspace recipient", () => {
+    const layout = appRoute("workspace-reviewer");
+    expect(routeRecipient(layout, readRoleRoute(layout)!)).toBe("workspace-reviewer");
   });
 });
