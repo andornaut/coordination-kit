@@ -14,7 +14,9 @@ export function hasPermission(
   permission: Permission,
   appId?: string,
 ): boolean {
-  if (appId !== undefined && !Object.hasOwn(layout.config.apps, appId)) return false;
+  if (appId !== undefined && !Object.hasOwn(layout.config.apps, appId)) {
+    return false;
+  }
   if (layout.mode === "legacy") {
     return role === "game-coordinator" && layout.config.sharedRoles.includes(role);
   }
@@ -37,14 +39,15 @@ export function isPermitted(
   permission: Permission,
   appId?: string,
 ): boolean {
-  const { role, nativeId } = actor;
+  const { nativeId, role } = actor;
   if (
     role === null ||
     nativeId === null ||
     actor.worker !== undefined ||
     !Object.hasOwn(registry.roles, role)
-  )
+  ) {
     return false;
+  }
   const record = registry.roles[role];
   return (
     record?.ownership === "active" &&

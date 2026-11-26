@@ -495,7 +495,7 @@ export const SPECS = {
     group: "decisions",
     options: POLICY_HOLD_SET_OPTIONS,
     summary: "record an explicit user policy hold with policy authority",
-    values: { scope: "role:ROLE|app:ID|work:REPOSITORY:WORK_ID" },
+    values: { scope: "role:ROLE|app:APP|game:GAME|work:REPOSITORY:WORK_ID" },
   },
   "hold policy-release": {
     forms: [["id", "approval", "native-id?"]],

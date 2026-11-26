@@ -80,8 +80,8 @@ function bodyViewer(context: StoreServiceContext, options: CallerOptions) {
   const roles = registry(context);
   const actor = resolveCaller(roles, context.env, options);
   return {
-    viewer: actor.role,
     readAll: isPermitted(context.layout, roles, actor, "messages:read-all"),
+    viewer: actor.role,
   };
 }
 
@@ -90,7 +90,9 @@ function requireStorePermission(
   options: CallerOptions,
   permission: Permission,
 ): void {
-  if (context.layout.mode === "legacy") return;
+  if (context.layout.mode === "legacy") {
+    return;
+  }
   const roles = registry(context);
   requirePermission(context.layout, roles, resolveCaller(roles, context.env, options), permission);
 }
