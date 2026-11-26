@@ -14,7 +14,15 @@ import {
 import { workText } from "./work.ts";
 
 export type ProjectTaskState =
-  "proposed" | "approved" | "in-progress" | "ready" | "merged" | "landed";
+  | "proposed"
+  | "approved"
+  | "in-progress"
+  | "ready"
+  | "merged"
+  | "landed"
+  | "declined"
+  | "cancelled";
+export type ClosedProjectTaskState = Extract<ProjectTaskState, "declined" | "cancelled">;
 export type ProjectReviewPolicy = "off" | "chat" | "pr";
 
 export interface ProjectTaskProposal {
@@ -63,6 +71,11 @@ export interface ProjectTask extends ProjectTaskProposal {
   readonly reviewRequest: (ProjectReviewLink & Receipt & CandidateReceipt) | null;
   readonly mergedSha: string | null;
   readonly landingEvidence: string | null;
+  readonly closure?: ApprovalReceipt & { readonly reason: string };
+  readonly dependencyReplacements?: readonly (ApprovalReceipt & {
+    readonly dependency: string;
+    readonly replacement: string;
+  })[];
   readonly updatedAt: string;
 }
 
@@ -79,7 +92,12 @@ interface TaskWrite {
 const TASK_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const FULL_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const SHA256 = /^[0-9a-f]{64}$/;
+export const PROJECT_TASK_DISPOSITIONS = {
+  closed: "project-task.closed",
+  dependencyReplaced: "project-task.dependency-replaced",
+} as const;
 const EVENT = {
+  ...PROJECT_TASK_DISPOSITIONS,
   approved: "project-task.approved",
   landed: "project-task.landed",
   merged: "project-task.merged",
@@ -219,6 +237,23 @@ function taskUpdate(
   switch (kind) {
     case EVENT.approved:
       return { approval: approvalReceipt, state: "approved" };
+    case EVENT.closed:
+      return {
+        closure: { ...approvalReceipt, reason: payload.reason as string },
+        state: payload.state as ClosedProjectTaskState,
+      };
+    case EVENT.dependencyReplaced:
+      return {
+        dependencyReplacements: [
+          ...(previous.dependencyReplacements ?? []),
+          {
+            ...approvalReceipt,
+            dependency: payload.dependency as string,
+            replacement: payload.replacement as string,
+          },
+        ],
+        dependsOn: payload.dependsOn as string[],
+      };
     case EVENT.started:
       return { start: receipt, state: "in-progress" };
     case EVENT.ready:
@@ -300,11 +335,12 @@ export function proposeProjectTask(
   return store.transaction(() => {
     const task = readProjectTask(store.db, input.id);
     if (task !== null) {
+      const original = store.eventByKey(`${EVENT.proposed}:${input.id}`)?.payload.dependsOn;
       ensure(
         task.title === title &&
           task.scope === scope &&
           task.owner === input.owner &&
-          task.dependsOn.join(",") === dependsOn.join(","),
+          canonicalJson(original ?? task.dependsOn) === canonicalJson(dependsOn),
         "project-task-id-conflict",
       );
       return duplicate(task);
@@ -328,6 +364,19 @@ function sameApproval(existing: ProjectApproval, input: ProjectApproval): boolea
   return existing.kind === input.kind && existing.ref === input.ref;
 }
 
+export function isClosedProjectTask(state: ProjectTaskState): state is ClosedProjectTaskState {
+  return state === "declined" || state === "cancelled";
+}
+
+export {
+  change as appendProjectTaskTransition,
+  bound as assertBoundProjectTaskActor,
+  checkedApproval as checkProjectTaskApproval,
+  duplicate as duplicateProjectTask,
+  requiredTask as requireProjectTask,
+  sameApproval as sameProjectTaskApproval,
+};
+
 /** Record the exact human decision after the command checks the approval recorder. */
 export function approveProjectTask(
   store: Store,
@@ -339,6 +388,7 @@ export function approveProjectTask(
   const approval = checkedApproval(input);
   return store.transaction(() => {
     const task = requiredTask(store.db, id);
+    ensure(!isClosedProjectTask(task.state), "project-task-closed");
     if (task.approval !== null) {
       ensure(sameApproval(task.approval, input), "project-task-approval-conflict");
       return duplicate(task);
@@ -353,6 +403,7 @@ export function startProjectTask(store: Store, actor: Actor, id: string): TaskWr
   return store.transaction(() => {
     const task = requiredTask(store.db, id);
     ensure(task.owner === actor.role, "not-owner");
+    ensure(!isClosedProjectTask(task.state), "project-task-closed");
     if (task.start !== null) {
       return duplicate(task);
     }
@@ -401,6 +452,7 @@ export function readyProjectTask(
   return store.transaction(() => {
     const task = requiredTask(store.db, id);
     ensure(task.owner === actor.role, "not-owner");
+    ensure(!isClosedProjectTask(task.state), "project-task-closed");
     const previous = task.candidate;
     if (previous?.headSha === input.headSha) {
       if (canonicalJson(previous) === canonicalJson(candidate)) {
@@ -434,6 +486,7 @@ export function readyProjectTask(
 }
 
 function candidateFor(task: ProjectTask, headSha: string): ProjectTaskCandidate {
+  ensure(!isClosedProjectTask(task.state), "project-task-closed");
   ensure(FULL_SHA.test(headSha), "invalid-project-task-sha");
   ensure(task.candidate?.headSha === headSha, "project-candidate-stale");
   return task.candidate;
