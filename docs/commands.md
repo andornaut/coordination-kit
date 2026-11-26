@@ -110,6 +110,7 @@ Reserve, prepare, activate and cancel require the active game-coordinator bindin
   body from exactly one of `--body-file` (relative to the working directory, valid UTF-8) and
   `--body`, and `--link` values as `KIND=REF`, such as `work=ck-0017`. `msg history` lists at
   most `--limit` events (default 1000). `--since` takes an ISO 8601 instant.
+  `msg send` also accepts [unbound senders](messages.md) for ordinary queued messages.
 - `msg status ID --include-body` and `msg history --include-body` identify the caller
   through the same registry fence and apply message-body visibility.
 - `question open|answer|project|cancel|close-legacy`, `hold set|release` identify the caller
