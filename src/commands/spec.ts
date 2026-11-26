@@ -534,7 +534,7 @@ export const SPECS = {
     forms: [["ID", "native-id?", "worker?"]],
     group: "work",
     options: WORK_WRITE_OPTIONS,
-    summary: "record your work item finished; its work file must be done on main",
+    summary: "finish your work item after main marks it done, superseded or cancelled",
   },
   "work show": {
     forms: [["ID"]],

@@ -7,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -17,7 +18,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
 import { type GitRunner, systemGit } from "../core/git.ts";
-import { EXIT_OK, EXIT_USAGE } from "../core/io.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
 import { loadLayout } from "../core/layout.ts";
 import {
   CLAUDE_COORDINATOR,
@@ -139,10 +140,10 @@ interface Fixture {
   readonly sha: Record<string, string>;
 }
 
-async function buildFixture(): Promise<Fixture> {
+async function buildFixture(gameDirectory = GAME): Promise<Fixture> {
   const base = mkdtempSync(join(tmpdir(), "status-fixture-"));
   const root = join(base, "game-coordinator");
-  const game = join(base, GAME);
+  const game = join(base, gameDirectory);
   const kit = join(base, KIT);
   const sha: Record<string, string> = {};
 
@@ -150,7 +151,9 @@ async function buildFixture(): Promise<Fixture> {
   writeFileSync(
     join(root, "config.json"),
     `${JSON.stringify({
-      games: { [GAME]: { name: "Sample", path: `../${GAME}`, roles: ["art", "gameplay", "tech"] } },
+      games: {
+        [GAME]: { name: "Sample", path: `../${gameDirectory}`, roles: ["art", "gameplay", "tech"] },
+      },
       kits: { [KIT]: { path: `../${KIT}` } },
       schema: 1,
       sharedRoles: ["game-coordinator", KIT],
@@ -248,12 +251,12 @@ async function buildFixture(): Promise<Fixture> {
       [`${GAME}/art`]: {
         conversations: { codex: CODEX_TECH },
         ownership: "active",
-        worktree: `../${GAME}`,
+        worktree: `../${gameDirectory}`,
       },
       [`${GAME}/tech`]: {
         conversations: { claude: CLAUDE_TECH },
         ownership: "active",
-        worktree: `../${GAME}/.worktrees/tech`,
+        worktree: `../${gameDirectory}/.worktrees/tech`,
       },
       [KIT]: { conversations: {}, ownership: "active", worktree: `../${KIT}` },
     },
@@ -438,6 +441,18 @@ describe("status", () => {
       originMain: fixture.sha.sg7,
     });
     expect(report.coordinator).toEqual({ root: fixture.root, store: { status: "available" } });
+  });
+
+  it("reports an unavailable checkout under its configured ID when scoped", async () => {
+    const missing = await buildFixture("different-checkout-name");
+    renameSync(missing.game, join(missing.base, "moved-checkout"));
+
+    const result = await cli(missing, "--scope", GAME);
+
+    expect(result.code).toBe(EXIT_INVALID);
+    expect(JSON.parse(result.out).repositories).toMatchObject([
+      { kind: "game", name: GAME, path: missing.game, status: "unavailable" },
+    ]);
   });
 
   it("derives each status by precedence", () => {

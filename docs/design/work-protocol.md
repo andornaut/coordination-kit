@@ -24,3 +24,4 @@ state is in the Phase 4 archive ([retirement](../store.md#retirement)).
 | ck-0014 | Report closed historical work as done                 | [ck-0014.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0014.md) |
 | ck-0015 | Report the cause of failed protocol commands          | [ck-0015.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0015.md) |
 | ck-0046 | Finish work items that were superseded or cancelled   | [ck-0046.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0046.md) |
+| ck-0055 | Report unavailable scopes and correct command help    | [ck-0055.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0055.md) |

@@ -213,16 +213,12 @@ export function repositories(
 ): Repository[] {
   const known = new Map<string, { name: string; kind: RepositoryKind }>();
   for (const [id, entry] of Object.entries(layout.config.games)) {
-    const path = real(resolve(layout.root, entry.path));
-    if (path !== null) {
-      known.set(path, { kind: "game", name: id });
-    }
+    const path = resolve(layout.root, entry.path);
+    known.set(real(path) ?? path, { kind: "game", name: id });
   }
   for (const [id, entry] of Object.entries(layout.config.kits)) {
-    const path = real(resolve(layout.root, entry.path));
-    if (path !== null) {
-      known.set(path, { kind: "kit", name: id });
-    }
+    const path = resolve(layout.root, entry.path);
+    known.set(real(path) ?? path, { kind: "kit", name: id });
   }
   const coordinator = real(layout.root);
   if (coordinator !== null) {

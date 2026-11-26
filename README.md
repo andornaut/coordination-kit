@@ -60,7 +60,7 @@ take the coordinator root only from `COORDINATION_KIT_ROOT` or `DELIVERY_KIT_ROO
 | `events`   | `ingest`                                                                                               | The runner seam: one event log ingest, as one typed JSON line.                                           |
 | `status`   | (none)                                                                                                 | Read-only status of every registered repository's work items, as JSON or a Markdown digest.              |
 | `work`     | `check`, `report`, `start`, `evidence`, `block`, `unblock`, `ready`, `finish`, `show`, `history`       | Validate a repository's work files and report them; record each item's live progress in the store.       |
-| `graph`    | (none), `why`, `index`                                                                                 | The live decision graph, supersedes chains and a compatibility summary.                                  |
+| `graph`    | (none), `why`                                                                                          | The live decision graph and supersedes chains.                                                           |
 
 `coordination-kit --help` lists every command form; it is generated from each command's parser
 options. Per-command semantics are in [docs/commands.md](docs/commands.md).
