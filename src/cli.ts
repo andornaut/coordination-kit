@@ -10,6 +10,7 @@ import {
   compactionReserve,
 } from "./commands/compaction.ts";
 import { harnessDoctor } from "./commands/doctor.ts";
+import { docsAudit, docsCompact } from "./commands/documentation.ts";
 import { graph, graphWhy } from "./commands/graph.ts";
 import { harnessSelect } from "./commands/harness.ts";
 import { init, projectRegister } from "./commands/init.ts";
@@ -118,6 +119,7 @@ const USAGE = [
   "init, project and task use the primary Git checkout, defaulting to the working directory.",
   "work uses --root for the repository, defaulting to the working directory, and reads its",
   "coordinator root from COORDINATION_KIT_ROOT or DELIVERY_KIT_ROOT.",
+  "docs uses --root for the repository, defaulting to the working directory.",
   "Other commands use --root, COORDINATION_KIT_ROOT, DELIVERY_KIT_ROOT or the working directory,",
   "in that order.",
   "",
@@ -127,6 +129,8 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "claude ready": claudeReady,
   "codex ready": codexReady,
   "decision list": decisionList,
+  "docs audit": docsAudit,
+  "docs compact": docsCompact,
   "events ingest": eventsIngest,
   graph,
   "graph why": graphWhy,
@@ -282,8 +286,9 @@ export async function main(io: Io, argv: readonly string[]): Promise<number> {
     io.err(USAGE);
     return EXIT_USAGE;
   }
+  const group = SPECS[found.command].group;
   const root =
-    SPECS[found.command].group === "work" || SPECS[found.command].group === "project"
+    group === "work" || group === "project" || group === "docs"
       ? (extracted.root ?? io.cwd)
       : (extracted.root ?? coordinatorRoot(io.env) ?? io.cwd);
   try {

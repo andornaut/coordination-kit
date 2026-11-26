@@ -18,9 +18,10 @@ coordination-kit work check --root /path/to/repository
 coordination-kit work check --decisions --root /path/to/repository
 ```
 
-The repository's work items are `docs/work/*.md` other than `docs/work/README.md`. A design index
-is any table in `docs/design/*.md` whose header is exactly `ID | Title | Link`. A row links its
-work file by a path relative to the design file, or by the repository's blob URL on `main`,
+The repository's work items are `docs/work/*.md` other than `docs/work/README.md`. An area's work
+index can live in `docs/design/<area>.md` or `docs/work/index/<area>.md`. Both use the header
+`ID | Title | Link`. In either location, a row links its work file relative to the index file or
+uses the repository's blob URL on `main`,
 `https://github.com/OWNER/REPO/blob/main/docs/work/<id>.md`, where `OWNER/REPO` comes from the
 `repository` field of the repository's `package.json`. A URL of another location does not
 resolve. The check reports:

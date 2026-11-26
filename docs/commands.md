@@ -6,6 +6,10 @@ every form and flag.
 
 ## Command forms
 
+Use `docs audit [--area TOPIC] [--format markdown|json]` to check committed local links and list
+marked rules. Use `docs compact --plan [--area TOPIC] [--format markdown|json]` to prepare
+reviewable changes. Both accept the repository as `--root`. See the [documentation guide](README.md).
+
 | Command                                                                                                                                                                                                                                                                                | Purpose                                                                                                                            |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `msg send --to ROLE (--body-file FILE \| --body TEXT) [--intent queue\|unblock] [--id UUID] [--link KIND=REF]...`                                                                                                                                                                      | Store a message, then attempt one guarded wake; see [store](store.md#message-lifecycle).                                           |

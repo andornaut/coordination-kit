@@ -1,6 +1,6 @@
 {
   "name": "@andornaut/coordination-kit",
-  "version": "7.6.0",
+  "version": "7.7.0",
   "description": "Role registry, the SQLite coordination store with its message lifecycle and wakes, harness adapters, the runner seam and work-file checks for the game and kit roles.",
   "license": "MIT",
   "type": "module",
@@ -32,6 +32,7 @@
   "files": [
     "dist",
     "README.md",
+    "docs/README.md",
     "docs/commands.md",
     "docs/configuration.md",
     "docs/libraries.md",
@@ -82,7 +83,7 @@
     "lint-staged": "^17.6.1",
     "markdownlint-cli2": "0.24.1",
     "prettier": "^3.9.10",
-    "typescript": "^7.0.2",
+    "typescript": "^6.0.3",
     "typescript-eslint": "^8.71.2",
     "vite": "^8.3.8",
     "vitest": "^5.0.5"

@@ -8,6 +8,7 @@ import {
   COMPACTION_RESERVATION_OPTIONS,
 } from "./compaction.ts";
 import { DOCTOR_OPTIONS } from "./doctor.ts";
+import { DOCS_AUDIT_OPTIONS, DOCS_COMPACT_OPTIONS } from "./documentation.ts";
 import { GRAPH_OPTIONS, GRAPH_WHY_OPTIONS } from "./graph.ts";
 import { INIT_OPTIONS, PROJECT_REGISTER_OPTIONS } from "./init.ts";
 import {
@@ -123,6 +124,7 @@ export const GROUPS = {
   review: "runner seam (delivery-kit)",
   status: "cross-repository status",
   work: "repository work files",
+  docs: "documentation audit and compaction planning",
   graph: "decision graph",
 } as const;
 /* eslint-enable sort-keys */
@@ -143,6 +145,20 @@ const READY = {
 /** Commands by their words: a noun group and its verb. */
 /* eslint-disable sort-keys -- Specification order is the public command help order. */
 export const SPECS = {
+  "docs audit": {
+    forms: [["area?", "format?"]],
+    group: "docs",
+    options: DOCS_AUDIT_OPTIONS,
+    summary: "audit tracked documentation links and list rules to verify against code",
+    values: { area: "TOPIC", format: "markdown|json" },
+  },
+  "docs compact": {
+    forms: [["plan", "area?", "format?"]],
+    group: "docs",
+    options: DOCS_COMPACT_OPTIONS,
+    summary: "prepare a read-only compaction plan for committed documentation",
+    values: { area: "TOPIC", format: "markdown|json" },
+  },
   init: {
     forms: [["project", "role?", "review?", "provider?", "repository?"]],
     group: "project",

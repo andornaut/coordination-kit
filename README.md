@@ -74,21 +74,7 @@ Errors go to stderr prefixed `coordination-kit:`. Commands with a JSON result ke
 
 ## Documentation
 
-| Doc                                            | Covers                                                                                                          |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| [docs/commands.md](docs/commands.md)           | Per-command semantics and the `status` schema                                                                   |
-| [docs/configuration.md](docs/configuration.md) | The coordinator root, `config.json`, the `reports` fields of `delivery-kit.json` and the state layout           |
-| [docs/registry.md](docs/registry.md)           | `var/registry.json`, scoped harness selection, send-time resolution, the readiness probe and the harness doctor |
-| [docs/messages.md](docs/messages.md)           | Store messages: send, pull, close and retain                                                                    |
-| [docs/store.md](docs/store.md)                 | Store layout, schema, API, writer fence, wakes, event ingest, work records, requests and retirement             |
-| [docs/review.md](docs/review.md)               | The review route, the runner seam, the stored brief, wake files and the Claude channel                          |
-| [docs/work-files.md](docs/work-files.md)       | `work check`, `work report` and the decision line format                                                        |
-| [docs/libraries.md](docs/libraries.md)         | The public build API subpaths and their main symbols                                                            |
-| [docs/upgrading.md](docs/upgrading.md)         | Moving between releases, including the 3.0 retirement runbook and rollback                                      |
-| [docs/design/](docs/design/README.md)          | Design area summaries, each linking its topic docs and indexing its work items                                  |
-| [docs/work/][work-files]                       | The work-file convention and one file per approved task (repository only, not packaged)                         |
-
-[work-files]: https://github.com/andornaut/coordination-kit/blob/main/docs/work/README.md
+The [documentation index](docs/README.md) covers setup, commands, and the project documentation workflow.
 
 ## Developing
 
