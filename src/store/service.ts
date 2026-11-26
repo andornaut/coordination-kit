@@ -23,7 +23,7 @@ import {
   retainMessage,
   sendMessage,
 } from "./messages.ts";
-import { messageWake, unreadMessages } from "./messageWake.ts";
+import { firstMessageWake, messageWake, unreadMessages } from "./messageWake.ts";
 import {
   type Actor,
   type MessageIntent,
@@ -249,7 +249,12 @@ export async function storeStatus(
   context: StoreServiceContext,
   id: string,
   bodyCaller?: CallerOptions,
-): Promise<{ readonly schema: 1; readonly message: MessageView; readonly wake: MessageWakeView }> {
+): Promise<{
+  readonly schema: 1;
+  readonly message: MessageView;
+  readonly firstWake: Omit<MessageWakeView, "nextAction"> | null;
+  readonly wake: MessageWakeView;
+}> {
   const viewer = bodyCaller === undefined ? undefined : caller(context, bodyCaller).role;
   if (!MESSAGE_ID.test(id)) {
     throw new StoreError("invalid-id");
@@ -261,7 +266,12 @@ export async function storeStatus(
   try {
     const message =
       viewer === undefined ? messageStatus(store, id) : messageWithBody(store, viewer, id);
-    return { message, schema: 1, wake: messageWake(store, id, message.to, message.state) };
+    return {
+      firstWake: firstMessageWake(store, id, message.to),
+      message,
+      schema: 1,
+      wake: messageWake(store, id, message.to, message.state),
+    };
   } finally {
     store.close();
   }

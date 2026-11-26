@@ -136,6 +136,43 @@ describe("per-original wake status", () => {
     expect((await storeStatus(sender, SECOND)).wake).toEqual(coalesced.wake.evidence);
   });
 
+  it("keeps the first exact wake visible after a later successful attempt", async () => {
+    const { layout } = storeFixture();
+    const codex = fakeCodex(ART);
+    let blocked = true;
+    const sender = {
+      clock: TEST_CLOCK,
+      env: { CLAUDE_CODE_SESSION_ID: COORDINATOR },
+      layout,
+      ports: {
+        connect: () => Promise.resolve(codex.client),
+        storeGuard: () =>
+          blocked
+            ? { reason: "recipient-question-pending", status: "blocked" as const }
+            : { status: "clear" as const },
+      },
+    };
+    const recipient = { clock: TEST_CLOCK, env: { CODEX_THREAD_ID: ART }, layout };
+    const first = await storeSend(sender, {}, { body: "Original.", id: FIRST, to: ART_ROLE });
+    blocked = false;
+    const later = await storeSend(sender, {}, { body: "New arrival.", id: SECOND, to: ART_ROLE });
+    await storeInbox(recipient, {}, {});
+    await storeDone(recipient, {}, FIRST, {});
+
+    const status = await storeStatus(sender, FIRST);
+    expect(status.firstWake).toMatchObject({
+      outcome: "guarded",
+      reason: "recipient-question-pending",
+      wake: first.wake.evidence.wake,
+    });
+    expect(status.wake).toMatchObject({
+      nextAction: "none",
+      outcome: "accepted",
+      wake: later.wake.evidence.wake,
+    });
+    expect(status.firstWake?.wake).not.toBe(status.wake.wake);
+  });
+
   it("does not guess a wake for a legacy message without exact associations", () => {
     const store = Store.open(TEST_CLOCK, ":memory:");
     try {

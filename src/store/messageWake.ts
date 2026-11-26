@@ -100,6 +100,27 @@ export function messageWake(
   return evidence(to, state, row);
 }
 
+/** Earliest exact association, including a coalesced wake that predates this original. */
+export function firstMessageWake(
+  store: Reader,
+  id: string,
+  to: string,
+): Omit<MessageWakeView, "nextAction"> | null {
+  const row = hasProjection(store)
+    ? (store.db
+        .prepare(
+          `SELECT ${EVIDENCE} FROM message_wakes mw LEFT JOIN wakes w ON w.id = mw.wake_id
+           WHERE mw.message_id = ? ORDER BY mw.seq LIMIT 1`,
+        )
+        .get(id) as unknown as WakeRow | undefined)
+    : undefined;
+  if (row === undefined) {
+    return null;
+  }
+  const { blocker, outcome, reason, wake } = evidence(to, "sent", row);
+  return { blocker, outcome, reason, wake };
+}
+
 export function unreadMessages(store: Reader, role: string | null): UnreadMessage[] {
   const base = `FROM messages m WHERE m.state = 'sent' AND (? IS NULL OR m.to_role = ?) ORDER BY m.sent_seq`;
   if (!hasProjection(store)) {
