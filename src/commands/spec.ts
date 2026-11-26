@@ -9,11 +9,22 @@ import {
 } from "./compaction.ts";
 import { DOCTOR_OPTIONS } from "./doctor.ts";
 import { GRAPH_OPTIONS, GRAPH_WHY_OPTIONS } from "./graph.ts";
+import { INIT_OPTIONS, PROJECT_REGISTER_OPTIONS } from "./init.ts";
 import {
   MIGRATION_ACTIVATE_OPTIONS,
   MIGRATION_PREPARE_OPTIONS,
   MIGRATION_STATUS_OPTIONS,
 } from "./migration.ts";
+import {
+  TASK_APPROVE_OPTIONS,
+  TASK_LINK_OPTIONS,
+  TASK_PROPOSE_OPTIONS,
+  TASK_READ_OPTIONS,
+  TASK_READY_OPTIONS,
+  TASK_REVIEW_APPROVE_OPTIONS,
+  TASK_VERIFY_OPTIONS,
+  TASK_WRITE_OPTIONS,
+} from "./projectTasks.ts";
 import {
   DECISION_LIST_OPTIONS,
   HOLD_LIST_OPTIONS,
@@ -106,6 +117,7 @@ export const GROUPS = {
   session: "sessions and harness handoffs (writes fenced by the registry)",
   request: "imported requests (owner closes, fenced by the registry)",
   harness: "harness (claude, codex)",
+  project: "standalone project setup and task workflow",
   review: "runner seam (delivery-kit)",
   status: "cross-repository status",
   work: "repository work files",
@@ -129,6 +141,101 @@ const READY = {
 /** Commands by their words: a noun group and its verb. */
 /* eslint-disable sort-keys -- Specification order is the public command help order. */
 export const SPECS = {
+  init: {
+    forms: [["project", "role?", "review?", "provider?", "repository?"]],
+    group: "project",
+    options: INIT_OPTIONS,
+    summary: "set up Coordination Kit in an existing Git repository",
+    values: {
+      project: "ID",
+      review: "off|chat|pr",
+      provider: "github|gitlab",
+      repository: "OWNER/REPO",
+    },
+  },
+  "project register": {
+    forms: [["role", "harness", "native-id", "native-project-id?", "worktree?"]],
+    group: "project",
+    options: PROJECT_REGISTER_OPTIONS,
+    summary: "register a verified session ID and worktree for a configured project role",
+    values: { harness: "claude|codex", "native-project-id": "ID", worktree: "PATH" },
+  },
+  "task propose": {
+    forms: [["ID", "owner", "title", "scope", "depends-on?", "native-id?"]],
+    group: "project",
+    options: TASK_PROPOSE_OPTIONS,
+    summary: "record an idea with its owner and proposed scope",
+    values: { scope: "TEXT", "depends-on": "TASK_ID" },
+  },
+  "task approve": {
+    forms: [["ID", "approval", "native-id?"]],
+    group: "project",
+    options: TASK_APPROVE_OPTIONS,
+    summary: "record the user's approval to build as the project maintainer",
+  },
+  "task start": {
+    forms: [["ID", "native-id?"]],
+    group: "project",
+    options: TASK_WRITE_OPTIONS,
+    summary: "start an approved task as its owner",
+  },
+  "task work-file": {
+    forms: [["ID"]],
+    group: "project",
+    options: TASK_READ_OPTIONS,
+    summary: "render the approved work file for the task branch",
+  },
+  "task ready": {
+    forms: [["ID", "branch", "head", "base?", "summary", "evidence", "native-id?"]],
+    group: "project",
+    options: TASK_READY_OPTIONS,
+    summary: "record an exact candidate and print its review packet",
+    values: { branch: "BRANCH", head: "SHA", base: "SHA", summary: "TEXT" },
+  },
+  "task approve-review": {
+    forms: [["ID", "head", "approval", "native-id?"]],
+    group: "project",
+    options: TASK_REVIEW_APPROVE_OPTIONS,
+    summary: "record the user's approval to merge this exact revision",
+    values: { head: "SHA" },
+  },
+  "task open-review": {
+    forms: [["ID", "native-id?"]],
+    group: "project",
+    options: TASK_WRITE_OPTIONS,
+    summary: "open a pull or merge request for the already-pushed candidate",
+  },
+  "task link-review": {
+    forms: [["ID", "number", "native-id?"]],
+    group: "project",
+    options: TASK_LINK_OPTIONS,
+    summary: "link an existing exact pull or merge request",
+    values: { number: "N" },
+  },
+  "task merge": {
+    forms: [["ID", "native-id?"]],
+    group: "project",
+    options: TASK_WRITE_OPTIONS,
+    summary: "submit the exact candidate for integration under the configured review policy",
+  },
+  "task verify": {
+    forms: [["ID", "evidence?", "native-id?"]],
+    group: "project",
+    options: TASK_VERIFY_OPTIONS,
+    summary: "observe the actual merge and verify checks before marking the task landed",
+  },
+  "task list": {
+    forms: [[]],
+    group: "project",
+    options: TASK_READ_OPTIONS,
+    summary: "list the standalone project's tasks",
+  },
+  "task show": {
+    forms: [["ID"]],
+    group: "project",
+    options: TASK_READ_OPTIONS,
+    summary: "show the task, exact candidate and recorded decisions",
+  },
   "msg send": {
     forms: [
       ["to", "body-file", "intent?", "id?", "link?", "native-id?", "worker?"],

@@ -5,6 +5,7 @@
 // `handoff ready` admits only the role's source binding and `handoff active` only its target
 // binding, which `harness select` makes effective. `handoff show` takes no caller.
 import { randomUUID } from "node:crypto";
+import { join, relative } from "node:path";
 
 import { CONVERSATION_ID_PATTERN } from "../core/validate.ts";
 import { claudeProjectsDir, clearPredecessor } from "../registry/claudeLineage.ts";
@@ -209,7 +210,13 @@ export async function storeSessionStart(
           )
         : [];
     return {
-      checkpoint: checkpointPath(actor.role),
+      checkpoint:
+        context.layout.project === undefined
+          ? checkpointPath(actor.role)
+          : relative(
+              context.layout.root,
+              join(context.layout.handoffsDir, actor.role, "current.md"),
+            ),
       conversation: actor.nativeId,
       counts: {
         holds:

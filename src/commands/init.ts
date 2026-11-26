@@ -343,12 +343,15 @@ export const projectRegister: Handler = (io, root, args) => {
     regularFile(layout.registryFile);
     regularFile(layout.registryLock);
     const current = readRegistry(layout);
-    if (!Object.hasOwn(current.roles, role)) {
+    if (!layout.config.sharedRoles.includes(role)) {
       throw new Error(`${role}: is not a declared project role`);
     }
-    const worktree = qualifyWorktree(git, repo, values.worktree ?? current.roles[role]!.worktree);
+    const binding = current.roles[role];
+    const worktree = qualifyWorktree(git, repo, values.worktree ?? binding?.worktree ?? ".");
     const nativeProjectId = values["native-project-id"] ?? current.host.nativeProjectId;
-    const duplicate = registered(current, role, harness, nativeId, nativeProjectId, worktree);
+    const duplicate =
+      binding !== undefined &&
+      registered(current, role, harness, nativeId, nativeProjectId, worktree);
     let registry = current;
     if (!duplicate) {
       const others = Object.entries(current.roles).filter(([name]) => name !== role);
@@ -365,9 +368,14 @@ export const projectRegister: Handler = (io, root, args) => {
       }
       registry = updateRegistry(systemClock, layout, current.revision, (draft) => {
         draft.host.nativeProjectId = nativeProjectId;
-        draft.roles[role]!.conversations[harness] = nativeId;
-        draft.roles[role]!.harness = harness;
-        draft.roles[role]!.worktree = worktree;
+        const entry = (draft.roles[role] ??= {
+          conversations: {},
+          ownership: "active",
+          worktree,
+        });
+        entry.conversations[harness] = nativeId;
+        entry.harness = harness;
+        entry.worktree = worktree;
       });
     }
     io.out(

@@ -26,14 +26,18 @@ function gitEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 /** The git runner over the real binary. `onCall` counts invocations for the performance bound. */
-export function systemGit(env: NodeJS.ProcessEnv, onCall?: () => void): GitRunner {
+export function systemGit(
+  env: NodeJS.ProcessEnv,
+  onCall?: () => void,
+  timeout?: number,
+): GitRunner {
   const environment = gitEnvironment(env);
   return (cwd, args) => {
     onCall?.();
     const result = spawnSync(
       "git",
       ["-c", "core.quotePath=false", "-c", "log.showSignature=false", ...args],
-      { cwd, encoding: "utf8", env: environment, maxBuffer: 1024 * 1024 * 1024 },
+      { cwd, encoding: "utf8", env: environment, maxBuffer: 1024 * 1024 * 1024, timeout },
     );
     if (result.error !== undefined) {
       throw new GitError(`git-unavailable: ${result.error.message}`);

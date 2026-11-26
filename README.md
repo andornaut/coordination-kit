@@ -16,6 +16,9 @@ the file store. The [filesystem layout](docs/store.md#filesystem-layout) describ
 role records. [Git boundaries](docs/configuration.md#state) cover tracked
 configuration and ignored runtime state.
 
+For individual repositories, [initialize a standalone project](docs/standalone.md) to track
+approved tasks and exact-revision chat or pull-request reviews without a separate coordinator.
+
 ## Install and pin
 
 Pin the release asset as a devDependency in the primary game-coordinator checkout and commit the

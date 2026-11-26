@@ -12,7 +12,22 @@ import {
 import { harnessDoctor } from "./commands/doctor.ts";
 import { graph, graphWhy } from "./commands/graph.ts";
 import { harnessSelect } from "./commands/harness.ts";
+import { init, projectRegister } from "./commands/init.ts";
 import { migrationActivate, migrationPrepare, migrationStatus } from "./commands/migration.ts";
+import {
+  taskApprove,
+  taskApproveReview,
+  taskLinkReview,
+  taskList,
+  taskMerge,
+  taskOpenReview,
+  taskPropose,
+  taskReady,
+  taskShow,
+  taskStart,
+  taskVerify,
+  taskWorkFile,
+} from "./commands/projectTasks.ts";
 import {
   decisionList,
   holdList,
@@ -125,11 +140,13 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "hold release": holdRelease,
   "hold set": holdSet,
   inbox,
+  init,
   "msg done": msgDone,
   "msg history": msgHistory,
   "msg retain": msgRetain,
   "msg send": msgSend,
   "msg status": msgStatus,
+  "project register": projectRegister,
   "question answer": questionAnswer,
   "question cancel": questionCancel,
   "question close-legacy": questionCloseLegacy,
@@ -153,6 +170,18 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "store migration-status": migrationStatus,
   "store rebuild": storeRebuildCommand,
   "store retire": storeRetireCommand,
+  "task approve": taskApprove,
+  "task approve-review": taskApproveReview,
+  "task link-review": taskLinkReview,
+  "task list": taskList,
+  "task merge": taskMerge,
+  "task open-review": taskOpenReview,
+  "task propose": taskPropose,
+  "task ready": taskReady,
+  "task show": taskShow,
+  "task start": taskStart,
+  "task verify": taskVerify,
+  "task work-file": taskWorkFile,
   "work block": workBlock,
   "work check": workCheck,
   "work evidence": workEvidence,
@@ -248,7 +277,7 @@ export async function main(io: Io, argv: readonly string[]): Promise<number> {
     return EXIT_USAGE;
   }
   const root =
-    SPECS[found.command].group === "work"
+    SPECS[found.command].group === "work" || SPECS[found.command].group === "project"
       ? (extracted.root ?? io.cwd)
       : (extracted.root ?? coordinatorRoot(io.env) ?? io.cwd);
   try {

@@ -66,7 +66,7 @@ export function parseOptions<const O extends Options>(
 }
 
 /** A verb family: its usage code is `invalid_FAMILY_options`, its fallback `FAMILY_operation_failed`. */
-export type Family = "store" | "work" | "graph";
+export type Family = "store" | "work" | "graph" | "task";
 
 /** A short reason a refusal prints after its code, such as `session-held: phase held`. */
 function reasonOf(error: unknown): string {

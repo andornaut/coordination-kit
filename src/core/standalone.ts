@@ -12,6 +12,7 @@ export const STANDALONE_CONFIG_FILE = "coordination-kit.json";
 export const STANDALONE_STATE_DIR = ".coordination-kit";
 export const REVIEW_MODES = ["off", "chat", "pr"] as const;
 export const PROJECT_PROVIDERS = ["github", "gitlab"] as const;
+const GITHUB_MERGE_METHODS = ["merge", "squash", "rebase"] as const;
 
 export interface StandaloneConfig {
   readonly schema: 1;
@@ -24,6 +25,7 @@ export interface StandaloneConfig {
     readonly repository: string;
     readonly requiredChecks?: readonly string[];
     readonly hostname?: string;
+    readonly mergeMethod?: (typeof GITHUB_MERGE_METHODS)[number];
   };
 }
 
@@ -48,7 +50,10 @@ function checkIntegration(issues: Issues, value: unknown): void {
     !checkObject(
       issues,
       at,
-      { optional: ["requiredChecks", "hostname"], required: ["provider", "repository"] },
+      {
+        optional: ["requiredChecks", "hostname", "mergeMethod"],
+        required: ["provider", "repository"],
+      },
       value,
     )
   ) {
@@ -81,6 +86,13 @@ function checkIntegration(issues: Issues, value: unknown): void {
       issues.add(`${at}/hostname`, "is only supported for GitLab");
     } else {
       checkString(issues, `${at}/hostname`, HOSTNAME, value.hostname);
+    }
+  }
+  if (value.mergeMethod !== undefined) {
+    if (value.provider !== "github") {
+      issues.add(`${at}/mergeMethod`, "is only supported for GitHub");
+    } else {
+      checkEnum(issues, `${at}/mergeMethod`, GITHUB_MERGE_METHODS, value.mergeMethod);
     }
   }
 }

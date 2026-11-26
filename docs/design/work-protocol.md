@@ -26,3 +26,4 @@ state is in the Phase 4 archive ([retirement](../store.md#retirement)).
 | ck-0046 | Finish work items that were superseded or cancelled   | [ck-0046.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0046.md) |
 | ck-0055 | Report unavailable scopes and correct command help    | [ck-0055.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0055.md) |
 | ck-0056 | Apply approved repository review follow-ups           | [ck-0056.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0056.md) |
+| ck-0063 | Support standalone project tasks and merge review     | [ck-0063.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0063.md) |
