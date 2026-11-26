@@ -5,6 +5,7 @@ import {
   ForgeError,
   type ForgeReview,
   type ForgeService,
+  type GitHubMergeMethod,
 } from "./types.ts";
 
 function sameRepository(repository: string, ref: unknown): boolean {
@@ -34,7 +35,12 @@ function statusState(state: unknown): ForgeCiState {
   return state === "pending" ? "pending" : "unknown";
 }
 
-export function github(api: Api, repository: string, hostname: string): ForgeService {
+export function github(
+  api: Api,
+  repository: string,
+  hostname: string,
+  mergeMethod?: GitHubMergeMethod,
+): ForgeService {
   const project = `repos/${repository}`;
   const pulls = `${project}/pulls`;
   const [owner] = repository.split("/");
@@ -111,7 +117,10 @@ export function github(api: Api, repository: string, hostname: string): ForgeSer
         .map(parse);
     },
     merge({ headSha, number: review }) {
-      api(`${pulls}/${review}/merge`, "PUT", { sha: headSha });
+      api(`${pulls}/${review}/merge`, "PUT", {
+        sha: headSha,
+        ...(mergeMethod === undefined ? {} : { merge_method: mergeMethod }),
+      });
     },
     read(review) {
       return parse(api(`${pulls}/${review}`));

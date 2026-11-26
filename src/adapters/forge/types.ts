@@ -1,9 +1,11 @@
 export type ForgeProvider = "github" | "gitlab";
+export type GitHubMergeMethod = "merge" | "squash" | "rebase";
 
 export interface ForgeTarget {
   readonly provider: ForgeProvider;
   readonly repository: string;
   readonly hostname?: string;
+  readonly mergeMethod?: GitHubMergeMethod;
   readonly requiredChecks: readonly string[];
 }
 

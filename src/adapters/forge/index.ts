@@ -24,11 +24,12 @@ export type {
   ForgeReview,
   ForgeRunner,
   ForgeTarget,
+  GitHubMergeMethod,
 } from "./types.ts";
 export { ForgeError } from "./types.ts";
 
 function hostname(target: ForgeTarget): string {
-  const { provider, repository, requiredChecks } = target;
+  const { mergeMethod, provider, repository, requiredChecks } = target;
   if (provider !== "github" && provider !== "gitlab") {
     throw new ForgeError("forge-target-invalid");
   }
@@ -41,6 +42,8 @@ function hostname(target: ForgeTarget): string {
     parts.some((part) => !/^[a-z0-9_.-]+$/i.test(part) || part === "." || part === "..") ||
     !/^[a-z0-9.-]+(?::[0-9]+)?$/i.test(host) ||
     parsed === null ||
+    (mergeMethod !== undefined &&
+      (provider !== "github" || !["merge", "squash", "rebase"].includes(mergeMethod))) ||
     requiredChecks.some((name) => name.trim() === "" || name !== name.trim()) ||
     new Set(requiredChecks).size !== requiredChecks.length
   ) {
@@ -87,11 +90,11 @@ function requiredState(name: string, observations: readonly CheckObservation[]):
 export function createForge(target: ForgeTarget, run: ForgeRunner = runForge): ForgeAdapter {
   const host = hostname(target);
   const command = target.provider === "github" ? "gh" : "glab";
-  const service = (target.provider === "github" ? github : gitlab)(
-    cliApi(command, host, run),
-    target.repository,
-    host,
-  );
+  const api = cliApi(command, host, run);
+  const service =
+    target.provider === "github"
+      ? github(api, target.repository, host, target.mergeMethod)
+      : gitlab(api, target.repository, host);
 
   function read(number: number): ForgeReview {
     if (!positiveInteger(number)) {

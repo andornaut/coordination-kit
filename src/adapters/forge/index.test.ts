@@ -184,6 +184,35 @@ describe.each(cases)("$provider review adapter", (fixture) => {
   });
 });
 
+describe("configured merge methods", () => {
+  const target = { hostname, repository, requiredChecks: [] };
+
+  it.each(["squash", "rebase"] as const)(
+    "passes GitHub's explicit %s method with the SHA",
+    (mergeMethod) => {
+      const runner = vi
+        .fn<ForgeRunner>()
+        .mockReturnValueOnce(JSON.stringify(githubReview()))
+        .mockReturnValueOnce("{}")
+        .mockReturnValueOnce(JSON.stringify(githubReview(true)));
+      const forge = createForge({ ...target, mergeMethod, provider: "github" }, runner);
+      expect(forge.merge({ base, headSha, number: 8 }).mergeSha).toBe(mergeSha);
+      expect(JSON.parse(runner.mock.calls[1]?.[2] ?? "{}")).toEqual({
+        merge_method: mergeMethod,
+        sha: headSha,
+      });
+    },
+  );
+
+  it("leaves the merge method to project policy on GitLab", () => {
+    const runner = vi.fn<ForgeRunner>();
+    expect(() =>
+      createForge({ ...target, mergeMethod: "squash", provider: "gitlab" }, runner),
+    ).toThrow("forge-target-invalid");
+    expect(runner).not.toHaveBeenCalled();
+  });
+});
+
 describe("exact-commit CI verification", () => {
   const checks = { hostname, repository, requiredChecks: ["build", "lint"] };
 
