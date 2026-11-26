@@ -1,4 +1,12 @@
-import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,8 +15,14 @@ import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
+import { collectStatus } from "../status/collect.ts";
+import { importApprovalLedger } from "../work/approvals.ts";
+import { buildGraph } from "../work/graph.ts";
+import { openCoordinator, workStart } from "../work/live.ts";
+import { commit, IDS, KIT, live, liveFixture, workFile } from "../work/testLive.ts";
 import { checkWork, type FindingCode } from "./check.ts";
 import { parseFrontMatter } from "./files.ts";
+import { reportWork } from "./report.ts";
 
 /** A copy of delivery-kit 4.7.0's docs/design and docs/work. */
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "delivery-kit");
@@ -22,6 +36,15 @@ function copy(): string {
 function edit(root: string, path: string, change: (text: string) => string): void {
   const file = join(root, path);
   writeFileSync(file, change(readFileSync(file, "utf8")));
+}
+
+function index(root: string, area: string, rows: readonly string[]): void {
+  const directory = join(root, "docs", "work", "index");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, `${area}.md`),
+    ["# Work index", "", "| ID | Title | Link |", "| --- | --- | --- |", ...rows, ""].join("\n"),
+  );
 }
 
 function codes(root: string): FindingCode[] {
@@ -63,6 +86,68 @@ describe("parseFrontMatter", () => {
 describe("checkWork", () => {
   it("accepts delivery-kit's own design indexes and work files", () => {
     expect(checkWork(FIXTURE)).toEqual({ designAreas: 7, findings: [], ok: true, workItems: 18 });
+  });
+
+  it("resolves optional area indexes from their own directory without changing either count", () => {
+    const root = copy();
+    edit(root, "docs/design/runner.md", (text) => text.replace(/^\| dk-0016 .*\n/m, ""));
+    index(root, "runner", ["| dk-0016 | Moved | [Task](../dk-0016.md#scope) |"]);
+
+    expect(checkWork(root)).toEqual({ designAreas: 7, findings: [], ok: true, workItems: 18 });
+    expect(reportWork(undefined, root).items.map(({ path }) => path)).not.toContain(
+      "docs/work/index/runner.md",
+    );
+  });
+
+  it("counts the same direct work file across both layouts and checks its design area", () => {
+    const root = copy();
+    index(root, "review", ["| dk-0016 | Moved | [Task](../dk-0016.md) |"]);
+
+    const findings = checkWork(root).findings;
+    expect(
+      findings.filter(({ code }) => code === "index-duplicate").map(({ path }) => path),
+    ).toEqual(["docs/design/runner.md", "docs/work/index/review.md"]);
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        code: "index-area-mismatch",
+        path: "docs/work/index/review.md",
+      }),
+    );
+  });
+
+  it("requires a design document for an optional index and suppresses private row values", () => {
+    const root = copy();
+    const privatePath = ["", "home", "fixture-person", "project"].join("/");
+    const session = "00000000-0000-4000-8000-000000000001";
+    index(root, "unknown", [
+      `| dk-9990 | Missing | [Task](${privatePath}/dk-9990.md) |`,
+      `| ${session} | Mismatched ID | [Task](../dk-0016.md) |`,
+      "| dk-9991 | Nested | [Task](unknown.md) |",
+    ]);
+
+    const result = checkWork(root);
+    const findings = result.findings.filter(({ path }) => path === "docs/work/index/unknown.md");
+    expect(findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "design-unknown" }),
+        expect.objectContaining({ code: "home-path" }),
+        expect.objectContaining({ code: "session-uuid" }),
+        expect.objectContaining({
+          code: "index-link-unresolved",
+          message: "link [private text] is outside this repository",
+        }),
+        expect.objectContaining({
+          code: "index-link-unresolved",
+          message: "link unknown.md does not name a work item",
+        }),
+        expect.objectContaining({
+          code: "index-id-mismatch",
+          message: "row ID [private text] differs from the linked item's id dk-0016",
+        }),
+      ]),
+    );
+    expect(JSON.stringify(result)).not.toContain(privatePath);
+    expect(JSON.stringify(result)).not.toContain(session);
   });
 
   it("requires every work file to be indexed exactly once, in its own area", () => {
@@ -324,6 +409,56 @@ describe("checkWork", () => {
     expect(found.filter((code) => code === "work-dir-missing")).toHaveLength(1);
     expect(found.filter((code) => code === "index-link-unresolved")).toHaveLength(18);
     expect(found).toHaveLength(19);
+  });
+});
+
+describe("nested index compatibility", () => {
+  it("keeps the work ID set identical for live commands, status, graph and approval import", () => {
+    const fixture = liveFixture({
+      kit: { "sk-0001": workFile("sk-0001", "Direct item", "approved") },
+    });
+    const decoy = "sk-9999";
+    commit(fixture.kit, "Add area index metadata", {
+      [`docs/work/index/${decoy}.md`]: workFile(decoy, "Index metadata", "approved"),
+    });
+    const context = live(fixture, IDS.kit);
+    const status = collectStatus({ git: context.git, io: { env: context.env } }, fixture.root, {
+      audit: false,
+      scope: KIT,
+      since: null,
+      states: [],
+      verifySince: "2026-11-19T02:00:00Z",
+    });
+    expect(status.items.map(({ id }) => id)).toEqual(["sk-0001"]);
+    const graph = buildGraph(context.git, openCoordinator(context.git, fixture.root), null);
+    expect(
+      [...graph.nodes.values()].filter(({ type }) => type === "work").map(({ id }) => id),
+    ).toEqual([`${KIT}:sk-0001`]);
+    expect(() => workStart(context, {}, { id: decoy, worktree: fixture.kit })).toThrow(
+      "work-file-missing",
+    );
+    expect(workStart(context, {}, { id: "sk-0001", worktree: fixture.kit }).id).toBe("sk-0001");
+
+    const file = join(fixture.base, "approval-ledger.json");
+    writeFileSync(
+      file,
+      JSON.stringify({
+        entries: [
+          { behavior: "Direct item", id: "sk-0001", owner: KIT, stage: "approved" },
+          { behavior: "Index metadata", id: decoy, owner: KIT, stage: "approved" },
+        ],
+        schemaVersion: 1,
+      }),
+    );
+    const approval = importApprovalLedger(
+      { ...context, coordinatorRoot: fixture.root },
+      {},
+      { dryRun: true, file },
+    );
+    expect(approval.mapped).toEqual([
+      { entry: "sk-0001", outcome: "mapped-id", work: { id: "sk-0001", repository: KIT } },
+    ]);
+    expect(approval.outcomes["no-work-file"]).toBe(1);
   });
 });
 

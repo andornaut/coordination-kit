@@ -1,10 +1,11 @@
-// Work files (docs/work/<id>.md) and design index tables (docs/design/*.md) as written by the
-// work-file convention. Reads only; nothing here writes the repository.
+// Work files and area index tables as written by the work-file convention.
+// Reads only; nothing here writes the repository.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 export const WORK_DIR = join("docs", "work");
 export const DESIGN_DIR = join("docs", "design");
+const WORK_INDEX_DIR = join(WORK_DIR, "index");
 /** The convention document in docs/work/, which is not a work item. */
 export const CONVENTION_FILE = "README.md";
 
@@ -38,7 +39,7 @@ export interface WorkFile {
 }
 
 interface IndexRow {
-  /** Repository-relative design file holding the row. */
+  /** Repository-relative file holding the row. */
   readonly path: string;
   /** 1-based line number. */
   readonly line: number;
@@ -53,7 +54,7 @@ interface IndexRow {
   readonly resolved: string | null;
 }
 
-export interface DesignFile {
+export interface AreaFile {
   readonly path: string;
   /** The file name without .md: the design area name. */
   readonly area: string;
@@ -233,15 +234,21 @@ function indexRows(root: string, base: string | null, path: string, text: string
   return rows;
 }
 
-/** Every docs/design/*.md file with its work item index rows, in name order. */
-export function readDesignFiles(root: string): DesignFile[] {
-  const directory = join(root, DESIGN_DIR);
-  const base = repositoryBlobBase(root);
-  return markdownFiles(directory).map((name) => {
-    const path = join(DESIGN_DIR, name);
-    const text = readFileSync(join(directory, name), "utf8");
+function readAreaFiles(root: string, directory: string, base: string | null): AreaFile[] {
+  return markdownFiles(join(root, directory)).map((name) => {
+    const path = join(directory, name);
+    const text = readFileSync(join(root, path), "utf8");
     return { area: basename(name, ".md"), path, rows: indexRows(root, base, path, text), text };
   });
+}
+
+/** Keep the design documents separate from optional tables under docs/work/index. */
+export function readAreaIndexes(root: string): { designs: AreaFile[]; indexes: AreaFile[] } {
+  const base = repositoryBlobBase(root);
+  return {
+    designs: readAreaFiles(root, DESIGN_DIR, base),
+    indexes: readAreaFiles(root, WORK_INDEX_DIR, base),
+  };
 }
 
 /** One field as a string, or undefined when it is absent or a list. */

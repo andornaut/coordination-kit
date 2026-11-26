@@ -1,18 +1,17 @@
-// `work check`: the work-file convention over one repository's docs/design index tables and
-// docs/work front matter. Findings name the file, line and rule; matched private text is never
-// echoed.
+// `work check` validates one repository's area index tables and docs/work front matter.
+// Findings name the file, line and rule without echoing matched private text.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { parseDecisions } from "./decisions.ts";
 import {
+  type AreaFile,
   CONVENTION_FILE,
   DESIGN_DIR,
-  type DesignFile,
   field,
   fieldIds,
   OPTIONAL_FIELDS,
-  readDesignFiles,
+  readAreaIndexes,
   readWorkFiles,
   REQUIRED_FIELDS,
   STATUSES,
@@ -211,23 +210,39 @@ function idFindings(files: readonly WorkFile[]): Finding[] {
   return findings;
 }
 
+function displayIndexText(value: string): string {
+  return HOME_PATH.test(value) || SESSION_UUID.test(value) ? "[private text]" : value;
+}
+
 function indexFindings(
   root: string,
-  designs: readonly DesignFile[],
+  designs: readonly AreaFile[],
+  indexes: readonly AreaFile[],
   files: readonly WorkFile[],
 ): Finding[] {
   const findings: Finding[] = [];
   const areas = new Set(designs.map((design) => design.area));
+  const separateIndexes = new Set(indexes);
   const byPath = new Map(files.map((file) => [file.path, file]));
   const indexed = new Map<string, { path: string; line: number; area: string }[]>();
-  for (const design of designs) {
-    for (const row of design.rows) {
+  for (const index of indexes) {
+    if (!areas.has(index.area)) {
+      findings.push({
+        code: "design-unknown",
+        message: `index area has no ${DESIGN_DIR}/${index.area}.md`,
+        path: index.path,
+      });
+    }
+  }
+  for (const index of [...designs, ...indexes]) {
+    for (const row of index.rows) {
       const at = { line: row.line, path: row.path };
+      const target = displayIndexText(row.target);
       if (row.resolved === null) {
         findings.push({
           ...at,
           code: "index-link-unresolved",
-          message: `link ${row.target} is outside this repository`,
+          message: `link ${target} is outside this repository`,
         });
         continue;
       }
@@ -235,21 +250,28 @@ function indexFindings(
         findings.push({
           ...at,
           code: "index-link-unresolved",
-          message: `link ${row.target} does not resolve`,
+          message: `link ${target} does not resolve`,
         });
         continue;
       }
       const file = byPath.get(row.resolved);
       if (file === undefined) {
+        if (separateIndexes.has(index)) {
+          findings.push({
+            ...at,
+            code: "index-link-unresolved",
+            message: `link ${target} does not name a work item`,
+          });
+        }
         continue;
       }
-      indexed.set(file.path, [...(indexed.get(file.path) ?? []), { ...at, area: design.area }]);
+      indexed.set(file.path, [...(indexed.get(file.path) ?? []), { ...at, area: index.area }]);
       const id = field(file, "id");
       if (id !== undefined && row.id !== id) {
         findings.push({
           ...at,
           code: "index-id-mismatch",
-          message: `row ID ${row.id} differs from the linked item's id ${id}`,
+          message: `row ID ${displayIndexText(row.id)} differs from the linked item's id ${displayIndexText(id)}`,
         });
       }
     }
@@ -310,14 +332,14 @@ function order(left: Finding, right: Finding): number {
   );
 }
 
-/** Check `root`'s docs/design index tables and docs/work files against the convention. */
+/** Check `root`'s area index tables and direct work files against the convention. */
 export function checkWork(root: string): WorkCheck {
   const findings: Finding[] = [];
   if (!existsSync(join(root, WORK_DIR))) {
     findings.push({ code: "work-dir-missing", message: "does not exist", path: WORK_DIR });
   }
   const files = readWorkFiles(root);
-  const designs = readDesignFiles(root);
+  const { designs, indexes } = readAreaIndexes(root);
   for (const file of files) {
     findings.push(...frontMatterFindings(file), ...privacyFindings(file.path, file.text));
   }
@@ -325,10 +347,10 @@ export function checkWork(root: string): WorkCheck {
   if (existsSync(join(root, convention))) {
     findings.push(...privacyFindings(convention, readFileSync(join(root, convention), "utf8")));
   }
-  for (const design of designs) {
-    findings.push(...privacyFindings(design.path, design.text));
+  for (const area of [...designs, ...indexes]) {
+    findings.push(...privacyFindings(area.path, area.text));
   }
-  findings.push(...idFindings(files), ...indexFindings(root, designs, files));
+  findings.push(...idFindings(files), ...indexFindings(root, designs, indexes, files));
   findings.sort(order);
   return {
     designAreas: designs.length,
