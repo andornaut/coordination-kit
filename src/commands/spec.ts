@@ -55,6 +55,7 @@ import {
 import { STATUS_OPTIONS } from "./status.ts";
 import {
   INBOX_OPTIONS,
+  MSG_DECIDE_OPTIONS,
   MSG_DONE_OPTIONS,
   MSG_HISTORY_OPTIONS,
   MSG_RETAIN_OPTIONS,
@@ -291,6 +292,17 @@ export const SPECS = {
     group: "msg",
     options: INBOX_OPTIONS,
     summary: "collect messages, or list unread metadata with --peek without recording delivery",
+  },
+  "msg decide": {
+    forms: [
+      ["ID", "body-sha256", "prompt", "native-id?"],
+      ["ID", "body-sha256", "approve", "scope", "user-reply", "native-id?"],
+      ["ID", "body-sha256", "decline", "user-reply", "native-id?"],
+    ],
+    group: "msg",
+    options: MSG_DECIDE_OPTIONS,
+    summary:
+      "record the recipient's displayed prompt or explicit user reply for an unverified original",
   },
   "msg done": {
     forms: [["ID", "work?", "superseded-by?", "evidence?", "native-id?", "worker?"]],

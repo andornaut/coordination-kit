@@ -9,6 +9,7 @@ import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
 import { loadLayout } from "../core/layout.ts";
 import { TEST_CONTEXT, TEST_GIT } from "../core/testFixtures.ts";
 import { Store, storePath } from "../store/db.ts";
+import { sha256 } from "../store/eventCodec.ts";
 import { openFileJournal } from "../store/files/journal.ts";
 import { activateMigration, prepareMigration } from "../store/files/migration.ts";
 import { sendMessage } from "../store/messages.ts";
@@ -259,7 +260,7 @@ describe("store message commands", () => {
     expect(rebuilt.json).toMatchObject({ events: expect.any(Number), schema: 1, verified: true });
   });
 
-  it("accepts an unbound queue original and keeps its recipient lifecycle after a filesystem rebuild", async () => {
+  it("requires one exact user decision for an unbound original across filesystem rebuilds", async () => {
     const { base, layout, root } = storeFixture();
     execFileSync("git", ["-C", root, "init", "-q", "--initial-branch=main"]);
     writeFileSync(join(root, ".gitignore"), "/var/\n");
@@ -287,7 +288,12 @@ describe("store message commands", () => {
       code: EXIT_OK,
       json: {
         duplicate: false,
-        message: { from: UNBOUND_MESSAGE_SENDER, intent: "queue", worker: null },
+        message: {
+          from: UNBOUND_MESSAGE_SENDER,
+          intent: "queue",
+          senderVerification: "unverified",
+          worker: null,
+        },
         wake: { status: "guarded" },
       },
     });
@@ -314,13 +320,97 @@ describe("store message commands", () => {
       code: EXIT_OK,
       json: {
         delivered: 1,
-        messages: [{ body: "Original.", from: UNBOUND_MESSAGE_SENDER, state: "delivered" }],
+        messages: [
+          {
+            body: "Original.",
+            decision: {
+              display: "unknown",
+              id: expect.stringMatching(/^q-msg-/),
+              status: "pending",
+            },
+            from: UNBOUND_MESSAGE_SENDER,
+            state: "delivered",
+          },
+        ],
       },
+    });
+    const decide = ["msg", "decide", ID, "--body-sha256", sha256("Original.")];
+    expect(await recipient("msg", "done", ID)).toMatchObject({
+      code: EXIT_INVALID,
+      err: "coordination-kit: message-decision-required\n",
+    });
+    expect(
+      await recipient(...decide, "--approve", "--scope", "inspect logs", "--user-reply", "answer"),
+    ).toMatchObject({
+      code: EXIT_INVALID,
+      err: "coordination-kit: message-prompt-unattested\n",
+    });
+    expect(
+      await recipient(
+        "msg",
+        "decide",
+        ID,
+        "--body-sha256",
+        sha256("Different"),
+        "--prompt",
+        "prompt-1",
+      ),
+    ).toMatchObject({
+      code: EXIT_INVALID,
+      err: "coordination-kit: message-body-mismatch\n",
+    });
+    expect(
+      await cli(root, base, { CLAUDE_CODE_SESSION_ID: COORDINATOR })(
+        ...decide,
+        "--prompt",
+        "prompt-1",
+      ),
+    ).toMatchObject({
+      code: EXIT_INVALID,
+      err: "coordination-kit: not-recipient\n",
+    });
+    expect(await recipient(...decide, "--prompt", "prompt-1")).toMatchObject({
+      code: EXIT_OK,
+      json: {
+        duplicate: false,
+        message: { decision: { display: "attested", promptRef: "prompt-1", status: "pending" } },
+      },
+    });
+    expect(await recipient(...decide, "--prompt", "different-prompt")).toMatchObject({
+      code: EXIT_INVALID,
+      err: "coordination-kit: message-prompt-conflict\n",
+    });
+    expect(await recipient("inbox")).toMatchObject({
+      code: EXIT_OK,
+      json: {
+        delivered: 0,
+        messages: [{ decision: { display: "attested", promptRef: "prompt-1", status: "pending" } }],
+      },
+    });
+    const approval = [...decide, "--approve", "--scope", "inspect logs", "--user-reply", "reply-1"];
+    expect(await recipient(...approval)).toMatchObject({
+      code: EXIT_OK,
+      json: {
+        duplicate: false,
+        message: { decision: { scope: "inspect logs", status: "approved", userReply: "reply-1" } },
+      },
+    });
+    expect(await recipient(...approval)).toMatchObject({
+      code: EXIT_OK,
+      json: { duplicate: true },
+    });
+    expect(await recipient(...decide, "--decline", "--user-reply", "reply-2")).toMatchObject({
+      code: EXIT_INVALID,
+      err: "coordination-kit: message-decision-conflict\n",
     });
     expect(await recipient("msg", "done", ID)).toMatchObject({
       code: EXIT_OK,
-      json: { message: { state: "handled" } },
+      json: { message: { decision: { status: "approved" }, state: "handled" } },
     });
+    const status = await stranger("msg", "status", ID);
+    expect(status.json).toMatchObject({ message: { decision: { status: "approved" } } });
+    expect(status.out).not.toContain("inspect logs");
+    expect(status.out).not.toContain("reply-1");
     const dispositions = join(
       layout.varDir,
       "coordination",
@@ -330,7 +420,7 @@ describe("store message commands", () => {
       "dispositions",
       ID,
     );
-    expect(readdirSync(dispositions)).toHaveLength(3);
+    expect(readdirSync(dispositions)).toHaveLength(5);
   });
 
   it("refuses an unidentified inbox, a non-recipient close, a secret body and an unknown recipient", async () => {

@@ -100,6 +100,16 @@ export interface LegacyOrigin {
   readonly source: string;
 }
 
+export interface MessageDecision {
+  readonly id: string;
+  readonly status: "pending" | "approved" | "declined";
+  /** An attestation by the recipient that it displayed the prompt. */
+  readonly display: "unknown" | "attested";
+  readonly promptRef?: string;
+  readonly userReply?: string;
+  readonly scope?: string;
+}
+
 /** A message as every read prints it. The body appears only on request. */
 export interface MessageView {
   readonly id: string;
@@ -113,6 +123,9 @@ export interface MessageView {
   readonly deliveredAt: string | null;
   readonly closedAt: string | null;
   readonly bodySha256: string;
+  readonly senderVerification: "verified" | "unverified";
+  /** Recipient decision metadata for an exact unverified original. */
+  readonly decision?: MessageDecision;
   readonly links: readonly MessageLink[];
   readonly worker: string | null;
   readonly work: string | null;

@@ -248,7 +248,18 @@ describe("Store", () => {
       links: [{ kind: "unblock-recipient", ref: RECIPIENT.role }],
       to: "game-coordinator",
     });
-    closeMessage(store, coordinator, uuid(2), { evidence: ["attention-source-cleared"] });
+    store.append({
+      actor: coordinator,
+      key: `msg.closed:${uuid(2)}`,
+      kind: "msg.closed",
+      payload: {
+        evidence: ["attention-source-cleared"],
+        id: uuid(2),
+        state: "handled",
+        supersededBy: null,
+        work: null,
+      },
+    });
     const before = messages(store);
     const wakes = store.db.prepare("SELECT * FROM wake_state ORDER BY role").all();
     expect(wakes).toContainEqual({ outstanding: null, pending: 1, role: RECIPIENT.role });

@@ -10,9 +10,11 @@ import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 import { MEMORY, READ_ONLY_CLOCK, Store, type StoreContext } from "./db.ts";
 import { type CallerOptions, resolveCaller } from "./identity.ts";
+import type { MessageDecisionInput } from "./messageDecisions.ts";
 import {
   type CloseInput,
   closeMessage,
+  decideMessage,
   type ExportResult,
   exportSince,
   type HistoryEntry,
@@ -243,6 +245,19 @@ export async function storeDone(
       return { ...closeMessage(store, actor, id, input), schema: 1 as const };
     }),
   );
+}
+
+export async function storeMessageDecide(
+  context: StoreServiceContext,
+  options: CallerOptions,
+  id: string,
+  input: MessageDecisionInput,
+): Promise<WriteOutput> {
+  const actor = caller(context, options);
+  return withStore(context, (store) => ({
+    ...decideMessage(store, actor, id, input),
+    schema: 1 as const,
+  }));
 }
 
 export async function storeRetain(

@@ -7,18 +7,20 @@ import type { FileProjection } from "../fileProjection.ts";
 import { recordSession } from "../handoffs.ts";
 import {
   closeMessage,
+  decideMessage,
   exportSince,
   messageHistory,
   messageStatus,
   messageWithBody,
+  readInbox,
   recipientMessages,
   sendMessage,
 } from "../messages.ts";
-import type { StoredEvent } from "../types.ts";
+import { type Actor, type StoredEvent, UNBOUND_MESSAGE_SENDER } from "../types.ts";
 import { prepareCompactionCheckpoint, verifyCompactionSource } from "./compactionCheckpoint.ts";
 
-const SENDER = { nativeId: "test-sender", role: "sample-kit" };
-const RECIPIENT = { nativeId: "test-recipient", role: "sample-game/tech" };
+const SENDER = { nativeId: "00000000-0000-4000-8000-00000000000a", role: "sample-kit" };
+const RECIPIENT = { nativeId: "00000000-0000-4000-8000-00000000000b", role: "sample-game/tech" };
 const RUNNER = { nativeId: null, role: "delivery-kit" };
 const CLOCK = "2026-11-21T00:00:00.000Z";
 const SINCE = "2026-11-20T00:00:00.000Z";
@@ -62,6 +64,13 @@ function fixture(store: Store) {
         to: RECIPIENT.role,
       },
     }).event;
+  const historicalClose = (id: string) =>
+    store.append({
+      actor: RECIPIENT,
+      key: `msg.closed:${id}`,
+      kind: "msg.closed",
+      payload: { evidence: [], id, state: "handled", supersededBy: null, work: null },
+    });
   const tick = (id: string) =>
     store.append({
       actor: RUNNER,
@@ -88,16 +97,16 @@ function fixture(store: Store) {
   sendMessage(store, SENDER, ORIGINAL);
   const legacy = importMessage(LEGACY, "Archived legacy text.");
   closeMessage(store, RECIPIENT, ORIGINAL.id, DISPOSITION);
-  closeMessage(store, RECIPIENT, LEGACY);
+  historicalClose(LEGACY);
   for (let index = 0; index < 100; index += 1) {
     const id = `recent-${index}`;
     session(id);
     tick(`slot-${index}`);
     importMessage(id, `Body ${index}`);
-    closeMessage(store, RECIPIENT, id);
+    historicalClose(id);
   }
   importMessage(LEGACY_EMPTY, "");
-  closeMessage(store, RECIPIENT, LEGACY_EMPTY);
+  historicalClose(LEGACY_EMPTY);
   sendMessage(store, SENDER, { ...ORIGINAL, body: "Current original", id: OPEN, links: [] });
 
   const events = store.events();
@@ -227,6 +236,93 @@ describe("qualified compacted store replay", () => {
         }
       } finally {
         store.close();
+      }
+    } finally {
+      source.close();
+    }
+  });
+
+  it("preserves unverified decisions through a checkpoint and atomically records an explicit decline", () => {
+    const source = Store.open(clockAt(CLOCK), MEMORY);
+    try {
+      const { oldSession, oldTick } = fixture(source);
+      const anchor = source.events()[0]!;
+      closeMessage(source, RECIPIENT, OPEN);
+      const unbound = { nativeId: null, role: UNBOUND_MESSAGE_SENDER };
+      const runnerLookalike = { nativeId: "unverified", role: RUNNER.role };
+      const append = (id: string, body: string, actor: Actor = unbound) =>
+        sendMessage(source, actor, { body, id, intent: "queue", to: RECIPIENT.role });
+      const declined = append("pending-decline", "Decline fixture.").message;
+      const approved = append("pending-approve", "Approve fixture.", runnerLookalike).message;
+      const generated = append("generated", "Runner fixture.", RUNNER).message;
+      expect(approved).toMatchObject({ senderVerification: "unverified" });
+      expect(generated).toMatchObject({ senderVerification: "verified" });
+      expect(() => closeMessage(source, RECIPIENT, declined.id)).toThrow(
+        "message-decision-required",
+      );
+      readInbox(source, RECIPIENT);
+      closeMessage(source, RECIPIENT, generated.id);
+      for (const original of [declined, approved]) {
+        const input = {
+          bodySha256: original.bodySha256,
+          promptRef: `prompt:${original.id}`,
+          status: "pending" as const,
+        };
+        expect(decideMessage(source, RECIPIENT, original.id, input).duplicate).toBe(false);
+        expect(decideMessage(source, RECIPIENT, original.id, input).duplicate).toBe(true);
+      }
+      decideMessage(source, RECIPIENT, approved.id, {
+        bodySha256: approved.bodySha256,
+        scope: "Inspect the fixture",
+        status: "approved",
+        userReply: "reply:approved",
+      });
+      const scope = {
+        registeredGames: new Set(["sample-game"]),
+        registeredRoles: new Set([SENDER.role, RUNNER.role, RECIPIENT.role]),
+        registryRevision: 7,
+        verifiedEvidence: {
+          head: source.head(),
+          messageIds: new Set([ORIGINAL.id, LEGACY]),
+          registryRevision: 7,
+          routineEventSequences: new Set([oldSession.seq, oldTick.seq]),
+        },
+      };
+      const { checkpoint, receipt } = prepareCompactionCheckpoint(source.events(), scope, anchor);
+      const tail: StoredEvent[] = [];
+      const projection = { ...journal(tail), checkpoint: { receipt, value: checkpoint } };
+      const reopened = Store.openFileProjection(clockAt(CLOCK), MEMORY, projection);
+      try {
+        expect(readInbox(reopened, RECIPIENT).messages).toMatchObject([
+          {
+            decision: { display: "attested", id: declined.decision?.id, status: "pending" },
+            id: declined.id,
+          },
+          { decision: { scope: "Inspect the fixture", status: "approved" }, id: approved.id },
+        ]);
+        const input = {
+          bodySha256: declined.bodySha256,
+          status: "declined" as const,
+          userReply: "reply:declined",
+        };
+        expect(decideMessage(reopened, RECIPIENT, declined.id, input)).toMatchObject({
+          duplicate: false,
+          message: {
+            decision: { status: "declined", userReply: "reply:declined" },
+            state: "handled",
+          },
+        });
+        expect(decideMessage(reopened, RECIPIENT, declined.id, input).duplicate).toBe(true);
+        expect(() => closeMessage(reopened, RECIPIENT, declined.id)).toThrow("message-declined");
+        expect(tail.map(({ kind }) => kind)).toEqual(["msg.decision", "msg.closed"]);
+        expect(readInbox(reopened, RECIPIENT).messages.map(({ id }) => id)).toEqual([approved.id]);
+        reopened.rebuild();
+        expect(messageStatus(reopened, declined.id)).toMatchObject({
+          decision: { id: declined.decision?.id, status: "declined" },
+          senderVerification: "unverified",
+        });
+      } finally {
+        reopened.close();
       }
     } finally {
       source.close();

@@ -434,6 +434,7 @@ function eventRecords(
     case "msg.imported":
       return originalMessage(context, owners, event, id, pathId);
     case "msg.closed":
+    case "msg.decision":
     case "msg.retained": {
       const expected = lookup(owners.messages, id, () => context?.messageOwner?.(id));
       const recipient = actorOwner(context, event, expected?.recipient ?? null);

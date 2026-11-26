@@ -6,6 +6,12 @@ import type { SQLInputValue } from "node:sqlite";
 
 import type { Store } from "./db.ts";
 import { canonicalJson, normalizeLinks, REF, sha256 } from "./eventCodec.ts";
+import {
+  messageDecision,
+  type MessageDecisionInput,
+  recordMessageDecision,
+  verifiedSender,
+} from "./messageDecisions.ts";
 import { secretShape } from "./secrets.ts";
 import {
   type Actor,
@@ -47,12 +53,34 @@ function bodyView(store: Pick<Store, "db">, row: Row): Pick<MessageView, "body" 
   return { body };
 }
 
-function rowView(store: Pick<Store, "db">, row: Row, includeBody: boolean): MessageView {
+function originalOf(row: Row) {
+  return {
+    bodySha256: row.body_sha256 as string,
+    from: row.from_role as string,
+    id: row.id as string,
+    open: OPEN.includes(row.state as MessageState),
+    sentSeq: Number(row.sent_seq),
+    to: row.to_role as string,
+  };
+}
+
+type Reader = Pick<Store, "db" | "eventByKey">;
+
+function rowView(
+  store: Reader,
+  row: Row,
+  includeBody: boolean,
+  includeDecisionEvidence = false,
+): MessageView {
+  const original = originalOf(row);
+  const verified = verifiedSender(store, original);
+  const decision = verified ? undefined : messageDecision(store, original, includeDecisionEvidence);
   const nullable = (key: string) => (row[key] as string | null) ?? null;
   return {
     bodySha256: row.body_sha256 as string,
     closedAt: nullable("closed_at"),
     createdAt: row.created_at as string,
+    ...(decision === undefined ? {} : { decision }),
     deliveredAt: nullable("delivered_at"),
     evidence: parse<string[]>(row.evidence ?? "[]"),
     from: row.from_role as string,
@@ -61,6 +89,7 @@ function rowView(store: Pick<Store, "db">, row: Row, includeBody: boolean): Mess
     legacy: row.legacy == null ? null : parse<LegacyOrigin | null>(row.legacy),
     links: parse<MessageLink[]>(row.links),
     retention: row.retention == null ? null : parse<Retention>(row.retention),
+    senderVerification: verified ? "verified" : "unverified",
     state: row.state as MessageState,
     supersededBy: nullable("superseded_by"),
     to: row.to_role as string,
@@ -191,6 +220,7 @@ export function readInbox(
           ? { ...row, delivered_at: at, state: "delivered" }
           : row,
         options.includeBody === true,
+        true,
       ),
     );
     return { delivered: undelivered.length, messages, role };
@@ -249,6 +279,10 @@ export function closeMessage(
     };
     if (row.state === "handled" || row.state === "superseded") {
       ensure(
+        messageDecision(store, originalOf(row), false)?.status !== "declined",
+        "message-declined",
+      );
+      ensure(
         row.state === state &&
           ((row.work as string | null) ?? null) === payload.work &&
           ((row.superseded_by as string | null) ?? null) === payload.supersededBy &&
@@ -257,6 +291,12 @@ export function closeMessage(
       );
       return { duplicate: true, message: rowView(store, row, false) };
     }
+    const original = originalOf(row);
+    ensure(
+      verifiedSender(store, original) ||
+        messageDecision(store, original, false)?.status === "approved",
+      "message-decision-required",
+    );
     if (input.supersededBy !== undefined) {
       ensure(
         input.supersededBy !== id && messageRow(store, input.supersededBy) !== undefined,
@@ -265,6 +305,31 @@ export function closeMessage(
     }
     store.append({ actor, key: `msg.closed:${id}`, kind: "msg.closed", payload });
     return { duplicate: false, message: rowView(store, messageRow(store, id)!, false) };
+  });
+}
+
+/** Record an attested prompt or its exact user reply as the bound recipient. */
+export function decideMessage(
+  store: Store,
+  actor: Actor,
+  id: string,
+  input: MessageDecisionInput,
+): WriteResult {
+  return store.transaction(() => {
+    const row = recipientRow(store, actor, id);
+    ensure(row.state !== "sent", "message-collect-required");
+    const duplicate = recordMessageDecision(store, actor, originalOf(row), input);
+    if (!duplicate && input.status === "declined") {
+      // The existing close state is kept for readers predating decisions. The attached decision
+      // is the reason for this close. Nothing requested in the original was handled.
+      store.append({
+        actor,
+        key: `msg.closed:${id}`,
+        kind: "msg.closed",
+        payload: { evidence: [], id, state: "handled", supersededBy: null, work: null },
+      });
+    }
+    return { duplicate, message: rowView(store, messageRow(store, id)!, false, true) };
   });
 }
 
@@ -322,11 +387,7 @@ export function retainMessage(
 }
 
 /** One message's metadata, without its body unless asked. */
-export function messageStatus(
-  store: Pick<Store, "db">,
-  id: string,
-  includeBody = false,
-): MessageView {
+export function messageStatus(store: Reader, id: string, includeBody = false): MessageView {
   ensure(MESSAGE_ID.test(id), "invalid-id");
   const row = messageRow(store, id);
   ensure(row !== undefined, "missing");
@@ -335,7 +396,7 @@ export function messageStatus(
 
 /** Read one exact original only when the caller's role may see its body. */
 export function messageWithBody(
-  store: Pick<Store, "db">,
+  store: Reader,
   viewer: string,
   id: string,
   readAll = false,
@@ -344,7 +405,7 @@ export function messageWithBody(
   const row = messageRow(store, id);
   ensure(row !== undefined, "missing");
   ensure(bodyVisibleTo(viewer, row.from_role, row.to_role, readAll), "message-not-visible");
-  return rowView(store, row, true);
+  return rowView(store, row, true, viewer === row.to_role);
 }
 
 /** Messages in one recipient's inbox in the given states, oldest first. A review seam read. */
@@ -368,6 +429,7 @@ export const MESSAGE_KINDS = [
   "msg.imported",
   "inbox.read",
   "msg.closed",
+  "msg.decision",
   "msg.retained",
 ];
 
@@ -400,6 +462,15 @@ function historyDetail(
     const rest: Record<string, Json> = { ...payload };
     delete rest.body;
     return rest;
+  }
+  if (event.kind === "msg.decision") {
+    const { bodySha256, id, promptId, status } = payload;
+    return {
+      bodySha256: bodySha256 ?? null,
+      id: id ?? null,
+      promptId: promptId ?? null,
+      status: status ?? null,
+    };
   }
   return payload;
 }

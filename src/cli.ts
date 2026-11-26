@@ -60,6 +60,7 @@ import { type Command, GROUPS, SPECS, synopsis } from "./commands/spec.ts";
 import { status } from "./commands/status.ts";
 import {
   inbox,
+  msgDecide,
   msgDone,
   msgHistory,
   msgRetain,
@@ -149,6 +150,7 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "hold set": holdSet,
   inbox,
   init,
+  "msg decide": msgDecide,
   "msg done": msgDone,
   "msg history": msgHistory,
   "msg retain": msgRetain,

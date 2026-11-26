@@ -20,6 +20,7 @@ import {
   storeHistory,
   storeInbox,
   storeInboxPeek,
+  storeMessageDecide,
   storeRebuild,
   storeRetain,
   storeSend,
@@ -54,6 +55,16 @@ export const MSG_DONE_OPTIONS = {
   evidence: { multiple: true, type: "string" },
   "superseded-by": { type: "string" },
   work: { type: "string" },
+} as const;
+
+export const MSG_DECIDE_OPTIONS = {
+  ...CALLER,
+  approve: { type: "boolean" },
+  "body-sha256": { type: "string" },
+  decline: { type: "boolean" },
+  prompt: { type: "string" },
+  scope: { type: "string" },
+  "user-reply": { type: "string" },
 } as const;
 
 export const MSG_RETAIN_OPTIONS = {
@@ -175,6 +186,61 @@ export const msgDone: Handler = storeVerb(
       ...(supersededBy === undefined ? {} : { supersededBy }),
       ...(work === undefined ? {} : { work }),
     });
+  },
+  1,
+);
+
+export const msgDecide: Handler = storeVerb(
+  "msg decide",
+  MSG_DECIDE_OPTIONS,
+  (context, values, [id]) => {
+    const bodySha256 = required(values, "body-sha256");
+    const promptRef = text(values, "prompt");
+    const scope = text(values, "scope");
+    const userReply = text(values, "user-reply");
+    const approve = values.approve === true;
+    const decline = values.decline === true;
+    if (!/^[0-9a-f]{64}$/.test(bodySha256) || values.worker !== undefined) {
+      throw new Usage();
+    }
+    const caller = callerOf(values);
+    if (
+      promptRef !== undefined &&
+      !approve &&
+      !decline &&
+      scope === undefined &&
+      userReply === undefined
+    ) {
+      return storeMessageDecide(context, caller, id!, { bodySha256, promptRef, status: "pending" });
+    }
+    if (
+      promptRef === undefined &&
+      approve &&
+      !decline &&
+      scope !== undefined &&
+      userReply !== undefined
+    ) {
+      return storeMessageDecide(context, caller, id!, {
+        bodySha256,
+        scope,
+        status: "approved",
+        userReply,
+      });
+    }
+    if (
+      promptRef === undefined &&
+      decline &&
+      !approve &&
+      scope === undefined &&
+      userReply !== undefined
+    ) {
+      return storeMessageDecide(context, caller, id!, {
+        bodySha256,
+        status: "declined",
+        userReply,
+      });
+    }
+    throw new Usage();
   },
   1,
 );
