@@ -306,6 +306,7 @@ export const SPECS = {
     options: MSG_DECIDE_OPTIONS,
     summary:
       "record the recipient's displayed prompt or explicit user reply for an unverified original",
+    values: { "body-sha256": "HASH", prompt: "REF", scope: "TEXT", "user-reply": "REF" },
   },
   "msg done": {
     forms: [["ID", "work?", "superseded-by?", "evidence?", "native-id?", "worker?"]],
@@ -646,7 +647,7 @@ export const SPECS = {
       "read-only status of each registered repository's work items, store records and imported requests",
     values: {
       format: "json|markdown",
-      scope: "all|GAME|KIT|ROLE",
+      scope: "all|APP|KIT|ROLE",
       since: "ISO_TIMESTAMP",
       state: "STATE",
       "verify-since": "ISO_TIMESTAMP",

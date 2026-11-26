@@ -45,6 +45,38 @@ async function run(handler: Handler, root: string, ...args: string[]) {
 }
 
 describe("standalone init", () => {
+  it("names the missing project option", async () => {
+    expect(await run(init, "/nonexistent")).toEqual({
+      code: EXIT_USAGE,
+      err: "coordination-kit: --project is required\n",
+      json: null,
+    });
+  });
+
+  it("refuses to initialize a configured app workspace before its registry exists", async () => {
+    const root = fixture();
+    const config = {
+      apps: { example: { name: "Example", path: "../example", roles: ["operator"] } },
+      kits: {},
+      permissions: {},
+      schema: 1,
+      sharedRoles: [],
+      timezone: "UTC",
+      wakeMinutes: [],
+    };
+    writeFileSync(join(root, "config.json"), JSON.stringify(config));
+
+    expect(await run(init, root, "--project", "sample")).toEqual({
+      code: EXIT_INVALID,
+      err: "coordination-kit: this checkout already has a shared workspace layout\n",
+      json: null,
+    });
+    expect(loadLayout(root).mode).toBe("app");
+    expect(existsSync(join(root, "coordination-kit.json"))).toBe(false);
+    expect(existsSync(join(root, ".coordination-kit"))).toBe(false);
+    expect(existsSync(join(root, ".gitignore"))).toBe(false);
+  });
+
   it("refuses linked task roots and resolves the caller before creating a database", async () => {
     const root = fixture();
     const cli: Handler = (io, _root, args) => main(io, args);
@@ -216,7 +248,7 @@ describe("standalone init", () => {
     writeFileSync(join(managed, "var", "registry.json"), "{}");
     expect(await run(init, managed, "--project", "sample")).toMatchObject({
       code: EXIT_INVALID,
-      err: expect.stringContaining("already has a game-coordinator layout"),
+      err: expect.stringContaining("already has a shared workspace layout"),
     });
     expect(existsSync(join(managed, ".coordination-kit"))).toBe(false);
   });

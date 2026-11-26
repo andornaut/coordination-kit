@@ -144,7 +144,7 @@ export function text(values: Values, key: string): string | undefined {
 export function required(values: Values, key: string): string {
   const value = text(values, key);
   if (value === undefined) {
-    throw new Usage();
+    throw new Usage(`--${key} is required`);
   }
   return value;
 }

@@ -741,12 +741,20 @@ describe("status", () => {
     expect(strict.out.match(/^- .*\(unverified\).*$/gm)).toEqual([
       expect.stringMatching(/^- sg-0014: Done after the cutoff \(unverified\) \(done; landed /),
     ]);
-    expect((await cli(fixture, "--verify-since", "soon")).code).toBe(EXIT_USAGE);
+    expect(await cli(fixture, "--verify-since", "soon")).toMatchObject({
+      code: EXIT_USAGE,
+      err: expect.stringContaining("--verify-since needs an ISO date"),
+      out: "",
+    });
     expect(under("Waiting on the user")).toEqual(["- sg-0001:", "- sg-0002:", "- sg-0006:"]);
     expect(digest.out).toContain("## Recorded pending questions");
     expect(digest.out).toContain("## Active holds");
     expect(digest.out).toContain("## Unmatched legacy requests");
-    expect((await cli(fixture, "--state", "shipped")).code).toBe(EXIT_USAGE);
+    expect(await cli(fixture, "--state", "shipped")).toMatchObject({
+      code: EXIT_USAGE,
+      err: expect.stringContaining("--state must be one of"),
+      out: "",
+    });
     expect((await cli(fixture, "--since", "yesterday")).code).toBe(EXIT_USAGE);
     expect((await cli(fixture, "--scope", "nowhere")).code).toBe(EXIT_USAGE);
   });

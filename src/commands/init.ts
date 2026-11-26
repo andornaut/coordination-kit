@@ -11,10 +11,10 @@ import {
 } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
-import { fsyncDirectory, readJson, writeJsonDurable } from "../core/durable.ts";
+import { fsyncDirectory, JsonFileError, readJson, writeJsonDurable } from "../core/durable.ts";
 import { type GitRunner, systemGit } from "../core/git.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
-import { CONFIG_FILE, loadLayout } from "../core/layout.ts";
+import { CONFIG_FILE, loadLayout, validateWorkspaceConfig } from "../core/layout.ts";
 import { withLock } from "../core/lock.ts";
 import {
   STANDALONE_CONFIG_FILE,
@@ -208,18 +208,31 @@ function existingConfig(
   return config;
 }
 
+function matchesWorkspaceConfig(path: string): boolean {
+  try {
+    validateWorkspaceConfig(readJson(path));
+    return true;
+  } catch (error) {
+    if (error instanceof ValidationError || error instanceof JsonFileError) {
+      return false;
+    }
+    throw error;
+  }
+}
+
 export const init: Handler = (io, root, args) => {
   try {
     const requested = proposedConfig(args);
     const git = systemGit(io.env);
     const repo = projectRoot(git, root);
     const configFile = join(repo, STANDALONE_CONFIG_FILE);
+    const workspaceConfig = join(repo, CONFIG_FILE);
     if (
       existingConfig(configFile, requested) === undefined &&
-      existsSync(join(repo, CONFIG_FILE)) &&
-      existsSync(join(repo, "var", "registry.json"))
+      existsSync(workspaceConfig) &&
+      (existsSync(join(repo, "var", "registry.json")) || matchesWorkspaceConfig(workspaceConfig))
     ) {
-      throw new Error("this checkout already has a game-coordinator layout");
+      throw new Error("this checkout already has a shared workspace layout");
     }
     if (git(repo, ["ls-files", "--", STANDALONE_STATE_DIR]) !== "") {
       throw new Error(`${STANDALONE_STATE_DIR}/ already contains tracked files`);

@@ -1,11 +1,12 @@
 // `coordination-kit status`: the read-only cross-repository status of every work item, as JSON or
 // a Markdown digest. --root names the coordinator, as for every non-work command.
 import { systemGit } from "../core/git.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../core/io.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
 import { collectStatus, incomplete, StatusUsageError } from "../status/collect.ts";
 import { DEFAULT_VERIFY_SINCE, STATE_FILTERS, type StateFilter } from "../status/derive.ts";
 import { renderMarkdown } from "../status/markdown.ts";
 import { errorMessage, parseOptions } from "./args.ts";
+import { commandUsage } from "./spec.ts";
 
 export const STATUS_OPTIONS = {
   audit: { type: "boolean" },
@@ -17,33 +18,41 @@ export const STATUS_OPTIONS = {
 } as const;
 
 const ISO = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
-const USAGE =
-  "coordination-kit: usage: coordination-kit status [--scope all|GAME|KIT|ROLE] [--since ISO_TIMESTAMP] " +
-  "[--state STATE]... [--audit] [--verify-since ISO_TIMESTAMP] [--format json|markdown] [--root DIR]\n";
+function usage(io: Io, reason?: string): number {
+  if (reason !== undefined) {
+    io.err(`coordination-kit: ${reason}\n`);
+  }
+  io.err(`coordination-kit: ${commandUsage("status")} [--root DIR]\n`);
+  return EXIT_USAGE;
+}
 
 export const status: Handler = (io, root, args) => {
   let values;
   try {
     ({ values } = parseOptions(STATUS_OPTIONS, args));
   } catch {
-    io.err(USAGE);
-    return EXIT_USAGE;
+    return usage(io);
   }
   const format = values.format ?? "json";
   const states = values.state ?? [];
   const since = values.since ?? null;
   const verifySince = values["verify-since"] ?? DEFAULT_VERIFY_SINCE;
-  const unknown = states.find((state) => !(STATE_FILTERS as readonly string[]).includes(state));
+  const unknown = states.some((state) => !(STATE_FILTERS as readonly string[]).includes(state));
   const invalid = (value: string | null) =>
     value !== null && (!ISO.test(value) || Number.isNaN(Date.parse(value)));
-  if (
-    !["json", "markdown"].includes(format) ||
-    unknown !== undefined ||
-    invalid(since) ||
-    invalid(verifySince)
-  ) {
-    io.err(USAGE);
-    return EXIT_USAGE;
+  if (!["json", "markdown"].includes(format)) {
+    return usage(io, "--format must be json or markdown");
+  }
+  if (unknown) {
+    return usage(io, `--state must be one of ${STATE_FILTERS.join(", ")}`);
+  }
+  for (const [flag, value] of [
+    ["--since", since],
+    ["--verify-since", verifySince],
+  ] as const) {
+    if (invalid(value)) {
+      return usage(io, `${flag} needs an ISO date or timestamp with a timezone`);
+    }
   }
   let report;
   try {
@@ -56,8 +65,7 @@ export const status: Handler = (io, root, args) => {
     });
   } catch (error) {
     if (error instanceof StatusUsageError) {
-      io.err(`coordination-kit: ${error.message}\n${USAGE}`);
-      return EXIT_USAGE;
+      return usage(io, error.message);
     }
     io.err(`coordination-kit: ${errorMessage(error)}\n`);
     return EXIT_INVALID;
