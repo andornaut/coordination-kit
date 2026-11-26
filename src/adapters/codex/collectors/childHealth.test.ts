@@ -15,6 +15,7 @@ type Health = {
   counts: Row;
   diagnostics: string[];
   inventories: Record<string, Row>;
+  next_child_after?: string;
   schema_status: string;
   status: string;
 };
@@ -196,8 +197,9 @@ class ScopedNative implements RpcClient {
 async function collect(
   client: RpcClient,
   parents: readonly string[],
+  cursors?: Readonly<Record<string, string>>,
 ): Promise<Record<string, Health>> {
-  return (await workerHealth(TEST_CLOCK, client, parents)) as Record<string, Health>;
+  return (await workerHealth(TEST_CLOCK, client, parents, cursors)) as Record<string, Health>;
 }
 
 async function snapshot(native: RpcClient = new Native()): Promise<Health> {
@@ -546,6 +548,54 @@ describe("workerHealth", () => {
       });
       expect(results[parent]?.complete).toBe(false);
     });
+  });
+
+  it("rotates rediscovered children past the visit cap and wraps on the next slot", async () => {
+    const native = new ScopedNative([140]);
+    const parent = native.parents[0]!;
+    const ids = native.children[parent]!;
+    const first = (await collect(native, [parent]))[parent]!;
+    const second = (await collect(native, [parent], { [parent]: first.next_child_after! }))[
+      parent
+    ]!;
+
+    expect(first.children.map((row) => row.child_id)).toEqual(ids.slice(0, 100));
+    expect(first.next_child_after).toBe(ids[99]);
+    expect(second.children.map((row) => row.child_id)).toEqual([
+      ...ids.slice(100),
+      ...ids.slice(0, 60),
+    ]);
+    expect(second.next_child_after).toBe(ids[59]);
+    expect(second.counts).toEqual({ discovered: 140, observed: 100, omitted: 40, validated: 0 });
+  });
+
+  it("advances only from attempted turns and uses absent cursors only for ordering", async () => {
+    const native = new ScopedNative([8]);
+    const parent = native.parents[0]!;
+    const ids = native.children[parent]!;
+    const anchor = ids[2]!;
+    // Inventory no longer contains the anchor. It can still order the current IDs.
+    native.children[parent] = ids.filter((id) => id !== anchor);
+    const blocked = (
+      await collect(Object.assign(native, { maxCalls: 2 }), [parent], {
+        [parent]: anchor,
+      })
+    )[parent]!;
+    const partial = (
+      await collect(Object.assign(native, { maxCalls: 3 }), [parent], {
+        [parent]: anchor,
+      })
+    )[parent]!;
+
+    expect(blocked.counts.observed).toBe(0);
+    expect(blocked.next_child_after).toBeUndefined();
+    expect(partial.children.at(-1)?.child_id).toBe(ids[1]);
+    expect(partial.next_child_after).toBe(ids[3]);
+    expect(
+      native.calls
+        .filter(([method]) => method === "thread/turns/list")
+        .map(([, params]) => params.threadId),
+    ).toEqual([ids[3]]);
   });
 
   it("never validates a failure from invalid inventory metadata", async () => {

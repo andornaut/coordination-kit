@@ -677,12 +677,14 @@ export async function storeReview(
   }
   const { recipient } = route;
   const beforeSurvey = Store.forLayout(context, context.layout);
+  let previousWorkers: NativeSurvey["workers"] | undefined;
   try {
     const earlier = recordedBrief(beforeSurvey, game.id, slot);
     if (earlier !== undefined) {
       await wakeBrief(context, beforeSurvey, earlier, recipient);
       return earlier.result;
     }
+    previousWorkers = previousBrief(beforeSurvey, game.id, slot)?.native?.workers ?? undefined;
   } finally {
     beforeSurvey.close();
   }
@@ -696,6 +698,7 @@ export async function storeReview(
       ...(context.ports?.connect === undefined ? {} : { connect: context.ports.connect }),
     },
     slot,
+    previousWorkers,
   );
   const store = Store.forLayout(context, context.layout);
   try {

@@ -76,6 +76,7 @@ type ParentHealth = {
   counts: { discovered: number; observed: number; omitted: number; validated: number };
   diagnostics: string[];
   inventories: Record<string, Inventory>;
+  next_child_after?: string;
   observed_at: string;
   provenance: string;
   schema_status: string;
@@ -112,7 +113,11 @@ class BudgetExhausted extends Error {
  * performance.now() value, as connectControl takes) that the caller has already reserved.
  */
 class Budget {
-  readonly client: RpcClient & { readonly deadline?: number; readonly maxCalls?: number };
+  readonly client: RpcClient & {
+    readonly deadline?: number;
+    readonly maxCalls?: number;
+    readonly callsUsed?: number;
+  };
   readonly maxCalls: number;
   callsUsed = 0;
   reason: string | null = null;
@@ -125,6 +130,11 @@ class Budget {
   get deadline(): number {
     const { deadline } = this.client;
     return typeof deadline === "number" && Number.isFinite(deadline) ? deadline : Infinity;
+  }
+
+  /** The outer phase can refuse a call after our local check. Count only admitted requests. */
+  get requestsStarted(): number {
+    return this.client.callsUsed ?? this.callsUsed;
   }
 
   check(): void {
@@ -411,7 +421,8 @@ function applyPage(stream: Stream, page: unknown): boolean {
  * Round-robin inventory pages cover active and archived direct children only. Validated inventory
  * metadata supplies each child's initial observation. One newest-turn read observes a child; only
  * typed failed candidates receive a fresh metadata read and newest-turn reread before becoming
- * actionable. Round-robin child visits inspect at most 100 children per parent. Each inventory
+ * actionable. Round-robin child visits start after the prior cursor in the current sorted
+ * inventory and inspect at most 100 children per parent. Each inventory
  * stream reads at most 10 pages (50 rows/page), with at most 256 calls overall and the client's
  * optional deadline. Inventory yields calls and time to turn reads. A per-request timeout
  * affects that read alone while the shared bounds still admit other requests.
@@ -427,6 +438,7 @@ async function collectChildHealth(
   clock: Clock,
   client: RpcClient,
   parents: readonly string[],
+  cursors: Readonly<Record<string, string>>,
 ): Promise<Record<string, Record<string, unknown>>> {
   if (!Array.isArray(parents) || !parents.every((parent) => isCanonicalUuid(parent))) {
     throw new Error("invalid_parent_scope");
@@ -501,7 +513,14 @@ async function collectChildHealth(
       state.health.diagnostics.push("child_bound_exceeded");
     }
     if (children.length > 0) {
-      visits.push([state, children.slice(0, MAX_CHILDREN).values()]);
+      const cursor = cursors[state.parent];
+      const start =
+        isCanonicalUuid(cursor) && cursor !== state.parent
+          ? children.findIndex((child) => child > cursor)
+          : 0;
+      const ordered =
+        start > 0 ? [...children.slice(start), ...children.slice(0, start)] : children;
+      visits.push([state, ordered.slice(0, MAX_CHILDREN).values()]);
     }
   }
   for (let visit = visits.shift(); visit !== undefined; visit = visits.shift()) {
@@ -511,6 +530,7 @@ async function collectChildHealth(
       continue;
     }
     const child = next.value;
+    const requestsBefore = budget.requestsStarted;
     // Child visits alternate between parents one at a time under the shared call budget.
     // eslint-disable-next-line no-await-in-loop
     const [health, observedTurn] = await childHealth(
@@ -521,6 +541,9 @@ async function collectChildHealth(
       state.children.get(child) ?? null,
     );
     state.health.children.push(health);
+    if (budget.requestsStarted > requestsBefore) {
+      state.health.next_child_after = child;
+    }
     state.health.counts.observed += observedTurn ? 1 : 0;
     state.health.counts.validated += health.requires_parent_action ? 1 : 0;
     visits.push(visit);
@@ -582,6 +605,7 @@ export async function workerHealth(
   clock: Clock,
   client: RpcClient,
   parents: readonly string[],
+  cursors: Readonly<Record<string, string>> = {},
 ): Promise<Record<string, Record<string, unknown>>> {
   if (parents.length === 0) {
     return {};
@@ -589,7 +613,7 @@ export async function workerHealth(
   let reasonCode = "collector_unavailable";
   let result: Record<string, unknown> = {};
   try {
-    const collected: unknown = await collectChildHealth(clock, client, parents);
+    const collected: unknown = await collectChildHealth(clock, client, parents, cursors);
     if (!isRecord(collected)) {
       throw new Error("invalid collector result");
     }

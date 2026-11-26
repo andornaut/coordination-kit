@@ -90,6 +90,8 @@ export interface NativeWorker {
   readonly status: "ok" | "unknown";
   /** Verified coverage for this slot. Older stored briefs omit it. */
   readonly coverage?: "complete" | "partial" | "unavailable";
+  /** Ordering only, never current worker evidence. */
+  readonly cursor?: { readonly afterChildId: string; readonly parentNativeId: string };
   /** Verified latest failed child turns: [child, turn, error code]. */
   readonly failures: readonly (readonly [string, string, string])[];
   readonly unavailableChildren: readonly { readonly id: string; readonly reason: string }[];
@@ -256,11 +258,33 @@ function questionStatus(
   };
 }
 
+function resumeAfter(previous: NativeWorker | undefined, parent: string): string | undefined {
+  if (previous?.cursor !== undefined) {
+    if (!isRecord(previous.cursor)) {
+      return undefined;
+    }
+    const { afterChildId, parentNativeId } = previous.cursor;
+    return parentNativeId === parent && isCanonicalUuid(afterChildId) && afterChildId !== parent
+      ? afterChildId
+      : undefined;
+  }
+  // Earlier briefs only retained successful reads, in the collector's old sorted order.
+  const ids =
+    previous?.lineage?.parentNativeId === parent ? previous.lineage.workerNativeIds : null;
+  return Array.isArray(ids) &&
+    ids.every(
+      (id, index) => isCanonicalUuid(id) && id !== parent && (index === 0 || ids[index - 1]! < id),
+    )
+    ? ids.at(-1)
+    : undefined;
+}
+
 function workerStatus(
   role: string,
   conversation: string | null,
   unavailable: string | null,
   value: unknown,
+  priorCursor: string | undefined,
 ): NativeWorker {
   const health = rec(value);
   const children = list(health.children).map(rec);
@@ -317,12 +341,23 @@ function workerStatus(
           ].sort(),
         }
       : null;
+  const attempted = health.next_child_after;
+  const afterChildId =
+    health.provenance === "native_protocol" &&
+    isCanonicalUuid(attempted) &&
+    attempted !== conversation &&
+    children.some((child) => child.parent_id === conversation && child.child_id === attempted)
+      ? attempted
+      : priorCursor;
   return {
     coverage: readable
       ? "complete"
       : (lineage?.workerNativeIds.length ?? 0) > 0
         ? "partial"
         : "unavailable",
+    ...(conversation === null || afterChildId === undefined
+      ? {}
+      : { cursor: { afterChildId, parentNativeId: conversation } }),
     failures: [...failures.keys()].sort().map((key) => failures.get(key)!),
     lineage,
     reason: readable
@@ -372,7 +407,11 @@ function channelStatus(layout: Layout, role: string, binding: string | null): Na
 }
 
 /** Read every registered role and its exact native children outside the store transaction. */
-export async function surveyNative(context: NativeContext, slot: number): Promise<NativeSurvey> {
+export async function surveyNative(
+  context: NativeContext,
+  slot: number,
+  previousWorkers: readonly NativeWorker[] = [],
+): Promise<NativeSurvey> {
   const { layout } = context;
   const registry = readRegistry(layout);
   const roles = Object.keys(registry.roles)
@@ -399,6 +438,17 @@ export async function surveyNative(context: NativeContext, slot: number): Promis
   });
 
   const recipients = targets.flatMap(({ recipient }) => (recipient === null ? [] : [recipient]));
+  const workerCursors = new Map<string, string>();
+  for (const { recipient, role } of targets) {
+    if (recipient === null) {
+      continue;
+    }
+    const previous = previousWorkers.filter((worker) => worker.role === role);
+    const cursor = previous.length === 1 ? resumeAfter(previous[0], recipient) : undefined;
+    if (cursor !== undefined) {
+      workerCursors.set(recipient, cursor);
+    }
+  }
   const request: CollectRequest = {
     decisionRecords: Object.fromEntries(
       targets.flatMap(({ marker, recipient }) =>
@@ -408,6 +458,7 @@ export async function surveyNative(context: NativeContext, slot: number): Promis
     parents: recipients,
     recipients,
     slot,
+    ...(workerCursors.size === 0 ? {} : { workerCursors: Object.fromEntries(workerCursors) }),
   };
   const collected =
     recipients.length === 0
@@ -434,6 +485,7 @@ export async function surveyNative(context: NativeContext, slot: number): Promis
         recipient,
         reason,
         recipient === null ? undefined : collected.worker_health[recipient],
+        recipient === null ? undefined : workerCursors.get(recipient),
       ),
     ),
   };

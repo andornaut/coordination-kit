@@ -151,7 +151,9 @@ export async function collectAll(
     collectionDeadline,
     MAX_COLLECTION_CALLS - questionsBudget.callsUsed,
   );
-  const workers = hasParents ? await workerHealth(clock, workerBudget, request.parents) : {};
+  const workers = hasParents
+    ? await workerHealth(clock, workerBudget, request.parents, request.workerCursors)
+    : {};
   return {
     collection_budget: {
       calls_used: questionsBudget.callsUsed + workerBudget.callsUsed,

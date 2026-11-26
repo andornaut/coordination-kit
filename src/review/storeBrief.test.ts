@@ -12,6 +12,7 @@ import { EXIT_OK } from "../core/io.ts";
 import { gameLayout, type Layout } from "../core/layout.ts";
 import { stateRoot } from "../core/stateRoot.ts";
 import { clockAt, TEST_CLOCK, TEST_CONTEXT, TEST_GIT, TEST_NOW } from "../core/testFixtures.ts";
+import { updateRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
 import {
   prepareFileCheckpoint,
@@ -598,6 +599,7 @@ describe("coordination events", () => {
 function collectedFor(
   request: CollectRequest,
   workerStatus: "complete" | "partial" = "complete",
+  attempted?: string,
 ): Collected {
   const question = {
     item_id: "item-9",
@@ -620,7 +622,7 @@ function collectedFor(
     turn_id: "turn-9",
   };
   const child = {
-    child_id: uuid(1001),
+    child_id: attempted ?? uuid(1001),
     complete: true,
     error_code: "tool_failed",
     lineage_verified: true,
@@ -641,6 +643,7 @@ function collectedFor(
         children: [child],
         complete: workerStatus === "complete",
         diagnostics: workerStatus === "partial" ? ["native_timeout"] : [],
+        ...(attempted === undefined ? {} : { next_child_after: attempted }),
         provenance: "native_protocol",
         schema_status: "available",
         status: workerStatus,
@@ -655,6 +658,57 @@ function brief(layout: Layout, slot: number): string {
 }
 
 describe("native checks in the stored brief", () => {
+  it("seeds a legacy cursor, advances on a new attempt and survives a stalled slot", async () => {
+    const { layout } = await storeModeFixture();
+    const game = gameLayout(layout, GAME);
+    const attempted = uuid(1003);
+    const collect = vi.fn((request: CollectRequest) => {
+      if (request.slot === SLOT) {
+        return Promise.resolve(collectedFor(request));
+      }
+      if (request.slot === NEXT) {
+        return Promise.resolve(collectedFor(request, "complete", attempted));
+      }
+      return Promise.resolve({
+        collection_budget: {},
+        history: {},
+        question_state: {},
+        worker_health: {},
+      });
+    });
+    const options = { ...TEST_CONTEXT, collect, env: {} };
+    const workerAt = (slot: number) =>
+      showBrief(TEST_CONTEXT, layout, { slot }).native.workers.find(
+        ({ role }) => role === ART_ROLE,
+      );
+
+    await deliverReview(options, layout, game, SLOT);
+    expect(workerAt(SLOT)?.cursor).toBeUndefined();
+    await deliverReview(options, layout, game, NEXT);
+    expect(collect.mock.calls[1]?.[0].workerCursors).toEqual({ [ART]: uuid(1001) });
+    expect(workerAt(NEXT)?.cursor).toEqual({ afterChildId: attempted, parentNativeId: ART });
+    await deliverReview(options, layout, game, NEXT);
+    expect(collect).toHaveBeenCalledTimes(2);
+    await deliverReview(options, layout, game, LATER);
+    expect(collect.mock.calls[2]?.[0].workerCursors).toEqual({ [ART]: attempted });
+    expect(workerAt(LATER)).toMatchObject({
+      coverage: "unavailable",
+      cursor: { afterChildId: attempted, parentNativeId: ART },
+      failures: [],
+      lineage: null,
+    });
+
+    const replacement = uuid(1010);
+    updateRegistry(TEST_CLOCK, layout, 1, (draft) => {
+      draft.roles[ART_ROLE]!.conversations.codex = replacement;
+    });
+    const reboundSlot = LATER + 3600;
+    await deliverReview(options, layout, game, reboundSlot);
+    expect(collect.mock.calls[3]?.[0]).toMatchObject({ parents: [replacement] });
+    expect(collect.mock.calls[3]?.[0].workerCursors).toBeUndefined();
+    expect(workerAt(reboundSlot)?.cursor).toBeUndefined();
+  });
+
   it("reports a pending Codex question every slot and a failed worker once", async () => {
     const { layout } = await storeModeFixture();
     const game = gameLayout(layout, GAME);

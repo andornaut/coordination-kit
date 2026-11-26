@@ -104,6 +104,8 @@ export interface CollectRequest {
   readonly recipients: readonly string[];
   readonly parents: readonly string[];
   readonly slot: number | null;
+  /** Resume ordering after this child ID, keyed by the same current native parent. */
+  readonly workerCursors?: Readonly<Record<string, string>>;
 }
 
 /** Snapshot capabilities, keyed by the snapshot record field names. */

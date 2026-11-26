@@ -224,6 +224,14 @@ as unknown. The existing `status: "unknown"` and `counts.native.workers.unknown`
 all incomplete surveys. `counts.native.workers.partial` counts the verified partial subset.
 Earlier briefs may lack these coverage fields.
 
+The worker survey orders currently inventoried children after the preceding brief's
+`native.workers[].cursor` for the same role and exact native parent, wrapping at the end
+before applying the 100-child limit. The optional cursor records the last attempted
+newest-turn read. A slot with no attempts preserves its same-parent position. An older brief
+can seed the position from its last verified child when the lineage is exact and sorted.
+The cursor orders the current inventory only. The review never queries an absent ID
+or treats an earlier observation as evidence for this slot.
+
 `native.channels` lists each active Claude role's channel `status`
 (`current`, `stale`, `missing` or `unreadable`), its `binding`, the recorded `conversation`,
 `pid`, `startedAt` and `version`, and `counts.native.channels` counts each status. The `unread`
