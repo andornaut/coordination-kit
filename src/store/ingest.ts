@@ -82,7 +82,7 @@ export function busEventId(game: string, type: string, key: string): string {
 const SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const TYPE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
-/** The line as a runner event of `game`, or null when it is malformed. */
+/** Normalise either schema-1 identity spelling before hashing or persisting the event. */
 export function parseBusLine(game: string, text: string): BusLine | null {
   let value: unknown;
   try {
@@ -97,7 +97,9 @@ export function parseBusLine(game: string, text: string): BusLine | null {
   const work = v.work;
   if (
     v.schema !== 1 ||
-    v.game !== game ||
+    (v.game === undefined && v.appId === undefined) ||
+    (v.game !== undefined && v.game !== game) ||
+    (v.appId !== undefined && v.appId !== game) ||
     typeof v.kind !== "string" ||
     !EVENT_KINDS.has(v.kind) ||
     typeof v.type !== "string" ||

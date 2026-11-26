@@ -23,6 +23,7 @@ import {
   type IngestContext,
   ingestEvents,
   LOG_FILE,
+  parseBusLine,
   QUARANTINE_FILE,
   readCursor,
 } from "./ingest.ts";
@@ -135,6 +136,50 @@ function completes(layout: Layout): StoredMessage[] {
 }
 
 describe("events ingest", () => {
+  it("normalises schema-1 app and game spellings to one event identity and original store payload", async () => {
+    const test = setup();
+    const legacy = line("runner.started", "same-event", "runner", null);
+    const app: Line = { ...legacy, appId: GAME };
+    delete app.game;
+    const both = { ...legacy, appId: GAME };
+    expect(parseBusLine(GAME, JSON.stringify(app))).toEqual(legacy);
+    expect(parseBusLine(GAME, JSON.stringify(both))).toEqual(legacy);
+    const conflict = { ...legacy, appId: "other-app" };
+    expect(parseBusLine(GAME, JSON.stringify(conflict))).toBeNull();
+    expect(parseBusLine(GAME, JSON.stringify({ ...app, game: null }))).toBeNull();
+    expect(parseBusLine(GAME, JSON.stringify({ ...app, appId: null }))).toBeNull();
+
+    const bytes = text(app, legacy, both, conflict);
+    writeFileSync(test.log, bytes);
+    expect(await ingestEvents(test.context, test.game)).toMatchObject({
+      delivered: 1,
+      ingested: 4,
+      quarantined: 1,
+    });
+    expect(readCursor(test.game.busDir)).toMatchObject({
+      firstId: legacy.id,
+      lastId: null,
+      lines: 4,
+      offset: Buffer.byteLength(bytes, "utf8"),
+    });
+    expect(readFileSync(join(test.game.busDir, QUARANTINE_FILE), "utf8")).toBe(text(conflict));
+    expect(withStore(test.layout, (store) => store.events({ kinds: ["bus.event"] }))).toMatchObject(
+      [
+        {
+          key: `bus.event:${String(legacy.id)}`,
+          payload: legacy,
+        },
+      ],
+    );
+    expect(
+      withStore(test.layout, (store) => store.events({ kinds: ["bus.event"] })[0]?.payload),
+    ).not.toHaveProperty("appId");
+    expect(await ingestEvents(test.context, test.game)).toMatchObject({
+      delivered: 0,
+      ingested: 0,
+    });
+  });
+
   it("commits each line once, then writes the cursor, and a repeated ingest is a no-op", async () => {
     const test = setup();
     const first = line("runner.started", "start1", "runner", null);

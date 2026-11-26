@@ -5,31 +5,38 @@
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
 import {
+  appLayout,
   type GameLayout,
   gameLayout,
   type Layout,
   loadLayout,
+  UnknownApp,
   UnknownGame,
 } from "../core/layout.ts";
-import { type CliIdentity, cliMember } from "../core/outcome.ts";
+import { type CliIdentity, cliMember, type RunnerIdField } from "../core/outcome.ts";
 import { cliIdentity } from "../core/version.ts";
+import { readRegistry } from "../registry/store.ts";
 import { deliverReview, reviewDeliverLine } from "../review/deliver.ts";
 import { showBrief } from "../review/storeBrief.ts";
+import { resolveCaller } from "../store/identity.ts";
 import { ingestEvents, type IngestResult } from "../store/ingest.ts";
+import { requirePermission } from "../store/permissions.ts";
 import { StoreError } from "../store/types.ts";
 import { errorMessage, parseOptions, systemClock } from "./args.ts";
 
+const TARGET_OPTIONS = {
+  app: { type: "string" },
+  game: { type: "string" },
+} as const;
+
 export const REVIEW_DELIVER_OPTIONS = {
-  game: { type: "string" },
+  ...TARGET_OPTIONS,
   slot: { type: "string" },
 } as const;
 
-export const EVENTS_INGEST_OPTIONS = { game: { type: "string" } } as const;
+export const EVENTS_INGEST_OPTIONS = TARGET_OPTIONS;
 
-export const REVIEW_SHOW_OPTIONS = {
-  game: { type: "string" },
-  slot: { type: "string" },
-} as const;
+export const REVIEW_SHOW_OPTIONS = REVIEW_DELIVER_OPTIONS;
 
 class Usage extends Error {}
 
@@ -54,36 +61,68 @@ function slotSeconds(text: string): number {
 }
 
 interface Context {
+  readonly app: GameLayout;
   readonly cli: CliIdentity;
-  readonly game: GameLayout;
   readonly layout: Layout;
 }
 
-/** Parse, then resolve the layout, the game and the CLI identity; a usage error exits 2. */
-function context(io: Io, root: string, game: string | undefined): Context | number {
-  let layout: Layout;
-  try {
-    layout = loadLayout(root);
-  } catch (error) {
-    io.err(`coordination-kit: ${errorMessage(error)}\n`);
-    return EXIT_INVALID;
+interface Target {
+  readonly field: RunnerIdField;
+  readonly id: string;
+}
+
+function target(values: { app?: string; game?: string }): Target | undefined {
+  if (values.app !== undefined && values.game !== undefined) {
+    throw new Usage("--app and --game are mutually exclusive");
   }
+  if (values.app !== undefined) {
+    return { field: "appId", id: values.app };
+  }
+  return values.game === undefined ? undefined : { field: "game", id: values.game };
+}
+
+function requiredTarget(values: { app?: string; game?: string }): Target {
+  const selected = target(values);
+  if (selected === undefined) {
+    throw new Usage("Either --app or --game is required");
+  }
+  return selected;
+}
+
+function targetLayout(layout: Layout, selected: Target): GameLayout {
+  return selected.field === "game" && layout.mode === "legacy"
+    ? gameLayout(layout, selected.id)
+    : appLayout(layout, selected.id);
+}
+
+/** Resolve the exact app and authenticate the caller before touching runner state. */
+function context(
+  io: Io,
+  root: string,
+  selected: Target,
+  permission: "review:deliver" | "events:ingest",
+): Context | number {
   try {
-    if (game === undefined) {
-      throw new Usage("--game is required");
+    const layout = loadLayout(root);
+    const app = targetLayout(layout, selected);
+    if (layout.mode !== "legacy") {
+      const registry = readRegistry(layout);
+      requirePermission(layout, registry, resolveCaller(registry, io.env), permission, app.id);
     }
-    return { cli: cliIdentity(io.entry), game: gameLayout(layout, game), layout };
+    return { app, cli: cliIdentity(io.entry), layout };
   } catch (error) {
-    io.err(`coordination-kit: ${errorMessage(error)}\n`);
-    return error instanceof Usage || error instanceof UnknownGame ? EXIT_USAGE : EXIT_INVALID;
+    io.err(`coordination-kit: ${error instanceof StoreError ? error.code : errorMessage(error)}\n`);
+    return error instanceof UnknownApp || error instanceof UnknownGame ? EXIT_USAGE : EXIT_INVALID;
   }
 }
 
 export const reviewDeliver: Handler = async (io, root, args) => {
   let values;
+  let selected: Target;
   let slot: number;
   try {
     ({ values } = parseOptions(REVIEW_DELIVER_OPTIONS, args));
+    selected = requiredTarget(values);
     if (values.slot === undefined) {
       throw new Usage("--slot is required");
     }
@@ -92,7 +131,7 @@ export const reviewDeliver: Handler = async (io, root, args) => {
     io.err(`coordination-kit: ${errorMessage(error)}\n`);
     return EXIT_USAGE;
   }
-  const resolved = context(io, root, values.game);
+  const resolved = context(io, root, selected, "review:deliver");
   if (typeof resolved === "number") {
     return resolved;
   }
@@ -106,7 +145,7 @@ export const reviewDeliver: Handler = async (io, root, args) => {
     const result = await deliverReview(
       { clock: systemClock, env: io.env },
       resolved.layout,
-      resolved.game,
+      resolved.app,
       slot,
       io.signal ?? controller?.signal,
     );
@@ -114,11 +153,13 @@ export const reviewDeliver: Handler = async (io, root, args) => {
       io.err("coordination-kit: review deliver stopped before a result; no delivery claimed\n");
       return EXIT_INVALID;
     }
-    io.out(reviewDeliverLine(resolved.cli, resolved.game.id, values.slot, result));
+    io.out(reviewDeliverLine(resolved.cli, resolved.app.id, values.slot, result, selected.field));
     return EXIT_OK;
   } catch (error) {
     if (error instanceof StoreError && error.code === RESERVED.reason) {
-      io.out(reviewDeliverLine(resolved.cli, resolved.game.id, values.slot, RESERVED));
+      io.out(
+        reviewDeliverLine(resolved.cli, resolved.app.id, values.slot, RESERVED, selected.field),
+      );
       return EXIT_OK;
     }
     io.err(`coordination-kit: review deliver failed: ${errorMessage(error)}\n`);
@@ -129,12 +170,12 @@ export const reviewDeliver: Handler = async (io, root, args) => {
 };
 
 /** The one stdout line of `events ingest`: the seam keys plus the ingest counts. */
-function eventsIngestLine(cli: CliIdentity, game: string, result: IngestResult): string {
+function eventsIngestLine(cli: CliIdentity, selected: Target, result: IngestResult): string {
   return `${JSON.stringify(
     Object.fromEntries([
       ["schema", 1],
       ["kind", "events-ingest"],
-      ["game", game],
+      [selected.field, selected.id],
       ["status", result.status],
       ["reason", result.reason],
       ["detail", result.detail],
@@ -149,28 +190,28 @@ function eventsIngestLine(cli: CliIdentity, game: string, result: IngestResult):
 }
 
 export const eventsIngest: Handler = async (io, root, args) => {
-  let values;
+  let selected: Target;
   try {
-    ({ values } = parseOptions(EVENTS_INGEST_OPTIONS, args));
+    selected = requiredTarget(parseOptions(EVENTS_INGEST_OPTIONS, args).values);
   } catch (error) {
     io.err(`coordination-kit: ${errorMessage(error)}\n`);
     return EXIT_USAGE;
   }
-  const resolved = context(io, root, values.game);
+  const resolved = context(io, root, selected, "events:ingest");
   if (typeof resolved === "number") {
     return resolved;
   }
   try {
     const result = await ingestEvents(
       { clock: systemClock, env: io.env, layout: resolved.layout },
-      resolved.game,
+      resolved.app,
     );
-    io.out(eventsIngestLine(resolved.cli, resolved.game.id, result));
+    io.out(eventsIngestLine(resolved.cli, selected, result));
     return EXIT_OK;
   } catch (error) {
     if (error instanceof StoreError && error.code === RESERVED.reason) {
       io.out(
-        eventsIngestLine(resolved.cli, resolved.game.id, {
+        eventsIngestLine(resolved.cli, selected, {
           ...RESERVED,
           completed: 0,
           delivered: 0,
@@ -188,10 +229,11 @@ export const eventsIngest: Handler = async (io, root, args) => {
 
 /** `review show`: the recorded stored brief for a slot, or the latest, with its full detail. */
 export const reviewShow: Handler = (io, root, args) => {
-  let values;
+  let selected: Target | undefined;
   let slot: number | undefined;
   try {
-    ({ values } = parseOptions(REVIEW_SHOW_OPTIONS, args));
+    const { values } = parseOptions(REVIEW_SHOW_OPTIONS, args);
+    selected = target(values);
     slot = values.slot === undefined ? undefined : slotSeconds(values.slot);
   } catch (error) {
     io.err(`coordination-kit: ${errorMessage(error)}\n`);
@@ -200,16 +242,18 @@ export const reviewShow: Handler = (io, root, args) => {
   let layout: Layout;
   try {
     layout = loadLayout(root);
-    if (values.game !== undefined) {
-      gameLayout(layout, values.game);
+    if (selected !== undefined) {
+      targetLayout(layout, selected);
     }
   } catch (error) {
     io.err(`coordination-kit: ${errorMessage(error)}\n`);
-    return Promise.resolve(error instanceof UnknownGame ? EXIT_USAGE : EXIT_INVALID);
+    return Promise.resolve(
+      error instanceof UnknownApp || error instanceof UnknownGame ? EXIT_USAGE : EXIT_INVALID,
+    );
   }
   try {
     const brief = showBrief(io, layout, {
-      ...(values.game === undefined ? {} : { game: values.game }),
+      ...(selected === undefined ? {} : { game: selected.id }),
       ...(slot === undefined ? {} : { slot }),
     });
     io.out(
@@ -217,7 +261,7 @@ export const reviewShow: Handler = (io, root, args) => {
         Object.fromEntries([
           ["schema", 1],
           ["kind", "review-show"],
-          ["game", brief.game],
+          [selected?.field ?? "game", brief.game],
           ["slot", new Date(brief.slot * 1000).toISOString()],
           ["recipient", brief.recipient],
           ["messageId", brief.messageId],

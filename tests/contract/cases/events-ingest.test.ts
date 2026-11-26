@@ -13,7 +13,7 @@ const SHA = "0123456789abcdef0123456789abcdef01234567";
 /** The runner's log in the agreed contract format: nine lines, one malformed, then a torn tail. */
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "events.jsonl");
 
-/** `events` commands get the game's configuration and `--game`; the others run bare. */
+/** The adapter prepares configuration and defaults events commands to the legacy selector. */
 async function run(ws: Workspace, words: string[], env: Record<string, string> = {}) {
   const command = words[0] === "events" ? impl.command(ws, words) : impl.bare(ws, words);
   command.env = { ...command.env, ...env };
@@ -99,4 +99,61 @@ suite("events ingest", () => {
       status: "deferred",
     });
   });
+
+  contract(
+    "ingests a modern appId line and reuses its identity through the legacy alias",
+    async () => {
+      const ws = workspace();
+      ws.writeRegistry({
+        harness: "claude",
+        revision: 1,
+        roles: { "game-coordinator": { conversations: { claude: COORDINATOR } } },
+        schema: 1,
+      });
+      const [source = ""] = readFileSync(FIXTURE, "utf8").split("\n");
+      const { game, ...event } = JSON.parse(source) as Record<string, unknown>;
+      expect(game).toBe(ws.game);
+      const appLine = JSON.stringify({ ...event, appId: ws.game });
+      const conflicting = JSON.stringify({ ...event, appId: "another-app", game });
+      const log = `${appLine}\n${source}\n${conflicting}\n`;
+      ws.write("events.jsonl", log);
+      const result = await run(ws, ["events", "ingest", "--app", ws.game]);
+      expect(Object.keys(result)).toEqual([
+        "schema",
+        "kind",
+        "appId",
+        "status",
+        "reason",
+        "detail",
+        "delivered",
+        "held",
+        "ingested",
+        "quarantined",
+        "completed",
+        "cli",
+      ]);
+      expect(result).toMatchObject({
+        appId: ws.game,
+        delivered: 1,
+        ingested: 3,
+        quarantined: 1,
+        schema: 1,
+        status: "delivered",
+      });
+      expect(JSON.parse(ws.read("events.cursor"))).toMatchObject({
+        firstId: event.id,
+        lines: 3,
+        offset: Buffer.byteLength(log, "utf8"),
+      });
+      expect(ws.read("events.quarantine.jsonl")).toBe(`${conflicting}\n`);
+      const legacy = await run(ws, ["events", "ingest", "--game", ws.game]);
+      expect(legacy).not.toHaveProperty("appId");
+      expect(legacy).toMatchObject({
+        delivered: 0,
+        game: ws.game,
+        ingested: 0,
+        reason: "no-events",
+      });
+    },
+  );
 });

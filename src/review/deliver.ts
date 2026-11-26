@@ -13,6 +13,7 @@ import {
   REASON_TOKENS,
   type ReasonToken,
   type ReviewResult,
+  type RunnerIdField,
   type SeamStatus,
 } from "../core/outcome.ts";
 import { isRecord } from "../core/pyjson.ts";
@@ -133,15 +134,16 @@ export async function deliverReview(
 /** The one stdout line of `review deliver`, in its documented key order. */
 export function reviewDeliverLine(
   cli: CliIdentity,
-  game: string,
+  id: string,
   slot: string,
   result: ReviewResult,
+  field: RunnerIdField = "game",
 ): string {
   return `${JSON.stringify(
     Object.fromEntries([
       ["schema", 1],
       ["kind", "review-deliver"],
-      ["game", game],
+      [field, id],
       ["slot", slot],
       ["status", result.status],
       ["reason", result.reason],

@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
 import { REASON_TOKENS } from "../core/outcome.ts";
-import { type ClaudeFixture, claudeFixture, GAME, SLOT } from "../review/fixtures.ts";
+import { CLAUDE_TECH } from "../core/testFixtures.ts";
+import { type ClaudeFixture, claudeFixture, GAME, RECIPIENT, SLOT } from "../review/fixtures.ts";
 
 const VERSION = "0.0.0-test";
 const ISO = new Date(SLOT * 1000).toISOString();
@@ -31,7 +32,7 @@ interface Run {
 async function run(
   root: string,
   argv: readonly string[],
-  extra: { entry?: string; signal?: AbortSignal } = {},
+  extra: { entry?: string; env?: NodeJS.ProcessEnv; signal?: AbortSignal } = {},
 ): Promise<Run> {
   let out = "";
   let err = "";
@@ -115,8 +116,11 @@ describe("review deliver", () => {
       ["review", "deliver", "--game", GAME, "--slot", "2026-11-18T15:30:00"],
       ["review", "deliver", "--game", "no-such-game", "--slot", ISO],
       ["review", "deliver", "--game", GAME, "--slot", ISO, "--extra"],
+      ["review", "deliver", "--app", GAME, "--game", GAME, "--slot", ISO],
       ["events", "ingest"],
       ["events", "ingest", "--game", "no-such-game"],
+      ["events", "ingest", "--app", GAME, "--game", GAME],
+      ["review", "show", "--app", GAME, "--game", GAME],
     ]) {
       // eslint-disable-next-line no-await-in-loop
       const result = await run(root, argv);
@@ -160,6 +164,55 @@ describe("review deliver", () => {
     expect(process.listenerCount("SIGTERM")).toBe(listeners + 1);
     expect((await pending).code).toBe(EXIT_OK);
     expect(process.listenerCount("SIGTERM")).toBe(listeners);
+  });
+});
+
+describe("app runner permissions", () => {
+  it("authenticates both selector forms in app mode before any runner state is written", async () => {
+    const fixture = claudeFixture();
+    const { apps, kits, schema, sharedRoles, timezone, wakeMinutes } = fixture.layout.config;
+    writeFileSync(
+      fixture.layout.configFile,
+      JSON.stringify({
+        appStateDir: "games",
+        apps,
+        kits,
+        permissions: {
+          "game-coordinator": {
+            apps: { [GAME]: ["review:deliver", "events:ingest"] },
+            workspace: [],
+          },
+        },
+        schema,
+        sharedRoles,
+        timezone,
+        wakeMinutes,
+      }),
+    );
+    for (const argv of [
+      ["review", "deliver", "--app", GAME, "--slot", ISO],
+      ["events", "ingest", "--game", GAME],
+    ]) {
+      // eslint-disable-next-line no-await-in-loop
+      expect(await run(fixture.layout.root, argv)).toMatchObject({
+        code: EXIT_INVALID,
+        err: "coordination-kit: caller-unidentified\n",
+        out: "",
+      });
+      // eslint-disable-next-line no-await-in-loop
+      const denied = await run(fixture.layout.root, argv, {
+        env: { CLAUDE_CODE_SESSION_ID: CLAUDE_TECH },
+      });
+      expect(denied).toMatchObject({ code: EXIT_INVALID, out: "" });
+    }
+    expect(existsSync(join(fixture.unblock, "review-deliver"))).toBe(false);
+    expect(existsSync(join(fixture.game.busDir, "events.cursor"))).toBe(false);
+
+    const result = await run(fixture.layout.root, ["events", "ingest", "--app", GAME], {
+      env: { CLAUDE_CODE_SESSION_ID: RECIPIENT },
+    });
+    expect(result.code, result.err).toBe(EXIT_OK);
+    expect(line(result)).toMatchObject({ appId: GAME, schema: 1 });
   });
 });
 

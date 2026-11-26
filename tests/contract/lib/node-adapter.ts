@@ -149,8 +149,9 @@ function command(ws: Workspace, words: string[]): Command {
   // Every command is a noun group and its verb.
   const verb = words.slice(0, 2);
   const rest = words.slice(2);
+  const target = rest.includes("--app") || rest.includes("--game") ? [] : ["--game", ws.game];
   return {
-    argv: [process.execPath, CLI, ...verb, "--game", ws.game, ...rest],
+    argv: [process.execPath, CLI, ...verb, ...target, ...rest],
     cwd: ws.coordinator,
     env: env(ws),
   };
