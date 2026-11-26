@@ -4,10 +4,13 @@ Messages live in the coordination store: `msg send` commits the original before 
 happens, and the recipient pulls it with `inbox`. A wake only asks the recipient to pull. One
 adapter per harness delivers it to the role's current binding: a per-role wake file that the
 Claude channel announces, so it follows a `/clear` rebind, or one guarded Codex control-socket
-queue add. Registry state, role and policy holds and pending store questions guard each wake.
-The scheduled review is the one rearm path: it wakes every recipient with unread originals
-once per slot, past a pending question but not past a hold. Native or channel acceptance is
-delivery, not handling; the recipient closes or retains each original.
+queue add. Registry state and role and policy holds guard every wake. The scheduled review
+can rearm unread originals once per recipient per slot. It skips the store question check
+while preserving Codex native input checks and queue deduplication.
+
+Native or channel acceptance records a wake result. The recipient's inbox pull records message
+delivery. The recipient records handling or an explicit deferral with its next boundary and
+available evidence. Exact status shows the first associated wake and the latest one.
 
 Reference: [messages](../messages.md), [store wakes](../store.md#wakes),
 [commands](../commands.md#command-semantics).
@@ -23,3 +26,4 @@ Reference: [messages](../messages.md), [store wakes](../store.md#wakes),
 | ck-0045 | One wake path that follows the role on both harnesses                  | [ck-0045.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0045.md) |
 | ck-0051 | Resolve channels across project directories and report unresolved ones | [ck-0051.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0051.md) |
 | ck-0057 | Allow messages from unbound senders                                    | [ck-0057.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0057.md) |
+| ck-0062 | Make guarded wake and owner disposition evidence actionable            | [ck-0062.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0062.md) |
