@@ -88,6 +88,8 @@ export interface NativeQuestion {
 export interface NativeWorker {
   readonly role: string;
   readonly status: "ok" | "unknown";
+  /** Verified coverage for this slot. Older stored briefs omit it. */
+  readonly coverage?: "complete" | "partial" | "unavailable";
   /** Verified latest failed child turns: [child, turn, error code]. */
   readonly failures: readonly (readonly [string, string, string])[];
   readonly unavailableChildren: readonly { readonly id: string; readonly reason: string }[];
@@ -316,6 +318,11 @@ function workerStatus(
         }
       : null;
   return {
+    coverage: readable
+      ? "complete"
+      : (lineage?.workerNativeIds.length ?? 0) > 0
+        ? "partial"
+        : "unavailable",
     failures: [...failures.keys()].sort().map((key) => failures.get(key)!),
     lineage,
     reason: readable

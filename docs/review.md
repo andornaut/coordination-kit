@@ -167,7 +167,8 @@ the full details, including every exact ID.
 - `work-ready`: a ready store work item with its owner and linked parent, when recorded;
 - `worker-failed`: a verified failed latest child turn of a Codex worker parent, reported once per
   game;
-- `worker-unknown`: a Codex worker parent whose child health could not be read, with its reason;
+- `worker-unknown`: incomplete worker coverage for a Codex parent, with its reason and a partial
+  coverage label when the brief retains verified child reads;
 - `channel-unresolved`: an active Claude role (effective harness `claude`, not held) whose
   [channel status file](#channel-status-file) is missing (`no channel status`) or names a
   conversation other than the role's current binding (`channel on <first 8 characters>`). A
@@ -211,7 +212,14 @@ with a slot-specific key. An older CLI can still return the brief result.
 slot, or the latest one, as one JSON line: `kind` `review-show`, the game, slot, recipient,
 message ID, recording time, result, counts, every exception, the open message IDs and the body.
 New briefs include `decisions` with store references and `native` with per-role evidence and the
-registry revision. `native.channels` lists each active Claude role's channel `status`
+registry revision. `native.workers[].coverage` is `complete` for a complete bounded survey,
+`partial` when the survey is incomplete but includes verified child reads, or `unavailable` when
+the survey is incomplete and has no verified child reads. Treat unread portions of the inventory
+as unknown. The existing `status: "unknown"` and `counts.native.workers.unknown` include
+all incomplete surveys. `counts.native.workers.partial` counts the verified partial subset.
+Earlier briefs may lack these coverage fields.
+
+`native.channels` lists each active Claude role's channel `status`
 (`current`, `stale`, `missing` or `unreadable`), its `binding`, the recorded `conversation`,
 `pid`, `startedAt` and `version`, and `counts.native.channels` counts each status. The `unread`
 list preserves the slot's exact passive snapshot with the recipient, original ID and wake

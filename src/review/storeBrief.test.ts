@@ -595,7 +595,10 @@ describe("coordination events", () => {
 });
 
 /** What the legacy collectors return for one Codex role with a pending question and a failed child. */
-function collectedFor(request: CollectRequest): Collected {
+function collectedFor(
+  request: CollectRequest,
+  workerStatus: "complete" | "partial" = "complete",
+): Collected {
   const question = {
     item_id: "item-9",
     kind: "question_tool",
@@ -622,7 +625,9 @@ function collectedFor(request: CollectRequest): Collected {
     error_code: "tool_failed",
     lineage_verified: true,
     parent_id: ART,
+    provenance: "native_protocol",
     requires_parent_action: true,
+    status: "complete",
     turn_id: uuid(1002),
     turn_status: "failed",
   };
@@ -632,7 +637,14 @@ function collectedFor(request: CollectRequest): Collected {
     history: {},
     question_state: { [ART]: { complete: true, questions: [question], status: "complete" } },
     worker_health: {
-      [ART]: { children: [child], complete: true, schema_status: "available", status: "complete" },
+      [ART]: {
+        children: [child],
+        complete: workerStatus === "complete",
+        diagnostics: workerStatus === "partial" ? ["native_timeout"] : [],
+        provenance: "native_protocol",
+        schema_status: "available",
+        status: workerStatus,
+      },
     },
   };
 }
@@ -653,7 +665,7 @@ describe("native checks in the stored brief", () => {
     expect(first).toContain(
       "Native prompt visibility: 4 unknown; history: 1 complete, 1 with pending attestations",
     );
-    expect(first).toContain("Worker parents: 1 read, 3 unknown, 1 failed children");
+    expect(first).toContain("Worker parents: 1 complete, 0 partial, 3 unknown, 1 failed children");
     expect(first).toContain(
       '- question-pending archies-dog-walks/art: "Ship the new map?", turn turn-9 item item-9',
     );
@@ -669,6 +681,30 @@ describe("native checks in the stored brief", () => {
     expect(collect).toHaveBeenCalledTimes(2);
   });
 
+  it("reports retained verified reads as partial and preserves the incomplete count", async () => {
+    const { layout } = await storeModeFixture();
+    const game = gameLayout(layout, GAME);
+    const collect = (request: CollectRequest) => Promise.resolve(collectedFor(request, "partial"));
+    await deliverReview({ ...TEST_CONTEXT, collect, env: {} }, layout, game, SLOT);
+    const body = brief(layout, SLOT);
+    expect(body).toContain("Worker parents: 0 complete, 1 partial, 3 unknown, 1 failed children");
+    expect(body).toContain(
+      "- worker-unknown archies-dog-walks/art: verified partial coverage (native_timeout)",
+    );
+    const row = showBrief(TEST_CONTEXT, layout, { slot: SLOT });
+    expect(row.counts.native).toMatchObject({
+      workers: { failed: 1, ok: 0, partial: 1, unknown: 4 },
+    });
+    expect(row.native.workers).toContainEqual(
+      expect.objectContaining({
+        coverage: "partial",
+        failures: [[uuid(1001), uuid(1002), "tool_failed"]],
+        role: ART_ROLE,
+        status: "unknown",
+      }),
+    );
+  });
+
   it("reports unknown only when the native check is unavailable", async () => {
     const { layout } = await storeModeFixture();
     const game = gameLayout(layout, GAME);
@@ -678,6 +714,9 @@ describe("native checks in the stored brief", () => {
     expect(body).toContain("Native prompt visibility: 4 unknown; history: 0 complete");
     expect(body).toContain("- question-unknown archies-dog-walks/art: control_unavailable");
     expect(body).toContain("- worker-unknown archies-dog-walks/art: control_unavailable");
+    expect(showBrief(TEST_CONTEXT, layout, { slot: SLOT }).native.workers).toContainEqual(
+      expect.objectContaining({ coverage: "unavailable", role: ART_ROLE, status: "unknown" }),
+    );
   });
 
   it("keeps current visibility unknown when the native question history is complete", async () => {
@@ -819,6 +858,7 @@ describe("brief exceptions", () => {
       { detail: "recipient-held", kind: "wake-guarded", role: ART_ROLE },
     ];
     const lines = composeBrief(game(), SLOT, { counts: counts(1), exceptions }).split("\n");
+    expect(lines).toContain("Worker parents: 0 complete, 0 partial, 0 unknown, 0 failed children");
     expect(lines.filter((line) => line.startsWith("- "))).toEqual([
       `- stalled ${TECH_ROLE}: 2 open across two slots (1 newly stalled), oldest ${uuid(1)}, age 5h`,
       `- stalled ${ART_ROLE}: 1 open across two slots (0 newly stalled), oldest ${uuid(4)}, age 3d`,

@@ -16,6 +16,7 @@ const CHILD = "00000000-0000-4000-8000-000000000003";
 const TURN = "00000000-0000-4000-8000-000000000004";
 const HEALTHY_CHILD = "00000000-0000-4000-8000-000000000005";
 const UNREADABLE_CHILD = "00000000-0000-4000-8000-000000000006";
+const READABLE_SHARED_CHILD = "00000000-0000-4000-8000-000000000007";
 
 function marker(layout: Layout, game: string, recipient: string, state: "clear" | "pending"): void {
   const directory = join(gameLayout(layout, game).busDir, "unblock", "decisions");
@@ -118,6 +119,11 @@ it("surveys registered recipients and parents using each exact decision record",
           children: [
             {
               ...child,
+              child_id: READABLE_SHARED_CHILD,
+              parent_id: SHARED,
+            },
+            {
+              ...child,
               child_id: UNREADABLE_CHILD,
               complete: false,
               parent_id: SHARED,
@@ -173,6 +179,7 @@ it("surveys registered recipients and parents using each exact decision record",
   expect(survey.workers).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
+        coverage: "unavailable",
         failures: [],
         lineage: { parentNativeId: ART, workerNativeIds: [] },
         reason: "worker_coverage_unverified",
@@ -180,18 +187,25 @@ it("surveys registered recipients and parents using each exact decision record",
         status: "unknown",
       }),
       expect.objectContaining({
+        coverage: "complete",
         failures: [[CHILD, TURN, "serverOverloaded"]],
         lineage: { parentNativeId: CHIBI_ART, workerNativeIds: [CHILD, HEALTHY_CHILD] },
         role: `${CHIBI}/art`,
         status: "ok",
       }),
       expect.objectContaining({
-        lineage: { parentNativeId: SHARED, workerNativeIds: [] },
+        coverage: "partial",
+        failures: [[READABLE_SHARED_CHILD, TURN, "serverOverloaded"]],
+        lineage: { parentNativeId: SHARED, workerNativeIds: [READABLE_SHARED_CHILD] },
         role: "art-kit",
         status: "unknown",
         unavailableChildren: [{ id: UNREADABLE_CHILD, reason: "unavailable" }],
       }),
-      expect.objectContaining({ lineage: null, role: "game-coordinator" }),
+      expect.objectContaining({
+        coverage: "unavailable",
+        lineage: null,
+        role: "game-coordinator",
+      }),
     ]),
   );
 });

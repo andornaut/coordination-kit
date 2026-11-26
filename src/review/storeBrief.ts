@@ -205,7 +205,7 @@ function nativeExceptions(
     unknown: 0,
     visibilityUnknown: 0,
   };
-  const workers = { failed: 0, ok: 0, unknown: 0 };
+  const workers = { failed: 0, ok: 0, partial: 0, unknown: 0 };
   const nonActionable = new Set(["recipient_held", "native_harness_unsupported"]);
   for (const question of native.questions) {
     questions[question.status] += 1;
@@ -235,6 +235,7 @@ function nativeExceptions(
   }
   for (const worker of native.workers) {
     workers[worker.status] += 1;
+    workers.partial += Number(worker.coverage === "partial");
     workers.failed += worker.failures.length;
     for (const [child, turn, code] of worker.failures) {
       const key = [worker.role, child, turn, code].join(" ");
@@ -248,8 +249,9 @@ function nativeExceptions(
       }
     }
     if (worker.status === "unknown" && !nonActionable.has(worker.reason ?? "")) {
+      const reason = worker.reason ?? "unavailable";
       exceptions.push({
-        detail: worker.reason ?? "unavailable",
+        detail: worker.coverage === "partial" ? `verified partial coverage (${reason})` : reason,
         kind: "worker-unknown",
         role: worker.role,
       });
@@ -548,12 +550,13 @@ export function composeBrief(
   const native = counts.native as {
     claudeRoles: number;
     questions: Record<string, number>;
-    workers: Record<string, number>;
+    workers: { failed: number; ok: number; partial?: number; unknown: number };
   };
   const states = counts.states as Record<string, number>;
   const wakes = counts.wakes as Record<string, number>;
   const decisions = counts.decisions as Record<string, number>;
   const byRole = counts.byRole as Record<string, Record<string, number>>;
+  const partialWorkers = native.workers.partial ?? 0;
   const unavailableCapability = native.questions.unavailableCapability ?? 0;
   const visibilityRoles = unavailableCapability === 1 ? "role" : "roles";
   const newlyStalled = record.exceptions.filter(
@@ -595,7 +598,8 @@ export function composeBrief(
     ...(Number(counts.readyHandoffs) > 0
       ? [`Ready work handoffs: ${String(counts.readyHandoffs)}`]
       : []),
-    `Worker parents: ${native.workers.ok} read, ${native.workers.unknown} unknown, ` +
+    `Worker parents: ${native.workers.ok} complete, ${partialWorkers} partial, ` +
+      `${native.workers.unknown - partialWorkers} unknown, ` +
       `${native.workers.failed} failed children`,
     ...(newlyStalled > 0 || newlyOverdue > 0
       ? [
