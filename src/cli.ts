@@ -1,7 +1,7 @@
 // coordination-kit command dispatcher. Every command is a noun group and its verb. Commands resolve
 // game-coordinator from --root (in any position, once), COORDINATION_KIT_ROOT, DELIVERY_KIT_ROOT or
 // the working directory, in that order; the work group reads --root as the repository instead.
-import { errorMessage } from "./commands/args.ts";
+import { errorMessage, parseOptions } from "./commands/args.ts";
 import { channel } from "./commands/channel.ts";
 import {
   compactionActivate,
@@ -73,8 +73,14 @@ import {
   type Handler,
   type Io,
 } from "./core/io.ts";
+import type { Options } from "./core/usage.ts";
 import { cliIdentity, VERSION } from "./core/version.ts";
 const COMMANDS: readonly Command[] = Object.keys(SPECS) as Command[];
+const GLOBAL_OPTIONS = {
+  "--help": { help: { type: "boolean" } },
+  "--version": { json: { type: "boolean" }, version: { type: "boolean" } },
+  help: {},
+} as const;
 /** Help text, generated from each command's parser options and grouped by audience. */
 const USAGE = [
   "usage: coordination-kit COMMAND [options] [--root DIR]",
@@ -202,12 +208,20 @@ export async function main(io: Io, argv: readonly string[]): Promise<number> {
     return EXIT_USAGE;
   }
   const [word] = args;
-  if (word === "help" || word === "--help") {
-    io.out(USAGE);
-    return EXIT_OK;
-  }
-  if (word === "--version") {
-    if (args[1] !== "--json") {
+  if (word === "help" || word === "--help" || word === "--version") {
+    let json;
+    try {
+      const options: Options = GLOBAL_OPTIONS[word];
+      json = parseOptions(options, word === "help" ? args.slice(1) : args).values.json;
+    } catch (error) {
+      io.err(`coordination-kit: ${errorMessage(error)}\n${USAGE}`);
+      return EXIT_USAGE;
+    }
+    if (word !== "--version") {
+      io.out(USAGE);
+      return EXIT_OK;
+    }
+    if (json !== true) {
       io.out(`${VERSION}\n`);
       return EXIT_OK;
     }

@@ -6,6 +6,7 @@ import { main } from "./cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "./core/io.ts";
 import { loadLayout } from "./core/layout.ts";
 import { makeFixture, registryInput, TEST_CLOCK } from "./core/testFixtures.ts";
+import { VERSION } from "./core/version.ts";
 import { createRegistry, type Registry } from "./registry/index.ts";
 
 async function run(
@@ -16,7 +17,7 @@ async function run(
   let err = "";
   const code = await main(
     { cwd: "/nonexistent", env: {}, err: (text) => (err += text), out: (text) => (out += text) },
-    ["--root", root, ...argv],
+    [...argv, "--root", root],
   );
   return { code, err, out };
 }
@@ -53,6 +54,36 @@ describe("dispatcher", () => {
       code: EXIT_USAGE,
     });
     expect((await run(root, "work", "check", "--unknown")).code).toBe(EXIT_USAGE);
+  });
+
+  it("preserves global help and version output with a trailing root", async () => {
+    const root = "/nonexistent";
+    const help = await run(root, "help");
+    expect(help.code).toBe(EXIT_OK);
+    expect(await run(root, "--help")).toEqual(help);
+    expect(await run(root, "--version")).toEqual({ code: EXIT_OK, out: `${VERSION}\n`, err: "" });
+    const json = await run(root, "--version", "--json");
+    expect(json.code).toBe(EXIT_OK);
+    expect(json.err).toBe("");
+    expect(JSON.parse(json.out)).toEqual({
+      schema: 1,
+      version: VERSION,
+      distSha256: "0".repeat(64),
+    });
+  });
+
+  it.each([
+    { argv: ["help", "--typo"] },
+    { argv: ["--help", "--help"] },
+    { argv: ["--help", "--version"] },
+    { argv: ["--version", "--typo"] },
+    { argv: ["--version", "--version"] },
+    { argv: ["--version", "--json", "--json"] },
+    { argv: ["--version", "--json", "extra"] },
+  ])("rejects invalid global arguments $argv", async ({ argv }) => {
+    const result = await run("/nonexistent", ...argv);
+    expect(result).toMatchObject({ code: EXIT_USAGE, out: "" });
+    expect(result.err).toContain("usage: coordination-kit");
   });
 });
 
