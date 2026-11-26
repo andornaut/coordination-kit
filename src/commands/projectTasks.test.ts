@@ -196,6 +196,18 @@ async function exactLanding(mode: "chat" | "pr-squash" | "pr-merge"): Promise<vo
       });
     } else {
       git("push", "-u", "origin", "task/input");
+      const policyFile = join(repo, "coordination-kit.json");
+      const policy = readFileSync(policyFile, "utf8");
+      const changed = JSON.parse(policy);
+      changed.integration.requiredChecks = ["different-check"];
+      writeFileSync(policyFile, JSON.stringify(changed));
+      const refusal = { code: 1, err: "coordination-kit: project-review-policy-changed\n" };
+      expect(await invoke(OWNER, "task", "open-review", TASK)).toMatchObject(refusal);
+      expect(await invoke(OWNER, "task", "link-review", TASK, "--number", "4")).toMatchObject(refusal);
+      expect(forge.create).not.toHaveBeenCalled();
+      expect(forge.read).not.toHaveBeenCalled();
+      writeFileSync(policyFile, policy);
+
       const open = {
         base: "main",
         head: "task/input",

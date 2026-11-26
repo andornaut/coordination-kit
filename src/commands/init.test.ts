@@ -11,6 +11,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { main } from "../cli.ts";
 import { readJson } from "../core/durable.ts";
 import { systemGit } from "../core/git.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../core/io.ts";
@@ -44,6 +45,35 @@ async function run(handler: Handler, root: string, ...args: string[]) {
 }
 
 describe("standalone init", () => {
+  it("refuses linked task roots and resolves the caller before creating a database", async () => {
+    const root = fixture();
+    const cli: Handler = (io, _root, args) => main(io, args);
+    expect(await run(init, root, "--project", "sample")).toMatchObject({ code: EXIT_OK });
+    expect(await run(cli, root, "task", "start", "task-001")).toMatchObject({
+      code: EXIT_INVALID,
+      err: "coordination-kit: caller-unidentified\n",
+    });
+    expect(existsSync(join(root, ".coordination-kit", "coordination.db"))).toBe(false);
+
+    git(root, ["add", "coordination-kit.json", ".gitignore"]);
+    git(root, ["-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "init"]);
+    const parent = mkdtempSync(join(tmpdir(), "standalone-linked-"));
+    const linked = join(parent, "worktree");
+    git(root, ["worktree", "add", "--detach", linked, "HEAD"]);
+    const refusal = {
+      code: EXIT_INVALID,
+      err: "coordination-kit: project-primary-root-required: use --root with the primary checkout\n",
+      json: null,
+    };
+    expect(await run(cli, linked, "task", "list")).toEqual(refusal);
+    expect(await run(cli, linked, "task", "start", "task-001")).toEqual(refusal);
+    expect(existsSync(join(linked, ".coordination-kit"))).toBe(false);
+    expect(await run(cli, linked, "task", "list", "--root", root)).toMatchObject({
+      code: EXIT_OK,
+      json: { tasks: [] },
+    });
+  });
+
   it("registers a role added to an existing project configuration", async () => {
     const root = fixture();
     await run(init, root, "--project", "sample");

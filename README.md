@@ -18,6 +18,7 @@ configuration and ignored runtime state.
 
 For individual repositories, [initialize a standalone project](docs/standalone.md) to track
 approved tasks and exact-revision chat or pull-request reviews without a separate coordinator.
+Optional forge integration uses [`gh` or `glab` with existing authentication](docs/standalone.md#review-and-merge).
 
 ## Install and pin
 

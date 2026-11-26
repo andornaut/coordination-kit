@@ -51,7 +51,7 @@ function refuse(io: Io, error: unknown): number {
 }
 
 /** The primary checkout anchors the runtime state, including for registered linked worktrees. */
-function projectRoot(git: GitRunner, root: string): string {
+export function projectRoot(git: GitRunner, root: string): string {
   const canonical = realpathSync(root);
   const [top, gitDir, common] = git(canonical, [
     "rev-parse",

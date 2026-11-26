@@ -112,10 +112,12 @@ const USAGE = [
   "  --version         print the version",
   "  --version --json  print {schema, version, distSha256} as one JSON line",
   "",
-  "game-coordinator is --root (in any position, once), else COORDINATION_KIT_ROOT, else",
-  "DELIVERY_KIT_ROOT, else the working directory. For the work commands, --root names the",
-  "repository (default: the working directory) and the coordinator root comes only from",
-  "COORDINATION_KIT_ROOT or DELIVERY_KIT_ROOT.",
+  "--root DIR can appear once in any position.",
+  "init, project and task use the primary Git checkout, defaulting to the working directory.",
+  "work uses --root for the repository, defaulting to the working directory, and reads its",
+  "coordinator root from COORDINATION_KIT_ROOT or DELIVERY_KIT_ROOT.",
+  "Other commands use --root, COORDINATION_KIT_ROOT, DELIVERY_KIT_ROOT or the working directory,",
+  "in that order.",
   "",
 ].join("\n");
 const HANDLERS: Readonly<Record<Command, Handler>> = {

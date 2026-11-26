@@ -1,7 +1,6 @@
 // The standalone lifecycle. The project owner performs external actions explicitly, using
 // the task's recorded candidate and review policy as the merge fence.
 import { createHash } from "node:crypto";
-import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { createForge, ForgeError } from "../adapters/forge/index.ts";
@@ -38,6 +37,7 @@ import {
   type Values,
   verbFamily,
 } from "./args.ts";
+import { projectRoot } from "./init.ts";
 
 export const TASK_READ_OPTIONS = {} as const;
 export const TASK_WRITE_OPTIONS = CALLER;
@@ -65,7 +65,16 @@ export const TASK_LINK_OPTIONS = { ...CALLER, number: { type: "string" } } as co
 export const TASK_VERIFY_OPTIONS = { ...CALLER, evidence: { type: "string" } } as const;
 
 const task = verbFamily("task", (io, root) => {
-  const layout = loadLayout(root);
+  const git = systemGit(io.env, undefined, 30_000);
+  let primary: string;
+  try {
+    primary = projectRoot(git, root);
+  } catch {
+    throw Object.assign(new StoreError("project-primary-root-required"), {
+      reason: "use --root with the primary checkout",
+    });
+  }
+  const layout = loadLayout(primary);
   const settings = layout.project;
   ensure(settings !== undefined, "standalone-project-required");
   const branch = settings.defaultBranch ?? "main";
@@ -74,7 +83,7 @@ const task = verbFamily("task", (io, root) => {
     branch,
     clock: systemClock,
     env: io.env,
-    git: systemGit(io.env, undefined, 30_000),
+    git,
     layout,
     remote,
     settings,
@@ -101,30 +110,30 @@ async function mutate<T>(
   values: Values,
   action: (store: Store, actor: ReturnType<typeof resolveCaller>) => T | Promise<T>,
 ): Promise<T> {
-  mkdirSync(context.layout.varDir, { mode: 0o700, recursive: true });
   try {
     // Keep a task update and its external action ordered. The store itself still uses short
     // transactions. Closing the command releases the process-owned lock.
     return await withLock(
       join(context.layout.varDir, "project-tasks.lock"),
-      () =>
-        withStore(context, (store) => {
-          const roles = registry(context);
-          const actor = resolveCaller(roles, context.env, callerOf(values));
-          const binding = roles.roles[actor.role];
-          ensure(
-            binding?.ownership === "active" &&
-              binding.phase !== "held" &&
-              binding.phase !== "source-held" &&
-              actor.worker === undefined,
-            "project-actor-inactive",
-          );
+      () => {
+        const roles = registry(context);
+        const actor = resolveCaller(roles, context.env, callerOf(values));
+        const binding = roles.roles[actor.role];
+        ensure(
+          binding?.ownership === "active" &&
+            binding.phase !== "held" &&
+            binding.phase !== "source-held" &&
+            actor.worker === undefined,
+          "project-actor-inactive",
+        );
+        return withStore(context, (store) => {
           ensure(
             holdGuard(store, actor.role, resolveHarness(roles, actor.role)).status === "clear",
             "project-role-held",
           );
           return action(store, actor);
-        }),
+        });
+      },
       { nonBlocking: true },
     );
   } catch (error) {
@@ -362,6 +371,7 @@ export const taskOpenReview = task(
       owner(record, actor.role);
       const candidate = candidateOf(record);
       ensure(record.state === "ready" && candidate.review === "pr", "project-pr-review-required");
+      changedPolicy(context, candidate);
       if (record.reviewRequest !== null) {
         return { duplicate: true, task: record };
       }
@@ -400,6 +410,7 @@ export const taskLinkReview = task(
       owner(record, actor.role);
       const candidate = candidateOf(record);
       ensure(candidate.review === "pr", "project-pr-review-required");
+      changedPolicy(context, candidate);
       const review = await forge(context).read(reviewNumber(values));
       checkReview(context, candidate, review);
       ensure(review.state !== "closed", "project-review-closed");
