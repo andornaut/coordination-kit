@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { type JsonObject, type StoredEvent } from "../types.ts";
+import type { JsonObject, StoredEvent } from "../types.ts";
 import { fileRecords } from "./records.ts";
 
 type FileRecordContext = NonNullable<Parameters<typeof fileRecords>[1]>;

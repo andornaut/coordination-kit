@@ -26,7 +26,7 @@ commit the lockfile integrity:
 
 ```json
 "devDependencies": {
-  "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v7.2.0/coordination-kit-7.2.0.tgz"
+  "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v7.2.1/coordination-kit-7.2.1.tgz"
 }
 ```
 
@@ -163,7 +163,8 @@ imports and re-exports included; tests are exempt. ESLint enforces the order wit
 `no-restricted-imports` boundary per layer folder and fails on a `src/` folder that is in no layer.
 `import-x/no-cycle` rejects runtime import cycles across `src/`, `scripts/` and `tests/`, including
 cycles that cross those directories. Type-only imports are erased at build time, so they may form
-a cycle within one layer.
+a cycle within one layer. An import whose specifiers are all inline types still loads its module,
+so `@typescript-eslint/no-import-type-side-effects` requires it as `import type`.
 
 | Layer | Directory                     | Holds                                                                                                                          |
 | ----- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |

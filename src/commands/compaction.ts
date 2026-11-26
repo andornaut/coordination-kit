@@ -18,7 +18,7 @@ import { isRecord } from "../core/pyjson.ts";
 import { storePath, storeRoot } from "../store/db.ts";
 import { canonicalJson, REF, sha256 } from "../store/eventCodec.ts";
 import { fileAuthority } from "../store/files/authority.ts";
-import { type CheckpointHead } from "../store/files/compactionCheckpoint.ts";
+import type { CheckpointHead } from "../store/files/compactionCheckpoint.ts";
 import {
   fileCheckpointCandidate,
   fileCheckpointJournal,
