@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,7 +21,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const helper = join(root, "scripts/release-package.mjs");
 const fixtureCommit = `${"1".repeat(40)}\n`;
 
-function fixture(includeGuide: boolean) {
+function fixture(missingGuide?: string) {
   const base = mkdtempSync(join(tmpdir(), "release-package-"));
   const source = join(base, "source");
   const output = join(base, "output");
@@ -31,8 +32,9 @@ function fixture(includeGuide: boolean) {
     cpSync(join(root, path), join(source, path), { recursive: true });
   }
   writeFileSync(join(source, "SOURCE_COMMIT"), fixtureCommit);
-  if (includeGuide) {
-    cpSync(join(root, "docs"), join(source, "docs"), { recursive: true });
+  cpSync(join(root, "docs"), join(source, "docs"), { recursive: true });
+  if (missingGuide !== undefined) {
+    rmSync(join(source, missingGuide));
   }
   return {
     base,
@@ -45,7 +47,7 @@ function fixture(includeGuide: boolean) {
 
 describe("actual release package", () => {
   it("ships the README-linked guides and public API from the real staging and npm pack helper", () => {
-    const test = fixture(true);
+    const test = fixture();
     execFileSync(process.execPath, [helper, test.staging, test.output], {
       cwd: test.source,
       stdio: "pipe",
@@ -80,7 +82,7 @@ describe("actual release package", () => {
   });
 
   it("refuses a missing required guide before emitting any release artifact", () => {
-    const test = fixture(false);
+    const test = fixture("docs/commands.md");
     const result = spawnSync(process.execPath, [helper, test.staging, test.output], {
       cwd: test.source,
       encoding: "utf8",
