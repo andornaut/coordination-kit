@@ -19,7 +19,7 @@ coordination-kit inbox --peek
 coordination-kit inbox --include-body
 coordination-kit msg done 00000000-0000-4000-8000-000000000001 --work ck-0017
 coordination-kit msg retain 00000000-0000-4000-8000-000000000002 --reason "waits on art" \
-  --next-review
+  --next-review --evidence artifacts/art-review.json
 coordination-kit msg retain 00000000-0000-4000-8000-000000000003 --reason "check after integration" \
   --until 2026-11-22T18:30:00Z
 ```
@@ -40,9 +40,10 @@ coordination-kit msg retain 00000000-0000-4000-8000-000000000003 --reason "check
   without recording delivery. The registry fence permits its registered sender, recipient and
   `game-coordinator` to see the body. `msg history --include-body` applies the same visibility
   rule to each body's events.
-- `msg status ID` includes the latest explicitly associated wake outcome, reason code, blocker
-  reference and next safe action. A coalesced original references the outstanding wake and has
-  its own outcome. Evidence missing from older events stays unknown.
+- `msg status ID` shows the earliest exact association in `firstWake` and the latest outcome,
+  reason code, blocker reference and next safe action in `wake`. A coalesced original
+  references the outstanding wake and has its own outcome. Older messages without an exact
+  association have `firstWake: null`.
 - Codex wake guards use `native-notice-already-queued` when a complete queue inventory shows a
   matching inbox notice. When queue clearance cannot be verified, the finite reasons are
   `native-notice-queue-incomplete`, `native-notice-queue-pagination-unverified`,
