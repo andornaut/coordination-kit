@@ -5,7 +5,7 @@ import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { CANONICAL_UUID } from "../../core/ids.ts";
-import { gameLayout, type Layout } from "../../core/layout.ts";
+import { appLayout, type Layout } from "../../core/layout.ts";
 import { readRoleRoute } from "./route.ts";
 
 const FIELDS = [
@@ -112,16 +112,15 @@ function inspectDecisionRecord(marker: unknown, recipient: string): DecisionMark
 /** The bus `unblock` directory holding a role's local decision markers, or null. */
 export function decisionDirectory(layout: Layout, role: string): string | null {
   try {
-    const game = role.split("/")[0]!;
-    if (role.includes("/")) {
-      return Object.hasOwn(layout.config.games, game)
-        ? join(gameLayout(layout, game).busDir, "unblock")
-        : null;
+    const apps = Object.entries(layout.config.apps).filter(([, app]) => app.roles.includes(role));
+    if (apps.length === 1) {
+      return join(appLayout(layout, apps[0]![0]).busDir, "unblock");
+    }
+    if (apps.length !== 0 || !layout.config.sharedRoles.includes(role)) {
+      return null;
     }
     const route = readRoleRoute(layout);
-    return route?.state === "active"
-      ? join(gameLayout(layout, route.host).busDir, "unblock")
-      : null;
+    return route?.state === "active" ? join(appLayout(layout, route.host).busDir, "unblock") : null;
   } catch {
     return null;
   }

@@ -1,7 +1,7 @@
 {
   "name": "@andornaut/coordination-kit",
-  "version": "7.7.0",
-  "description": "Role registry, the SQLite coordination store with its message lifecycle and wakes, harness adapters, the runner seam and work-file checks for the game and kit roles.",
+  "version": "7.8.0",
+  "description": "App and role coordination, durable messaging, agent task tracking and the delivery runner seam.",
   "license": "MIT",
   "type": "module",
   "engines": {

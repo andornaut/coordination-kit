@@ -15,6 +15,7 @@ import {
   type WorkFileTarget,
 } from "./decisionLine.ts";
 import { type CallerOptions, resolveCaller } from "./identity.ts";
+import { requirePermission } from "./permissions.ts";
 import {
   type HoldState,
   type HoldView,
@@ -31,6 +32,7 @@ import {
   closeLegacyQuestion,
   type DecisionRow,
   getQuestionDecision,
+  holdScope,
   listDecisions,
   listHolds,
   listQuestions,
@@ -314,7 +316,14 @@ export async function storeHoldSet(
   options: CallerOptions,
   request: { readonly id: string; readonly scope: string; readonly reason: string },
 ): Promise<HoldOutput> {
-  const actor = resolveCaller(registry(context), context.env, options);
+  const roles = registry(context);
+  const actor = resolveCaller(roles, context.env, options);
+  if (context.layout.mode === "app") {
+    const [kind, app] = holdScope(request.scope).split(":");
+    if (kind === "app" || kind === "game") {
+      requirePermission(context.layout, roles, actor, "policy:manage", app);
+    }
+  }
   return withStore(context, (store) => ({ ...setHold(store, actor, request), schema: 1 as const }));
 }
 

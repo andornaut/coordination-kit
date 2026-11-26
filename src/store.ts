@@ -79,6 +79,7 @@ export {
   HOLD_STATES,
   type HoldState,
   type HoldView,
+  type PolicyHoldAuthority,
   type PolicyHoldInput,
   type PolicyHoldTarget,
   policyHoldTarget,

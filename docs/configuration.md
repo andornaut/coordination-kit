@@ -39,9 +39,9 @@ root. Use exactly one of `apps` and `games`.
 
 Registry entries, review routes and recipient references use the exact configured role keys.
 
-## Game `delivery-kit.json`
+## App `delivery-kit.json`
 
-Each game commits a `delivery-kit.json`, schema 1, owned by its Tech role. delivery-kit documents
+An app using Delivery Kit commits a schema-1 `delivery-kit.json`. Delivery Kit documents
 its delivery sections: `git`, `schedule`, `gate`, `resources`, `ci` and `deploy`.
 
 | Reader                                                         | Validates                                    |
@@ -59,8 +59,8 @@ This kit uses only `reports`:
 
 - `project`: an optional legacy display name. Both readers still validate a supplied value.
   Coordination reports take the display name from the app or game entry's `name` in `config.json`.
-- `scheduledTicks`: whether the game's runner reports scheduled departure slots.
-- `recipient`: a registered role key. It receives the game's events and, when the game hosts the
+- `scheduledTicks`: whether the app's runner reports scheduled departure slots.
+- `recipient`: a registered role key. It receives the app's events and, when the app hosts the
   route, its scheduled reviews. `claude channel` defaults to it.
 - `workerParents`: required list of role references retained for configuration compatibility. The
   current scheduled review derives native coverage from the registry.

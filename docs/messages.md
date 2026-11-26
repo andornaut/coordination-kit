@@ -11,6 +11,9 @@ Every send is stored before anything native happens, and recipients pull. The
 can send to a registered recipient. These messages show `from: "[unbound]"`, use queue intent and
 carry no native ID or worker attribution. Their links and body supply context only. Verify work
 approval and role authority through the applicable work and decision records.
+Before acting on an unverified original, collect one explicit user decision for that exact
+message. The recipient records the prompt and decision with `msg decide`.
+See [unverified sender decisions](store.md#unverified-originals).
 
 ```bash
 coordination-kit msg send --to archies-dog-walks/tech --body-file note.md --link work=ck-0017

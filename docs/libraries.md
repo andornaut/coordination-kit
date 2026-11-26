@@ -54,10 +54,16 @@ same class another subpath exports. Each bundle imports only `node:` builtins an
 only `node:` builtins and `flock(1)`; `dist/cli.js` embeds the same source. Context parameters
 come first and the subject last.
 
-- `loadLayout(coordinatorRoot)` and `gameLayout(layout, game)`: `config.json` and the `var/`
-  paths. `roleKeys(config)` and `validateGameCoordinatorConfig(value)` use
+- `loadLayout(workspaceRoot)` and `appLayout(layout, appId)` resolve configuration, checkout
+  and state paths. `appRoleKeys(config, appId)` returns the app's exact configured role keys.
+  `validateWorkspaceConfig(value)` reads either workspace shape. `gameLayout(layout, game)`,
+  `roleKeys(config)` and `validateGameCoordinatorConfig(value)` remain compatible with
   `GameCoordinatorConfig`. `GameDevConfig` and `validateGameDevConfig` remain identical aliases
   for readers that still use those names.
+- `isPermitted(layout, registry, actor, permission, appId?)` checks the active native binding
+  and the configured grant for a privileged action. `hasPermission` checks configuration
+  alone. Policy hold writers take a `PolicyHoldAuthority` with the layout and registry before
+  the actor. See [app mode permissions](store.md#app-mode-permissions).
 - `readRegistry(layout)`: a validated snapshot carrying its `revision`; `RegistryMissing` when
   absent.
 - `updateRegistry(clock, layout, expectedRevision, mutate, options)` and
@@ -69,6 +75,6 @@ come first and the subject last.
 - `resolveRole(registry, role)` and `resolveConversation(registry, role)`, which throw
   `UnknownRole` for a name that is not a registered role key.
 - `resolveHarness(registry, role)` returns a registered role's override or the registry default.
-  `selectHarness(clock, layout, expectedRevision, {harness, games?, roles?}, options?)` validates the
+  `selectHarness(clock, layout, expectedRevision, {harness, apps?, roles?}, options?)` validates the
   entire explicit selection and changes only those overrides under `registry.lock`.
 - `RegistrySchema`, `validateRegistry`, `HARNESSES` and `TRANSFER_PHASES`, with the record types.

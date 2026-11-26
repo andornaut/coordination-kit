@@ -650,14 +650,14 @@ export function listDecisions(
   ).map(decisionRow);
 }
 
-/** `work:<id>`, `role` or `game:<id>`, validated. */
+/** Validate work, role and app hold scopes, including the legacy game spelling. */
 export function holdScope(scope: string): string {
   const [kind, ref, ...rest] = scope.split(":");
   ensure(
     rest.length === 0 &&
       ((kind === "role" && ref === undefined) ||
         (kind === "work" && ref !== undefined && WORK_ID.test(ref)) ||
-        (kind === "game" && ref !== undefined && GAME.test(ref))),
+        ((kind === "app" || kind === "game") && ref !== undefined && GAME.test(ref))),
     "invalid-scope",
   );
   return scope;
@@ -841,7 +841,7 @@ export function holdGuard(
 /**
  * The `work start` and `work show` hold port: active holds that cover the item. A `work:` hold
  * covers it by ID (and repository, for an imported hold), a `role` hold when its owner is the
- * item's owner, and a `game:` hold when the item's repository is that game.
+ * item's owner, and an app hold when it matches the item's repository.
  */
 export const storeHolds: HoldLookup = (store, ref, cover) => {
   const local = (store.db.prepare("SELECT * FROM holds WHERE state = 'active'").all() as Row[])
@@ -850,8 +850,8 @@ export const storeHolds: HoldLookup = (store, ref, cover) => {
       if (scope === "role") {
         return cover?.owner != null && row.role === cover.owner;
       }
-      if (scope.startsWith("game:")) {
-        return cover?.game != null && scope === `game:${cover.game}`;
+      if (scope.startsWith("app:") || scope.startsWith("game:")) {
+        return cover?.game != null && scope.slice(scope.indexOf(":") + 1) === cover.game;
       }
       return (JSON.parse(row.work as string) as { id: string; repository: string | null }[]).some(
         (item) =>
