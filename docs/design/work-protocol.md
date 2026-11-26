@@ -28,3 +28,4 @@ state is in the Phase 4 archive ([retirement](../store.md#retirement)).
 | ck-0056 | Apply approved repository review follow-ups            | [ck-0056.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0056.md) |
 | ck-0063 | Support standalone project tasks and merge review      | [ck-0063.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0063.md) |
 | ck-0064 | Correct standalone merge proof and workspace selection | [ck-0064.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0064.md) |
+| ck-0065 | Recover standalone tasks after review policy changes | [ck-0065.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0065.md) |
