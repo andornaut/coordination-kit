@@ -9,6 +9,16 @@ export interface QueueEntry {
   readonly [key: string]: unknown;
 }
 
+export class QueueInventoryError extends Error {
+  readonly reason: "incomplete" | "pagination-unverified";
+
+  constructor(reason: QueueInventoryError["reason"], message: string) {
+    super(message);
+    this.name = "QueueInventoryError";
+    this.reason = reason;
+  }
+}
+
 function queuePage(page: unknown, entries: Map<string, QueueEntry>): unknown {
   if (
     !isRecord(page) ||
@@ -17,7 +27,7 @@ function queuePage(page: unknown, entries: Map<string, QueueEntry>): unknown {
     page.truncated ||
     page.hasMore
   ) {
-    throw new Error("queue inventory incomplete");
+    throw new QueueInventoryError("incomplete", "queue inventory incomplete");
   }
   for (const entry of page.data as unknown[]) {
     if (
@@ -27,12 +37,12 @@ function queuePage(page: unknown, entries: Map<string, QueueEntry>): unknown {
       typeof entry.clientUserMessageId !== "string" ||
       !Array.isArray(entry.input)
     ) {
-      throw new Error("unknown queued submission shape");
+      throw new QueueInventoryError("incomplete", "unknown queued submission shape");
     }
     const known = entries.get(entry.id);
     const same = known === undefined || sameJson(known, entry);
     if (!same) {
-      throw new Error("queue changed during pagination");
+      throw new QueueInventoryError("pagination-unverified", "queue changed during pagination");
     }
     entries.set(entry.id, entry as unknown as QueueEntry);
   }
@@ -60,10 +70,10 @@ export async function queueEntries(
       return [...entries.values()];
     }
     if (typeof next !== "string" || next === "" || cursors.has(next)) {
-      throw new Error("queue pagination did not advance");
+      throw new QueueInventoryError("pagination-unverified", "queue pagination did not advance");
     }
     cursors.add(next);
     cursor = next;
   }
-  throw new Error("queue inventory bound exceeded");
+  throw new QueueInventoryError("pagination-unverified", "queue inventory bound exceeded");
 }

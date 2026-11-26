@@ -6,14 +6,14 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 
 import { wakeText, writeWakeFile } from "../adapters/claude/wakeFile.ts";
-import { queueEntries, type QueueEntry } from "../adapters/codex/inventory.ts";
+import { queueEntries, type QueueEntry, QueueInventoryError } from "../adapters/codex/inventory.ts";
 import {
   codexQueueTransport,
   inputUnavailable,
   type QueueClearance,
   type TransportReceipt,
 } from "../adapters/codex/queue.ts";
-import { connectControl, type RpcClient } from "../adapters/codex/rpc.ts";
+import { connectControl, NativeTimeout, type RpcClient, RpcError } from "../adapters/codex/rpc.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
 import type { Layout } from "../core/layout.ts";
 import { isRecord } from "../core/pyjson.ts";
@@ -255,12 +255,28 @@ function queuedWake(entry: QueueEntry, role: string): boolean {
   );
 }
 
-/** True when no earlier wake for `role` is still queued natively, so a new one is not a duplicate. */
-async function noWakeQueued(client: RpcClient, recipient: string, role: string): Promise<boolean> {
+/** A matching notice and proof unavailable both withhold a new wake for different reasons. */
+async function noticeQueueGuard(
+  client: RpcClient,
+  recipient: string,
+  role: string,
+): Promise<WakeGuard> {
   try {
-    return !(await queueEntries(client, recipient, 10)).some((entry) => queuedWake(entry, role));
-  } catch {
-    return false;
+    const entries = await queueEntries(client, recipient, 10);
+    const queued = entries.some((entry) => queuedWake(entry, role));
+    return queued
+      ? { reason: "native-notice-already-queued", status: "blocked" }
+      : { status: "clear" };
+  } catch (error) {
+    const reason =
+      error instanceof QueueInventoryError
+        ? error.reason
+        : error instanceof NativeTimeout
+          ? "timeout"
+          : error instanceof RpcError
+            ? "refused"
+            : "unverified";
+    return { reason: `native-notice-queue-${reason}`, status: "blocked" };
   }
 }
 
@@ -293,8 +309,9 @@ const codexWake: WakeAdapter = async (context, role, target, wake) => {
         if (diagnostic !== null) {
           return { diagnostic, status: "blocked" };
         }
-        if (!(await noWakeQueued(client, recipient, role))) {
-          refused = { reason: "native-notice-queue-unverified", status: "blocked" };
+        const queue = await noticeQueueGuard(client, recipient, role);
+        if (queue.status === "blocked") {
+          refused = queue;
           return { status: "blocked" };
         }
         return { status: locallyClear() ? "clear" : "blocked" };

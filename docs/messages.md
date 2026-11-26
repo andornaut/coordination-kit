@@ -43,6 +43,13 @@ coordination-kit msg retain 00000000-0000-4000-8000-000000000003 --reason "check
 - `msg status ID` includes the latest explicitly associated wake outcome, reason code, blocker
   reference and next safe action. A coalesced original references the outstanding wake and has
   its own outcome. Evidence missing from older events stays unknown.
+- Codex wake guards use `native-notice-already-queued` when a complete queue inventory shows a
+  matching inbox notice. When queue clearance cannot be verified, the finite reasons are
+  `native-notice-queue-incomplete`, `native-notice-queue-pagination-unverified`,
+  `native-notice-queue-timeout`, `native-notice-queue-refused` and
+  `native-notice-queue-unverified` for an unclassified read failure. Earlier events can use
+  `native-notice-queue-unverified` for both a match and a read failure. Both outcomes keep
+  the original unread and withhold another native wake. Use the next safe inbox pull.
 - `inbox --peek` shows the current role's unread originals and wake metadata without recording
   delivery, clearing a guard or sending native input. The scheduled review preserves the same
   metadata for its review slot. Use the store surfaces while a question or unknown state is
