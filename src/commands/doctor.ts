@@ -6,11 +6,13 @@ import { diagnoseHarness } from "../review/diagnostics.ts";
 import { parseOptions } from "./args.ts";
 
 export const DOCTOR_OPTIONS = {
+  app: { multiple: true, type: "string" },
   game: { multiple: true, type: "string" },
   role: { multiple: true, type: "string" },
 } as const;
 
 const USAGE =
+  "coordination-kit harness doctor --app ID ... [--role ROLE ...]\n" +
   "coordination-kit harness doctor --game ID ... [--role ROLE ...]\n" +
   "coordination-kit harness doctor --role ROLE ...";
 
@@ -19,8 +21,11 @@ export const harnessDoctor: Handler = async (io, root, args) => {
   try {
     ({ values } = parseOptions(DOCTOR_OPTIONS, args));
     if (
-      (values.game === undefined && values.role === undefined) ||
-      [...(values.game ?? []), ...(values.role ?? [])].some((value) => value.trim() === "")
+      (values.app !== undefined && values.game !== undefined) ||
+      (values.app === undefined && values.game === undefined && values.role === undefined) ||
+      [...(values.app ?? values.game ?? []), ...(values.role ?? [])].some(
+        (value) => value.trim() === "",
+      )
     ) {
       throw new Error("scope required");
     }
@@ -31,6 +36,7 @@ export const harnessDoctor: Handler = async (io, root, args) => {
   try {
     const layout = loadLayout(root);
     const report = await diagnoseHarness(io.env, layout, readRegistry(layout), {
+      ...(values.app === undefined ? {} : { apps: values.app }),
       ...(values.game === undefined ? {} : { games: values.game }),
       ...(values.role === undefined ? {} : { roles: values.role }),
     });

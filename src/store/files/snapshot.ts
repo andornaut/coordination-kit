@@ -12,13 +12,13 @@ import {
   rmdirSync,
   unlinkSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 
 import { readRoleRoute } from "../../adapters/shared/route.ts";
 import { loadProjectConfig } from "../../core/config.ts";
 import { fsyncDirectory } from "../../core/durable.ts";
-import { gameLayout, type Layout, loadLayout, PROJECT_CONFIG_FILE } from "../../core/layout.ts";
+import { appLayout, type Layout, loadLayout, PROJECT_CONFIG_FILE } from "../../core/layout.ts";
 import { configuredStateRoot, stateRootConfigPath } from "../../core/stateRoot.ts";
 import { readRegistry } from "../../registry/store.ts";
 import { READ_ONLY_CLOCK, Store, STORE_FILE, storeRoot } from "../db.ts";
@@ -461,11 +461,11 @@ export function inventorySqliteSource(layout: Layout): SqliteSourceInventory {
       ...(["wake", "channel", "artifacts", "archive"] as const).map((path) =>
         state(path, "directory"),
       ),
-      ...Object.keys(layout.config.games)
+      ...Object.keys(layout.config.apps)
         .sort()
         .flatMap((game) => {
-          const prefix = `var/games/${game}/bus`;
-          const project = gameLayout(layout, game);
+          const project = appLayout(layout, game);
+          const prefix = relative(layout.root, project.busDir);
           return [
             validated({ ...entry("game", project.repo, PROJECT_CONFIG_FILE, "file"), game }, () =>
               loadProjectConfig(project.configFile),

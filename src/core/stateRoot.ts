@@ -122,7 +122,7 @@ export function stateRoot(layout: Layout): string {
   const target = canonical(configured);
   const sources = [
     layout.root,
-    ...Object.values(layout.config.games).map((game) => resolve(layout.root, game.path)),
+    ...Object.values(layout.config.apps).map((app) => resolve(layout.root, app.path)),
     ...Object.values(layout.config.kits).map((kit) => resolve(layout.root, kit.path)),
     ...registeredWorktrees(layout),
   ].map(canonical);

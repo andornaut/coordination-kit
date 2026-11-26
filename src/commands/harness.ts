@@ -3,7 +3,10 @@ import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../core/io.ts";
 import { loadLayout } from "../core/layout.ts";
 import { dumpsJson } from "../core/pyjson.ts";
 import { selectHarness } from "../registry/selection.ts";
-import { errorMessage, parseOptions, systemClock } from "./args.ts";
+import { readRegistry } from "../registry/store.ts";
+import { resolveCaller } from "../store/identity.ts";
+import { requirePermission } from "../store/permissions.ts";
+import { callerOf, errorMessage, parseOptions, systemClock } from "./args.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 export const harnessSelect: Handler = (io, root, args) => {
@@ -15,19 +18,27 @@ export const harnessSelect: Handler = (io, root, args) => {
     io.err(`coordination-kit: ${message}\n${commandUsage("harness select")}\n`);
     return EXIT_USAGE;
   }
-  const { "expected-revision": revision, game, harness, role } = values;
+  const { app, "expected-revision": revision, game, harness, role } = values;
   if (
     (harness !== "claude" && harness !== "codex" && harness !== "default") ||
     typeof revision !== "string" ||
     !/^(0|[1-9][0-9]*)$/.test(revision) ||
     !Number.isSafeInteger(Number(revision)) ||
-    (game === undefined && role === undefined)
+    (app !== undefined && game !== undefined) ||
+    (app === undefined && game === undefined && role === undefined)
   ) {
     io.err(`${commandUsage("harness select")}\n`);
     return EXIT_USAGE;
   }
   try {
-    const registry = selectHarness(systemClock, loadLayout(root), Number(revision), {
+    const layout = loadLayout(root);
+    if (layout.mode !== "legacy") {
+      const current = readRegistry(layout);
+      const actor = resolveCaller(current, io.env, callerOf(values));
+      requirePermission(layout, current, actor, "registry:manage");
+    }
+    const registry = selectHarness(systemClock, layout, Number(revision), {
+      ...(app === undefined ? {} : { apps: app }),
       ...(game === undefined ? {} : { games: game }),
       harness,
       ...(role === undefined ? {} : { roles: role }),

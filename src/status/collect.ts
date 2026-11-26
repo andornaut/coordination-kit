@@ -13,7 +13,7 @@ import {
   repositoryRoot,
 } from "../core/git.ts";
 import type { Io } from "../core/io.ts";
-import { gameLayout, type Layout, loadLayout } from "../core/layout.ts";
+import { appLayout, type Layout, loadLayout } from "../core/layout.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 import type { HoldView } from "../store/policyHolds.ts";
@@ -192,11 +192,11 @@ function real(path: string): string | null {
   }
 }
 
-/** The config path behind a role: its game's or kit's repository, or the coordinator for others. */
+/** The configured app or kit repository for the exact role, or the workspace root. */
 function configPath(layout: Layout, role: string): string {
-  const game = role.includes("/") ? role.split("/")[0]! : null;
-  if (game !== null && Object.hasOwn(layout.config.games, game)) {
-    return resolve(layout.root, layout.config.games[game]!.path);
+  const app = Object.values(layout.config.apps).find((entry) => entry.roles.includes(role));
+  if (app !== undefined) {
+    return resolve(layout.root, app.path);
   }
   if (Object.hasOwn(layout.config.kits, role)) {
     return resolve(layout.root, layout.config.kits[role]!.path);
@@ -211,7 +211,7 @@ export function repositories(
   registry: Registry,
 ): Repository[] {
   const known = new Map<string, { name: string; kind: RepositoryKind }>();
-  for (const [id, entry] of Object.entries(layout.config.games)) {
+  for (const [id, entry] of Object.entries(layout.config.apps)) {
     const path = resolve(layout.root, entry.path);
     known.set(real(path) ?? path, { kind: "game", name: id });
   }
@@ -221,7 +221,10 @@ export function repositories(
   }
   const coordinator = real(layout.root);
   if (coordinator !== null) {
-    known.set(coordinator, { kind: "coordinator", name: "game-coordinator" });
+    known.set(coordinator, {
+      kind: "coordinator",
+      name: layout.mode === "legacy" ? "game-coordinator" : basename(coordinator),
+    });
   }
   const found = new Map<string, Repository>();
   for (const role of Object.keys(registry.roles).sort()) {
@@ -555,7 +558,7 @@ function readRepository(
     const stored = storeWork.deployments.get(repository.name) ?? [];
     points = stored;
     try {
-      const bus = readBusDeployments(gameLayout(layout, repository.name).busDir);
+      const bus = readBusDeployments(appLayout(layout, repository.name).busDir);
       points = [...stored, ...bus.points];
       deployment = {
         channel,
@@ -674,7 +677,7 @@ function selectScope(
   if (scope === "all") {
     return { names: new Set(repos.map((repo) => repo.name)), role: null };
   }
-  if (Object.hasOwn(layout.config.games, scope) || Object.hasOwn(layout.config.kits, scope)) {
+  if (Object.hasOwn(layout.config.apps, scope) || Object.hasOwn(layout.config.kits, scope)) {
     return {
       names: new Set(repos.filter((repo) => repo.name === scope).map((r) => r.name)),
       role: null,
@@ -684,7 +687,7 @@ function selectScope(
     const repo = repos.find((candidate) => candidate.roles.includes(scope));
     return { names: new Set(repo === undefined ? [] : [repo.name]), role: scope };
   }
-  throw new StatusUsageError(`--scope names no game, kit or registered role: ${scope}`);
+  throw new StatusUsageError(`--scope names no app, kit or registered role: ${scope}`);
 }
 
 /** Collect, derive and filter the status of every selected repository's items. */

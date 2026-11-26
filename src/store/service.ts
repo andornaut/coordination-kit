@@ -3,7 +3,8 @@
 import { randomUUID } from "node:crypto";
 
 import { isCanonicalUuid } from "../core/ids.ts";
-import type { Layout } from "../core/layout.ts";
+import type { Layout, Permission } from "../core/layout.ts";
+import { isPermitted } from "../registry/permissions.ts";
 import { resolveRole } from "../registry/resolve.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
@@ -24,6 +25,7 @@ import {
   sendMessage,
 } from "./messages.ts";
 import { firstMessageWake, messageWake, unreadMessages } from "./messageWake.ts";
+import { requirePermission } from "./permissions.ts";
 import {
   type Actor,
   type MessageIntent,
@@ -70,6 +72,25 @@ function caller(
   options: CallerOptions,
 ): Actor & { readonly role: string } {
   return resolveCaller(registry(context), context.env, options);
+}
+
+function bodyViewer(context: StoreServiceContext, options: CallerOptions) {
+  const roles = registry(context);
+  const actor = resolveCaller(roles, context.env, options);
+  return {
+    viewer: actor.role,
+    readAll: isPermitted(context.layout, roles, actor, "messages:read-all"),
+  };
+}
+
+function requireStorePermission(
+  context: StoreServiceContext,
+  options: CallerOptions,
+  permission: Permission,
+): void {
+  if (context.layout.mode === "legacy") return;
+  const roles = registry(context);
+  requirePermission(context.layout, roles, resolveCaller(roles, context.env, options), permission);
 }
 
 function registered(roles: Registry, role: string, code: string): string {
@@ -256,7 +277,7 @@ export async function storeStatus(
   readonly firstWake: Omit<MessageWakeView, "nextAction"> | null;
   readonly wake: MessageWakeView;
 }> {
-  const viewer = bodyCaller === undefined ? undefined : caller(context, bodyCaller).role;
+  const bodyAccess = bodyCaller === undefined ? undefined : bodyViewer(context, bodyCaller);
   if (!MESSAGE_ID.test(id)) {
     throw new StoreError("invalid-id");
   }
@@ -266,7 +287,9 @@ export async function storeStatus(
   }
   try {
     const message =
-      viewer === undefined ? messageStatus(store, id) : messageWithBody(store, viewer, id);
+      bodyAccess === undefined
+        ? messageStatus(store, id)
+        : messageWithBody(store, bodyAccess.viewer, id, bodyAccess.readAll);
     return {
       firstWake: firstMessageWake(store, id, message.to),
       message,
@@ -280,7 +303,7 @@ export async function storeStatus(
 
 /**
  * Message events without bodies. With `includeBody` the caller is resolved through the registry
- * fence and sees the bodies of messages it sent or received, or every body as `game-coordinator`.
+ * fence. It sees its own exchanges, with workspace-wide visibility requiring an explicit grant.
  */
 export async function storeHistory(
   context: StoreServiceContext,
@@ -292,8 +315,8 @@ export async function storeHistory(
     readonly caller?: CallerOptions;
   },
 ): Promise<{ readonly schema: 1; readonly events: readonly HistoryEntry[] }> {
-  const viewer =
-    selection.includeBody === true ? caller(context, selection.caller ?? {}).role : undefined;
+  const bodyAccess =
+    selection.includeBody === true ? bodyViewer(context, selection.caller ?? {}) : undefined;
   return withStore(
     context,
     (store) => ({
@@ -301,7 +324,7 @@ export async function storeHistory(
         ...(selection.limit === undefined ? {} : { limit: selection.limit }),
         ...(selection.role === undefined ? {} : { role: selection.role }),
         ...(selection.since === undefined ? {} : { since: selection.since }),
-        ...(viewer === undefined ? {} : { viewer }),
+        ...bodyAccess,
       }),
       schema: 1 as const,
     }),
@@ -312,18 +335,21 @@ export async function storeHistory(
 export async function storeExport(
   context: StoreServiceContext,
   since: string,
+  options: CallerOptions = {},
 ): Promise<{ readonly schema: 1 } & ExportResult> {
+  requireStorePermission(context, options, "messages:read-all");
   return withStore(context, (store) => ({ ...exportSince(store, since), schema: 1 as const }), {
     createMissing: false,
   });
 }
 
-export async function storeRebuild(context: StoreServiceContext): Promise<{
+export async function storeRebuild(context: StoreServiceContext, options: CallerOptions = {}): Promise<{
   readonly schema: 1;
   readonly verified: true;
   readonly events: number;
   readonly head: { readonly seq: number; readonly hash: string };
 }> {
+  requireStorePermission(context, options, "store:maintain");
   return withStore(context, (store) => ({
     ...store.rebuild(),
     schema: 1 as const,

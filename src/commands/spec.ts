@@ -1,6 +1,7 @@
 // Every command's options: the one source for argument parsing and for the help text, so a flag a
 // command accepts always appears in `coordination-kit --help`.
 import { type CommandSpec, formSynopsis, usageText } from "../core/usage.ts";
+import { CALLER } from "./args.ts";
 import {
   COMPACTION_ACTIVATE_OPTIONS,
   COMPACTION_CANCEL_OPTIONS,
@@ -77,6 +78,7 @@ import {
 const BINARY = "coordination-kit";
 /** The placeholder each string option shows in help. */
 const VALUES: Readonly<Record<string, string>> = {
+  app: "ID",
   approval: "REF",
   at: "ISO_TIMESTAMP",
   body: "TEXT",
@@ -132,11 +134,12 @@ interface GroupedSpec extends CommandSpec {
   readonly group: keyof typeof GROUPS;
 }
 const SCOPE = {
+  app: { multiple: true, type: "string" },
   game: { multiple: true, type: "string" },
   role: { multiple: true, type: "string" },
 } as const;
 const READY = {
-  forms: [["game?", "role?"]],
+  forms: [["app?", "role?"], ["game", "role?"]],
   group: "harness",
   options: SCOPE,
   summary:
@@ -311,7 +314,7 @@ export const SPECS = {
     group: "msg",
     options: MSG_STATUS_OPTIONS,
     summary:
-      "read exact message and wake metadata, or include its body as sender, recipient or game-coordinator",
+      "read exact message and wake metadata, or include its body with message access",
   },
   "msg history": {
     forms: [
@@ -321,7 +324,7 @@ export const SPECS = {
     group: "msg",
     options: MSG_HISTORY_OPTIONS,
     summary:
-      "read message events in order; bodies only with --include-body, to their sender, recipient or game-coordinator",
+      "read message events in order; --include-body requires message access",
   },
   "store import": {
     forms: [["approval-ledger", "dry-run?", "native-id?", "worker?"]],
@@ -331,13 +334,13 @@ export const SPECS = {
     values: { "approval-ledger": "FILE" },
   },
   "store export": {
-    forms: [["since"]],
+    forms: [["since", "native-id?", "worker?"]],
     group: "store",
     options: STORE_EXPORT_OPTIONS,
     summary: "list sends, closes and retentions recorded after a time, for rollback re-recording",
   },
   "store rebuild": {
-    forms: [[]],
+    forms: [["native-id?", "worker?"]],
     group: "store",
     options: STORE_REBUILD_OPTIONS,
     summary: "verify the event hash chain and recreate every projection from the events",
@@ -472,20 +475,20 @@ export const SPECS = {
     group: "decisions",
     options: HOLD_SET_OPTIONS,
     summary: "set a hold owned by your role",
-    values: { scope: "work:WORK_ID|role|game:ID" },
+    values: { scope: "work:WORK_ID|role|app:ID" },
   },
   "hold policy-set": {
     forms: [["id", "scope", "reason", "approval", "native-id?"]],
     group: "decisions",
     options: POLICY_HOLD_SET_OPTIONS,
-    summary: "record an explicit user policy hold as game-coordinator",
-    values: { scope: "role:ROLE|game:GAME|work:REPOSITORY:WORK_ID" },
+    summary: "record an explicit user policy hold with policy authority",
+    values: { scope: "role:ROLE|app:ID|work:REPOSITORY:WORK_ID" },
   },
   "hold policy-release": {
     forms: [["id", "approval", "native-id?"]],
     group: "decisions",
     options: POLICY_HOLD_RELEASE_OPTIONS,
-    summary: "release an exact coordinator-issued user policy hold",
+    summary: "release an exact user policy hold with policy authority",
   },
   "hold release": {
     forms: [["id", "native-id?", "worker?"]],
@@ -516,7 +519,7 @@ export const SPECS = {
     forms: [["scope", "to", "id?", "native-id?", "worker?"]],
     group: "session",
     options: HANDOFF_OPEN_OPTIONS,
-    summary: "open a handoff for roles or all (game-coordinator only)",
+    summary: "open a handoff for roles or all with workspace handoff authority",
     values: { id: "ID", scope: "ROLE|all", to: "claude|codex" },
   },
   "handoff ready": {
@@ -529,7 +532,7 @@ export const SPECS = {
     forms: [["STATE", "id", "native-id?", "worker?"]],
     group: "session",
     options: HANDOFF_STATE_OPTIONS,
-    summary: "move a handoff to prepared, sent, completed or cancelled (game-coordinator only)",
+    summary: "move a handoff to prepared, sent, completed or cancelled with handoff authority",
     values: { id: "ID" },
   },
   "handoff active": {
@@ -554,24 +557,26 @@ export const SPECS = {
   "claude ready": READY,
   "codex ready": READY,
   "harness doctor": {
-    forms: [["game", "role?"], ["role"]],
+    forms: [["app", "role?"], ["game", "role?"], ["role"]],
     group: "harness",
     options: DOCTOR_OPTIONS,
     summary: "diagnose explicitly selected roles without sending or activating",
   },
   "harness ready": {
-    forms: [["game?", "role?"]],
+    forms: [["app?", "role?"], ["game", "role?"]],
     group: "harness",
     options: SCOPE,
     summary: "probe each selected role's effective harness without sending or activating",
   },
   "harness select": {
     forms: [
-      ["harness", "expected-revision", "game", "role?"],
-      ["harness", "expected-revision", "role"],
+      ["harness", "expected-revision", "app", "role?", "native-id?"],
+      ["harness", "expected-revision", "game", "role?", "native-id?"],
+      ["harness", "expected-revision", "role", "native-id?"],
     ],
     group: "harness",
     options: {
+      "native-id": CALLER["native-id"],
       ...SCOPE,
       "expected-revision": { type: "string" },
       harness: { type: "string" },
@@ -579,9 +584,10 @@ export const SPECS = {
     summary: "atomically select harness overrides for an explicit scope without activating roles",
   },
   "claude channel": {
-    forms: [["game?", "conversation?", "poll-seconds?"]],
+    forms: [["app?", "conversation?", "poll-seconds?"], ["game", "conversation?", "poll-seconds?"]],
     group: "harness",
     options: {
+      app: SCOPE.app,
       conversation: { type: "string" },
       game: { multiple: true, type: "string" },
       "poll-seconds": { type: "string" },
@@ -590,23 +596,23 @@ export const SPECS = {
       "the stdio server the Claude recipient session starts; emits one notification per wake",
   },
   "review deliver": {
-    forms: [["game", "slot"]],
+    forms: [["app", "slot"], ["game", "slot"]],
     group: "review",
     options: REVIEW_DELIVER_OPTIONS,
     summary: "deliver the scheduled review for one slot once; prints one typed JSON result line",
   },
   "review show": {
-    forms: [["game?", "slot?"]],
+    forms: [["app?", "slot?"], ["game", "slot?"]],
     group: "review",
     options: REVIEW_SHOW_OPTIONS,
     summary: "print a stored review brief's full record: the slot's, else the latest",
   },
   "events ingest": {
-    forms: [["game"]],
+    forms: [["app"], ["game"]],
     group: "review",
     options: EVENTS_INGEST_OPTIONS,
     summary:
-      "ingest the game's runner event log into the store from its cursor; prints one typed JSON result line",
+      "ingest the app's runner event log from its cursor; prints one typed JSON result line",
   },
   status: {
     forms: [["scope?", "since?", "state?", "audit?", "verify-since?", "format?"]],

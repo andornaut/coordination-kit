@@ -92,9 +92,9 @@ export const STORE_IMPORT_OPTIONS = {
   "dry-run": { type: "boolean" },
 } as const;
 
-export const STORE_EXPORT_OPTIONS = { since: { type: "string" } } as const;
+export const STORE_EXPORT_OPTIONS = { ...CALLER, since: { type: "string" } } as const;
 
-export const STORE_REBUILD_OPTIONS = {} as const;
+export const STORE_REBUILD_OPTIONS = CALLER;
 export const STORE_COMPACTION_PLAN_OPTIONS = {} as const;
 
 export const STORE_RETIRE_OPTIONS = {
@@ -276,13 +276,13 @@ export const storeImportCommand: Handler = storeVerb(
 export const storeExportCommand: Handler = storeVerb(
   "store export",
   STORE_EXPORT_OPTIONS,
-  (context, values) => storeExport(context, instant(required(values, "since"))),
+  (context, values) => storeExport(context, instant(required(values, "since")), callerOf(values)),
 );
 
 export const storeRebuildCommand: Handler = storeVerb(
   "store rebuild",
   STORE_REBUILD_OPTIONS,
-  (context) => storeRebuild(context),
+  (context, values) => storeRebuild(context, callerOf(values)),
 );
 
 export const storeCompactionPlanCommand: Handler = storeVerb(

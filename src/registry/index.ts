@@ -28,6 +28,7 @@ export {
 } from "../core/layout.ts";
 export { LockBusy, LockError } from "../core/lock.ts";
 export { ValidationError } from "../core/validate.ts";
+export { hasPermission, isPermitted } from "./permissions.ts";
 export { resolveConversation, resolveHarness, resolveRole, UnknownRole } from "./resolve.ts";
 export {
   type Activation,

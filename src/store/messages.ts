@@ -334,11 +334,16 @@ export function messageStatus(
 }
 
 /** Read one exact original only when the caller's role may see its body. */
-export function messageWithBody(store: Pick<Store, "db">, viewer: string, id: string): MessageView {
+export function messageWithBody(
+  store: Pick<Store, "db">,
+  viewer: string,
+  id: string,
+  readAll = false,
+): MessageView {
   ensure(MESSAGE_ID.test(id), "invalid-id");
   const row = messageRow(store, id);
   ensure(row !== undefined, "missing");
-  ensure(bodyVisibleTo(viewer, row.from_role, row.to_role), "message-not-visible");
+  ensure(bodyVisibleTo(viewer, row.from_role, row.to_role, readAll), "message-not-visible");
   return rowView(store, row, true);
 }
 
@@ -374,25 +379,22 @@ export interface HistoryEntry {
   readonly detail: JsonObject;
 }
 
-/** The role that may read every message body in history, beside each sender and recipient. */
-const BODY_READER = "game-coordinator";
-
-function bodyVisibleTo(viewer: string | null, from: unknown, to: unknown): boolean {
-  return viewer !== null && (viewer === BODY_READER || viewer === from || viewer === to);
+function bodyVisibleTo(viewer: string | null, from: unknown, to: unknown, readAll: boolean): boolean {
+  return viewer !== null && (readAll || viewer === from || viewer === to);
 }
 
 /**
  * Senders and recipients appear by role. A body appears only to a `viewer` that is the message's
- * sender, its recipient or `game-coordinator`; everyone else, and every read without a viewer,
- * gets metadata.
+ * sender, its recipient or has workspace permission to read all bodies.
  */
 function historyDetail(
   event: Pick<StoredEvent, "kind" | "payload">,
   viewer: string | null,
+  readAll: boolean,
 ): JsonObject {
   const { payload } = event;
   if (event.kind === "msg.sent" || event.kind === "msg.imported") {
-    if (bodyVisibleTo(viewer, payload.from, payload.to)) {
+    if (bodyVisibleTo(viewer, payload.from, payload.to, readAll)) {
       return payload.body === undefined ? { ...payload, bodyExpired: true } : payload;
     }
     const rest: Record<string, Json> = { ...payload };
@@ -414,6 +416,7 @@ export function messageHistory(
     readonly since?: string;
     readonly limit?: number;
     readonly viewer?: string;
+    readonly readAll?: boolean;
   } = {},
 ): HistoryEntry[] {
   return historyQuery(
@@ -423,6 +426,7 @@ export function messageHistory(
     options.since ?? null,
     options.limit ?? 1000,
     options.viewer ?? null,
+    options.readAll ?? false,
   );
 }
 
@@ -433,6 +437,7 @@ function historyQuery(
   since: string | null,
   limit: number,
   viewer: string | null,
+  readAll: boolean,
 ): HistoryEntry[] {
   const rows = store.db
     .prepare(
@@ -454,6 +459,7 @@ function historyQuery(
     detail: historyDetail(
       { kind: row.kind as string, payload: parse<JsonObject>(row.payload) },
       viewer,
+      readAll,
     ),
     kind: row.kind as string,
     seq: Number(row.seq),

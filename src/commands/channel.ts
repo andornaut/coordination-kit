@@ -12,7 +12,7 @@ import { wakeFilePath, WakeWatcher } from "../adapters/claude/wakeFile.ts";
 import { gameRecipients } from "../core/config.ts";
 import { isCanonicalUuid } from "../core/ids.ts";
 import { EXIT_INVALID, EXIT_USAGE, type Io } from "../core/io.ts";
-import { gameLayout, type Layout, loadLayout } from "../core/layout.ts";
+import { appLayout, gameLayout, type Layout, loadLayout } from "../core/layout.ts";
 import { cliIdentity } from "../core/version.ts";
 import { claudeProjectsDir, clearSuccessor } from "../registry/claudeLineage.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
@@ -31,7 +31,7 @@ function recipientBinding(
   games: string[] | undefined,
 ): { conversation: string | null; role: string } {
   const layout = loadLayout(root);
-  const recipients = gameRecipients(layout, games ?? Object.keys(layout.config.games));
+  const recipients = gameRecipients(layout, games ?? Object.keys(layout.config.apps));
   if (recipients.length !== 1) {
     throw new Error(
       `the selected games name ${recipients.length === 0 ? "no" : "different"} ` +
@@ -162,16 +162,21 @@ export async function channel(
     if (values.conversation !== undefined && !isCanonicalUuid(values.conversation)) {
       throw new ChannelUsage("--conversation must be a canonical session UUID");
     }
-    if (values.game !== undefined) {
-      if (values.game.length !== new Set(values.game).size) {
-        throw new ChannelUsage("each --game may appear once");
+    if (values.app !== undefined && values.game !== undefined) {
+      throw new ChannelUsage("use --app or --game to select apps");
+    }
+    const apps = values.app ?? values.game;
+    if (apps !== undefined) {
+      if (apps.length !== new Set(apps).size) {
+        throw new ChannelUsage(`each --${values.app === undefined ? "game" : "app"} may appear once`);
       }
       const layout = loadLayout(root);
-      values.game.forEach((game) => gameLayout(layout, game));
+      const selectedLayout = values.app === undefined ? gameLayout : appLayout;
+      apps.forEach((app) => selectedLayout(layout, app));
     }
     conversation = values.conversation;
     if (conversation === undefined) {
-      const recipient = recipientBinding(root, values.game);
+      const recipient = recipientBinding(root, apps);
       role = recipient.role;
       proven = recipient.conversation;
     }
