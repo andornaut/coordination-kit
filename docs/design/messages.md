@@ -11,6 +11,8 @@ while preserving Codex native input checks and queue deduplication.
 Native or channel acceptance records a wake result. The recipient's inbox pull records message
 delivery. The recipient records handling or an explicit deferral with its next boundary and
 available evidence. Exact status shows the first associated wake and the latest one.
+The recipient collects an [explicit user decision](../store.md#unverified-originals)
+before recording handling of an unverified original.
 
 Reference: [messages](../messages.md), [store wakes](../store.md#wakes),
 [commands](../commands.md#command-semantics).

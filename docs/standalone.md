@@ -11,11 +11,9 @@ task commands and can publish or deploy landed revisions through their existing 
 
 ## Install and initialize
 
-Download the pinned release archive, `SOURCE_COMMIT` and `SHA256SUMS` from the
-[releases page][releases].
-Verify the archive with `sha256sum -c SHA256SUMS`, then extract it outside the checkout
-and use its `package/dist/cli.js`. Node 24.21.0 or later, Git and `flock` are required.
-This installation works for Go, Ansible and other repositories without an npm dependency.
+Use the [verified release archive](getting-started.md#get-the-cli) and the
+[standalone first run](getting-started.md#set-up-a-standalone-project). The archive also
+works for Go, Ansible and other repositories without an npm dependency.
 
 Run these commands from the repository's primary checkout. From a task worktree, add
 `--root /absolute/path/to/primary-checkout` to every Coordination Kit invocation. In the
@@ -31,8 +29,9 @@ ck session start
 ```
 
 Use the actual conversation IDs from the harness. For Claude, pass `--harness claude` and
-the Claude session ID. A registration may name an existing linked worktree with
-`--worktree PATH`. Run `session start` in each registered session. The first configured role is
+the Claude session ID. `--worktree PATH` names an existing linked worktree of the same
+Git repository by its path relative to the primary checkout, for example
+`--worktree ../implementation`. Run `session start` in each registered session. The first configured role is
 the maintainer that records the user's explicit decisions. These commands assume the operator
 trusts the people and processes with write access to the local coordination state. Normal Git
 and forge permissions still apply.
@@ -157,5 +156,3 @@ When the project uses its own CI or local checks, the owner runs the required ch
 their exact-commit evidence with `task verify ID --evidence REF`. A task only reaches `landed`
 after the target and required evidence are present. A GitHub or GitLab release, host rollout or
 game departure remains a separate action under that project's policy.
-
-[releases]: https://github.com/andornaut/coordination-kit/releases

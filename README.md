@@ -1,5 +1,8 @@
 # coordination-kit
 
+[Getting started](docs/getting-started.md) walks through a first task in one repository or
+a first inbox check in a shared app workspace.
+
 Shared coordination for application, game and kit roles: the role registry, the coordination store
 with its message lifecycle, Claude and Codex wakes, work records, questions, holds and decisions,
 the scheduled review brief, plus checks for a repository's work files. The workspace owner manages
@@ -7,35 +10,17 @@ the scheduled review brief, plus checks for a repository's work files. The works
 this kit to compose and deliver it.
 
 The package is `@andornaut/coordination-kit`. Its operator tool is the `coordination-kit` CLI,
-bundled into `dist/cli.js`. The bundle imports only `node:` builtins. Its child processes are
-`flock`, `git`, `claude agents --json` and, for `store retire`, `tar`.
-
-[Start an app workspace](docs/configuration.md#start-an-app-workspace) or
-[bootstrap a legacy game coordinator](docs/configuration.md#start-a-fresh-coordinator) with SQLite and
-use the [upgrade guide](docs/upgrading.md#filesystem-authority-migration) to qualify and activate
-the file store. The [filesystem layout](docs/store.md#filesystem-layout) describes journal and
-role records. [Git boundaries](docs/configuration.md#state) cover tracked
-configuration and ignored runtime state.
-
-For individual repositories, [initialize a standalone project](docs/standalone.md) to track
-approved tasks and exact-revision chat or pull-request reviews without a separate coordinator.
-Optional forge integration uses [`gh` or `glab` with existing authentication](docs/standalone.md#review-and-merge).
+bundled into `dist/cli.js`. The bundle imports only `node:` builtins. It uses `flock` and Git,
+with `claude agents --json` for Claude readiness, `gh` or `glab` for optional forge workflows
+and `tar` for store retirement.
 
 ## Install and pin
 
-Pin the checked release asset as a devDependency in the primary workspace checkout and commit the
-lockfile. The CLI requires Node 24.21.0 or newer, and all roles use that installation. This
-example is a legacy game pin. App mode requires a checked release that supports `apps`.
-
-```json
-"devDependencies": {
-  "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v7.3.2/coordination-kit-7.3.2.tgz"
-}
-```
-
-Use `npm ci` to install the committed pin. Delivery Kit's runner calls the coordinator-installed
-CLI for reviews and event ingest. Its bundled build libraries have a separate compatibility range.
-See the [upgrade guide](docs/upgrading.md#coordination-kit-73).
+Verify and extract the [release archive](docs/getting-started.md#get-the-cli) for direct use, or
+[pin it as a dev dependency](docs/getting-started.md#set-up-an-app-workspace) in the primary
+workspace checkout. The CLI requires Node 24.21.0 or later. Delivery Kit's runner uses this
+workspace installation for reviews and event ingest. Its bundled build libraries have a
+separate compatibility range. See [7.8 upgrade notes](docs/upgrading.md#coordination-kit-78).
 
 ## Usage
 
@@ -48,25 +33,26 @@ See [runner examples and compatibility](docs/store.md#runner-events). The `work`
 the working directory. They take the coordinator root only from `COORDINATION_KIT_ROOT` or
 `DELIVERY_KIT_ROOT`.
 
-| Group      | Verbs                                                                                                  | Purpose                                                                                                  |
-| ---------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `msg`      | `send`, `done`, `retain`, `status`, `history`                                                          | Store messages: send with one guarded wake, close or retain in one write, read.                          |
-| `inbox`    | (none)                                                                                                 | Read your store inbox and record it delivered.                                                           |
-| `store`    | `import`, `export`, `rebuild`, `retire`, `migration-status`, `migration-prepare`, `migration-activate` | Import, export, rebuild, retire, and qualify or activate filesystem authority.                           |
-| `request`  | `close`                                                                                                | Close an imported ledger request you own.                                                                |
-| `question` | `open`, `answer`, `project`, `cancel`, `list`                                                          | Pending prompts, durable answers and recoverable work-file writeback.                                    |
-| `hold`     | `set`, `release`, `list`                                                                               | Holds owned by the role that set them; only that role releases them.                                     |
-| `session`  | `start`                                                                                                | Record a role's startup or resume and print its binding, checkpoint and open counts.                     |
-| `handoff`  | `open`, `ready`, `state`, `active`, `show`                                                             | The store record of a harness handoff; see [sessions and handoffs](docs/store.md#sessions-and-handoffs). |
-| `decision` | `list`                                                                                                 | Read the decision records.                                                                               |
-| `harness`  | `ready`, `select`, `doctor`                                                                            | Readiness by effective harness, scoped harness selection and diagnosis.                                  |
-| `claude`   | `ready`, `channel`                                                                                     | The Claude readiness probe and the stdio MCP channel server.                                             |
-| `codex`    | `ready`                                                                                                | The Codex readiness probe.                                                                               |
-| `review`   | `deliver`, `show`                                                                                      | The runner seam: one slot's scheduled review, as one typed JSON line; show a stored brief.               |
-| `events`   | `ingest`                                                                                               | The runner seam: one event log ingest, as one typed JSON line.                                           |
-| `status`   | (none)                                                                                                 | Read-only status of every registered repository's work items, as JSON or a Markdown digest.              |
-| `work`     | `check`, `report`, `start`, `evidence`, `block`, `unblock`, `ready`, `finish`, `show`, `history`       | Validate a repository's work files and report them; record each item's live progress in the store.       |
-| `graph`    | (none), `why`                                                                                          | The live decision graph and supersedes chains.                                                           |
+| Group                     | Verbs                                                                                                  | Purpose                                                                                                  |
+| ------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `init`, `project`, `task` | See [standalone project commands](docs/commands.md#command-forms)                                      | Set up one repository and track work from proposal to landing.                                           |
+| `msg`                     | `send`, `decide`, `done`, `retain`, `status`, `history`                                                | Deliver messages and record their handling or user decisions.                                            |
+| `inbox`                   | (none)                                                                                                 | Read your store inbox and record it delivered.                                                           |
+| `store`                   | `import`, `export`, `rebuild`, `retire`, `migration-status`, `migration-prepare`, `migration-activate` | Import, export, rebuild, retire, and qualify or activate filesystem authority.                           |
+| `request`                 | `close`                                                                                                | Close an imported ledger request you own.                                                                |
+| `question`                | `open`, `answer`, `project`, `cancel`, `list`                                                          | Pending prompts, durable answers and recoverable work-file writeback.                                    |
+| `hold`                    | `set`, `release`, `list`                                                                               | Holds owned by the role that set them; only that role releases them.                                     |
+| `session`                 | `start`                                                                                                | Record a role's startup or resume and print its binding, checkpoint and open counts.                     |
+| `handoff`                 | `open`, `ready`, `state`, `active`, `show`                                                             | The store record of a harness handoff; see [sessions and handoffs](docs/store.md#sessions-and-handoffs). |
+| `decision`                | `list`                                                                                                 | Read the decision records.                                                                               |
+| `harness`                 | `ready`, `select`, `doctor`                                                                            | Readiness by effective harness, scoped harness selection and diagnosis.                                  |
+| `claude`                  | `ready`, `channel`                                                                                     | The Claude readiness probe and the stdio MCP channel server.                                             |
+| `codex`                   | `ready`                                                                                                | The Codex readiness probe.                                                                               |
+| `review`                  | `deliver`, `show`                                                                                      | The runner seam: one slot's scheduled review, as one typed JSON line; show a stored brief.               |
+| `events`                  | `ingest`                                                                                               | The runner seam: one event log ingest, as one typed JSON line.                                           |
+| `status`                  | (none)                                                                                                 | Read-only status of every registered repository's work items, as JSON or a Markdown digest.              |
+| `work`                    | `check`, `report`, `start`, `evidence`, `block`, `unblock`, `ready`, `finish`, `show`, `history`       | Validate a repository's work files and report them; record each item's live progress in the store.       |
+| `graph`                   | (none), `why`                                                                                          | The live decision graph and supersedes chains.                                                           |
 
 `coordination-kit --help` lists every command form; it is generated from each command's parser
 options. Per-command semantics are in [docs/commands.md](docs/commands.md).

@@ -526,24 +526,26 @@ opened by the updated CLI. Use that CLI for a rebuild after recording an answer 
 
 ### Holds
 
-`hold set --id H --scope work:W|role|game:G --reason R` records an active hold owned by the
+`hold set --id H --scope work:W|role|app:A --reason R` records an active hold owned by the
 caller; `role` scopes it to the owner itself. Repeating it with the same owner, scope and reason
 while active is a no-op; any other reuse of the ID, including after release, is `id-conflict`.
 `hold release --id H` releases the caller's own hold, including an imported
 `approval-ledger:<id>` hold it owns; a repeated release is a no-op. Holds also gate `work start`
-([hold seam](#hold-seam)).
+([hold seam](#hold-seam)). `game:G` remains a supported scope.
 
 ### User policy holds
 
-Game-coordinator uses `hold policy-set --id H --scope S --reason R --approval REF` to record an
-explicit user instruction. Only its active registered conversation may issue or release these
-holds. `REF` cites the explicit user instruction for the action. `H` is a distinct `policy-` ID.
+Use `hold policy-set --id H --scope S --reason R --approval REF` as an active
+`policy:manage` operator to record an explicit user instruction. An app grant covers its
+app and work scopes. A role scope requires a workspace grant. In legacy mode, the active
+registered game-coordinator holds this permission. `REF` cites the explicit user instruction
+for the action. `H` is a distinct `policy-` ID.
 Set appends `hold.policy-set` with the ID, issuer, scope, reason and approval reference.
 
 | Scope                     | Work starts covered                 | Wakes covered        |
 | ------------------------- | ----------------------------------- | -------------------- |
 | `role:ROLE`               | Items owned by the registered role  | The registered role  |
-| `game:GAME`               | Items in the configured game        | Its registered roles |
+| `app:APP` or `game:GAME`  | Items in the configured app         | Its registered roles |
 | `work:REPOSITORY:WORK_ID` | That exact repository and work item | None                 |
 
 `hold policy-release --id H --approval REF` appends `hold.policy-released` for the exact policy

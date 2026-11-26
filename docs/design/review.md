@@ -1,13 +1,13 @@
 # Review
 
-`var/route.json` names the scheduled review's host game and its target roles. When the host
-game's runner reaches a `config.json` `wakeMinutes` slot, this kit composes the review and sends
-it to that game's `reports.recipient`. Each game's events go to its own `reports.recipient`. A
+`var/route.json` names the scheduled review's host app and its target roles. When the host
+app's runner reaches a `config.json` `wakeMinutes` slot, this kit composes the review and records
+it for that app's `reports.recipient`. Each app's event messages go to its own `reports.recipient`. A
 held route, or no route, delivers no scheduled review.
 
-The Claude adapter spools briefs and events for `claude channel` while the recipient session is
-listed as interactive. The Codex adapter steers turns through the control socket. Inbox snapshots
-and acknowledgements reconcile exact unchanged originals. Unavailable native capabilities stay
+Review briefs and event messages live in the coordination store. The Claude channel watches a
+wake file. Codex receives a guarded notice through the control socket. Recipients collect and
+record handling of exact originals in the store. Unavailable native capabilities stay
 explicitly unknown and are never reported as an empty queue or as clearance.
 
 Reference: [review](../review.md), [commands](../commands.md#command-semantics).

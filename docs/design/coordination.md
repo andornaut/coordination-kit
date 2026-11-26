@@ -7,12 +7,13 @@ resource sampling, the pin guard, status and source and gate identity.
 
 The dependency runs one way: delivery-kit imports this kit and this kit never imports
 delivery-kit. The runner decides when a scheduled review slot is due and calls
-`deliverScheduledReview`; the brief composition, inventory and delivery happen here. Events are
-produced by the runner through `recordEvent`, with its own commit tracking under the outbox lock,
-and delivered here by `flushEvents`. The utilities both kits need (durable files, locks, the
+`review deliver` on the workspace-installed CLI. The kit composes and records the brief
+and attempts delivery. The runner writes its events and calls `events ingest` to record
+them in the store. The utilities both kits need (durable files, locks, the
 layout, validation, `delivery-kit.json` loading and the command contract) are exported once from
 `build/shared`, and the API bundles share module instances so locks and error classes are the
-same across subpaths. Every on-disk format stays byte-compatible with delivery-kit 4.7.0.
+same across subpaths. The [runner event seam](../store.md#runner-events) documents accepted
+event spellings and the persisted cursor.
 
 `work check` and `work report` apply the work-file convention to any repository's docs and join
 its milestones with live protocol state. `status` reads every registered repository through local

@@ -1,5 +1,25 @@
 # Upgrading
 
+## Coordination Kit 7.8
+
+7.8.0 reads both legacy `games` configurations and schema-1 `apps` workspaces. To adopt
+app mode without moving existing bus, review or registry state, use the
+[in-place migration](configuration.md#migrate-a-legacy-coordinator-in-place).
+
+Qualify the exact coordinator CLI pin before adopting a runner that writes `appId` in
+schema-1 events. The 7.8 CLI reads both event spellings. `--game` keeps the legacy
+response field and `--app` echoes `appId`. Check the runner's CLI range separately from
+its bundled library pin. Compare the installed `--version --json` digest with the
+approved release and verify the next scheduled review using the workspace's existing controls.
+
+In app mode, runners and privileged operators need
+[explicit grants](store.md#app-mode-permissions). A recipient can still collect a message
+from an unbound sender. An [unverified original](store.md#unverified-originals) needs
+an exact user decision before the recipient records handling.
+
+Direct `build/store` callers of `setPolicyHold` and `releasePolicyHold` pass
+`PolicyHoldAuthority` (the current layout and registry) between the store and the actor.
+
 ## Coordination Kit 7.3
 
 Update the exact release pin and lockfile in the primary coordinator checkout. Delivery Kit
@@ -327,7 +347,7 @@ briefs, `events flush` and the event outbox.
   `events ingest`, which stores runner events and COMPLETE as messages from `delivery-kit`
   ([runner events](store.md#runner-events)). 6.0 runners keep `events flush`. Install 2.0 at the
   coordinator root before any 6.1 runner starts; 6.1 requires `>=2.0.0 <3.0.0`.
-- Store mode: the [store cutover fence](store.md#store-mode) selects it. Then `review deliver`
+- Store mode: the [2.0 store cutover fence](https://github.com/andornaut/coordination-kit/blob/v2.0.0/docs/store.md#store-mode) selects it. Then `review deliver`
   stores a one-page brief per (game, slot) ([stored brief](review.md#stored-brief)), review
   health goes to the store, and legacy message writes are refused with `store-cutover`.
 - Doctor: Claude rows report `channel_command` (the configured channel command against the stable
@@ -338,8 +358,8 @@ briefs, `events flush` and the event outbox.
   before the cutover; an `npx` command needs one relaunch onto it.
 - Library: `@andornaut/coordination-kit/build/store` is a new subpath, and `build/review` adds the
   stored brief; the others are unchanged.
-- Cutover: follow the [runbook](store.md#runbook), in one window from :35 to :55 after a review.
-- Rollback: [store rollback](store.md#rollback). Restoring the previous fence returns this kit to
+- Cutover: follow the [2.0 runbook](https://github.com/andornaut/coordination-kit/blob/v2.0.0/docs/store.md#runbook), in one window from :35 to :55 after a review.
+- Rollback: [2.0 store rollback](https://github.com/andornaut/coordination-kit/blob/v2.0.0/docs/store.md#rollback). Restoring the previous fence returns this kit to
   legacy mode, and restoring the 1.3 pins makes a 1.3 CLI work again; `coordination.db` stays.
 
 ## From 1.1

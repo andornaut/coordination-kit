@@ -1,9 +1,9 @@
 # Work items
 
-Each approved task is one file, `docs/work/<id>.md`. It records scope and milestones; live
+Each tracked request is one file, `docs/work/<id>.md`. It records scope and milestones. Live
 progress (start, blocks, stage evidence and finish) is recorded in the coordination store with the
-`work` verbs. The
-[design index](../design/README.md) lists the work items of each area.
+`work` verbs. The [design index](../design/README.md) links each area. Its work table is
+either in the design summary or at `docs/work/index/<area>.md`.
 
 | Front matter | Content                                                                                                                   |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------- |

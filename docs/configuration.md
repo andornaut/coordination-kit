@@ -67,64 +67,29 @@ This kit uses only `reports`:
 
 ## Start an app workspace
 
-1. In the primary workspace checkout, commit `config.json` as below, the compatible checked
-   Coordination Kit pin and its lockfile, and `.gitignore` rules for `/var/` and `/node_modules/`. Install with
-   `npm ci`. In the app repository, commit `delivery-kit.json` if you plan to run reviews or
-   ingest runner events. In its `reports` section use the exact recipient key `operator`.
-2. Establish the actual Codex session from the app's worktree. Run the registry seed command
-   below from the primary workspace checkout using the verified native project and conversation IDs.
-3. In that session, use the workspace's installed CLI with the absolute workspace root and
-   run `session start` as in the [coordinator startup command](#start-a-fresh-coordinator).
-   Start with SQLite. Use the [filesystem migration guide](upgrading.md#filesystem-authority-migration)
-   to qualify and activate filesystem authority.
+Follow [Getting started](getting-started.md#set-up-an-app-workspace) to install the
+published CLI, create a registry and collect your first message. The example works
+with a single app and no delivery runner.
+
+For scheduled delivery and reviews, commit a `delivery-kit.json` in each participating
+app. Use the exact configured recipient key in `reports.recipient`, set `wakeMinutes`
+in workspace configuration, and add the [local review route](review.md#review-route).
+Grant the active runner `review:deliver` and `events:ingest` for the selected app.
+For the example app, the grants in `permissions` could be:
 
 ```json
 {
-  "schema": 1,
-  "timezone": "UTC",
-  "wakeMinutes": [],
-  "apps": {
-    "dashboard": { "name": "Dashboard", "path": "../dashboard", "roles": ["operator"] }
-  },
-  "kits": {},
-  "sharedRoles": [],
-  "permissions": {
-    "operator": {
-      "workspace": ["store:maintain"],
-      "apps": { "dashboard": ["review:deliver", "events:ingest", "delivery:operate"] }
-    }
+  "operator": {
+    "workspace": ["store:maintain"],
+    "apps": { "dashboard": ["review:deliver", "events:ingest", "delivery:operate"] }
   }
 }
 ```
 
-Set `native_project_id` and `conversation_id` to the verified IDs before seeding the registry.
-
-```sh
-node --input-type=module - "${native_project_id:?}" "${conversation_id:?}" <<'JS'
-import { createRegistry, loadLayout } from "@andornaut/coordination-kit/build/registry";
-
-const [, , nativeProjectId, conversationId] = process.argv;
-const registry = createRegistry(() => new Date(), loadLayout(process.cwd()), {
-  schema: 1,
-  harness: "codex",
-  host: { nativeProjectId, root: "." },
-  roles: {
-    operator: {
-      ownership: "active",
-      worktree: "../dashboard",
-      conversations: { codex: conversationId },
-    },
-  },
-  operations: { dashboard: { busOwner: "operator" } },
-  transfers: [],
-});
-console.log(JSON.stringify({ revision: registry.revision }));
-JS
-```
-
-The workspace owner provisions the active runner binding and review route before enabling a
-scheduled runner. The example leaves scheduled reviews disabled with `wakeMinutes: []`.
-See the [review route](review.md#review-route) and [runner commands](store.md#runner-events).
+Grant `store:maintain` to the workspace maintainer for
+[filesystem authority migration](upgrading.md#filesystem-authority-migration).
+Grant `delivery:operate` only to an operator authorized for manual delivery. See
+[app-mode permissions](store.md#app-mode-permissions) for scope and identity checks.
 
 ### Migrate a legacy coordinator in place
 

@@ -2,20 +2,20 @@
 
 The shared role registry `var/registry.json`, scoped harness selection, send-time conversation resolution, the readiness probe and the scoped harness doctor.
 
-`var/registry.json` (schema 1) is shared by coordination-kit, delivery-kit and the game-sessions skills. It records
+`var/registry.json` (schema 1) is the local app or legacy workspace registry. It records
 ownership and the conversation ID of each role per harness. It never proves activation on its
 own: `transfers` carries the hold, acceptance and activation markers.
 
-| Field                             | Content                                                                                                                                                                                               |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema`, `revision`, `updatedAt` | `1`, a non-negative integer incremented on every write, and a UTC timestamp.                                                                                                                          |
-| `harness`                         | `claude` or `codex`: the default harness for roles without an override.                                                                                                                               |
-| `host`                            | `nativeProjectId` and `root` (relative to game-coordinator).                                                                                                                                          |
-| `roles.<key>`                     | `ownership`, `worktree` (relative to game-coordinator), `conversations` (`claude` and `codex`, each an ID or null), and optional `harness`, `branch`, `phase`, `activation` (`marker`, `checkpoint`). |
-| `operations.<game>`               | `busOwner` (a role key), optional `activation.marker` and `lastAdoption` (`at`, `version`, `cliSha256`, optional `integrity` and `evidenceRef: "protocol-artifact:<audit hash>"`).                    |
-| `transfers[]`                     | `marker`, `from`, `to`, `phase` (`source-held`, `accepted` or `active-confirmed`), `roles` and `checkpoint`.                                                                                          |
+| Field                             | Content                                                                                                                                                                                            |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema`, `revision`, `updatedAt` | `1`, a non-negative integer incremented on every write, and a UTC timestamp.                                                                                                                       |
+| `harness`                         | `claude` or `codex`: the default harness for roles without an override.                                                                                                                            |
+| `host`                            | `nativeProjectId` and `root` (relative to the workspace).                                                                                                                                          |
+| `roles.<key>`                     | `ownership`, `worktree` (relative to the workspace), `conversations` (`claude` and `codex`, each an ID or null), and optional `harness`, `branch`, `phase`, `activation` (`marker`, `checkpoint`). |
+| `operations.<id>`                 | `busOwner` (a role key), optional `activation.marker` and `lastAdoption` (`at`, `version`, `cliSha256`, optional `integrity` and `evidenceRef: "protocol-artifact:<audit hash>"`).                 |
+| `transfers[]`                     | `marker`, `from`, `to`, `phase` (`source-held`, `accepted` or `active-confirmed`), `roles` and `checkpoint`.                                                                                       |
 
-- Every role key must be a role key in `config.json`, and every `operations` key a game.
+- Every role key must be a configured role, and every `operations` key a configured app or legacy game ID.
 - Role references (`busOwner`, `reports.recipient`, `reports.workerParents`, `--requester`,
   `--role`, `--recipient`, `--parent`) use registered role keys; explicit inbox conversation UUID
   selectors follow the [inbox validation rules](commands.md#command-semantics). There are no role aliases.
@@ -38,6 +38,8 @@ native conversation IDs from the workspace owner. A null conversation marks an u
 For a new game, first add its role keys to [the coordinator configuration](configuration.md#add-a-game).
 The coordinator then adds those roles and their worktree paths to the registry using the current
 revision. The CLI's `harness select` only changes existing role overrides.
+For a new app workspace, see [Getting started](getting-started.md#set-up-an-app-workspace).
+Standalone projects use their own [registration command](standalone.md#install-and-initialize).
 
 ## Scoped harness selection
 
@@ -46,6 +48,7 @@ top-level `harness`, preserving the global-only schema 1 behaviour. Selection re
 choice, not activation, target startup, ownership acceptance, delivery control or permission to
 clear a hold or question. Changing selection requires the caller's explicit authority for that
 exact scope.
+In app mode, the caller also needs an active binding with the workspace `registry:manage` grant.
 
 Older schema 1 readers reject the new role field. Upgrade every reader of the shared registry
 through a reviewed consumer pin before writing any override. A successful readiness probe does
@@ -56,16 +59,17 @@ revision-checked selection, using the freshly read registry revision for `N`:
 
 ```sh
 coordination-kit claude ready \
-  --game archies-dog-walks \
-  --game chibis-way-home
+  --app archies-dog-walks \
+  --app chibis-way-home
 coordination-kit harness select \
   --harness claude \
   --expected-revision N \
-  --game archies-dog-walks \
-  --game chibis-way-home
+  --app archies-dog-walks \
+  --app chibis-way-home
 ```
 
-Each `--game` selects every configured role for that game. Repeat `--role` to select additional
+Each `--app` selects every configured role for that app. `--game` remains a legacy alias.
+Use one selector spelling per invocation. Repeat `--role` to select additional
 registered role names; the union is changed once. Missing or invalid roles,
 an unknown game, an unavailable selected conversation ID, or a changed revision refuse the entire mutation. At least one scope is
 required, so this command never implicitly switches the global default. `--harness default`
@@ -125,7 +129,7 @@ Output is one JSON line:
 ```
 
 Unscoped `claude ready` and `codex ready` retain this output and probe every route role against
-the requested target harness. With `--game` or `--role`, they probe only the selected roles and
+the requested target harness. With `--app` or `--role`, they probe only the selected roles and
 add `current_harness` and `probed_harness` to each role row. Unselected games and kits need no
 conversation ID for that target. Scopes never create or modify a registry entry.
 
@@ -143,7 +147,7 @@ cannot be read. Malformed command options exit 2. It sends nothing and activates
 ## Scoped harness doctor
 
 `coordination-kit harness doctor --role ROLE` diagnoses only the role's current effective harness.
-Repeat `--role` or `--game ID` to select more roles. At least one nonempty explicit scope is
+Repeat `--role` or `--app ID` to select more roles. At least one nonempty explicit scope is
 required; an invalid selection fails before any probe. It sends nothing, performs no queue
 writes, starts no frontend and changes no registry, HOLD, activation or draft state.
 

@@ -93,14 +93,14 @@ activation require the current active game-coordinator binding. See the
 --head-hash SHA256 --registry-revision REVISION` releases the exact reservation before permanent
   fencing.
 
-Reserve, prepare, activate and cancel require the active game-coordinator binding. See the
+Reserve, prepare, activate and cancel require the active workspace `store:maintain` binding. See the
 [filesystem compaction runbook](store.md#filesystem-compaction-runbook).
 
 ## Command semantics
 
-- `claude channel`: by default it serves the `reports.recipient` that every game (or each
-  `--game`) names, and requires that role's effective harness to be `claude`. Games that name
-  different recipients stop it with exit 1; select games with one recipient or pass
+- `claude channel`: by default it serves the `reports.recipient` that every app (or each
+  `--app`) names, and requires that role's effective harness to be `claude`. Apps that name
+  different recipients stop it with exit 1. Select apps with one recipient or pass
   `--conversation`. With `--conversation UUID` it serves the one role whose effective Claude
   conversation is that ID, or is reached from it by `/clear` lineage
   ([Claude channel](review.md#claude-channel)). `--poll-seconds` defaults to 5. Without
@@ -136,12 +136,12 @@ Reserve, prepare, activate and cancel require the active game-coordinator bindin
 - For Codex, record exact prompt wording, ordered `--option LABEL` or `--option-json JSON`,
   and repeated `--depends-on REPOSITORY:WORK_ID` through `question open` before presentation.
   See [Codex question recovery](store.md#codex-question-recovery).
-- `hold policy-set` and `hold policy-release` require the active game-coordinator binding and the
+- `hold policy-set` and `hold policy-release` require an active `policy:manage` binding and the
   exact user approval reference for the action. Policy IDs start with `policy-`. Set names one
-  target as `role:ROLE`, `game:GAME` or `work:REPOSITORY:WORK_ID`. Release names its exact policy
+  target as `role:ROLE`, `app:APP`, the legacy `game:GAME` or `work:REPOSITORY:WORK_ID`. Release names its exact policy
   ID. See [user policy holds](store.md#user-policy-holds).
 - `session start`, `handoff ready` and `handoff active` identify the caller through the registry
-  fence; `handoff open` and `handoff state` also require game-coordinator (`not-coordinator`).
+  fence. `handoff open` and `handoff state` also require the workspace `handoff:manage` grant.
   `session start` refuses a held role with `session-held: phase held` (or `source-held`).
   An unbound Claude caller without `--native-id` is rebound when its transcript proves a `/clear`
   of exactly one role's current Claude binding; the output then adds
@@ -154,10 +154,10 @@ Reserve, prepare, activate and cancel require the active game-coordinator bindin
   `review deliver` for a slot prints the recorded result. SIGTERM observed before review
   processing starts exits 1 without writing a brief or printing a result to stdout. See
   [same-slot recovery](review.md#stored-brief) and [runner events](store.md#runner-events).
-- `review show`: prints the recorded stored brief for `--slot` (default: the latest) of `--game`
-  (default: any game) as one JSON line; exit 1 with `brief-missing` when there is none.
+- `review show`: prints the recorded brief for `--slot` (default: the latest) of `--app`
+  (default: any app) as one JSON line. It exits 1 with `brief-missing` when there is none.
 - `store retire`: exactly one of `--dry-run` and `--apply`. `--dry-run` takes no caller and
-  writes nothing. `--apply` accepts only `game-coordinator` (`not-coordinator`). See
+  writes nothing. `--apply` requires the workspace `store:maintain` grant. See
   [retirement](store.md#retirement).
 - `--version --json` prints `{"schema":1,"version":V,"distSha256":H}`, where `H` is the sha256 of
   the running `dist/cli.js` bytes, or 64 zeros from source. Plain `--version` prints `V` alone.

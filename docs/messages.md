@@ -40,8 +40,8 @@ coordination-kit msg retain 00000000-0000-4000-8000-000000000003 --reason "check
   path between roles.
 - Output is one JSON object, identical for Claude and Codex callers. `msg status ID` and
   `msg history` show metadata by default. `msg status ID --include-body` reads one exact original
-  without recording delivery. The registry fence permits its registered sender, recipient and
-  `game-coordinator` to see the body. `msg history --include-body` applies the same visibility
+  without recording delivery. Its registered sender and recipient can see the body. Workspace
+  `messages:read-all` also grants access. `msg history --include-body` applies the same visibility
   rule to each body's events.
 - `msg status ID` shows the earliest exact association in `firstWake` and the latest outcome,
   reason code, blocker reference and next safe action in `wake`. A coalesced original

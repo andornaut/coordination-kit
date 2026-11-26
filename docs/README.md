@@ -1,5 +1,8 @@
 # Coordination Kit documentation
 
+[Getting started](getting-started.md) covers installation and the first workflow for
+a standalone repository or a shared app workspace.
+
 | Topic                   | Reference                                                                                         |
 | ----------------------- | ------------------------------------------------------------------------------------------------- |
 | Setup and state         | [Configuration](configuration.md), [standalone projects](standalone.md), [upgrades](upgrading.md) |

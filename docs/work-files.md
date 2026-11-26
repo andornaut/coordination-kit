@@ -7,6 +7,10 @@ a coordinator root is available. The convention itself is in
 commands only read. Each item's live progress is recorded with the `work` store verbs
 ([work records](store.md#work-records)).
 
+This guide covers the indexed work-file convention used by shared workspaces. The
+[standalone task workflow](standalone.md#approve-and-build) renders its own work file with
+`task work-file` and tracks approval and review with `task` commands.
+
 `--root DIR` names the repository (default: the working directory). The coordinator root comes
 only from `COORDINATION_KIT_ROOT`, else `DELIVERY_KIT_ROOT`, so a session's coordinator variable
 never redirects which repository is checked.

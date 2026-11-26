@@ -1,6 +1,7 @@
 # Simplification
 
 Approved by the user on 2026-11-18. Each phase is a work item below; deletions need separate user approval.
+For current operation, see the [store](../store.md) and [command reference](../commands.md).
 
 ## Summary
 
@@ -72,6 +73,8 @@ Three additions:
 - **Migration:** none. Holds and questions are only read.
 - **Compatibility:** n/a. **Risks:** a backup taken mid-write; take it between a review and the next departure. **Rollback:** none needed. **Exit:** restore verified; manifest reviewed by the user.
 
+<a id="phase-1-stable-entry-points-and-growth-stop"></a>
+
 ### Phase 1: stable entry points and growth stop (M)
 
 - **Goal:** no session relaunch for later phases; the ledger stops growing from bookkeeping.
@@ -90,6 +93,8 @@ Three additions:
 - **Risks:** a missing or out-of-range CLI defers reviews ("no delivery claimed"); capture off weakens coverage reports, which Phase 4 retires.
 - **Rollback:** restore the previous `package.json` and lockfile pins in game-coordinator and the game, `npm ci`, replace the runner idle; restore the previous MCP command and reconnect; re-enable `--capture`.
 - **Exit:** all Claude sessions on the stable path; one coordination-kit patch adopted by `npm ci` plus reconnect with zero relaunches; three runners on 6.0, with 24 consecutive reviews delivered by the route host and 24 slots with no malformed seam result on the other runners; ledger growth under 20 events a day.
+
+<a id="phase-2-one-store-and-one-message-path"></a>
 
 ### Phase 2: one store and one message path (L)
 
@@ -113,6 +118,8 @@ Three additions:
 - **Rollback:** set the fence to refuse new writes; `store export --since-cutover` lists messages and closes made after cutover (no payload was ever sent natively); restore the Phase 2 backup; convert uningested `events.jsonl` lines back to `bus/events` outbox files (or ingest them once with the 1.2 CLI) before any 6.0 runner starts; restore Phase 1 pins and replace runners idle; re-record exported messages with `message send` under their original IDs and dispatch through the legacy guarded path; recipients re-close exported closes.
 - **Exit:** seven days with no native send lacking a stored original (wake log against store); p95 under 200 ms for `send`, `inbox` and `done` on a synthetic store of ten times current volume; no new record in an ambiguous state; two reviews with full classification and a one-page brief; a contract case proving the same lifecycle on both adapters.
 
+<a id="phase-3-work-decisions-questions-and-holds"></a>
+
 ### Phase 3: work, decisions, questions and holds (M)
 
 - **Goal:** one work record, persistent decisions, questions and holds visible without pane reads.
@@ -125,6 +132,8 @@ Three additions:
 - **Risks:** missed approval entries (count equality check); owners not recording questions (pane check stays the backstop).
 - **Rollback:** unfreeze the backed-up `approval-ledger.json`, stop using the new verbs; store events remain as history; revert the docs commit.
 - **Exit:** every ledger entry mapped; every hold and question in checkpoints present in the store for two slots; `graph` answers why for three sample decisions.
+
+<a id="phase-4-thin-protocol-and-retirement"></a>
 
 ### Phase 4: thin protocol and retirement (L)
 
