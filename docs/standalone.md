@@ -36,6 +36,10 @@ the maintainer that records the user's explicit decisions. These commands assume
 trusts the people and processes with write access to the local coordination state. Normal Git
 and forge permissions still apply.
 
+Registration syncs the lifecycle, status, handoff and recovery skills for the selected harness.
+Commit the skill files with their manifest. For an existing checkout, or after upgrading the
+pinned CLI, follow [project skill sync](getting-started.md#sync-project-skills).
+
 To add an agent later, add its role to `project.roles` and use `project register` for its
 verified session and worktree.
 

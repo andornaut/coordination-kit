@@ -15,20 +15,20 @@ through `CODEX_THREAD_ID` for Codex or `CLAUDE_CODE_SESSION_ID` for Claude.
 ## Get the CLI
 
 You need Node 24.21.0 or later, Git and `flock`. Download the archive and its verification files
-from the same [7.10.0 release][release]. Use a directory outside any repository.
+from the same [7.11.0 release][release]. Use a directory outside any repository.
 
 ```sh
-kit_dir="$HOME/.local/share/coordination-kit/7.10.0"
-kit_release="https://github.com/andornaut/coordination-kit/releases/download/v7.10.0"
+kit_dir="$HOME/.local/share/coordination-kit/7.11.0"
+kit_release="https://github.com/andornaut/coordination-kit/releases/download/v7.11.0"
 mkdir -p "$kit_dir"
 (
   set -e
   cd "$kit_dir"
-  for asset in coordination-kit-7.10.0.tgz SOURCE_COMMIT SHA256SUMS; do
+  for asset in coordination-kit-7.11.0.tgz SOURCE_COMMIT SHA256SUMS; do
     curl -fLO "$kit_release/$asset"
   done
   sha256sum -c SHA256SUMS
-  tar -xzf coordination-kit-7.10.0.tgz
+  tar -xzf coordination-kit-7.11.0.tgz
   cmp SOURCE_COMMIT package/SOURCE_COMMIT
 )
 ck() { node "$kit_dir/package/dist/cli.js" "$@"; }
@@ -36,7 +36,7 @@ ck --version
 ```
 
 Both checksum lines should say `OK`, the two `SOURCE_COMMIT` files should match, and the version
-should be `7.10.0`. Keep the `ck` function in the shell where you run the standalone example.
+should be `7.11.0`. Keep the `ck` function in the shell where you run the standalone example.
 A shared workspace can [pin the same release with npm](#set-up-an-app-workspace).
 
 ## Set up a standalone project
@@ -55,8 +55,10 @@ ck --root "$primary" project register --role maintainer --harness codex \
 ck --root "$primary" session start
 ```
 
-The start result names the `maintainer` role. Commit the generated `coordination-kit.json` and
-`.gitignore` change. Keep the same root for later invocations, including from task worktrees.
+The start result names the `maintainer` role. Registration syncs the managed skills for the
+chosen harness. Commit the generated `coordination-kit.json`, the `.gitignore` change, and
+the skills and their manifest. Keep the same root for later invocations, including from task worktrees.
+If registration warns about skill sync, resolve it with [explicit sync](#sync-project-skills).
 When a role uses another linked worktree, register its path relative to the primary
 checkout, such as `--worktree ../implementation`.
 
@@ -110,21 +112,34 @@ The [review guide](standalone.md#review-and-merge) explains policy changes and e
 approval. Run [landing verification](standalone.md#follow-the-merge-to-landing) after the
 merge with the evidence your repository requires for the integrated revision.
 
-### Install the lifecycle skill
+## Sync project skills
 
-The optional `coordination-lifecycle` skill guides agents taking up or resuming a standalone task,
-from checking recorded approval through review, merge and verification of the landed revision.
-Use a CLI release that lists `lifecycle` in `skills install --help`. To install for Codex from
-the standalone example above, run
+Lifecycle, status, handoff and recovery skills ship in the pinned archive. The standalone
+registration above installs them for the selected harness. For an existing standalone project or
+shared workspace, run this in its primary checkout using the archive's `ck` function.
 
 ```sh
-ck --root "$primary" skills install lifecycle --harness codex --scope project
+ck --root . skills sync --harness codex --scope project
 ```
 
-Use `--harness claude` for Claude. Commit the installed skill to share it with the project's
-other checkouts. Review any local edits before replacing a skill with a newer bundled version.
-Install `status` in place of `lifecycle` for read-only status reporting in standalone or shared
-workspaces. See [installer options and destinations](commands.md#skills-install).
+Use `--harness claude` for Claude. With the app workspace's `ck` function, omit `--root .` because
+the function supplies that root. Commit the files and their `.coordination-kit.json` manifest in
+the harness skill directory. Linked worktrees get the skills when they update to the commit.
+
+To upgrade, verify the new archive's checksum and matching `SOURCE_COMMIT` files, switch to that
+release's CLI, then rerun sync and review the diff before committing. If the workspace pins the CLI
+with npm, update the dependency and lockfile to the new release first.
+
+If sync reports a conflict, inspect the named file and verify its reported SHA256. After approving
+replacement, resync with the reviewed digest. For example, set `reviewed_sha256` to the digest for
+the lifecycle skill and run
+
+```sh
+ck --root . skills sync --harness codex --scope project --adopt "lifecycle=$reviewed_sha256"
+```
+
+Repeat `--adopt` for each approved conflict. See [sync options](commands.md#skills-sync) and
+[individual installers](commands.md#skills-install).
 
 ## Set up an app workspace
 
@@ -139,7 +154,7 @@ Install the checked release, commit `package.json` and `package-lock.json`, and 
 
 ```sh
 npm install --save-dev \
-  https://github.com/andornaut/coordination-kit/releases/download/v7.10.0/coordination-kit-7.10.0.tgz
+  https://github.com/andornaut/coordination-kit/releases/download/v7.11.0/coordination-kit-7.11.0.tgz
 workspace="$(pwd -P)"
 ck() { node "$workspace/node_modules/@andornaut/coordination-kit/dist/cli.js" --root "$workspace" "$@"; }
 ck --version
@@ -265,4 +280,4 @@ review.
 See the [command reference](commands.md) for syntax and the [documentation index](README.md)
 for the remaining guides.
 
-[release]: https://github.com/andornaut/coordination-kit/releases/tag/v7.10.0
+[release]: https://github.com/andornaut/coordination-kit/releases/tag/v7.11.0

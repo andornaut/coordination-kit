@@ -21,7 +21,10 @@ Verify and extract the [release archive](docs/getting-started.md#get-the-cli) fo
 workspace checkout. The CLI requires Node 24.21.0 or later. Delivery Kit's runner uses this
 workspace installation for reviews and event ingest. Its bundled build libraries have a
 separate compatibility range. See [7.8 upgrade notes](docs/upgrading.md#coordination-kit-78).
-The archive bundles the lifecycle, status and agent cleanup skills for project installation.
+The archive bundles lifecycle, status, handoff and recovery skills for managed project
+installation. Standalone `project register` syncs them for the selected harness. In an existing
+project or shared workspace, use [skills sync](docs/commands.md#skills-sync). Install the optional
+`agent-cleanup` skill separately.
 
 ## Start an assigned task
 
@@ -30,17 +33,10 @@ already in progress. It guides you from checking the task's recorded approval th
 exact landed revision and its required checks. Start implementation once the task has recorded
 approval.
 
-If the skill is missing from the checkout, use a CLI release that lists `lifecycle` in
-`skills install --help`. From the primary checkout, install it once for your harness.
-
-```sh
-coordination-kit --root . skills install lifecycle --harness codex --scope project
-```
-
-Use `--harness claude` for Claude, or `ck` in place of `coordination-kit` if you followed the
-archive setup. In your registered session, ask to use the `coordination-lifecycle` skill and
-give the assigned task ID. See [standalone setup](docs/getting-started.md#set-up-a-standalone-project)
-for registration.
+From your registered session, ask to use the `coordination-lifecycle` skill and give the
+assigned task ID. See [standalone setup](docs/getting-started.md#set-up-a-standalone-project)
+for registration and [skill upgrades](docs/getting-started.md#sync-project-skills) for existing
+checkouts.
 
 ## Find work by description
 
@@ -72,7 +68,7 @@ defaulting to the working directory. They take the coordinator root only from
 | Group                     | Verbs                                                                                                  | Purpose                                                                                                  |
 | ------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
 | `init`, `project`, `task` | See [standalone project commands](docs/commands.md#command-forms)                                      | Set up one repository and track work from proposal to landing.                                           |
-| `skills`                  | `install`                                                                                              | Install [bundled skills](docs/commands.md#skills-install) in a project.                                  |
+| `skills`                  | `sync`, `install`                                                                                      | Sync or install [bundled skills](docs/commands.md#skills-sync) in a project.                             |
 | `msg`                     | `send`, `decide`, `done`, `retain`, `status`, `history`                                                | Deliver messages and record their handling or user decisions.                                            |
 | `inbox`                   | (none)                                                                                                 | Read your store inbox and record it delivered.                                                           |
 | `store`                   | `import`, `export`, `rebuild`, `retire`, `migration-status`, `migration-prepare`, `migration-activate` | Import, export, rebuild, retire, and qualify or activate filesystem authority.                           |

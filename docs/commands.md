@@ -79,6 +79,30 @@ Both commands read local records only, with no fetch. A complete lookup exits 0 
 in that result are partial. Invalid usage exits 2. Resolve ambiguous matches to an exact ID, and
 confirm approval and ownership before acting.
 
+## Skills sync
+
+`skills sync --harness codex|claude --scope project [--adopt SKILL=SHA256]...` installs or
+updates the lifecycle, status, handoff and recovery skills from the running CLI release. Both
+`--harness` and `--scope project` are required. Use the project's primary checkout as `--root`.
+Standalone `project register` syncs this same set for the registered harness. The cleanup skill
+uses the individual installer.
+
+The manifest records the managed files. Track `.agents/skills/.coordination-kit.json` for Codex
+or `.claude/skills/.coordination-kit.json` for Claude with the installed skills.
+A differing unmanaged file or a change to a managed file conflicts. Inspect the file and its
+reported SHA256 before authorizing a replacement. Pass one `--adopt SKILL=SHA256` per approved
+conflict, using the skill alias and the exact digest of the reviewed file.
+
+Sync returns `status: "synced"` with each skill's `skill`, `path`, `sha256` and `action`.
+A conflict exits 1 and returns `status: "conflict"`, the harness, manifest and conflict entries.
+Each conflict includes its path and reason, and may also include its skill alias and SHA256.
+Registration reports sync in `skillSync`. A conflict or unavailable sync produces a warning
+while preserving the registered binding. Resolve it with explicit sync.
+
+The handoff and recovery skills use the existing binding and authorization controls. A handoff
+transfers ownership across harnesses. Recovery reuses the exact registered binding. Game-specific
+wrappers belong in their game workspaces.
+
 ## Skills install
 
 `skills install SKILL --harness codex|claude --scope project` installs one skill bundled with
@@ -88,6 +112,8 @@ the current CLI release. Both flags are required. Use `--root DIR` to select the
 | --------------- | ------------------------ | ------------------------------------------------------ |
 | `lifecycle`     | `coordination-lifecycle` | Approved standalone tasks through verified landing.    |
 | `status`        | `coordination-status`    | Read-only status in standalone and shared workspaces.  |
+| `handoff`       | `coordination-handoff`   | Transfer to another harness using exact role bindings. |
+| `recovery`      | `coordination-recovery`  | Resume an existing role using its registered session.  |
 | `agent-cleanup` | `agent-cleanup`          | Explicitly requested cleanup of agent-owned resources. |
 
 Codex skills go under `.agents/skills/` and Claude skills go under `.claude/skills/`, relative
