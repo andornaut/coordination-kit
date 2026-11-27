@@ -6,9 +6,9 @@ import { describe, expect, it } from "vitest";
 
 import { TEST_CONTEXT, TEST_GIT } from "../../core/testFixtures.ts";
 import { Store, storePath } from "../db.ts";
+import { openQuestion, setHold } from "../decisions/questions.ts";
 import { canonicalJson } from "../eventCodec.ts";
-import { messageStatus, readInbox, sendMessage } from "../messages.ts";
-import { openQuestion, setHold } from "../questions.ts";
+import { messageStatus, readInbox, sendMessage } from "../messages/messages.ts";
 import { COORDINATOR, GAME, storeFixture, TECH } from "../testStore.ts";
 import { inspectFileAuthority } from "./authority.ts";
 import { activateMigration, prepareMigration } from "./migration.ts";

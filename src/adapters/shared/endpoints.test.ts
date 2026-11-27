@@ -2,7 +2,7 @@ import { statSync } from "node:fs";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Layout } from "../../core/layout.ts";
+import type { Layout } from "../../core/configuration/layout.ts";
 import { coordinatorConfig, registryInput } from "../../core/testFixtures.ts";
 import type { Registry } from "../../registry/schema.ts";
 import { effectiveReadiness, harnessReadiness } from "../../review/readiness.ts";

@@ -1,9 +1,10 @@
 // @andornaut/coordination-kit/build/store: the SQLite coordination store, its message lifecycle,
 // wakes, the registry writer fence, runner event ingest, the retirement, imported requests, work
 // records, and questions, holds and decisions.
-export { type CodexQuestion, dependentQuestions } from "./store/codexQuestions.ts";
+export type { StoreServiceContext } from "./store/context.ts";
 export type { AppendResult, VerifyResult } from "./store/db.ts";
 export { Store, STORE_FILE, type StoreContext, storePath, storeRoot } from "./store/db.ts";
+export { type CodexQuestion, dependentQuestions } from "./store/decisions/codexQuestions.ts";
 export {
   appendDecisionLine,
   decisionLine,
@@ -11,69 +12,7 @@ export {
   fileDecisionNumbers,
   mainWorkFile,
   type WorkFileTarget,
-} from "./store/decisionLine.ts";
-export { canonicalJson, eventHash } from "./store/eventCodec.ts";
-export {
-  activeHandoff,
-  HANDOFF_STATES,
-  HANDOFF_TRANSITIONS,
-  handoffHolds,
-  type HandoffResult,
-  type HandoffRoleView,
-  type HandoffState,
-  type HandoffView,
-  latestHandoff,
-  OPEN_HANDOFF_STATES,
-  openHandoff,
-  openHandoffsFor,
-  readHandoff,
-  readyHandoff,
-  recordSession,
-  setHandoffState,
-} from "./store/handoffs.ts";
-export {
-  type CallerOptions,
-  DELIVERY_KIT_ACTOR,
-  DELIVERY_KIT_ROLE,
-  NATIVE_ID_VARIABLES,
-  resolveCaller,
-} from "./store/identity.ts";
-export {
-  busEventId,
-  type BusLine,
-  type Cursor,
-  CURSOR_FILE,
-  EVENT_KINDS,
-  EVENT_STATUSES,
-  type IngestContext,
-  ingestEvents,
-  type IngestResult,
-  LOG_FILE,
-  parseBusLine,
-  QUARANTINE_FILE,
-  readCursor,
-} from "./store/ingest.ts";
-export {
-  type CloseInput,
-  closeMessage,
-  type ExportResult,
-  exportSince,
-  type HistoryEntry,
-  type InboxResult,
-  MAX_BODY_BYTES,
-  MESSAGE_KINDS,
-  messageHistory,
-  messageStatus,
-  readInbox,
-  recipientMessages,
-  type RetainInput,
-  retainMessage,
-  type SendInput,
-  sendMessage,
-  type SendResult,
-  type WriteResult,
-} from "./store/messages.ts";
-export { derivedId, type Notice, reportsRecipient, storeNotice } from "./store/notices.ts";
+} from "./store/decisions/decisionLine.ts";
 export {
   activePolicyHoldsForRole,
   HOLD_STATES,
@@ -87,14 +26,7 @@ export {
   policyTargetCoversRole,
   releasePolicyHold,
   setPolicyHold,
-} from "./store/policyHolds.ts";
-export { PROJECTIONS } from "./store/projections.ts";
-export { DELIVERY_PROJECTION } from "./store/projections/delivery.ts";
-export { handoffHoldId, HANDOFFS_PROJECTION } from "./store/projections/handoffs.ts";
-export { MESSAGES_PROJECTION } from "./store/projections/messages.ts";
-export { QUESTIONS_PROJECTION } from "./store/projections/questions.ts";
-export { REQUESTS_PROJECTION } from "./store/projections/requests.ts";
-export { WORK_KINDS, WORK_PROJECTION } from "./store/projections/work.ts";
+} from "./store/decisions/policyHolds.ts";
 export {
   type AnswerInput,
   answerQuestion,
@@ -124,7 +56,7 @@ export {
   releaseHold,
   setHold,
   storeHolds,
-} from "./store/questions.ts";
+} from "./store/decisions/questions.ts";
 export {
   type AnswerContext,
   type AnswerOutput,
@@ -140,15 +72,24 @@ export {
   storeQuestionCancel,
   storeQuestionList,
   storeQuestionOpen,
-} from "./store/questionService.ts";
+} from "./store/decisions/questionService.ts";
+export { canonicalJson, eventHash } from "./store/eventCodec.ts";
 export {
-  closeRequest,
-  type CloseRequestResult,
-  importRequest,
-  readRequests,
-  type RequestImport,
-  type RequestRecord,
-} from "./store/requests.ts";
+  busEventId,
+  type BusLine,
+  type Cursor,
+  CURSOR_FILE,
+  EVENT_KINDS,
+  EVENT_STATUSES,
+  type IngestContext,
+  ingestEvents,
+  type IngestResult,
+  LOG_FILE,
+  parseBusLine,
+  QUARANTINE_FILE,
+  readCursor,
+} from "./store/ingest.ts";
+export { storeRebuild } from "./store/maintenance/rebuild.ts";
 export {
   COORDINATOR_ROLE,
   READ_WITH,
@@ -156,19 +97,82 @@ export {
   RETIRED_PATHS,
   type RetireOutput,
   storeRetire,
-} from "./store/retire.ts";
-export { SECRET_SHAPES, secretShape } from "./store/secrets.ts";
+} from "./store/maintenance/retire.ts";
+export {
+  type CloseInput,
+  closeMessage,
+  type ExportResult,
+  exportSince,
+  type HistoryEntry,
+  type InboxResult,
+  MAX_BODY_BYTES,
+  MESSAGE_KINDS,
+  messageHistory,
+  messageStatus,
+  readInbox,
+  recipientMessages,
+  type RetainInput,
+  retainMessage,
+  type SendInput,
+  sendMessage,
+  type SendResult,
+  type WriteResult,
+} from "./store/messages/messages.ts";
+export { derivedId, type Notice, reportsRecipient, storeNotice } from "./store/messages/notices.ts";
 export {
   storeDone,
   storeExport,
   storeHistory,
   storeInbox,
-  storeRebuild,
   storeRetain,
   storeSend,
-  type StoreServiceContext,
   storeStatus,
-} from "./store/service.ts";
+} from "./store/messages/service.ts";
+export {
+  NO_STORE_GUARD,
+  pendingWakeRoles,
+  rearmWake,
+  type StoreWakeGuard,
+  type WakeContext,
+  type WakePorts,
+  wakeRecipient,
+  type WakeResult,
+  wakeState,
+  type WakeStatus,
+} from "./store/messages/wake.ts";
+export { PROJECTIONS } from "./store/projections.ts";
+export { DELIVERY_PROJECTION } from "./store/projections/delivery.ts";
+export { handoffHoldId, HANDOFFS_PROJECTION } from "./store/projections/handoffs.ts";
+export { MESSAGES_PROJECTION } from "./store/projections/messages.ts";
+export { QUESTIONS_PROJECTION } from "./store/projections/questions.ts";
+export { REQUESTS_PROJECTION } from "./store/projections/requests.ts";
+export { WORK_KINDS, WORK_PROJECTION } from "./store/projections/work.ts";
+export { SECRET_SHAPES, secretShape } from "./store/secrets.ts";
+export {
+  activeHandoff,
+  HANDOFF_STATES,
+  HANDOFF_TRANSITIONS,
+  handoffHolds,
+  type HandoffResult,
+  type HandoffRoleView,
+  type HandoffState,
+  type HandoffView,
+  latestHandoff,
+  OPEN_HANDOFF_STATES,
+  openHandoff,
+  openHandoffsFor,
+  readHandoff,
+  readyHandoff,
+  recordSession,
+  setHandoffState,
+} from "./store/sessions/handoffs.ts";
+export {
+  type CallerOptions,
+  DELIVERY_KIT_ACTOR,
+  DELIVERY_KIT_ROLE,
+  NATIVE_ID_VARIABLES,
+  resolveCaller,
+} from "./store/sessions/identity.ts";
 export {
   checkpointPath,
   type HandoffOutput,
@@ -179,7 +183,7 @@ export {
   storeHandoffShow,
   storeHandoffState,
   storeSessionStart,
-} from "./store/sessionService.ts";
+} from "./store/sessions/service.ts";
 export {
   type Actor,
   type CodexQuestionInput,
@@ -204,17 +208,13 @@ export {
   type WorkRef,
 } from "./store/types.ts";
 export {
-  NO_STORE_GUARD,
-  pendingWakeRoles,
-  rearmWake,
-  type StoreWakeGuard,
-  type WakeContext,
-  type WakePorts,
-  wakeRecipient,
-  type WakeResult,
-  wakeState,
-  type WakeStatus,
-} from "./store/wake.ts";
+  closeRequest,
+  type CloseRequestResult,
+  importRequest,
+  readRequests,
+  type RequestImport,
+  type RequestRecord,
+} from "./store/work-records/requests.ts";
 export {
   blockWork,
   FINISH_STATUSES,
@@ -234,4 +234,4 @@ export {
   type WorkRecord,
   type WorkStage,
   type WorkState,
-} from "./store/work.ts";
+} from "./store/work-records/work.ts";

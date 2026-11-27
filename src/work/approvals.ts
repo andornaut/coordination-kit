@@ -5,15 +5,15 @@
 // releases a hold; entries without a work file are listed for their owners to stub.
 import { readFileSync } from "node:fs";
 
+import { StateRootError } from "../core/configuration/stateRoot.ts";
+import { isRecord } from "../core/encoding/pyjson.ts";
 import { type GitRunner, readMainFiles } from "../core/git.ts";
-import { isRecord } from "../core/pyjson.ts";
-import { StateRootError } from "../core/stateRoot.ts";
 import type { Repository } from "../status/collect.ts";
 import { MEMORY, READ_ONLY_CLOCK, Store, type StoreContext } from "../store/db.ts";
 import { sha256 } from "../store/eventCodec.ts";
-import { type CallerOptions, resolveCaller } from "../store/identity.ts";
-import { requirePermission } from "../store/permissions.ts";
 import { holdOpen } from "../store/projections/questions.ts";
+import { type CallerOptions, resolveCaller } from "../store/sessions/identity.ts";
+import { requirePermission } from "../store/sessions/permissions.ts";
 import { type Actor, type Json, StoreError, type WorkRef } from "../store/types.ts";
 import {
   type EvidenceInput,
@@ -25,7 +25,7 @@ import {
   SHA,
   type WorkStage,
   workText,
-} from "../store/work.ts";
+} from "../store/work-records/work.ts";
 import { CONVENTION_FILE, parseFrontMatter } from "../workfiles/files.ts";
 import { type Coordinator, openCoordinator } from "./live.ts";
 

@@ -10,8 +10,8 @@ import {
   readRoleRoute,
   routeRecipient,
 } from "../adapters/shared/route.ts";
-import { gameRecipients } from "../core/config.ts";
-import type { Layout } from "../core/layout.ts";
+import { gameRecipients } from "../core/configuration/delivery.ts";
+import type { Layout } from "../core/configuration/layout.ts";
 import { resolveHarness } from "../registry/resolve.ts";
 import type { Harness, Registry } from "../registry/schema.ts";
 import { type HarnessSelection, resolveSelectedRoles } from "../registry/selection.ts";

@@ -3,7 +3,12 @@
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { type GameLayout, gameLayout, type Layout, loadLayout } from "../core/layout.ts";
+import {
+  type GameLayout,
+  gameLayout,
+  type Layout,
+  loadLayout,
+} from "../core/configuration/layout.ts";
 import {
   CLAUDE_COORDINATOR,
   CLAUDE_TECH,

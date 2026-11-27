@@ -5,8 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { writeChannelStatus } from "../adapters/claude/channelStatus.ts";
 import { type FakeControl, startFakeControl } from "../adapters/codex/testControlSocket.ts";
-import { loadLayout } from "../core/layout.ts";
-import { stateRoot } from "../core/stateRoot.ts";
+import { loadLayout } from "../core/configuration/layout.ts";
+import { stateRoot } from "../core/configuration/stateRoot.ts";
 import {
   CLAUDE_TECH,
   CODEX_TECH,

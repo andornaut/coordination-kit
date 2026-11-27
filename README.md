@@ -160,6 +160,14 @@ host name; the layers below take them as explicit leading parameters or context 
 
 `registry/index.ts` is the `build/registry` barrel. Within `store/`, `types.ts`, `eventCodec.ts`
 and the projections in `projections/` sit below `db.ts`, so every record module can take a `Store`.
+The store opens through `context.ts`. Its record families live under `messages/`, `decisions/`,
+`sessions/`, `projects/`, and `work-records/`. `files/` owns file-backed authority, including
+`files/compaction/`, and `maintenance/` holds store rebuild and retirement.
+
+`core/configuration/` owns the workspace layout and config schemas, `core/files/` owns durable
+I/O and locks, `core/encoding/` owns compatibility formats, and `core/cli/` owns the command and
+runner contracts. Within `commands/`, `harness/`, `project/`, and `store/` group related handlers.
+`args.ts` and `spec.ts` provide the shared parser and command forms.
 
 ## Compatibility and releases
 

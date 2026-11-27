@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { TEST_CLOCK } from "../core/testFixtures.ts";
 import { MEMORY, Store } from "./db.ts";
 import type { FileProjection } from "./fileProjection.ts";
-import { messageStatus, sendMessage } from "./messages.ts";
+import { messageStatus, sendMessage } from "./messages/messages.ts";
 import type { StoredEvent } from "./types.ts";
 
 type FileRecord = ReturnType<FileProjection["records"]>[number];

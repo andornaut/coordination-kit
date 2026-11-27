@@ -1,11 +1,11 @@
+import { isRecord } from "../../core/encoding/pyjson.ts";
 import { isCanonicalUuid } from "../../core/ids.ts";
-import { isRecord } from "../../core/pyjson.ts";
 import type { Registry } from "../../registry/schema.ts";
 import {
   DELIVERY_KIT_ROLE,
   matchesVerifiedWorker,
   type VerifiedWorkerCaller,
-} from "../identity.ts";
+} from "../sessions/identity.ts";
 import type { StoredEvent } from "../types.ts";
 
 const REVIEW_INTERVAL_MS = 60 * 60 * 1000;

@@ -20,13 +20,13 @@ export {
   validateGameCoordinatorConfig,
   validateWorkspaceConfig,
   type WorkspaceConfig,
-} from "../core/layout.ts";
+} from "../core/configuration/layout.ts";
 // CLEANUP (added 2026-11-13): Retain old public symbols until registry readers use the canonical names.
 export {
   type GameCoordinatorConfig as GameDevConfig,
   validateGameCoordinatorConfig as validateGameDevConfig,
-} from "../core/layout.ts";
-export { LockBusy, LockError } from "../core/lock.ts";
+} from "../core/configuration/layout.ts";
+export { LockBusy, LockError } from "../core/files/lock.ts";
 export { ValidationError } from "../core/validate.ts";
 export { hasPermission, isPermitted } from "./permissions.ts";
 export { resolveConversation, resolveHarness, resolveRole, UnknownRole } from "./resolve.ts";

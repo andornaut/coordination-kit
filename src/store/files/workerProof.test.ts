@@ -4,7 +4,7 @@ import { TEST_CLOCK } from "../../core/testFixtures.ts";
 import type { Registry } from "../../registry/schema.ts";
 import { readRegistry } from "../../registry/store.ts";
 import { Store } from "../db.ts";
-import { DELIVERY_KIT_ACTOR, resolveCaller } from "../identity.ts";
+import { DELIVERY_KIT_ACTOR, resolveCaller } from "../sessions/identity.ts";
 import { ART, COORDINATOR, GAME, storeFixture, TECH } from "../testStore.ts";
 import type { JsonObject, StoredEvent } from "../types.ts";
 import { verifiedWorkerForCaller, verifiedWorkerForEvent } from "./workerProof.ts";

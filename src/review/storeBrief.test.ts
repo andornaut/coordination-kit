@@ -8,26 +8,26 @@ import { writeChannelStatus } from "../adapters/claude/channelStatus.ts";
 import { wakeFilePath } from "../adapters/claude/wakeFile.ts";
 import type { Collected, CollectRequest } from "../adapters/types.ts";
 import { main } from "../cli.ts";
-import { EXIT_OK } from "../core/io.ts";
-import { gameLayout, type Layout } from "../core/layout.ts";
-import { stateRoot } from "../core/stateRoot.ts";
+import { EXIT_OK } from "../core/cli/io.ts";
+import { gameLayout, type Layout } from "../core/configuration/layout.ts";
+import { stateRoot } from "../core/configuration/stateRoot.ts";
 import { clockAt, TEST_CLOCK, TEST_CONTEXT, TEST_GIT, TEST_NOW } from "../core/testFixtures.ts";
 import { readRegistry, updateRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
+import { setPolicyHold } from "../store/decisions/policyHolds.ts";
+import { openQuestion, releaseHold, setHold } from "../store/decisions/questions.ts";
 import {
   prepareFileCheckpoint,
   selectFileCheckpoint,
-} from "../store/files/compactionGeneration.ts";
+} from "../store/files/compaction/generation.ts";
 import { activateMigration, prepareMigration } from "../store/files/migration.ts";
-import { recordSession } from "../store/handoffs.ts";
-import { DELIVERY_KIT_ACTOR } from "../store/identity.ts";
-import { messageStatus, retainMessage } from "../store/messages.ts";
-import { derivedId, storeNotice } from "../store/notices.ts";
-import { setPolicyHold } from "../store/policyHolds.ts";
-import { openQuestion, releaseHold, setHold } from "../store/questions.ts";
-import { storeSend } from "../store/service.ts";
+import { messageStatus, retainMessage } from "../store/messages/messages.ts";
+import { derivedId, storeNotice } from "../store/messages/notices.ts";
+import { storeSend } from "../store/messages/service.ts";
+import { recordSession } from "../store/sessions/handoffs.ts";
+import { DELIVERY_KIT_ACTOR } from "../store/sessions/identity.ts";
 import { ART, COORDINATOR, fakeCodex, GAME, storeFixture, TECH } from "../store/testStore.ts";
-import { blockWork, finishWork, readyWork, startWork } from "../store/work.ts";
+import { blockWork, finishWork, readyWork, startWork } from "../store/work-records/work.ts";
 import { deliverReview } from "./deliver.ts";
 import { coordinationEmit } from "./emit.ts";
 import {

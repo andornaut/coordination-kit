@@ -5,7 +5,7 @@ import { payloadText as text } from "../eventCodec.ts";
 import { handoffHoldId } from "../projections/handoffs.ts";
 import { recordedPolicyIssuer } from "../projections/policyHolds.ts";
 import { WORK_KINDS } from "../projections/work.ts";
-import { PROJECT_TASK_KINDS } from "../projectTasks.ts";
+import { PROJECT_TASK_KINDS } from "../projects/tasks.ts";
 import {
   type Json,
   type JsonObject,

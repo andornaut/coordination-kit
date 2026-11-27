@@ -3,10 +3,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { main } from "./cli.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "./core/io.ts";
-import { loadLayout } from "./core/layout.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "./core/cli/io.ts";
+import { VERSION } from "./core/cli/version.ts";
+import { loadLayout } from "./core/configuration/layout.ts";
 import { makeFixture, registryInput, TEST_CLOCK } from "./core/testFixtures.ts";
-import { VERSION } from "./core/version.ts";
 import { createRegistry, type Registry } from "./registry/index.ts";
 
 async function dispatch(...argv: string[]): Promise<{ code: number; out: string; err: string }> {

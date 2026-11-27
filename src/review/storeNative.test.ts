@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 
 import { decisionDirectory } from "../adapters/shared/decisions.ts";
-import { gameLayout, type Layout } from "../core/layout.ts";
+import { gameLayout, type Layout } from "../core/configuration/layout.ts";
 import { TEST_CLOCK, writeFixtureJson } from "../core/testFixtures.ts";
 import { ART, GAME, storeFixture } from "../store/testStore.ts";
 import { type NativeCollect, surveyNative } from "./storeNative.ts";

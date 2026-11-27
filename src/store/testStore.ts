@@ -1,6 +1,6 @@
 // Scratch coordinator trees with a registry for the store tests. Synthetic IDs only.
 import type { RpcClient } from "../adapters/codex/rpc.ts";
-import { type Layout, loadLayout } from "../core/layout.ts";
+import { type Layout, loadLayout } from "../core/configuration/layout.ts";
 import { makeFixture, TEST_CLOCK } from "../core/testFixtures.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
 

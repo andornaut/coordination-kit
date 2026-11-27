@@ -1,8 +1,8 @@
 // Decision graph queries over the coordinator's registered repositories and the
 // store. Each prints one JSON object (or DOT for `graph --format dot`); a refusal prints
 // `coordination-kit: CODE` and exits 1, a usage error exits 2.
+import type { Handler } from "../core/cli/io.ts";
 import { type GitRunner, systemGit } from "../core/git.ts";
-import type { Handler } from "../core/io.ts";
 import { Store } from "../store/db.ts";
 import {
   buildGraph,

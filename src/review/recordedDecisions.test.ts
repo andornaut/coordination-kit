@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 
 import { TEST_CLOCK, TEST_HOST } from "../core/testFixtures.ts";
 import { Store } from "../store/db.ts";
-import { answerQuestion, cancelQuestion, openQuestion } from "../store/questions.ts";
+import { answerQuestion, cancelQuestion, openQuestion } from "../store/decisions/questions.ts";
 import { COORDINATOR, GAME, TECH } from "../store/testStore.ts";
 import { recordedDecisions } from "./recordedDecisions.ts";
 

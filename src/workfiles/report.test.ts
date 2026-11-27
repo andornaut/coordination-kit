@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
-import { EXIT_INVALID, EXIT_OK } from "../core/io.ts";
-import { loadLayout } from "../core/layout.ts";
+import { EXIT_INVALID, EXIT_OK } from "../core/cli/io.ts";
+import { loadLayout } from "../core/configuration/layout.ts";
 import { makeFixture, registryInput, TEST_CLOCK } from "../core/testFixtures.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
 import { reportWork } from "./report.ts";

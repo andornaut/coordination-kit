@@ -1,22 +1,11 @@
 // Every command's options: the one source for argument parsing and for the help text, so a flag a
 // command accepts always appears in `coordination-kit --help`.
-import { type CommandSpec, formSynopsis, usageText } from "../core/usage.ts";
+import { type CommandSpec, formSynopsis, usageText } from "../core/cli/usage.ts";
 import { CALLER } from "./args.ts";
-import {
-  COMPACTION_ACTIVATE_OPTIONS,
-  COMPACTION_CANCEL_OPTIONS,
-  COMPACTION_PREPARE_OPTIONS,
-  COMPACTION_RESERVATION_OPTIONS,
-} from "./compaction.ts";
-import { DOCTOR_OPTIONS } from "./doctor.ts";
 import { DOCS_AUDIT_OPTIONS, DOCS_COMPACT_OPTIONS } from "./documentation.ts";
 import { GRAPH_OPTIONS, GRAPH_WHY_OPTIONS } from "./graph.ts";
-import { INIT_OPTIONS, PROJECT_REGISTER_OPTIONS } from "./init.ts";
-import {
-  MIGRATION_ACTIVATE_OPTIONS,
-  MIGRATION_PREPARE_OPTIONS,
-  MIGRATION_STATUS_OPTIONS,
-} from "./migration.ts";
+import { DOCTOR_OPTIONS } from "./harness/doctor.ts";
+import { INIT_OPTIONS, PROJECT_REGISTER_OPTIONS } from "./project/init.ts";
 import {
   TASK_APPROVE_OPTIONS,
   TASK_CLOSE_OPTIONS,
@@ -28,7 +17,36 @@ import {
   TASK_REVIEW_APPROVE_OPTIONS,
   TASK_VERIFY_OPTIONS,
   TASK_WRITE_OPTIONS,
-} from "./projectTasks.ts";
+} from "./project/tasks.ts";
+import { EVENTS_INGEST_OPTIONS, REVIEW_DELIVER_OPTIONS, REVIEW_SHOW_OPTIONS } from "./runner.ts";
+import { STATUS_SPEC } from "./status.ts";
+import {
+  COMPACTION_ACTIVATE_OPTIONS,
+  COMPACTION_CANCEL_OPTIONS,
+  COMPACTION_PREPARE_OPTIONS,
+  COMPACTION_RESERVATION_OPTIONS,
+} from "./store/compaction.ts";
+import {
+  STORE_COMPACTION_PLAN_OPTIONS,
+  STORE_EXPORT_OPTIONS,
+  STORE_IMPORT_OPTIONS,
+  STORE_REBUILD_OPTIONS,
+  STORE_RETIRE_OPTIONS,
+} from "./store/maintenance.ts";
+import {
+  INBOX_OPTIONS,
+  MSG_DECIDE_OPTIONS,
+  MSG_DONE_OPTIONS,
+  MSG_HISTORY_OPTIONS,
+  MSG_RETAIN_OPTIONS,
+  MSG_SEND_OPTIONS,
+  MSG_STATUS_OPTIONS,
+} from "./store/messages.ts";
+import {
+  MIGRATION_ACTIVATE_OPTIONS,
+  MIGRATION_PREPARE_OPTIONS,
+  MIGRATION_STATUS_OPTIONS,
+} from "./store/migration.ts";
 import {
   DECISION_LIST_OPTIONS,
   HOLD_LIST_OPTIONS,
@@ -42,31 +60,15 @@ import {
   QUESTION_LIST_OPTIONS,
   QUESTION_OPEN_OPTIONS,
   QUESTION_PROJECT_OPTIONS,
-} from "./questions.ts";
-import { REQUEST_CLOSE_OPTIONS } from "./requests.ts";
-import { EVENTS_INGEST_OPTIONS, REVIEW_DELIVER_OPTIONS, REVIEW_SHOW_OPTIONS } from "./runner.ts";
+} from "./store/questions.ts";
+import { REQUEST_CLOSE_OPTIONS } from "./store/requests.ts";
 import {
   HANDOFF_OPEN_OPTIONS,
   HANDOFF_ROLE_OPTIONS,
   HANDOFF_SHOW_OPTIONS,
   HANDOFF_STATE_OPTIONS,
   SESSION_START_OPTIONS,
-} from "./session.ts";
-import { STATUS_SPEC } from "./status.ts";
-import {
-  INBOX_OPTIONS,
-  MSG_DECIDE_OPTIONS,
-  MSG_DONE_OPTIONS,
-  MSG_HISTORY_OPTIONS,
-  MSG_RETAIN_OPTIONS,
-  MSG_SEND_OPTIONS,
-  MSG_STATUS_OPTIONS,
-  STORE_COMPACTION_PLAN_OPTIONS,
-  STORE_EXPORT_OPTIONS,
-  STORE_IMPORT_OPTIONS,
-  STORE_REBUILD_OPTIONS,
-  STORE_RETIRE_OPTIONS,
-} from "./store.ts";
+} from "./store/session.ts";
 import {
   WORK_BLOCK_OPTIONS,
   WORK_CHECK_OPTIONS,

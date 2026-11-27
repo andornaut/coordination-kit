@@ -7,8 +7,8 @@ import { describe, expect, it } from "vitest";
 
 import { TEST_CLOCK, TEST_CONTEXT } from "../core/testFixtures.ts";
 import { Store } from "./db.ts";
-import { closeMessage, sendMessage } from "./messages.ts";
-import { storeDone, storeInbox, storeSend } from "./service.ts";
+import { closeMessage, sendMessage } from "./messages/messages.ts";
+import { storeDone, storeInbox, storeSend } from "./messages/service.ts";
 import { COORDINATOR, storeFixture, TECH } from "./testStore.ts";
 
 const VOLUME = 30_000;

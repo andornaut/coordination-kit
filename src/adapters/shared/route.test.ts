@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { appLayout, gameLayout, type Layout, loadLayout } from "../../core/layout.ts";
+import { appLayout, gameLayout, type Layout, loadLayout } from "../../core/configuration/layout.ts";
 import {
   makeFixture,
   projectConfig,

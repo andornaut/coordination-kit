@@ -14,10 +14,10 @@ import {
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
-import { fsyncDirectory, tempPrefix, writeDurable } from "../../core/durable.ts";
+import { isRecord } from "../../core/encoding/pyjson.ts";
+import { fsyncDirectory, tempPrefix, writeDurable } from "../../core/files/durable.ts";
+import { holdLock, LockBusy } from "../../core/files/lock.ts";
 import { isCanonicalUuid } from "../../core/ids.ts";
-import { holdLock, LockBusy } from "../../core/lock.ts";
-import { isRecord } from "../../core/pyjson.ts";
 import { canonicalJson, eventHash, sha256 } from "../eventCodec.ts";
 import { ensure, GENESIS, type Json, type StoredEvent, StoreError } from "../types.ts";
 

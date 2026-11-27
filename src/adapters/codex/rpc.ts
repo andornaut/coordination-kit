@@ -7,7 +7,7 @@ import { randomBytes } from "node:crypto";
 import { createConnection, type Socket } from "node:net";
 import { performance } from "node:perf_hooks";
 
-import { isRecord } from "../../core/pyjson.ts";
+import { isRecord } from "../../core/encoding/pyjson.ts";
 import { type DeliveryDiagnostic, safeDeliveryDiagnostic, safeRpcCode } from "../types.ts";
 import { acceptKey, decodeFrames, encodeFrame, MessageAssembler, OPCODE } from "./websocket.ts";
 

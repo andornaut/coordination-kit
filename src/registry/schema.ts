@@ -1,7 +1,11 @@
 // var/registry.json schema version 1, shared by coordination-kit, delivery-kit and the game-sessions skills.
 // The skills own every field except operations.*.lastAdoption, reserved for supported resident-adoption recording.
 // Registry state records ownership; it never proves activation on its own.
-import { type GameCoordinatorConfig, ROLE_KEY_PATTERN, roleKeys } from "../core/layout.ts";
+import {
+  type GameCoordinatorConfig,
+  ROLE_KEY_PATTERN,
+  roleKeys,
+} from "../core/configuration/layout.ts";
 import {
   checkArray,
   checkEnum,

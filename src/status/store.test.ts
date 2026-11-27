@@ -3,8 +3,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { loadLayout } from "../core/configuration/layout.ts";
 import { systemGit } from "../core/git.ts";
-import { loadLayout } from "../core/layout.ts";
 import { TEST_CLOCK } from "../core/testFixtures.ts";
 import { Store, storePath } from "../store/db.ts";
 import {

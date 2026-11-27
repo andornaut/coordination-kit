@@ -3,14 +3,14 @@ import { mkdirSync, readdirSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import type { Clock } from "../core/clock.ts";
+import type { Layout } from "../core/configuration/layout.ts";
 import {
   type DurableStage,
   readJsonIfExists,
   tempPrefix,
   writeJsonDurable,
-} from "../core/durable.ts";
-import type { Layout } from "../core/layout.ts";
-import { LockError, type LockHandle, withLock } from "../core/lock.ts";
+} from "../core/files/durable.ts";
+import { LockError, type LockHandle, withLock } from "../core/files/lock.ts";
 import { type Registry, type RegistryDraft, validateRegistry } from "./schema.ts";
 
 export interface UpdateOptions {

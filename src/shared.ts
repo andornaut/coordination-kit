@@ -6,13 +6,13 @@ export {
   type CodexControlSocketOptions,
   resolveCodexControlSocket,
 } from "./adapters/shared/endpoints.ts";
+export * from "./core/cli/io.ts";
+export * from "./core/cli/usage.ts";
 export * from "./core/clock.ts";
-export * from "./core/config.ts";
-export * from "./core/durable.ts";
+export * from "./core/configuration/delivery.ts";
+export * from "./core/configuration/layout.ts";
+export * from "./core/encoding/pyjson.ts";
+export * from "./core/files/durable.ts";
+export * from "./core/files/lock.ts";
 export * from "./core/ids.ts";
-export * from "./core/io.ts";
-export * from "./core/layout.ts";
-export * from "./core/lock.ts";
-export * from "./core/pyjson.ts";
-export * from "./core/usage.ts";
 export * from "./core/validate.ts";

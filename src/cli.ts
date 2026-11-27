@@ -2,19 +2,13 @@
 // game-coordinator from --root, COORDINATION_KIT_ROOT, DELIVERY_KIT_ROOT or
 // the working directory, in that order; the work group reads --root as the repository instead.
 import { errorMessage, parseOptions } from "./commands/args.ts";
-import { channel } from "./commands/channel.ts";
-import {
-  compactionActivate,
-  compactionCancel,
-  compactionPrepare,
-  compactionReserve,
-} from "./commands/compaction.ts";
-import { harnessDoctor } from "./commands/doctor.ts";
 import { docsAudit, docsCompact } from "./commands/documentation.ts";
 import { graph, graphWhy } from "./commands/graph.ts";
-import { harnessSelect } from "./commands/harness.ts";
-import { init, projectRegister } from "./commands/init.ts";
-import { migrationActivate, migrationPrepare, migrationStatus } from "./commands/migration.ts";
+import { channel } from "./commands/harness/channel.ts";
+import { harnessDoctor } from "./commands/harness/doctor.ts";
+import { claudeReady, codexReady, harnessReady } from "./commands/harness/ready.ts";
+import { harnessSelect } from "./commands/harness/select.ts";
+import { init, projectRegister } from "./commands/project/init.ts";
 import {
   taskApprove,
   taskApproveReview,
@@ -30,7 +24,37 @@ import {
   taskStart,
   taskVerify,
   taskWorkFile,
-} from "./commands/projectTasks.ts";
+} from "./commands/project/tasks.ts";
+import { eventsIngest, reviewDeliver, reviewShow } from "./commands/runner.ts";
+import { type Command, commandUsage, GROUPS, SPECS, synopsis } from "./commands/spec.ts";
+import { status } from "./commands/status.ts";
+import {
+  compactionActivate,
+  compactionCancel,
+  compactionPrepare,
+  compactionReserve,
+} from "./commands/store/compaction.ts";
+import {
+  storeCompactionPlanCommand,
+  storeExportCommand,
+  storeImportCommand,
+  storeRebuildCommand,
+  storeRetireCommand,
+} from "./commands/store/maintenance.ts";
+import {
+  inbox,
+  msgDecide,
+  msgDone,
+  msgHistory,
+  msgRetain,
+  msgSend,
+  msgStatus,
+} from "./commands/store/messages.ts";
+import {
+  migrationActivate,
+  migrationPrepare,
+  migrationStatus,
+} from "./commands/store/migration.ts";
 import {
   decisionList,
   holdList,
@@ -44,10 +68,8 @@ import {
   questionList,
   questionOpen,
   questionProject,
-} from "./commands/questions.ts";
-import { claudeReady, codexReady, harnessReady } from "./commands/ready.ts";
-import { requestClose } from "./commands/requests.ts";
-import { eventsIngest, reviewDeliver, reviewShow } from "./commands/runner.ts";
+} from "./commands/store/questions.ts";
+import { requestClose } from "./commands/store/requests.ts";
 import {
   handoffActive,
   handoffOpen,
@@ -55,23 +77,7 @@ import {
   handoffShow,
   handoffState,
   sessionStart,
-} from "./commands/session.ts";
-import { type Command, commandUsage, GROUPS, SPECS, synopsis } from "./commands/spec.ts";
-import { status } from "./commands/status.ts";
-import {
-  inbox,
-  msgDecide,
-  msgDone,
-  msgHistory,
-  msgRetain,
-  msgSend,
-  msgStatus,
-  storeCompactionPlanCommand,
-  storeExportCommand,
-  storeImportCommand,
-  storeRebuildCommand,
-  storeRetireCommand,
-} from "./commands/store.ts";
+} from "./commands/store/session.ts";
 import {
   workBlock,
   workCheck,
@@ -91,9 +97,9 @@ import {
   EXIT_USAGE,
   type Handler,
   type Io,
-} from "./core/io.ts";
-import type { Options } from "./core/usage.ts";
-import { cliIdentity, VERSION } from "./core/version.ts";
+} from "./core/cli/io.ts";
+import type { Options } from "./core/cli/usage.ts";
+import { cliIdentity, VERSION } from "./core/cli/version.ts";
 const COMMANDS: readonly Command[] = Object.keys(SPECS) as Command[];
 const GLOBAL_OPTIONS = {
   "--help": { help: { type: "boolean" } },

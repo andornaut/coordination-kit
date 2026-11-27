@@ -6,11 +6,11 @@
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { readJsonIfExists, writeJsonDurable } from "../../core/durable.ts";
-import type { Layout } from "../../core/layout.ts";
-import { withLock } from "../../core/lock.ts";
-import { isRecord } from "../../core/pyjson.ts";
-import { stateRoot } from "../../core/stateRoot.ts";
+import type { Layout } from "../../core/configuration/layout.ts";
+import { stateRoot } from "../../core/configuration/stateRoot.ts";
+import { isRecord } from "../../core/encoding/pyjson.ts";
+import { readJsonIfExists, writeJsonDurable } from "../../core/files/durable.ts";
+import { withLock } from "../../core/files/lock.ts";
 
 interface Wake {
   readonly seq: number;

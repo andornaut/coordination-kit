@@ -13,9 +13,9 @@ import {
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
 import type { Collected, CollectRequest } from "../adapters/types.ts";
 import type { Clock } from "../core/clock.ts";
+import type { Layout } from "../core/configuration/layout.ts";
+import { isRecord } from "../core/encoding/pyjson.ts";
 import { isCanonicalUuid } from "../core/ids.ts";
-import type { Layout } from "../core/layout.ts";
-import { isRecord } from "../core/pyjson.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Harness, RoleRecord } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";

@@ -7,9 +7,9 @@ import type { DatabaseSync } from "node:sqlite";
 import { type GitRunner, readMainFiles } from "../core/git.ts";
 import type { Repository } from "../status/collect.ts";
 import type { Store } from "../store/db.ts";
-import { listQuestions } from "../store/questions.ts";
+import { listQuestions } from "../store/decisions/questions.ts";
 import { StoreError } from "../store/types.ts";
-import { readWorkRecords } from "../store/work.ts";
+import { readWorkRecords } from "../store/work-records/work.ts";
 import { parseDecisions } from "../workfiles/decisions.ts";
 import {
   CONVENTION_FILE,

@@ -4,12 +4,12 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
-import { loadLayout } from "../core/layout.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/cli/io.ts";
+import { loadLayout } from "../core/configuration/layout.ts";
 import { clockAt, TEST_CONTEXT, TEST_GIT, TEST_HOST } from "../core/testFixtures.ts";
 import { Store } from "../store/db.ts";
+import { answerQuestion, openQuestion } from "../store/decisions/questions.ts";
 import { activateMigration, prepareMigration } from "../store/files/migration.ts";
-import { answerQuestion, openQuestion } from "../store/questions.ts";
 import { workEvidence, workStart } from "./live.ts";
 import { commit, GAME, IDS, KIT, live, liveFixture, liveIo, ROLES, workFile } from "./testLive.ts";
 

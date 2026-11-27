@@ -13,8 +13,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { main } from "../cli.ts";
-import { EXIT_OK, EXIT_USAGE } from "../core/io.ts";
-import { type GameLayout, gameLayout, type Layout } from "../core/layout.ts";
+import { EXIT_OK, EXIT_USAGE } from "../core/cli/io.ts";
+import { type GameLayout, gameLayout, type Layout } from "../core/configuration/layout.ts";
 import { clockAt, TEST_CONTEXT } from "../core/testFixtures.ts";
 import { Store } from "./db.ts";
 import {
@@ -27,7 +27,7 @@ import {
   QUARANTINE_FILE,
   readCursor,
 } from "./ingest.ts";
-import { derivedId } from "./notices.ts";
+import { derivedId } from "./messages/notices.ts";
 import { GAME, storeFixture } from "./testStore.ts";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";

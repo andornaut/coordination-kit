@@ -15,7 +15,7 @@ export {
   type ReasonToken,
   type ReviewResult,
   type SeamStatus,
-} from "./core/outcome.ts";
+} from "./core/cli/outcome.ts";
 export { deliverReview, type ReviewOptions } from "./review/deliver.ts";
 export { coordinationEmit, coordinationNotice } from "./review/emit.ts";
 export {

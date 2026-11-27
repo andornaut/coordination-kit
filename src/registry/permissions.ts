@@ -1,4 +1,4 @@
-import type { Layout, Permission } from "../core/layout.ts";
+import type { Layout, Permission } from "../core/configuration/layout.ts";
 import { resolveConversation } from "./resolve.ts";
 import type { Registry } from "./schema.ts";
 

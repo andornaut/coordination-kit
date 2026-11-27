@@ -3,8 +3,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { loadLayout, roleKeys } from "../core/layout.ts";
-import { holdLock, LockBusy } from "../core/lock.ts";
+import { loadLayout, roleKeys } from "../core/configuration/layout.ts";
+import { holdLock, LockBusy } from "../core/files/lock.ts";
 import {
   CLAUDE_TECH,
   CODEX_TECH,

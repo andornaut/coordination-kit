@@ -16,13 +16,12 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 
-import { writeDurable } from "../core/durable.ts";
-import type { GameLayout, Layout } from "../core/layout.ts";
-import { holdLock, LockBusy, type LockHandle } from "../core/lock.ts";
-import type { ReasonToken, SeamStatus } from "../core/outcome.ts";
+import type { ReasonToken, SeamStatus } from "../core/cli/outcome.ts";
+import type { GameLayout, Layout } from "../core/configuration/layout.ts";
+import { writeDurable } from "../core/files/durable.ts";
+import { holdLock, LockBusy, type LockHandle } from "../core/files/lock.ts";
 import { Store, type StoreContext } from "./db.ts";
 import { REF, sha256 } from "./eventCodec.ts";
-import { DELIVERY_KIT_ACTOR } from "./identity.ts";
 import {
   clean,
   derivedId,
@@ -31,9 +30,10 @@ import {
   reportsRecipient,
   shouldNotifyRunnerEvent,
   storeNotice,
-} from "./notices.ts";
+} from "./messages/notices.ts";
+import { type WakePorts, wakeRecipient } from "./messages/wake.ts";
+import { DELIVERY_KIT_ACTOR } from "./sessions/identity.ts";
 import type { Json, JsonObject, MessageLink } from "./types.ts";
-import { type WakePorts, wakeRecipient } from "./wake.ts";
 
 export const LOG_FILE = "events.jsonl";
 export const CURSOR_FILE = "events.cursor";

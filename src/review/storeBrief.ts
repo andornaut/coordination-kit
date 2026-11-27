@@ -5,17 +5,24 @@
 import type { SQLInputValue } from "node:sqlite";
 
 import { readRoleRoute, RouteError, routeRecipient } from "../adapters/shared/route.ts";
-import type { GameLayout, Layout } from "../core/layout.ts";
-import type { ReviewResult } from "../core/outcome.ts";
+import type { ReviewResult } from "../core/cli/outcome.ts";
+import type { GameLayout, Layout } from "../core/configuration/layout.ts";
 import { resolveRole } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
 import { Store, type StoreContext } from "../store/db.ts";
-import { DELIVERY_KIT_ACTOR } from "../store/identity.ts";
-import { unreadMessages } from "../store/messageWake.ts";
-import { derivedId, storeNotice } from "../store/notices.ts";
-import { policyHoldEntries, type PolicyHoldView } from "../store/policyHolds.ts";
-import { holdGuard } from "../store/questions.ts";
-import { NEXT_REVIEW_BOUNDARY, retentionInstant } from "../store/retention.ts";
+import { policyHoldEntries, type PolicyHoldView } from "../store/decisions/policyHolds.ts";
+import { holdGuard } from "../store/decisions/questions.ts";
+import { derivedId, storeNotice } from "../store/messages/notices.ts";
+import { NEXT_REVIEW_BOUNDARY, retentionInstant } from "../store/messages/retention.ts";
+import {
+  pendingWakeRoles,
+  rearmWake,
+  type WakePorts,
+  wakeRecipient,
+  wakeState,
+} from "../store/messages/wake.ts";
+import { unreadMessages } from "../store/messages/wakeEvidence.ts";
+import { DELIVERY_KIT_ACTOR } from "../store/sessions/identity.ts";
 import {
   type Json,
   type JsonObject,
@@ -23,13 +30,6 @@ import {
   StoreError,
   type UnreadMessage,
 } from "../store/types.ts";
-import {
-  pendingWakeRoles,
-  rearmWake,
-  type WakePorts,
-  wakeRecipient,
-  wakeState,
-} from "../store/wake.ts";
 import { readReadyHandoffs, type ReadyHandoff } from "./ready.ts";
 import { type RecordedDecisions, recordedDecisions } from "./recordedDecisions.ts";
 import {

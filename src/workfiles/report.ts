@@ -1,6 +1,6 @@
 // `work report`: each work item's front-matter state. Live progress is in the store (`work show`)
 // and the cross-repository view is `status`; reading changes nothing.
-import { loadLayout } from "../core/layout.ts";
+import { loadLayout } from "../core/configuration/layout.ts";
 import { field, readWorkFiles, type WorkFile } from "./files.ts";
 
 interface WorkReportItem {

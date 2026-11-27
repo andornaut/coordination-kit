@@ -1,15 +1,15 @@
 // Read the coordinator's status projections in one consistent, read-only snapshot.
 import type { DatabaseSync } from "node:sqlite";
 
-import type { Layout } from "../core/layout.ts";
-import { StateRootError } from "../core/stateRoot.ts";
+import type { Layout } from "../core/configuration/layout.ts";
+import { StateRootError } from "../core/configuration/stateRoot.ts";
 import { Store } from "../store/db.ts";
-import { unreadMessages } from "../store/messageWake.ts";
-import type { HoldView } from "../store/policyHolds.ts";
-import { listHolds, listQuestions, type QuestionView } from "../store/questions.ts";
-import { readRequests, type RequestRecord } from "../store/requests.ts";
+import type { HoldView } from "../store/decisions/policyHolds.ts";
+import { listHolds, listQuestions, type QuestionView } from "../store/decisions/questions.ts";
+import { unreadMessages } from "../store/messages/wakeEvidence.ts";
 import type { UnreadMessage } from "../store/types.ts";
-import { readWorkRecords, type WorkRecord } from "../store/work.ts";
+import { readRequests, type RequestRecord } from "../store/work-records/requests.ts";
+import { readWorkRecords, type WorkRecord } from "../store/work-records/work.ts";
 import { type DeployPoint, storedDeployPoint } from "./delivery.ts";
 
 type StoreSourceState =

@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { type Layout, loadLayout, validateWorkspaceConfig } from "../core/layout.ts";
-import { holdLock, LockBusy, LockError, lockIsFree } from "../core/lock.ts";
+import { type Layout, loadLayout, validateWorkspaceConfig } from "../core/configuration/layout.ts";
+import { holdLock, LockBusy, LockError, lockIsFree } from "../core/files/lock.ts";
 import {
   CLAUDE_COORDINATOR,
   clockAt,

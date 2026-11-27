@@ -4,8 +4,8 @@
 import { performance } from "node:perf_hooks";
 
 import type { Clock } from "../../../core/clock.ts";
+import { isRecord, sameJson } from "../../../core/encoding/pyjson.ts";
 import { isCanonicalUuid } from "../../../core/ids.ts";
-import { isRecord, sameJson } from "../../../core/pyjson.ts";
 import { NativeTimeout, type RpcClient } from "../rpc.ts";
 
 const ERROR_CLASSES: Readonly<Record<string, string>> = {

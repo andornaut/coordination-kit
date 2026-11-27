@@ -3,10 +3,10 @@
 // printed message or refusal code. The real clock is read here and in the entry points only.
 import { parseArgs } from "node:util";
 
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/cli/io.ts";
+import type { Options } from "../core/cli/usage.ts";
 import type { Clock } from "../core/clock.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
-import type { Options } from "../core/usage.ts";
-import type { CallerOptions } from "../store/identity.ts";
+import type { CallerOptions } from "../store/sessions/identity.ts";
 import { StoreError } from "../store/types.ts";
 
 /** The options every store writer takes to name its caller. */
@@ -237,4 +237,12 @@ export function refusalCode(error: unknown, fallback: string): string {
   return error instanceof StoreError && /^[a-z][a-z-]{0,63}$/.test(error.code)
     ? error.code
     : fallback;
+}
+
+/** An ISO 8601 instant, normalized to the store's `toISOString` form for ordered comparison. */
+export function isoInstant(value: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(value) || !Number.isFinite(Date.parse(value))) {
+    throw new Usage();
+  }
+  return new Date(value).toISOString();
 }

@@ -6,16 +6,16 @@ import { dirname, join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import type { Clock } from "../core/clock.ts";
+import type { Layout } from "../core/configuration/layout.ts";
+import { stateRoot } from "../core/configuration/stateRoot.ts";
 import { systemGit } from "../core/git.ts";
-import type { Layout } from "../core/layout.ts";
-import { stateRoot } from "../core/stateRoot.ts";
 import { canonicalJson, eventHash, rowEvent, sha256 } from "./eventCodec.ts";
 import type { FileProjection } from "./fileProjection.ts";
 import { fileAuthority } from "./files/authority.ts";
 import {
   type CompactionCheckpoint,
   verifyCompactionCheckpoint,
-} from "./files/compactionCheckpoint.ts";
+} from "./files/compaction/checkpoint.ts";
 import { fileLayoutProjection } from "./files/runtime.ts";
 import { PROJECTIONS, RETIRED_TABLES } from "./projections.ts";
 import {

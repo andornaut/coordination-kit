@@ -3,16 +3,16 @@
 // recipient is the host app's reports.recipient.
 import { existsSync } from "node:fs";
 
-import { loadReportsConfig } from "../../core/config.ts";
-import { readJson } from "../../core/durable.ts";
+import { loadReportsConfig } from "../../core/configuration/delivery.ts";
 import {
   appLayout,
   appRoleKeys,
   type GameCoordinatorConfig,
   type Layout,
   roleKeys,
-} from "../../core/layout.ts";
-import { isRecord } from "../../core/pyjson.ts";
+} from "../../core/configuration/layout.ts";
+import { isRecord } from "../../core/encoding/pyjson.ts";
+import { readJson } from "../../core/files/durable.ts";
 
 export interface RoleRoute {
   readonly schema: 2;

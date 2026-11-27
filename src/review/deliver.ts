@@ -4,9 +4,6 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { readJsonIfExists, writeJsonDurable } from "../core/durable.ts";
-import type { GameLayout, Layout } from "../core/layout.ts";
-import { holdLock, LockBusy, type LockHandle } from "../core/lock.ts";
 import {
   type CliIdentity,
   cliMember,
@@ -15,10 +12,13 @@ import {
   type ReviewResult,
   type RunnerIdField,
   type SeamStatus,
-} from "../core/outcome.ts";
-import { isRecord } from "../core/pyjson.ts";
+} from "../core/cli/outcome.ts";
+import type { GameLayout, Layout } from "../core/configuration/layout.ts";
+import { isRecord } from "../core/encoding/pyjson.ts";
+import { readJsonIfExists, writeJsonDurable } from "../core/files/durable.ts";
+import { holdLock, LockBusy, type LockHandle } from "../core/files/lock.ts";
 import type { StoreContext } from "../store/db.ts";
-import type { WakePorts } from "../store/wake.ts";
+import type { WakePorts } from "../store/messages/wake.ts";
 import { storeReview } from "./storeBrief.ts";
 import type { NativeCollect } from "./storeNative.ts";
 

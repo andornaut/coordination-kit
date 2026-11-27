@@ -1,7 +1,6 @@
 // The work group over one repository, which --root names (default: the working directory): `work
 // check` and `work report`, and the store work verbs `work start|evidence|block|unblock|ready|
 // finish|show|history`. The coordinator root for live state comes only from the environment.
-import { systemGit } from "../core/git.ts";
 import {
   coordinatorRoot,
   EXIT_INVALID,
@@ -9,9 +8,10 @@ import {
   EXIT_USAGE,
   type Handler,
   type Io,
-} from "../core/io.ts";
-import type { Options } from "../core/usage.ts";
-import { WORK_STAGES, type WorkStage } from "../store/work.ts";
+} from "../core/cli/io.ts";
+import type { Options } from "../core/cli/usage.ts";
+import { systemGit } from "../core/git.ts";
+import { WORK_STAGES, type WorkStage } from "../store/work-records/work.ts";
 import {
   type LiveContext,
   unrecordedDecisions,

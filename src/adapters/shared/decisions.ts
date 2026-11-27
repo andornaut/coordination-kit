@@ -4,8 +4,8 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { appLayout, type Layout } from "../../core/configuration/layout.ts";
 import { CANONICAL_UUID } from "../../core/ids.ts";
-import { appLayout, type Layout } from "../../core/layout.ts";
 import { readRoleRoute } from "./route.ts";
 
 const FIELDS = [

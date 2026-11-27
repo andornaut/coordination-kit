@@ -3,9 +3,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/cli/io.ts";
+import type { Options } from "../core/cli/usage.ts";
 import { makeFixture } from "../core/testFixtures.ts";
-import type { Options } from "../core/usage.ts";
 import { StoreError } from "../store/types.ts";
 import { parseOptions, Usage, verbFamily } from "./args.ts";
 import { type Command, SPECS } from "./spec.ts";

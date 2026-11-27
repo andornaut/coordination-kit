@@ -1,8 +1,8 @@
 // `coordination-kit status`: the read-only cross-repository status of every work item, as JSON or
 // a Markdown digest. --root names the coordinator, as for every non-work command.
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/cli/io.ts";
+import { type CommandSpec, formSynopsis, usageText } from "../core/cli/usage.ts";
 import { systemGit } from "../core/git.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
-import { type CommandSpec, formSynopsis, usageText } from "../core/usage.ts";
 import { collectStatus, incomplete, StatusUsageError } from "../status/collect.ts";
 import { DEFAULT_VERIFY_SINCE, STATE_FILTERS, type StateFilter } from "../status/derive.ts";
 import { renderMarkdown } from "../status/markdown.ts";

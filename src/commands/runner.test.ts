@@ -5,8 +5,8 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { main } from "../cli.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
-import { REASON_TOKENS } from "../core/outcome.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/cli/io.ts";
+import { REASON_TOKENS } from "../core/cli/outcome.ts";
 import { CLAUDE_TECH } from "../core/testFixtures.ts";
 import { type ClaudeFixture, claudeFixture, GAME, RECIPIENT, SLOT } from "../review/fixtures.ts";
 

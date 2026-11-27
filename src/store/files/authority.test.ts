@@ -14,7 +14,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { loadLayout } from "../../core/layout.ts";
+import { loadLayout } from "../../core/configuration/layout.ts";
 import { TEST_CLOCK, TEST_GIT } from "../../core/testFixtures.ts";
 import { Store } from "../db.ts";
 import { GENESIS } from "../types.ts";

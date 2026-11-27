@@ -1,11 +1,11 @@
 import { lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-import { readJson, writeJsonDurable } from "../../core/durable.ts";
+import type { Layout } from "../../core/configuration/layout.ts";
+import { isRecord } from "../../core/encoding/pyjson.ts";
+import { readJson, writeJsonDurable } from "../../core/files/durable.ts";
+import { withLock } from "../../core/files/lock.ts";
 import type { GitRunner } from "../../core/git.ts";
-import type { Layout } from "../../core/layout.ts";
-import { withLock } from "../../core/lock.ts";
-import { isRecord } from "../../core/pyjson.ts";
 import { readRegistry } from "../../registry/store.ts";
 import { READ_ONLY_CLOCK, Store, storePath } from "../db.ts";
 import { canonicalJson, sha256 } from "../eventCodec.ts";

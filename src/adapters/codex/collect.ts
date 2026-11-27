@@ -3,7 +3,7 @@
 import { performance } from "node:perf_hooks";
 
 import type { Clock } from "../../core/clock.ts";
-import { isRecord, unicodeDumps } from "../../core/pyjson.ts";
+import { isRecord, unicodeDumps } from "../../core/encoding/pyjson.ts";
 import type { Collected, CollectRequest } from "../types.ts";
 import { workerHealth } from "./collectors/childHealth.ts";
 import { collectQuestionState } from "./collectors/questionState.ts";

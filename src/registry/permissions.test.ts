@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { loadLayout } from "../core/layout.ts";
+import { loadLayout } from "../core/configuration/layout.ts";
 import {
   CLAUDE_COORDINATOR,
   CLAUDE_TECH,

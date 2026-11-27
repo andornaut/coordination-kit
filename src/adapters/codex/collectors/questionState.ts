@@ -6,9 +6,9 @@
 import { performance } from "node:perf_hooks";
 
 import type { Clock } from "../../../core/clock.ts";
+import { utcStamp } from "../../../core/encoding/isoformat.ts";
+import { isRecord, sameJson } from "../../../core/encoding/pyjson.ts";
 import { isCanonicalUuid } from "../../../core/ids.ts";
-import { utcStamp } from "../../../core/isoformat.ts";
-import { isRecord, sameJson } from "../../../core/pyjson.ts";
 import { NativeTimeout, type RpcClient } from "../rpc.ts";
 
 const MAX_CALLS = 256;

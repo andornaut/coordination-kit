@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import * as durable from "../../core/durable.ts";
+import * as durable from "../../core/files/durable.ts";
 import { codexQueueTransport } from "./queue.ts";
 import { type RpcClient, RpcError } from "./rpc.ts";
 

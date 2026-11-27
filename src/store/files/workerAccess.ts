@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import type { Layout } from "../../core/layout.ts";
+import type { Layout } from "../../core/configuration/layout.ts";
 import type { Registry } from "../../registry/schema.ts";
 import { Store, type StoreContext } from "../db.ts";
 import { latestStoreReview } from "../eventCodec.ts";

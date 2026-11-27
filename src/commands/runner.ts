@@ -3,7 +3,9 @@
 // typed outcome, 2 for a usage error and 1 for an internal failure, which prints nothing on
 // stdout and one `coordination-kit:` line on stderr.
 
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/cli/io.ts";
+import { type CliIdentity, cliMember, type RunnerIdField } from "../core/cli/outcome.ts";
+import { cliIdentity } from "../core/cli/version.ts";
 import {
   appLayout,
   type GameLayout,
@@ -12,15 +14,13 @@ import {
   loadLayout,
   UnknownApp,
   UnknownGame,
-} from "../core/layout.ts";
-import { type CliIdentity, cliMember, type RunnerIdField } from "../core/outcome.ts";
-import { cliIdentity } from "../core/version.ts";
+} from "../core/configuration/layout.ts";
 import { readRegistry } from "../registry/store.ts";
 import { deliverReview, reviewDeliverLine } from "../review/deliver.ts";
 import { showBrief } from "../review/storeBrief.ts";
-import { resolveCaller } from "../store/identity.ts";
 import { ingestEvents, type IngestResult } from "../store/ingest.ts";
-import { requirePermission } from "../store/permissions.ts";
+import { resolveCaller } from "../store/sessions/identity.ts";
+import { requirePermission } from "../store/sessions/permissions.ts";
 import { StoreError } from "../store/types.ts";
 import { errorMessage, parseOptions, systemClock } from "./args.ts";
 

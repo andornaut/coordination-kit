@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { clockAt, TEST_CLOCK, TEST_CONTEXT } from "../core/testFixtures.ts";
 import { Store, storePath } from "./db.ts";
 import { canonicalJson } from "./eventCodec.ts";
-import { closeMessage, readInbox, retainMessage, sendMessage } from "./messages.ts";
+import { closeMessage, readInbox, retainMessage, sendMessage } from "./messages/messages.ts";
 import { storeFixture } from "./testStore.ts";
 import { GENESIS } from "./types.ts";
 

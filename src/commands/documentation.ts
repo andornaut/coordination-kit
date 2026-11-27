@@ -1,6 +1,6 @@
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../core/cli/io.ts";
+import type { Options } from "../core/cli/usage.ts";
 import { systemGit } from "../core/git.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../core/io.ts";
-import type { Options } from "../core/usage.ts";
 import { auditDocs } from "../workfiles/docsAudit.ts";
 import { planDocsCompaction } from "../workfiles/docsCompact.ts";
 import { errorMessage, parseOptions, Usage } from "./args.ts";

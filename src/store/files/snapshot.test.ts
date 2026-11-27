@@ -4,14 +4,19 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
-import { gameLayout } from "../../core/layout.ts";
+import { gameLayout } from "../../core/configuration/layout.ts";
 import { clockAt, TEST_CLOCK, TEST_HOST } from "../../core/testFixtures.ts";
 import { Store, storePath } from "../db.ts";
+import {
+  answerQuestion,
+  openQuestion,
+  recordQuestionAnswer,
+  setHold,
+} from "../decisions/questions.ts";
 import { canonicalJson } from "../eventCodec.ts";
-import { sendMessage } from "../messages.ts";
-import { answerQuestion, openQuestion, recordQuestionAnswer, setHold } from "../questions.ts";
+import { sendMessage } from "../messages/messages.ts";
 import { COORDINATOR, GAME, storeFixture, TECH } from "../testStore.ts";
-import { recordEvidence, retainWorkItem, startWork } from "../work.ts";
+import { recordEvidence, retainWorkItem, startWork } from "../work-records/work.ts";
 import {
   assertSqliteEquivalent,
   exportSqliteSnapshot,

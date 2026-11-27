@@ -3,23 +3,23 @@
 // through the registry fence, then apply one store write. Only the owner may write.
 import { realpathSync } from "node:fs";
 
+import { type Layout, loadLayout } from "../core/configuration/layout.ts";
+import { StateRootError } from "../core/configuration/stateRoot.ts";
 import { type GitRunner, repositoryRoot } from "../core/git.ts";
-import { type Layout, loadLayout } from "../core/layout.ts";
-import { StateRootError } from "../core/stateRoot.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 import { repositories, type Repository } from "../status/collect.ts";
-import { dependentQuestions } from "../store/codexQuestions.ts";
 import { MEMORY, READ_ONLY_CLOCK, Store, type StoreContext } from "../store/db.ts";
-import { fileWorkerCaller } from "../store/files/workerAccess.ts";
-import { type CallerOptions, resolveCaller } from "../store/identity.ts";
+import { dependentQuestions } from "../store/decisions/codexQuestions.ts";
 import {
   type CoveringHold,
   type HoldCover,
   type HoldLookup,
   listDecisions,
   storeHolds,
-} from "../store/questions.ts";
+} from "../store/decisions/questions.ts";
+import { fileWorkerCaller } from "../store/files/workerAccess.ts";
+import { type CallerOptions, resolveCaller } from "../store/sessions/identity.ts";
 import { type Actor, StoreError, type WorkRef } from "../store/types.ts";
 import {
   blockWork,
@@ -37,7 +37,7 @@ import {
   type WorkRecord,
   type WorkStage,
   type WorkWrite,
-} from "../store/work.ts";
+} from "../store/work-records/work.ts";
 import { parseDecisions } from "../workfiles/decisions.ts";
 import {
   CONVENTION_FILE,

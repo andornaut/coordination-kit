@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/cli/io.ts";
 import { collectStatus } from "../status/collect.ts";
 import { importApprovalLedger } from "../work/approvals.ts";
 import { buildGraph } from "../work/graph.ts";

@@ -1,6 +1,6 @@
-import type { CodexQuestion } from "../store/codexQuestions.ts";
 import type { Store } from "../store/db.ts";
-import { listQuestions, type QuestionOption } from "../store/questions.ts";
+import type { CodexQuestion } from "../store/decisions/codexQuestions.ts";
+import { listQuestions, type QuestionOption } from "../store/decisions/questions.ts";
 
 export interface RecordedDecisions {
   readonly pending: readonly {

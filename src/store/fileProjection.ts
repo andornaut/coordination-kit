@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import type { CheckpointReceipt } from "./files/compactionCheckpoint.ts";
+import type { CheckpointReceipt } from "./files/compaction/checkpoint.ts";
 import type { Json, StoredEvent } from "./types.ts";
 
 interface FileRecord {

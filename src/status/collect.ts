@@ -4,6 +4,8 @@
 import { realpathSync } from "node:fs";
 import { basename, resolve } from "node:path";
 
+import type { Io } from "../core/cli/io.ts";
+import { appLayout, type Layout, loadLayout } from "../core/configuration/layout.ts";
 import {
   type GitRunner,
   type History,
@@ -12,15 +14,13 @@ import {
   readMainFiles,
   repositoryRoot,
 } from "../core/git.ts";
-import type { Io } from "../core/io.ts";
-import { appLayout, type Layout, loadLayout } from "../core/layout.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
-import type { HoldView } from "../store/policyHolds.ts";
-import type { QuestionView } from "../store/questions.ts";
-import type { RequestRecord } from "../store/requests.ts";
+import type { HoldView } from "../store/decisions/policyHolds.ts";
+import type { QuestionView } from "../store/decisions/questions.ts";
 import type { UnreadMessage } from "../store/types.ts";
-import type { WorkRecord } from "../store/work.ts";
+import type { RequestRecord } from "../store/work-records/requests.ts";
+import type { WorkRecord } from "../store/work-records/work.ts";
 import { CONVENTION_FILE, fieldIds, parseFrontMatter } from "../workfiles/files.ts";
 import { type RepositoryKind, workOwner } from "../workfiles/owner.ts";
 import {

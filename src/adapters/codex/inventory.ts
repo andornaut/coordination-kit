@@ -1,5 +1,5 @@
 // Native queue inventory (thread/queue/list).
-import { isRecord, type PyJson, sameJson } from "../../core/pyjson.ts";
+import { isRecord, type PyJson, sameJson } from "../../core/encoding/pyjson.ts";
 import type { RpcClient } from "./rpc.ts";
 
 export interface QueueEntry {

@@ -17,9 +17,9 @@ import { dirname, join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/cli/io.ts";
+import { loadLayout } from "../core/configuration/layout.ts";
 import { type GitRunner, systemGit } from "../core/git.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
-import { loadLayout } from "../core/layout.ts";
 import {
   CLAUDE_COORDINATOR,
   CLAUDE_TECH,
@@ -29,11 +29,11 @@ import {
 } from "../core/testFixtures.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
 import { Store } from "../store/db.ts";
-import { sendMessage } from "../store/messages.ts";
-import { setPolicyHold } from "../store/policyHolds.ts";
-import { openQuestion, setHold } from "../store/questions.ts";
-import { importRequest, type RequestImport } from "../store/requests.ts";
-import { startWork } from "../store/work.ts";
+import { setPolicyHold } from "../store/decisions/policyHolds.ts";
+import { openQuestion, setHold } from "../store/decisions/questions.ts";
+import { sendMessage } from "../store/messages/messages.ts";
+import { importRequest, type RequestImport } from "../store/work-records/requests.ts";
+import { startWork } from "../store/work-records/work.ts";
 import { collectStatus, type StatusItem, type StatusReport } from "./collect.ts";
 
 type StatusOptions = Parameters<typeof collectStatus>[2];

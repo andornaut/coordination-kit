@@ -4,12 +4,12 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/io.ts";
-import { loadLayout } from "../core/layout.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/cli/io.ts";
+import { loadLayout } from "../core/configuration/layout.ts";
 import { TEST_CONTEXT, TEST_HOST } from "../core/testFixtures.ts";
 import { readRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
-import { releasePolicyHold, setPolicyHold } from "../store/policyHolds.ts";
+import { releasePolicyHold, setPolicyHold } from "../store/decisions/policyHolds.ts";
 import {
   answerQuestion,
   listDecisions,
@@ -17,7 +17,7 @@ import {
   recordQuestionAnswer,
   releaseHold,
   setHold,
-} from "../store/questions.ts";
+} from "../store/decisions/questions.ts";
 import { StoreError } from "../store/types.ts";
 import {
   workBlock,

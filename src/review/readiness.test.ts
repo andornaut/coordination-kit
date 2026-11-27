@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { type FakeControl, startFakeControl } from "../adapters/codex/testControlSocket.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
-import { type Layout, loadLayout } from "../core/layout.ts";
+import { type Layout, loadLayout } from "../core/configuration/layout.ts";
 import { CODEX_TECH, makeFixture, registryInput, TEST_CLOCK } from "../core/testFixtures.ts";
 import { createRegistry, readRegistry, type Registry, updateRegistry } from "../registry/index.ts";
 import { harnessReadiness } from "./readiness.ts";

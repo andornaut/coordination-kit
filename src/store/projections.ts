@@ -11,7 +11,7 @@ import { POLICY_HOLDS_PROJECTION } from "./projections/policyHolds.ts";
 import { QUESTION_ANSWERS_PROJECTION, QUESTIONS_PROJECTION } from "./projections/questions.ts";
 import { REQUESTS_PROJECTION } from "./projections/requests.ts";
 import { WORK_PROJECTION } from "./projections/work.ts";
-import { PROJECT_TASKS_PROJECTION } from "./projectTasks.ts";
+import { PROJECT_TASKS_PROJECTION } from "./projects/tasks.ts";
 import type { Projection } from "./types.ts";
 
 /** Every projection, in apply order. A later phase appends its own here. */

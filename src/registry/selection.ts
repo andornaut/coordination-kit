@@ -1,6 +1,6 @@
 // Scoped transport selection changes no activation or ownership evidence.
 import type { Clock } from "../core/clock.ts";
-import { appRoleKeys, type Layout } from "../core/layout.ts";
+import { appRoleKeys, type Layout } from "../core/configuration/layout.ts";
 import { checkArray, checkEnum, checkObject, checkString, Issues } from "../core/validate.ts";
 import { resolveRole } from "./resolve.ts";
 import { type Harness, HARNESSES, type Registry } from "./schema.ts";
