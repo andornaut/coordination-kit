@@ -103,19 +103,20 @@ The [review guide](standalone.md#review-and-merge) explains policy changes and e
 approval. Run [landing verification](standalone.md#follow-the-merge-to-landing) after the
 merge with the evidence your repository requires for the integrated revision.
 
-### Install the workflow skill
+### Install the lifecycle skill
 
-The optional workflow skill guides agents through approved standalone tasks, from starting work
-through review, merge and verification of the landed revision. Use a CLI release that lists
-`skills install` in its help. To install for Codex from the standalone example above, run
+The optional `coordination-lifecycle` skill guides agents taking up or resuming a standalone task,
+from checking recorded approval through review, merge and verification of the landed revision.
+Use a CLI release that lists `lifecycle` in `skills install --help`. To install for Codex from
+the standalone example above, run
 
 ```sh
-ck --root "$primary" skills install workflow --harness codex --scope project
+ck --root "$primary" skills install lifecycle --harness codex --scope project
 ```
 
 Use `--harness claude` for Claude. Commit the installed skill to share it with the project's
 other checkouts. Review any local edits before replacing a skill with a newer bundled version.
-Install `status` in place of `workflow` for read-only status reporting in standalone or shared
+Install `status` in place of `lifecycle` for read-only status reporting in standalone or shared
 workspaces. See [installer options and destinations](commands.md#skills-install).
 
 ## Set up an app workspace

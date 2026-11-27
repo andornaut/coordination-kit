@@ -56,10 +56,10 @@ Commands with an app selector also accept the legacy `--game` spelling. Use one 
 `skills install SKILL --harness codex|claude --scope project` installs one skill bundled with
 the current CLI release. Both flags are required. Use `--root DIR` to select the project explicitly.
 
-| Skill      | Folder name                 | What it covers                                        |
-| ---------- | --------------------------- | ----------------------------------------------------- |
-| `workflow` | `coordination-kit-workflow` | Approved standalone tasks through verified landing.   |
-| `status`   | `coordination-status`       | Read-only status in standalone and shared workspaces. |
+| Skill       | Folder name              | What it covers                                        |
+| ----------- | ------------------------ | ----------------------------------------------------- |
+| `lifecycle` | `coordination-lifecycle` | Approved standalone tasks through verified landing.   |
+| `status`    | `coordination-status`    | Read-only status in standalone and shared workspaces. |
 
 Codex skills go under `.agents/skills/` and Claude skills go under `.claude/skills/`, relative
 to the Git root. Each skill folder holds its `SKILL.md`.
