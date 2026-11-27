@@ -1,5 +1,13 @@
 # Upgrading
 
+## Coordination Kit 7.13
+
+New standalone work files include a Verification section for the task owner's plan.
+The [standalone workflow](standalone.md#approve-and-build) explains how to fill it in before
+building and record exact check results. Upgrade the CLI used for `task ready` before preparing a
+candidate that includes the new section. The 7.13 CLI also accepts the earlier work-file format.
+Existing projects can [sync the managed lifecycle skill](commands.md#skills-sync) after upgrading.
+
 ## Coordination Kit 7.12
 
 Use 7.12.1 or later for any real one-time closed-history operation. The 7.12.0 variant lacks

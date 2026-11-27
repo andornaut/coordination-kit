@@ -42,9 +42,11 @@ docs/
 - Keep historical tasks at their existing `docs/work/<id>.md` paths. Move long tables to
   `docs/work/index/<area>.md` and link to the table from the design area. Existing inline
   tables remain valid.
-- Put a rule's current wording in one place. For a changed or reverted requirement,
-  update that text and link the new decision to its predecessor with `supersedes`.
-  For a documentation correction, verify the approved requirement before editing.
+- Give each rule or procedure one authoritative page. Link to it from navigation, setup
+  guides and skills, with a short cue about when to use it.
+- For a changed or reverted requirement, update its authoritative text and link the new
+  decision to its predecessor with `supersedes`. For a documentation correction, verify
+  the approved requirement before editing.
 
 ## Audit a requirement
 
