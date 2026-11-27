@@ -162,9 +162,9 @@ export function verbFamily<C>(
 ): <Result>(
   command: string,
   options: Options,
-  action: (context: C, values: Values, positionals: readonly string[]) => Result | Promise<Result>,
+  action: (context: C, values: Values, positionals: readonly string[]) => Result,
   positionals?: number,
-  exitCode?: (result: Result) => number,
+  exitCode?: (result: Awaited<Result>) => number,
 ) => Handler {
   const usage = (io: Io, command: string, options: Options, error: unknown): number => {
     const hint = usageHint(command, options, error);
