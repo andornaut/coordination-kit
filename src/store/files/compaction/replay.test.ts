@@ -148,9 +148,13 @@ function operationalState(store: Store) {
   return {
     closed: recipientMessages(store, RECIPIENT.role, ["handled", "superseded"]),
     open: recipientMessages(store, RECIPIENT.role, ["delivered", "retained", "sent"]),
-    runner: store.db.prepare("SELECT * FROM bus_events ORDER BY seq").all(),
-    sessions: store.db.prepare("SELECT * FROM sessions ORDER BY role").all(),
-    wakes: store.db.prepare("SELECT * FROM wake_state ORDER BY role").all(),
+    runner: store.index.rows("bus_events").toSorted((a, b) => Number(a.seq) - Number(b.seq)),
+    sessions: store.index
+      .rows("sessions")
+      .toSorted((a, b) => String(a.role).localeCompare(String(b.role))),
+    wakes: store.index
+      .rows("wake_state")
+      .toSorted((a, b) => String(a.role).localeCompare(String(b.role))),
   };
 }
 
@@ -359,14 +363,10 @@ describe("qualified compacted store replay", () => {
         expect(() => store.rebuild()).toThrow("chain-broken");
         expect(store.head()).toEqual(proof.receipt.head);
         tail.pop();
-        store.db.exec("DROP TRIGGER events_no_update");
-        store.db
-          .prepare(
-            "UPDATE events SET payload = json_set(payload, '$.version', 'altered') WHERE seq = ?",
-          )
-          .run(oldSession.seq);
-        expect(() => store.verify()).toThrow("chain-broken");
-        expect(() => store.rebuild()).toThrow("chain-broken");
+        expect(Reflect.set(store.eventAt(oldSession.seq)!.payload, "version", "altered")).toBe(
+          false,
+        );
+        expect(store.verify().head).toEqual(proof.receipt.head);
       } finally {
         store.close();
       }

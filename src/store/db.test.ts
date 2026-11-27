@@ -285,7 +285,12 @@ describe("Store", () => {
     const store = Store.open(TEST_CLOCK, scratch());
     expect(() =>
       store.transaction(() => {
-        sendMessage(store, SENDER, { body: "Discard this message", id: uuid(1), intent: "queue", to: RECIPIENT.role });
+        sendMessage(store, SENDER, {
+          body: "Discard this message",
+          id: uuid(1),
+          intent: "queue",
+          to: RECIPIENT.role,
+        });
         throw new Error("abort");
       }),
     ).toThrow("abort");
@@ -299,8 +304,9 @@ describe("Store", () => {
     const store = Store.open(TEST_CLOCK, path);
     const { event } = store.append({ actor: SENDER, key: "k", kind: "test.noted", payload: {} });
     const repeated = { ...event, prevHash: event.hash, seq: 2 };
-    expect(() => Store.fromEvents(TEST_CLOCK, [event, { ...repeated, hash: eventHash(repeated) }]))
-      .toThrow("duplicate-event-key");
+    expect(() =>
+      Store.fromEvents(TEST_CLOCK, [event, { ...repeated, hash: eventHash(repeated) }]),
+    ).toThrow("duplicate-event-key");
     store.close();
   });
 });

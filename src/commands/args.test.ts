@@ -113,7 +113,6 @@ describe("the verb wrapper", () => {
       "codex ready",
       "harness doctor",
       "harness ready",
-      "store migration-status",
       "task list",
       "task show",
       "task work-file",

@@ -159,7 +159,10 @@ export class Store {
     const checkpoint = proof && verifyCompactionCheckpoint(proof.value, proof.receipt);
     const store = new Store(clock, path, files, checkpoint);
     if (checkpoint !== undefined) {
-      store.#replay(checkpoint.entries.map(({ event }) => event), true);
+      store.#replay(
+        checkpoint.entries.map(({ event }) => event),
+        true,
+      );
       store.#verifyCheckpointHead();
     }
     store.#replay(files.journal.events(checkpoint?.head.seq));

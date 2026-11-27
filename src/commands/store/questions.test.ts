@@ -589,7 +589,7 @@ describe("hold commands", () => {
     });
     const store = Store.forLayout(TEST_CONTEXT, layout);
     try {
-      const blocker = store.db.prepare("SELECT blocker FROM message_wakes").get()?.blocker;
+      const blocker = store.index.rows("message_wakes")[0]?.blocker;
       expect(JSON.parse(String(blocker))).toMatchObject({
         id: "policy-alpha",
         owner: operatorRole,
