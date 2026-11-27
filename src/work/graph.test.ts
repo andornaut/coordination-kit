@@ -6,10 +6,9 @@ import { describe, expect, it } from "vitest";
 import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/cli/io.ts";
 import { loadLayout } from "../core/configuration/layout.ts";
-import { clockAt, TEST_CONTEXT, TEST_GIT, TEST_HOST } from "../core/testFixtures.ts";
-import { Store } from "../store/db.ts";
+import { clockAt, TEST_CONTEXT, TEST_HOST } from "../core/testFixtures.ts";
+import { Store, storePath } from "../store/db.ts";
 import { answerQuestion, openQuestion } from "../store/decisions/questions.ts";
-import { activateMigration, prepareMigration } from "../store/files/migration.ts";
 import { workEvidence, workStart } from "./live.ts";
 import { commit, GAME, IDS, KIT, live, liveFixture, liveIo, ROLES, workFile } from "./testLive.ts";
 
@@ -161,16 +160,9 @@ describe("graph", () => {
   it("reads new Git decisions and store evidence while leaving an old cache untouched", async () => {
     const made = fixture();
     const layout = loadLayout(made.root);
-    const { receipt } = prepareMigration(
-      TEST_GIT,
-      layout,
-      join(made.base, "backup.db"),
-      join(made.base, "restore.db"),
-    );
-    activateMigration(TEST_GIT, layout, receipt.id);
     const previous = await run(made, "graph");
     expect(previous.exit, previous.err).toBe(EXIT_OK);
-    const cache = join(layout.varDir, "coordination", "graph-index.json");
+    const cache = join(storePath(layout), "graph-index.json");
     const bytes = JSON.stringify({
       at: "2026-11-06T12:00:00.000Z",
       edges: previous.json.edges,

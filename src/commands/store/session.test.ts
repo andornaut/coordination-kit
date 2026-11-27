@@ -13,7 +13,7 @@ import {
   writeFixtureJson,
 } from "../../core/testFixtures.ts";
 import { createRegistry, readRegistry, updateRegistry } from "../../registry/store.ts";
-import { Store } from "../../store/db.ts";
+import { Store, storePath } from "../../store/db.ts";
 import {
   checkpointPath,
   storeHandoffOpen,
@@ -107,7 +107,7 @@ describe("session start", () => {
     );
   });
 
-  it("writes the store under a stateRoot-only work-protocol.json", async () => {
+  it("writes the journal locally when an external artifact root is configured", async () => {
     const { base, kit, layout } = setup();
     const state = join(base, "state");
     mkdirSync(state, { mode: 0o700 });
@@ -116,7 +116,8 @@ describe("session start", () => {
       JSON.stringify({ schema: 2, stateRoot: state }),
     );
     expect((await kit("session", "start")).code).toBe(EXIT_OK);
-    expect(existsSync(join(state, "coordination.db"))).toBe(true);
+    expect(existsSync(storePath(layout))).toBe(true);
+    expect(existsSync(join(state, "coordination"))).toBe(false);
   });
 
   it("derives the checkpoint for game, kit and coordinator roles", () => {

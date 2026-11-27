@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { main } from "../../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../../core/cli/io.ts";
-import { clockAt, stateRootFixture, TEST_CLOCK } from "../../core/testFixtures.ts";
+import { clockAt, stateRootFixture, TEST_CONTEXT } from "../../core/testFixtures.ts";
 import { Store } from "../db.ts";
 import { COORDINATOR, GAME, storeFixture, TECH } from "../testStore.ts";
 import { readRequests } from "../work-records/requests.ts";
@@ -153,7 +153,7 @@ describe("store retire", () => {
   });
 
   it("archives the retired paths with a manifest, imports open requests and keeps originals", async () => {
-    const { cli, root, stateRoot } = setup();
+    const { cli, layout, root, stateRoot } = setup();
     const refused = await cli(TECH_ENV, "store", "retire", "--apply");
     expect(refused).toMatchObject({
       code: EXIT_INVALID,
@@ -190,12 +190,13 @@ describe("store retire", () => {
     expect(manifest.paths).toHaveLength(7);
     expect(manifest.paths[0]).toEqual({ bytes: 2, files: 1, path: "roles" });
     // Every original stays in place; only the archive and its manifest are new.
-    const after = tree(stateRoot).filter((path) => !path.startsWith(join(stateRoot, "archive")));
-    expect(after.filter((path) => !path.includes("coordination.db"))).toEqual(originals);
+    expect(tree(stateRoot)).toEqual(
+      [...originals, String(archive.manifest), String(archive.path)].sort(),
+    );
     expect(existsSync(join(root, "var", "work-protocol-fence.json"))).toBe(true);
-    const store = Store.open(TEST_CLOCK, join(stateRoot, "coordination.db"));
+    const store = Store.readLayout(TEST_CONTEXT, layout)!;
     try {
-      const requests = readRequests(store.db);
+      const requests = readRequests(store.index);
       expect(requests.map((request) => [request.id, request.owner, request.state])).toEqual([
         ["request-open", TECH_ROLE, "open"],
         ["request-started", "game-coordinator", "started"],

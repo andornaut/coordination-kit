@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../core/cli/io.ts";
-import { stateRootFixture, TEST_CLOCK } from "../core/testFixtures.ts";
+import { TEST_CONTEXT } from "../core/testFixtures.ts";
 import { Store } from "../store/db.ts";
 import { openQuestion, setHold } from "../store/decisions/questions.ts";
 import { GAME, storeFixture, TECH } from "../store/testStore.ts";
@@ -68,11 +68,10 @@ function fixture() {
     git(repo, "add", "-A");
     git(repo, "commit", "-qm", "Record approved work");
   }
-  const stateRoot = stateRootFixture(layout);
   const actor = { nativeId: TECH, role: TECH_ROLE };
   const ref = { id: "sg-0001", repository: GAME };
   const sha = git(game, "rev-parse", "HEAD");
-  const store = Store.open(TEST_CLOCK, join(stateRoot, "coordination.db"));
+  const store = Store.forLayout(TEST_CONTEXT, layout);
   try {
     startWork(store, actor, { owner: TECH_ROLE, parent: null, ref });
     recordEvidence(store, actor, { ref, sha, stage: "implemented" });

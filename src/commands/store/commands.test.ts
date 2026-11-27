@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -7,11 +6,10 @@ import { describe, expect, it } from "vitest";
 import { main } from "../../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../../core/cli/io.ts";
 import { loadLayout } from "../../core/configuration/layout.ts";
-import { TEST_CONTEXT, TEST_GIT } from "../../core/testFixtures.ts";
+import { TEST_CONTEXT } from "../../core/testFixtures.ts";
 import { Store, storePath } from "../../store/db.ts";
 import { sha256 } from "../../store/eventCodec.ts";
 import { openFileJournal } from "../../store/files/journal.ts";
-import { activateMigration, prepareMigration } from "../../store/files/migration.ts";
 import { sendMessage } from "../../store/messages/messages.ts";
 import { ART, COORDINATOR, GAMEPLAY, storeFixture, TECH } from "../../store/testStore.ts";
 import { UNBOUND_MESSAGE_SENDER } from "../../store/types.ts";
@@ -54,12 +52,6 @@ describe("store compaction-plan", () => {
 
   it("reports the selected journal head without writing files or exposing a body", async () => {
     const { base, layout, root } = storeFixture();
-    execFileSync("git", ["-C", root, "init", "-q", "--initial-branch=main"]);
-    writeFileSync(join(root, ".gitignore"), "/var/\n");
-    writeFileSync(
-      join(layout.varDir, "work-protocol.json"),
-      JSON.stringify({ schema: 2, stateRoot: join(base, "external-state") }),
-    );
     const store = Store.forLayout(TEST_CONTEXT, layout);
     try {
       sendMessage(
@@ -70,23 +62,17 @@ describe("store compaction-plan", () => {
     } finally {
       store.close();
     }
-    const { receipt } = prepareMigration(
-      TEST_GIT,
-      layout,
-      join(base, "backup.db"),
-      join(base, "restore.db"),
-    );
-    activateMigration(TEST_GIT, layout, receipt.id);
-    const target = join(layout.varDir, "coordination");
+    const target = storePath(layout);
     const journal = openFileJournal(target);
     const before = journal.snapshot();
+    const { hash, seq } = before.events.at(-1)!;
     const paths = readdirSync(target, { recursive: true }).sort();
     const result = await cli(root, base, {})("store", "compaction-plan");
     expect(result).toMatchObject({
       code: EXIT_OK,
       json: {
         diskSavingsBytes: null,
-        head: receipt.head,
+        head: { hash, seq },
         kind: "file-compaction-plan",
         schema: 1,
         window: 100,
@@ -262,20 +248,7 @@ describe("store message commands", () => {
 
   it("requires one exact user decision for an unbound original across filesystem rebuilds", async () => {
     const { base, layout, root } = storeFixture();
-    execFileSync("git", ["-C", root, "init", "-q", "--initial-branch=main"]);
-    writeFileSync(join(root, ".gitignore"), "/var/\n");
-    writeFileSync(
-      join(layout.varDir, "work-protocol.json"),
-      JSON.stringify({ schema: 2, stateRoot: join(base, "external-state") }),
-    );
     Store.forLayout(TEST_CONTEXT, layout).close();
-    const { receipt } = prepareMigration(
-      TEST_GIT,
-      layout,
-      join(base, "backup.db"),
-      join(base, "restore.db"),
-    );
-    activateMigration(TEST_GIT, layout, receipt.id);
 
     const claimedId = "00000000-0000-4000-8000-0000000000ff";
     const recipientRole = "archies-dog-walks/gameplay";
@@ -412,8 +385,7 @@ describe("store message commands", () => {
     expect(status.out).not.toContain("inspect logs");
     expect(status.out).not.toContain("reply-1");
     const dispositions = join(
-      layout.varDir,
-      "coordination",
+      storePath(layout),
       "roles",
       encodeURIComponent(recipientRole),
       "messages",

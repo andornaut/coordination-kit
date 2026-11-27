@@ -26,6 +26,7 @@ import {
   CODEX_TECH,
   stateRootFixture,
   TEST_CLOCK,
+  TEST_CONTEXT,
 } from "../core/testFixtures.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
 import { Store } from "../store/db.ts";
@@ -286,7 +287,7 @@ async function buildFixture(gameDirectory = GAME): Promise<Fixture> {
   writeFileSync(join(events, `${sha.sg9}.state`), "{}\n");
 
   const stateRoot = stateRootFixture(layout);
-  const store = Store.open(TEST_CLOCK, join(stateRoot, "coordination.db"));
+  const store = Store.forLayout(TEST_CONTEXT, layout);
   const importer = { nativeId: null, role: "game-coordinator" };
   importRequest(
     store,
@@ -350,8 +351,6 @@ async function buildFixture(gameDirectory = GAME): Promise<Fixture> {
       scope: "role",
     },
   );
-  // The read-only command must also read questions in a store predating answer projection.
-  store.db.exec("DROP TABLE IF EXISTS question_answers; PRAGMA journal_mode = DELETE");
   store.close();
   return { base, game, root, sha, stateRoot };
 }
@@ -724,7 +723,7 @@ describe("status", () => {
       transfers: [],
     });
     const stateRoot = stateRootFixture(layout);
-    const store = Store.open(TEST_CLOCK, join(stateRoot, "coordination.db"));
+    const store = Store.forLayout(TEST_CONTEXT, layout);
     try {
       startWork(store, appActor, {
         owner: id,

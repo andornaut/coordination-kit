@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { storePath } from "../../store/db.ts";
+import { legacyStorePath, storePath } from "../../store/db.ts";
 import { makeFixture, stateRootFixture } from "../testFixtures.ts";
 import { loadLayout } from "./layout.ts";
 import { stateRoot, StateRootError } from "./stateRoot.ts";
@@ -24,7 +24,8 @@ describe("stateRoot", () => {
     const current = layout();
     const root = stateRootFixture(current);
     expect(stateRoot(current)).toBe(root);
-    expect(storePath(current)).toBe(join(root, "coordination.db"));
+    expect(storePath(current)).toBe(join(current.varDir, "coordination"));
+    expect(legacyStorePath(current)).toBe(join(root, "coordination.db"));
   });
 
   it("still reads the 2.1 configuration, read-only, without the fence or workspace record", () => {
