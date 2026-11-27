@@ -2,7 +2,7 @@ import type { Layout } from "../../core/configuration/layout.ts";
 import { readRegistry } from "../../registry/store.ts";
 import { latestStoreReview, payloadText } from "../eventCodec.ts";
 import type { FileProjection } from "../fileProjection.ts";
-import { selectedFileCheckpoint } from "./compaction/generation.ts";
+import { assertCurrentJournal, selectedFileCheckpoint } from "./compaction/generation.ts";
 import { openFileJournal } from "./journal.ts";
 import { fileRecords } from "./records.ts";
 import { verifiedWorkerForEvent } from "./workerProof.ts";
@@ -13,7 +13,10 @@ function text(value: unknown): string | null {
 
 export function fileLayoutProjection(layout: Layout, target: string): FileProjection {
   return {
-    ...(selectedFileCheckpoint(target) ?? { journal: openFileJournal(target) }),
+    ...(selectedFileCheckpoint(target) ?? {
+      assertCurrent: () => assertCurrentJournal(target),
+      journal: openFileJournal(target),
+    }),
     records(index, throughSeq, events, history) {
       const registry = readRegistry(layout);
       const review = latestStoreReview(history, throughSeq);

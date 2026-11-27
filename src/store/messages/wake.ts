@@ -145,6 +145,7 @@ function sameTarget(layout: Layout, role: string, target: Target): boolean {
 }
 
 function checkStoreGuard(context: WakeContext, role: string, harness: Harness): WakeGuard {
+  context.store.refresh();
   return (context.ports?.storeGuard ?? questionHoldGuard)(
     context.store,
     role,

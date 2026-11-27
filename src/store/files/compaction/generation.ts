@@ -193,10 +193,14 @@ export function fileCheckpointJournal(root: string) {
   return journalFor(root, generation(root, activeSelection(root)));
 }
 
-function readyJournal(path: string, baseline?: JournalBaseline): FileJournal {
+export function assertCurrentJournal(path: string): void {
   if (readFileJournalFence(path) !== undefined) {
     throw new StoreError("checkpoint-selection-pending");
   }
+}
+
+function readyJournal(path: string, baseline?: JournalBaseline): FileJournal {
+  assertCurrentJournal(path);
   return openFileJournal(path, baseline);
 }
 
@@ -368,7 +372,7 @@ export function selectFileCheckpoint(
 /** Open the selected checkpoint and its unfenced ordinary tail. */
 export function selectedFileCheckpoint(
   root: string,
-): Pick<FileProjection, "checkpoint" | "journal"> | undefined {
+): Pick<FileProjection, "assertCurrent" | "checkpoint" | "journal"> | undefined {
   const previous = generation(root, activeSelection(root));
   const { baseline, path } = journalFor(root, previous);
   const journal = readyJournal(path, baseline);
@@ -377,6 +381,7 @@ export function selectedFileCheckpoint(
   }
   const { digest: hash, head } = previous.selection;
   return {
+    assertCurrent: () => assertCurrentJournal(path),
     checkpoint: { receipt: { digest: hash, head }, value: previous.checkpoint },
     journal,
   };

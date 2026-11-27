@@ -25,6 +25,7 @@ export interface FileProjection {
   /** Optional replay prefix and its independently qualified receipt. The journal supplies the tail. */
   readonly checkpoint?: { readonly value: unknown; readonly receipt: CheckpointReceipt };
   readonly journal: FileJournalPort;
+  readonly assertCurrent?: () => void;
   readonly records: (
     index: ProjectionIndex,
     previousSeq: number,

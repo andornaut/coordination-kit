@@ -196,6 +196,16 @@ export class Store {
     return this.#clock().toISOString();
   }
 
+  /** Recheck a long-lived view before acting on work that may have changed during native I/O. */
+  refresh(): void {
+    this.#ensureOpen();
+    if (!this.#writing && this.#files !== undefined) {
+      this.#files.assertCurrent?.();
+      this.#replay(this.#files.journal.events(this.head().seq));
+      this.#files.assertCurrent?.();
+    }
+  }
+
   /** Nested operations join the outer transaction and its journal writer lock. */
   transaction<T>(body: () => T): T {
     this.#ensureOpen();
