@@ -1,7 +1,6 @@
 // The latest session per role and the handoff records with their per-role times.
-import type { DatabaseSync } from "node:sqlite";
-
 import { payloadText as text } from "../eventCodec.ts";
+import type { ProjectionIndex } from "../projectionIndex.ts";
 import type { JsonObject, Projection, StoredEvent } from "../types.ts";
 
 /** The hold `handoff ready` sets for a role: `/` in a game role is written as `-`. */
@@ -9,98 +8,71 @@ export function handoffHoldId(id: string, role: string): string {
   return `handoff-${id}-${role.replaceAll("/", "-")}`;
 }
 
-const HANDOFFS_DDL = `
-CREATE TABLE IF NOT EXISTS sessions (
-  role TEXT PRIMARY KEY,
-  harness TEXT NOT NULL,
-  native_id TEXT NOT NULL,
-  version TEXT NOT NULL,
-  cwd TEXT NOT NULL,
-  started_at TEXT NOT NULL,
-  seq INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS handoffs (
-  id TEXT PRIMARY KEY,
-  scope TEXT NOT NULL,
-  from_harness TEXT NOT NULL,
-  to_harness TEXT NOT NULL,
-  state TEXT NOT NULL
-    CHECK (state IN ('preparing', 'prepared', 'sent', 'completed', 'cancelled')),
-  opened_at TEXT NOT NULL,
-  opened_seq INTEGER NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS handoff_roles (
-  handoff TEXT NOT NULL,
-  role TEXT NOT NULL,
-  from_harness TEXT NOT NULL,
-  ready_at TEXT,
-  active_at TEXT,
-  PRIMARY KEY (handoff, role)
-);
-`;
-
-const sessionStarted = (db: DatabaseSync, event: StoredEvent): void => {
+const sessionStarted = (index: ProjectionIndex, event: StoredEvent): void => {
   const p = event.payload;
-  db.prepare(
-    `INSERT OR REPLACE INTO sessions (role, harness, native_id, version, cwd, started_at, seq)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    text(p, "role"),
-    text(p, "harness"),
-    text(p, "nativeId"),
-    text(p, "version"),
-    text(p, "cwd"),
-    event.at,
-    event.seq,
-  );
+  const role = text(p, "role");
+  index.put("sessions", [role], {
+    cwd: text(p, "cwd"),
+    harness: text(p, "harness"),
+    native_id: text(p, "nativeId"),
+    role,
+    seq: event.seq,
+    started_at: event.at,
+    version: text(p, "version"),
+  });
 };
 
-const opened = (db: DatabaseSync, event: StoredEvent): void => {
+const opened = (index: ProjectionIndex, event: StoredEvent): void => {
   const p = event.payload;
+  const id = text(p, "id");
   const roles = (Array.isArray(p.roles) ? (p.roles as readonly JsonObject[]) : []).map((item) => ({
     from: text(item, "from"),
     role: text(item, "role"),
   }));
-  db.prepare(
-    `INSERT INTO handoffs (id, scope, from_harness, to_harness, state, opened_at, opened_seq,
-       updated_at) VALUES (?, ?, ?, ?, 'preparing', ?, ?, ?)`,
-  ).run(
-    text(p, "id"),
-    JSON.stringify(roles.map((item) => item.role)),
-    text(p, "from"),
-    text(p, "to"),
-    event.at,
-    event.seq,
-    event.at,
-  );
-  const insert = db.prepare(
-    "INSERT INTO handoff_roles (handoff, role, from_harness) VALUES (?, ?, ?)",
-  );
+  index.put("handoffs", [id], {
+    from_harness: text(p, "from"),
+    id,
+    opened_at: event.at,
+    opened_seq: event.seq,
+    scope: JSON.stringify(roles.map((item) => item.role)),
+    state: "preparing",
+    to_harness: text(p, "to"),
+    updated_at: event.at,
+  });
   for (const item of roles) {
-    insert.run(text(p, "id"), item.role, item.from);
+    index.put("handoff_roles", [id, item.role], {
+      active_at: null,
+      from_harness: item.from,
+      handoff: id,
+      ready_at: null,
+      role: item.role,
+    });
   }
 };
 
 const roleMark =
   (column: "ready_at" | "active_at") =>
-  (db: DatabaseSync, event: StoredEvent): void => {
+  (index: ProjectionIndex, event: StoredEvent): void => {
     const p = event.payload;
-    db.prepare(`UPDATE handoff_roles SET ${column} = ? WHERE handoff = ? AND role = ?`).run(
-      event.at,
-      text(p, "id"),
-      text(p, "role"),
-    );
-    db.prepare("UPDATE handoffs SET updated_at = ? WHERE id = ?").run(event.at, text(p, "id"));
+    const id = text(p, "id");
+    const key = [id, text(p, "role")];
+    const role = index.get("handoff_roles", key);
+    if (role !== undefined) {
+      index.put("handoff_roles", key, { ...role, [column]: event.at });
+    }
+    const handoff = index.get("handoffs", [id]);
+    if (handoff !== undefined) {
+      index.put("handoffs", [id], { ...handoff, updated_at: event.at });
+    }
   };
 
-const stateSet = (db: DatabaseSync, event: StoredEvent): void => {
+const stateSet = (index: ProjectionIndex, event: StoredEvent): void => {
   const p = event.payload;
-  db.prepare("UPDATE handoffs SET state = ?, updated_at = ? WHERE id = ?").run(
-    text(p, "state"),
-    event.at,
-    text(p, "id"),
-  );
+  const id = text(p, "id");
+  const handoff = index.get("handoffs", [id]);
+  if (handoff !== undefined) {
+    index.put("handoffs", [id], { ...handoff, state: text(p, "state"), updated_at: event.at });
+  }
 };
 
 /** The latest session per role and the handoff records with their per-role times. */
@@ -112,6 +84,5 @@ export const HANDOFFS_PROJECTION: Projection = {
     "handoff.state": stateSet,
     "session.started": sessionStarted,
   },
-  ddl: HANDOFFS_DDL,
   tables: ["sessions", "handoffs", "handoff_roles"],
 };

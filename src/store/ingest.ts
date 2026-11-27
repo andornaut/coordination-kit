@@ -372,14 +372,6 @@ function eventNotice(project: string, to: string, line: BusLine): Notice {
   };
 }
 
-interface EventRow {
-  readonly kind: string;
-  readonly type: string;
-  readonly status: string | null;
-  readonly work: string | null;
-  readonly detail?: string;
-}
-
 function workIds(value: string | null): string[] | null {
   const parsed = value === null ? null : (JSON.parse(value) as Json);
   return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : null;
@@ -399,17 +391,13 @@ function deriveComplete(
   sha: string,
   details: ReadonlyMap<string, string | null>,
 ): boolean {
-  const done = store.db
-    .prepare("SELECT 1 FROM bus_completes WHERE game = ? AND sha = ?")
-    .get(game.id, sha);
-  if (done !== undefined) {
+  if (store.index.get("bus_completes", [game.id, sha]) !== undefined) {
     return false;
   }
-  const rows = store.db
-    .prepare(
-      "SELECT id, kind, type, status, work FROM bus_events WHERE game = ? AND sha = ? ORDER BY seq",
-    )
-    .all(game.id, sha) as unknown as (EventRow & { id: string })[];
+  const rows = store.index
+    .rows("bus_events")
+    .filter((row) => row.game === game.id && row.sha === sha)
+    .sort((a, b) => Number(a.seq) - Number(b.seq));
   const legacy = rows.find(
     (row) => row.type === LEGACY_COMPLETE && row.kind === "runner" && row.status === "ok",
   );
@@ -419,9 +407,9 @@ function deriveComplete(
       .filter(
         (row) =>
           row.kind === kind &&
-          row.status !== null &&
+          typeof row.status === "string" &&
           statuses.includes(row.status) &&
-          !INTERMEDIATE_TYPES.has(row.type),
+          !INTERMEDIATE_TYPES.has(row.type as string),
       )
       .at(-1);
   const gate = passed("gate", ["ok", "skipped"]);
@@ -434,17 +422,23 @@ function deriveComplete(
     return false;
   }
   // An imported legacy complete line is the commit's COMPLETE, with its own work list.
-  const listed = workIds(legacy === undefined ? deploy!.work : legacy.work);
-  const recorded = store.db.prepare("SELECT 1 FROM bus_work WHERE game = ? AND work = ?");
+  const listed = workIds((legacy === undefined ? deploy!.work : legacy.work) as string | null);
   const work =
-    listed === null ? null : listed.filter((id) => recorded.get(game.id, id) === undefined);
-  const previous = store.db
-    .prepare(
-      `SELECT id FROM messages WHERE legacy IS NOT NULL AND to_role = ? AND instr(body, ?) > 0
-         AND instr(upper(body), 'COMPLETE') > 0 ORDER BY sent_seq LIMIT 1`,
+    listed === null
+      ? null
+      : listed.filter((id) => store.index.get("bus_work", [game.id, id]) === undefined);
+  const previous = store.index
+    .rows("messages")
+    .filter(
+      (row) =>
+        row.legacy !== null &&
+        row.to_role === to &&
+        typeof row.body === "string" &&
+        row.body.includes(sha) &&
+        /complete/i.test(row.body),
     )
-    .get(to, sha) as { id: string } | undefined;
-  let messageId: string | null = previous?.id ?? null;
+    .sort((a, b) => Number(a.sent_seq) - Number(b.sent_seq))[0];
+  let messageId = (previous?.id as string | undefined) ?? null;
   let stored = false;
   if (previous === undefined) {
     messageId = derivedId("complete", game.id, sha);
@@ -454,7 +448,7 @@ function deriveComplete(
         ? `${game.name} bus: COMPLETE ${sha}`
         : `${game.name} bus: COMPLETE ${sha}: gate ${gate!.status}, push ok, ci ok, ` +
           `deploy ${deploy!.type} (${deploy!.status})`;
-    const legacyDetail = legacy === undefined ? null : (details.get(legacy.id) ?? null);
+    const legacyDetail = legacy === undefined ? null : (details.get(legacy.id as string) ?? null);
     const body = `${head}${legacyDetail ? `; ${clean(legacyDetail)}` : ""}; work: ${workText}`;
     stored = storeNotice(store, {
       body,

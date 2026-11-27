@@ -4,12 +4,11 @@
 // ready from its source binding, which sets a role-scope hold so wakes are withheld while it sits
 // idle, and active from its target binding, which releases that hold. Every writer trusts its
 // `actor`; the service resolves it through the registry fence and checks the role first.
-import type { SQLInputValue } from "node:sqlite";
-
 import type { Harness } from "../../registry/schema.ts";
 import type { Store } from "../db.ts";
 import type { HoldView } from "../decisions/policyHolds.ts";
 import { listHolds } from "../decisions/questions.ts";
+import type { ProjectionRow } from "../projectionIndex.ts";
 import { handoffHoldId } from "../projections/handoffs.ts";
 import { type Actor, ensure, type StoredEvent } from "../types.ts";
 
@@ -58,8 +57,6 @@ export interface HandoffResult {
   readonly duplicate: boolean;
 }
 
-type Row = Record<string, SQLInputValue>;
-
 export function recordSession(
   store: Store,
   actor: Actor & { readonly role: string; readonly nativeId: string },
@@ -84,17 +81,21 @@ export function recordSession(
   }).event;
 }
 
-function view(store: Store, row: Row): HandoffView {
+function view(store: Store, row: ProjectionRow): HandoffView {
   const id = row.id as string;
-  const roles = (
-    store.db.prepare("SELECT * FROM handoff_roles WHERE handoff = ? ORDER BY role").all(id) as Row[]
-  ).map((item) => ({
-    activeAt: (item.active_at as string | null) ?? null,
-    from: item.from_harness as Harness,
-    hold: handoffHoldId(id, item.role as string),
-    readyAt: (item.ready_at as string | null) ?? null,
-    role: item.role as string,
-  }));
+  const roles = store.index
+    .rows("handoff_roles")
+    .filter((item) => item.handoff === id)
+    .sort((a, b) =>
+      String(a.role) < String(b.role) ? -1 : String(a.role) > String(b.role) ? 1 : 0,
+    )
+    .map((item) => ({
+      activeAt: (item.active_at as string | null) ?? null,
+      from: item.from_harness as Harness,
+      hold: handoffHoldId(id, item.role as string),
+      readyAt: (item.ready_at as string | null) ?? null,
+      role: item.role as string,
+    }));
   return {
     from: row.from_harness as Harness,
     id,
@@ -107,32 +108,30 @@ function view(store: Store, row: Row): HandoffView {
   };
 }
 
-function handoffRow(store: Store, id: string): Row | undefined {
-  return store.db.prepare("SELECT * FROM handoffs WHERE id = ?").get(id) as Row | undefined;
-}
-
 export function readHandoff(store: Store, id: string): HandoffView | null {
-  const row = handoffRow(store, id);
+  const row = store.index.get("handoffs", [id]);
   return row === undefined ? null : view(store, row);
 }
 
 /** The latest handoff by opening order, or null. */
 export function latestHandoff(store: Store): HandoffView | null {
-  const row = store.db.prepare("SELECT * FROM handoffs ORDER BY opened_seq DESC LIMIT 1").get() as
-    Row | undefined;
+  const row = store.index
+    .rows("handoffs")
+    .toSorted((a, b) => Number(b.opened_seq) - Number(a.opened_seq))[0];
   return row === undefined ? null : view(store, row);
 }
 
 /** The open handoffs whose scope includes `role`, in opening order. */
 export function openHandoffsFor(store: Store, role: string): HandoffView[] {
-  return (
-    store.db
-      .prepare(
-        `SELECT h.* FROM handoffs h JOIN handoff_roles r ON r.handoff = h.id
-         WHERE r.role = ? AND h.state IN ('preparing', 'prepared', 'sent') ORDER BY h.opened_seq`,
-      )
-      .all(role) as Row[]
-  ).map((row) => view(store, row));
+  return store.index
+    .rows("handoffs")
+    .filter(
+      (row) =>
+        OPEN_HANDOFF_STATES.includes(row.state as HandoffState) &&
+        store.index.get("handoff_roles", [row.id as string, role]) !== undefined,
+    )
+    .sort((a, b) => Number(a.opened_seq) - Number(b.opened_seq))
+    .map((row) => view(store, row));
 }
 
 /** The handoff holds of a record, active and released. */
@@ -142,7 +141,7 @@ export function handoffHolds(store: Store, handoff: HandoffView): HoldView[] {
 }
 
 function nextId(store: Store): string {
-  const rows = store.db.prepare("SELECT id FROM handoffs").all() as Row[];
+  const rows = store.index.rows("handoffs");
   const highest = rows
     .map((row) => /^h-([1-9][0-9]{0,8})$/.exec(row.id as string)?.[1])
     .reduce((top, n) => Math.max(top, n === undefined ? 0 : Number(n)), 0);
@@ -258,7 +257,7 @@ export function readyHandoff(
 }
 
 function releaseHandoffHold(store: Store, actor: Actor, handoff: string, hold: string): boolean {
-  const row = store.db.prepare("SELECT state FROM holds WHERE id = ?").get(hold) as Row | undefined;
+  const row = store.index.get("holds", [hold]);
   if (row?.state !== "active") {
     return false;
   }

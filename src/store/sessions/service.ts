@@ -13,7 +13,6 @@ import { resolveConversation, resolveHarness } from "../../registry/resolve.ts";
 import type { Harness, Registry } from "../../registry/schema.ts";
 import { RevisionConflict, updateRegistry } from "../../registry/store.ts";
 import { registry, type StoreServiceContext, withStore } from "../context.ts";
-import type { Store } from "../db.ts";
 import { activePolicyHoldsForRole, type HoldView } from "../decisions/policyHolds.ts";
 import { listQuestions, type QuestionView } from "../decisions/questions.ts";
 import { wakeOwner } from "../decisions/questionService.ts";
@@ -165,11 +164,6 @@ async function rebindAfterClear(
   };
 }
 
-function count(store: Store) {
-  return (sql: string, ...args: string[]): number =>
-    Number((store.db.prepare(sql).get(...args) as { n: number }).n);
-}
-
 /** The fenced caller, or the caller `rebindAfterClear` binds when the fence refuses it. */
 async function bindCaller(
   context: StoreServiceContext,
@@ -203,7 +197,16 @@ export async function storeSessionStart(
   const game = actor.role.includes("/") ? actor.role.split("/")[0]! : null;
   return withStore(context, (store) => {
     const event = recordSession(store, actor, { harness, key: randomUUID(), ...request });
-    const n = count(store);
+    const gameScope = game === null ? "" : `game:${game}`;
+    const inbox = store.index
+      .rows("messages")
+      .filter(
+        (message) =>
+          message.to_role === actor.role &&
+          (message.state === "sent" ||
+            message.state === "delivered" ||
+            message.state === "retained"),
+      );
     const pending =
       harness === "codex"
         ? listQuestions(store, { role: actor.role, states: ["pending"] }).filter(
@@ -221,21 +224,18 @@ export async function storeSessionStart(
       conversation: actor.nativeId,
       counts: {
         holds:
-          n(
-            `SELECT COUNT(*) AS n FROM holds WHERE state = 'active'
-             AND ((role = ? AND scope = 'role') OR scope = ?)`,
-            actor.role,
-            game === null ? "" : `game:${game}`,
-          ) + activePolicyHoldsForRole(store, actor.role, context.layout),
-        inbox: n(
-          `SELECT COUNT(*) AS n FROM messages WHERE to_role = ?
-             AND state IN ('sent', 'delivered', 'retained')`,
-          actor.role,
-        ),
-        questions: n(
-          "SELECT COUNT(*) AS n FROM questions WHERE role = ? AND state = 'pending'",
-          actor.role,
-        ),
+          store.index
+            .rows("holds")
+            .filter(
+              (hold) =>
+                hold.state === "active" &&
+                ((hold.role === actor.role && hold.scope === "role") || hold.scope === gameScope),
+            ).length + activePolicyHoldsForRole(store, actor.role, context.layout),
+        inbox: inbox.length,
+        questions: store.index
+          .rows("questions")
+          .filter((question) => question.role === actor.role && question.state === "pending")
+          .length,
       },
       handoffs: openHandoffsFor(store, actor.role).map((handoff) => {
         const entry = handoff.roles.find((item) => item.role === actor.role)!;
@@ -253,10 +253,7 @@ export async function storeSessionStart(
         : {
             questionRecovery: {
               pending,
-              unread: n(
-                "SELECT COUNT(*) AS n FROM messages WHERE to_role = ? AND state = 'sent'",
-                actor.role,
-              ),
+              unread: inbox.filter((message) => message.state === "sent").length,
             },
           }),
       registry: {

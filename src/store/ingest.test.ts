@@ -107,9 +107,10 @@ function withStore<T>(layout: Layout, body: (store: Store) => T): T {
 
 function busEvents(layout: Layout): string[] {
   return withStore(layout, (store) =>
-    (store.db.prepare("SELECT type FROM bus_events ORDER BY seq").all() as { type: string }[]).map(
-      (row) => row.type,
-    ),
+    store.index
+      .rows("bus_events")
+      .toSorted((a, b) => Number(a.seq) - Number(b.seq))
+      .map((row) => row.type as string),
   );
 }
 
@@ -122,12 +123,17 @@ interface StoredMessage {
 }
 
 function messages(layout: Layout): StoredMessage[] {
-  return withStore(
-    layout,
-    (store) =>
-      store.db
-        .prepare("SELECT id, from_role, to_role, body, links FROM messages ORDER BY sent_seq")
-        .all() as unknown as StoredMessage[],
+  return withStore(layout, (store) =>
+    store.index
+      .rows("messages")
+      .toSorted((a, b) => Number(a.sent_seq) - Number(b.sent_seq))
+      .map(({ id, from_role, to_role, body, links }) => ({
+        body: body as string,
+        from_role: from_role as string,
+        id: id as string,
+        links: links as string,
+        to_role: to_role as string,
+      })),
   );
 }
 
@@ -465,7 +471,10 @@ describe("events ingest", () => {
     expect(second!.body).toMatch(/work: ck-0002$/);
     expect(
       withStore(test.layout, (store) =>
-        store.db.prepare("SELECT work, sha FROM bus_work ORDER BY work").all(),
+        store.index
+          .rows("bus_work")
+          .toSorted((a, b) => String(a.work).localeCompare(String(b.work)))
+          .map(({ sha, work }) => ({ sha, work })),
       ),
     ).toEqual([
       { sha: SHA, work: "ck-0001" },
@@ -644,7 +653,7 @@ describe("events ingest", () => {
     expect(completes(test.layout).map((message) => message.id)).toEqual(["legacy-complete-1"]);
     expect(
       withStore(test.layout, (store) =>
-        store.db.prepare("SELECT source, message_id FROM bus_completes").all(),
+        store.index.rows("bus_completes").map(({ message_id, source }) => ({ message_id, source })),
       ),
     ).toEqual([{ message_id: "legacy-complete-1", source: "legacy-message" }]);
   });
