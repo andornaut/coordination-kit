@@ -35,3 +35,4 @@ Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
 | ck-0076 | Manage reusable skills from project setup                        | [ck-0076.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0076.md) |
 | ck-0079 | Document how agents start Coordination Kit sessions              | [ck-0079.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0079.md) |
 | ck-0080 | Standardize documentation navigation across adopting projects    | [ck-0080.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0080.md) |
+| ck-0082 | Organize documentation into guides and reference                 | [ck-0082.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0082.md) |
