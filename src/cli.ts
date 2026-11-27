@@ -27,7 +27,7 @@ import {
   taskWorkFile,
 } from "./commands/project/tasks.ts";
 import { eventsIngest, reviewDeliver, reviewShow } from "./commands/runner.ts";
-import { skillsInstall } from "./commands/skills.ts";
+import { skillsInstall, skillsSync } from "./commands/skills.ts";
 import { type Command, commandUsage, GROUPS, SPECS, synopsis } from "./commands/spec.ts";
 import { status } from "./commands/status.ts";
 import {
@@ -179,6 +179,7 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "review show": reviewShow,
   "session start": sessionStart,
   "skills install": skillsInstall,
+  "skills sync": skillsSync,
   status,
   "store compaction-activate": compactionActivate,
   "store compaction-cancel": compactionCancel,

@@ -35,6 +35,7 @@ import { CONVERSATION_ID_PATTERN, ValidationError } from "../../core/validate.ts
 import { type Harness, HARNESSES, type Registry } from "../../registry/schema.ts";
 import { createRegistry, readRegistry, updateRegistry } from "../../registry/store.ts";
 import { errorMessage, parseOptions, required, systemClock, Usage } from "../args.ts";
+import { syncProjectSkills } from "../managedSkills.ts";
 
 export const INIT_OPTIONS = {
   project: { type: "string" },
@@ -335,7 +336,15 @@ function registered(
   return true;
 }
 
-export const projectRegister: Handler = (io, root, args) => {
+async function syncRegisteredSkills(io: Io, checkout: string, harness: Harness) {
+  try {
+    return await syncProjectSkills(io, checkout, harness);
+  } catch (error) {
+    return { reason: errorMessage(error), status: "unavailable" as const };
+  }
+}
+
+export const projectRegister: Handler = async (io, root, args) => {
   try {
     const { values } = parseOptions(PROJECT_REGISTER_OPTIONS, args);
     const role = required(values, "role");
@@ -399,6 +408,12 @@ export const projectRegister: Handler = (io, root, args) => {
         entry.worktree = worktree;
       });
     }
+    const skillSync = await syncRegisteredSkills(io, repo, harness);
+    if (skillSync.status !== "synced") {
+      io.err(
+        `coordination-kit: skills sync ${skillSync.status}. Review skillSync and run skills sync --harness ${harness} --scope project.\n`,
+      );
+    }
     io.out(
       `${JSON.stringify({
         duplicate,
@@ -407,6 +422,7 @@ export const projectRegister: Handler = (io, root, args) => {
         revision: registry.revision,
         role,
         schema: 1,
+        skillSync,
         worktree,
       })}\n`,
     );

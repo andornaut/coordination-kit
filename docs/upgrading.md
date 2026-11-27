@@ -1,5 +1,12 @@
 # Upgrading
 
+## Coordination Kit 7.11
+
+The pinned package now synchronizes reusable skills at standalone project registration.
+Existing standalone and shared workspaces can use the [managed skill sync](commands.md#skills-sync)
+for the harness they actually use. Review any differing files by exact digest before adoption.
+The managed set covers lifecycle, status, handoff and recovery. Cleanup remains individually installable.
+
 ## Coordination Kit 7.10
 
 Install the bundled `agent-cleanup` skill with `skills install agent-cleanup` in a

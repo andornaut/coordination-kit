@@ -45,6 +45,66 @@ async function run(handler: Handler, root: string, ...args: string[]) {
 }
 
 describe("standalone init", () => {
+  it.each([
+    ["codex", ".agents", ".claude"],
+    ["claude", ".claude", ".agents"],
+  ])(
+    "installs the managed set only for the registered %s harness",
+    async (harness, installed, other) => {
+      const root = fixture();
+      await run(init, root, "--project", "sample");
+      expect(
+        await run(
+          projectRegister,
+          root,
+          "--role",
+          "maintainer",
+          "--harness",
+          harness,
+          "--native-id",
+          MAINTAINER,
+        ),
+      ).toMatchObject({
+        code: EXIT_OK,
+        json: { harness, skillSync: { status: "synced" } },
+      });
+      for (const skill of ["handoff", "lifecycle", "recovery", "status"]) {
+        expect(
+          existsSync(join(root, installed, "skills", `coordination-${skill}`, "SKILL.md")),
+        ).toBe(true);
+      }
+      expect(existsSync(join(root, installed, "skills", ".coordination-kit.json"))).toBe(true);
+      expect(existsSync(join(root, installed, "skills", "agent-cleanup"))).toBe(false);
+      expect(existsSync(join(root, other, "skills"))).toBe(false);
+    },
+  );
+
+  it("registers the binding and reports an untouched unmanaged skill conflict", async () => {
+    const root = fixture();
+    await run(init, root, "--project", "sample");
+    const path = join(root, ".agents", "skills", "coordination-lifecycle");
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, "SKILL.md"), "Local lifecycle.\n");
+    const result = await run(
+      projectRegister,
+      root,
+      "--role",
+      "maintainer",
+      "--harness",
+      "codex",
+      "--native-id",
+      MAINTAINER,
+    );
+    expect(result).toMatchObject({
+      code: EXIT_OK,
+      json: { nativeId: MAINTAINER, skillSync: { status: "conflict" } },
+    });
+    expect(result.err).toContain("skills sync conflict");
+    expect(readRegistry(loadLayout(root)).roles.maintainer?.conversations.codex).toBe(MAINTAINER);
+    expect(readFileSync(join(path, "SKILL.md"), "utf8")).toBe("Local lifecycle.\n");
+    expect(existsSync(join(root, ".agents", "skills", "coordination-status"))).toBe(false);
+  });
+
   it("names the missing project option", async () => {
     expect(await run(init, "/nonexistent")).toEqual({
       code: EXIT_USAGE,

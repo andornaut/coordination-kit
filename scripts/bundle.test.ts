@@ -14,7 +14,9 @@ const LIBRARIES = ["registry", "review", "shared", "store"];
 const BUNDLES = ["dist/cli.js", ...LIBRARIES.map((name) => `dist/${name}.js`)];
 const SKILLS = [
   "skills/agent-cleanup/SKILL.md",
+  "skills/coordination-handoff/SKILL.md",
   "skills/coordination-lifecycle/SKILL.md",
+  "skills/coordination-recovery/SKILL.md",
   "skills/coordination-status/SKILL.md",
 ];
 const METADATA = ["LICENSE", "SOURCE_COMMIT", "package.json", ...packagedDocs(root), ...SKILLS];

@@ -20,7 +20,7 @@ import {
   TASK_WRITE_OPTIONS,
 } from "./project/tasks.ts";
 import { EVENTS_INGEST_OPTIONS, REVIEW_DELIVER_OPTIONS, REVIEW_SHOW_OPTIONS } from "./runner.ts";
-import { SKILLS_INSTALL_OPTIONS } from "./skills.ts";
+import { SKILLS_INSTALL_OPTIONS, SKILLS_SYNC_OPTIONS } from "./skills.ts";
 import { STATUS_SPEC } from "./status.ts";
 import {
   COMPACTION_ACTIVATE_OPTIONS,
@@ -187,14 +187,22 @@ export const SPECS = {
     forms: [["SKILL", "harness", "scope"]],
     group: "project",
     options: SKILLS_INSTALL_OPTIONS,
-    summary: "install agent-cleanup, lifecycle or status in the primary Git checkout",
+    summary:
+      "install agent-cleanup, handoff, lifecycle, recovery or status in the primary checkout",
     values: { harness: "codex|claude", scope: "project" },
+  },
+  "skills sync": {
+    forms: [["harness", "scope", "adopt?"]],
+    group: "project",
+    options: SKILLS_SYNC_OPTIONS,
+    summary: "install or update managed reusable skills and report local conflicts",
+    values: { adopt: "SKILL=SHA256", harness: "codex|claude", scope: "project" },
   },
   "project register": {
     forms: [["role", "harness", "native-id", "native-project-id?", "worktree?"]],
     group: "project",
     options: PROJECT_REGISTER_OPTIONS,
-    summary: "register a verified session ID and worktree for a configured project role",
+    summary: "register a verified project session and sync reusable skills for its harness",
     values: { harness: "claude|codex", "native-project-id": "ID", worktree: "PATH" },
   },
   "task propose": {
