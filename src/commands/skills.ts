@@ -39,7 +39,7 @@ export const skillsInstall: Handler = (io, root, args) => {
     if (harness !== "codex" && harness !== "claude") {
       throw new Usage("--harness must be codex or claude");
     }
-    if (required(values, "scope") !== "project") {
+    if ((values.scope ?? "project") !== "project") {
       throw new Usage("--scope must be project");
     }
     const checkout = projectRoot(systemGit(io.env), root);
@@ -64,7 +64,7 @@ export const skillsSync: Handler = (io, root, args) => {
     if (harness !== "codex" && harness !== "claude") {
       throw new Usage("--harness must be codex or claude");
     }
-    if (required(values, "scope") !== "project") {
+    if ((values.scope ?? "project") !== "project") {
       throw new Usage("--scope must be project");
     }
     const approvals = skillAdoptions(values.adopt ?? []);

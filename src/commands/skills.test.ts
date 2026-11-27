@@ -56,7 +56,7 @@ async function cli(handler: Handler, io: Io, ...args: string[]) {
 }
 
 function sync(io: Io, ...args: string[]) {
-  return cli(skillsSync, io, "--harness", "codex", "--scope", "project", ...args);
+  return cli(skillsSync, io, "--harness", "codex", ...args);
 }
 
 function versionedBundle(
@@ -100,11 +100,12 @@ describe("skills sync", () => {
     expect(readFileSync(join(root, SKILLS, "unrelated", "SKILL.md"), "utf8")).toBe("User skill.");
     expect(existsSync(join(root, SKILLS, "agent-cleanup"))).toBe(false);
     expect(existsSync(join(root, ".claude"))).toBe(false);
-    expect(
-      await cli(skillsInstall, io, "agent-cleanup", "--harness", "claude", "--scope", "project"),
-    ).toMatchObject({ code: EXIT_OK, json: { installed: true } });
+    expect(await cli(skillsInstall, io, "agent-cleanup", "--harness", "claude")).toMatchObject({
+      code: EXIT_OK,
+      json: { installed: true },
+    });
     const manifest = lstatSync(join(root, MANIFEST));
-    expect(await sync(io)).toMatchObject({
+    expect(await sync(io, "--scope", "project")).toMatchObject({
       code: EXIT_OK,
       json: { skills: Array.from({ length: 4 }, () => ({ action: "unchanged" })) },
     });
@@ -226,6 +227,10 @@ describe("skills sync", () => {
 
   it("rejects invalid adoption and returns a conflict while another sync holds the checkout", async () => {
     const { io, root } = fixture();
+    expect(await sync(io, "--scope", "user")).toMatchObject({ code: EXIT_USAGE });
+    expect(
+      await cli(skillsInstall, io, "agent-cleanup", "--harness", "claude", "--scope", "user"),
+    ).toMatchObject({ code: EXIT_USAGE });
     const adopt = `status=${sha("example")}`;
     expect(await sync(io, "--adopt", adopt, "--adopt", adopt)).toMatchObject({ code: EXIT_USAGE });
     expect(await sync(io, "--adopt", `agent-cleanup=${sha("example")}`)).toMatchObject({
@@ -241,5 +246,6 @@ describe("skills sync", () => {
       lock.release();
     }
     expect(existsSync(join(root, SKILLS))).toBe(false);
+    expect(existsSync(join(root, ".claude"))).toBe(false);
   });
 });

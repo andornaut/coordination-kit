@@ -81,9 +81,10 @@ confirm approval and ownership before acting.
 
 ## Skills sync
 
-`skills sync --harness codex|claude --scope project [--adopt SKILL=SHA256]...` installs or
-updates the lifecycle, status, handoff and recovery skills from the running CLI release. Both
-`--harness` and `--scope project` are required. Use the project's primary checkout as `--root`.
+`skills sync --harness codex|claude [--scope project] [--adopt SKILL=SHA256]...` installs or
+updates the lifecycle, status, handoff and recovery skills from the running CLI release.
+Choose a harness with `--harness`. Scope defaults to `project`, the only supported value.
+Use the project's primary checkout as `--root`.
 Standalone `project register` syncs this same set for the registered harness. The cleanup skill
 uses the individual installer.
 
@@ -105,8 +106,9 @@ wrappers belong in their game workspaces.
 
 ## Skills install
 
-`skills install SKILL --harness codex|claude --scope project` installs one skill bundled with
-the current CLI release. Both flags are required. Use `--root DIR` to select the project explicitly.
+`skills install SKILL --harness codex|claude [--scope project]` installs one skill bundled with
+the current CLI release. Choose a harness with `--harness`. Scope defaults to `project`.
+Use `--root DIR` to select the project explicitly.
 
 | Skill           | Folder name              | What it covers                                         |
 | --------------- | ------------------------ | ------------------------------------------------------ |

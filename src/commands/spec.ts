@@ -184,7 +184,7 @@ export const SPECS = {
     },
   },
   "skills install": {
-    forms: [["SKILL", "harness", "scope"]],
+    forms: [["SKILL", "harness", "scope?"]],
     group: "project",
     options: SKILLS_INSTALL_OPTIONS,
     summary:
@@ -192,7 +192,7 @@ export const SPECS = {
     values: { harness: "codex|claude", scope: "project" },
   },
   "skills sync": {
-    forms: [["harness", "scope", "adopt?"]],
+    forms: [["harness", "scope?", "adopt?"]],
     group: "project",
     options: SKILLS_SYNC_OPTIONS,
     summary: "install or update managed reusable skills and report local conflicts",
