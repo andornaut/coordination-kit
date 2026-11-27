@@ -36,7 +36,7 @@ suite("entry", () => {
       const result = await execute(command);
       expect(result.code, result.stderr).toBe(0);
       expect(result.stdout).toContain("usage: coordination-kit COMMAND");
-      expect(result.stdout).toContain("store retire --dry-run");
+      expect(result.stdout).toContain("store retire [--dry-run]");
       expect(result.stdout).toContain("work check");
       expect(result.stdout).not.toContain("check-config");
       expect(result.stderr).toBe("");
