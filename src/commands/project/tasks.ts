@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 import { createForge, ForgeError } from "../../adapters/forge/index.ts";
+import { EXIT_INVALID, EXIT_OK } from "../../core/cli/io.ts";
 import { loadLayout } from "../../core/configuration/layout.ts";
 import {
   STANDALONE_CONFIG_FILE,
@@ -370,6 +371,7 @@ export const taskFind = task(
     }
   },
   1,
+  (result) => (result.status === "unavailable" ? EXIT_INVALID : EXIT_OK),
 );
 
 export const taskShow = task(

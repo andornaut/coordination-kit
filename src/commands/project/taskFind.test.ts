@@ -142,7 +142,7 @@ it("reports an unavailable store instead of an empty task list", async () => {
   const path = storePath(layout);
   writeFileSync(path, "invalid database");
   expect(await ask("fix inputs")).toEqual({
-    code: 0,
+    code: 1,
     err: "",
     result: { match: null, matches: [], schema: 1, status: "unavailable" },
   });

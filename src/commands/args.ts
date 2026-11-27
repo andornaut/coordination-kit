@@ -150,7 +150,8 @@ function reasonOf(error: unknown): string {
 /**
  * The one wrapper for the store, `work` and `graph` verbs. It parses with `parseOptions`, also
  * refusing a blank option value or positional, builds the family's context and runs `action`. A
- * string result prints as is; any other result prints as one JSON line. A `Usage` error prints
+ * string result prints as is; any other result prints as one JSON line. The default result exit
+ * code is 0. A `Usage` error prints
  * `coordination-kit: invalid_FAMILY_options (COMMAND)` with a hint and exits 2. Any other error prints
  * `coordination-kit: CODE`, the store refusal code or `FAMILY_operation_failed`, with the
  * refusal's short reason after it when it carries one, and exits 1.
@@ -158,18 +159,19 @@ function reasonOf(error: unknown): string {
 export function verbFamily<C>(
   family: Family,
   contextOf: (io: Io, root: string) => C,
-): (
+): <Result>(
   command: string,
   options: Options,
-  action: (context: C, values: Values, positionals: readonly string[]) => unknown,
+  action: (context: C, values: Values, positionals: readonly string[]) => Result | Promise<Result>,
   positionals?: number,
+  exitCode?: (result: Result) => number,
 ) => Handler {
   const usage = (io: Io, command: string, options: Options, error: unknown): number => {
     const hint = usageHint(command, options, error);
     io.err(`coordination-kit: invalid_${family}_options (${command})\n${hint}`);
     return EXIT_USAGE;
   };
-  return (command, options, action, positionals = 0) =>
+  return (command, options, action, positionals = 0, exitCode) =>
     async (io, root, args) => {
       let parsed;
       try {
@@ -193,7 +195,7 @@ export function verbFamily<C>(
           parsed.positionals,
         );
         io.out(typeof result === "string" ? result : `${JSON.stringify(result)}\n`);
-        return EXIT_OK;
+        return exitCode?.(result) ?? EXIT_OK;
       } catch (error) {
         if (error instanceof Usage) {
           return usage(io, command, options, error);

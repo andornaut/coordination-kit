@@ -30,8 +30,13 @@ export function systemGit(
   env: NodeJS.ProcessEnv,
   onCall?: () => void,
   timeout?: number,
+  options?: { readonly localOnly: boolean },
 ): GitRunner {
   const environment = gitEnvironment(env);
+  if (options?.localOnly === true) {
+    environment.GIT_ALLOW_PROTOCOL = "";
+    environment.GIT_NO_LAZY_FETCH = "1";
+  }
   return (cwd, args) => {
     onCall?.();
     const result = spawnSync(
@@ -47,6 +52,11 @@ export function systemGit(
     }
     return result.stdout;
   };
+}
+
+/** Keep object reads local even in a partial clone. */
+export function localGit(env: NodeJS.ProcessEnv): GitRunner {
+  return systemGit(env, undefined, undefined, { localOnly: true });
 }
 
 /** The main checkout of the repository a worktree belongs to: the parent of its common Git dir. */

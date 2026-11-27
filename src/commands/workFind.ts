@@ -5,6 +5,7 @@ import {
   collectStatus,
   incomplete,
   type StatusReport,
+  statusRepositoryPath,
   StatusUsageError,
   statusWorkOwner,
 } from "../status/collect.ts";
@@ -78,6 +79,7 @@ export const workFind: Handler = (io, root, args) => {
       },
       matches: result.matches.map((item) => ({
         ...item,
+        repositoryPath: item[statusRepositoryPath] ?? null,
         workOwner: item[statusWorkOwner] ?? null,
       })),
       owner,

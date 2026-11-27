@@ -13,6 +13,7 @@ import {
   taskApprove,
   taskApproveReview,
   taskClose,
+  taskFind,
   taskLinkReview,
   taskList,
   taskMerge,
@@ -91,6 +92,7 @@ import {
   workStart,
   workUnblock,
 } from "./commands/work.ts";
+import { workFind } from "./commands/workFind.ts";
 import {
   coordinatorRoot,
   EXIT_INVALID,
@@ -126,8 +128,9 @@ const USAGE = [
   "",
   "--root DIR or --root=DIR can appear once before the -- option terminator.",
   "init, project, skills and task use the primary Git checkout, defaulting to the working directory.",
-  "work uses --root for the repository, defaulting to the working directory, and reads its",
+  "Except for work find, work uses --root for the repository and reads its",
   "coordinator root from COORDINATION_KIT_ROOT or DELIVERY_KIT_ROOT.",
+  "work find uses the same coordinator root as status.",
   "docs uses --root for the repository, defaulting to the working directory.",
   "Other commands use --root, COORDINATION_KIT_ROOT, DELIVERY_KIT_ROOT or the working directory,",
   "in that order.",
@@ -192,6 +195,7 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "task approve": taskApprove,
   "task approve-review": taskApproveReview,
   "task close": taskClose,
+  "task find": taskFind,
   "task link-review": taskLinkReview,
   "task list": taskList,
   "task merge": taskMerge,
@@ -206,6 +210,7 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "work block": workBlock,
   "work check": workCheck,
   "work evidence": workEvidence,
+  "work find": workFind,
   "work finish": workFinish,
   "work history": workHistory,
   "work ready": workReady,

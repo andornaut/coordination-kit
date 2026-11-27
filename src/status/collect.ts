@@ -47,6 +47,8 @@ const STATUS_SCHEMA = 2;
 const WORK_DIRECTORY = "docs/work";
 /** Keeps distinct repositories grouped in Markdown without changing the JSON report. */
 export const statusRepositoryPath = Symbol("statusRepositoryPath");
+/** The work owner is distinct from the owner of the current blocker. */
+export const statusWorkOwner = Symbol("statusWorkOwner");
 
 export class StatusUsageError extends Error {
   constructor(message: string) {
@@ -114,6 +116,7 @@ interface GitDeployment {
 
 export interface StatusItem {
   readonly [statusRepositoryPath]?: string | null;
+  readonly [statusWorkOwner]?: string | null;
   readonly repository: string;
   readonly id: string;
   readonly title: string | null;
@@ -423,10 +426,11 @@ function repositoryItems(
       (matchesOwner === null || (stored.owner !== null && matchesOwner(stored.owner)))
         ? stored
         : null;
+    const fileOwner = workOwner(repository, work.fields);
     if (
       role !== null &&
       record?.owner !== role &&
-      workOwner(repository, work.fields) !== role &&
+      fileOwner !== role &&
       !requests.some((request) => request.owner === role)
     ) {
       continue;
@@ -509,6 +513,7 @@ function repositoryItems(
       requests,
       status: derived.status,
       [statusRepositoryPath]: repository.path,
+      [statusWorkOwner]: record?.owner ?? fileOwner,
       store: record,
       title: work.title,
       userOriginated:
@@ -641,6 +646,7 @@ function requestedItems(
       requests: [entry],
       status: "requested",
       [statusRepositoryPath]: repository.path,
+      [statusWorkOwner]: request.owner,
       store: null,
       title: request.summary,
       userOriginated: entry.userSource,
@@ -681,6 +687,7 @@ function recordOnlyItem(record: WorkRecord, repository: Repository | undefined):
               ? "requested"
               : "in-progress",
     [statusRepositoryPath]: repository?.path ?? null,
+    [statusWorkOwner]: record.owner,
     store: record,
     title: null,
     userOriginated: false,

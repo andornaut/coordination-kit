@@ -9,6 +9,7 @@ import { INIT_OPTIONS, PROJECT_REGISTER_OPTIONS } from "./project/init.ts";
 import {
   TASK_APPROVE_OPTIONS,
   TASK_CLOSE_OPTIONS,
+  TASK_FIND_OPTIONS,
   TASK_LINK_OPTIONS,
   TASK_PROPOSE_OPTIONS,
   TASK_READ_OPTIONS,
@@ -79,6 +80,7 @@ import {
   WORK_START_OPTIONS,
   WORK_WRITE_OPTIONS,
 } from "./work.ts";
+import { WORK_FIND_OPTIONS } from "./workFind.ts";
 const BINARY = "coordination-kit";
 /** The placeholder each string option shows in help. */
 const VALUES: Readonly<Record<string, string>> = {
@@ -280,6 +282,12 @@ export const SPECS = {
     group: "project",
     options: TASK_READ_OPTIONS,
     summary: "list the standalone project's tasks",
+  },
+  "task find": {
+    forms: [["DESCRIPTION", "owner?"]],
+    group: "project",
+    options: TASK_FIND_OPTIONS,
+    summary: "find a standalone task by canonical ID or description without writing",
   },
   "task show": {
     forms: [["ID"]],
@@ -704,6 +712,13 @@ export const SPECS = {
     group: "work",
     options: WORK_WRITE_OPTIONS,
     summary: "finish your work item after main marks it done, superseded or cancelled",
+  },
+  "work find": {
+    forms: [["DESCRIPTION", "scope?", "owner?"]],
+    group: "status",
+    options: WORK_FIND_OPTIONS,
+    summary: "find shared work by canonical ID or description without writing",
+    values: { scope: "all|workspace|app:ID|kit:ID|role:KEY|NAME" },
   },
   "work show": {
     forms: [["ID"]],

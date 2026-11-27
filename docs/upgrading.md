@@ -1,5 +1,12 @@
 # Upgrading
 
+## Coordination Kit 7.9
+
+The read-only `task find` and `work find` commands add description lookup to standalone
+projects and shared workspaces. The release also bundles the optional `coordination-lifecycle`
+and `coordination-status` skills. The [command reference](commands.md#skills-install) shows
+how to install them. Existing clients can keep their pins and store state.
+
 ## Coordination Kit 7.8
 
 7.8.0 reads both legacy `games` configurations and schema-1 `apps` workspaces. To adopt

@@ -2,7 +2,7 @@
 // a Markdown digest. --root names the coordinator, as for every non-work command.
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/cli/io.ts";
 import { type CommandSpec, formSynopsis, usageText } from "../core/cli/usage.ts";
-import { systemGit } from "../core/git.ts";
+import { localGit } from "../core/git.ts";
 import { collectStatus, incomplete, StatusUsageError } from "../status/collect.ts";
 import { DEFAULT_VERIFY_SINCE, STATE_FILTERS, type StateFilter } from "../status/derive.ts";
 import { renderMarkdown } from "../status/markdown.ts";
@@ -74,7 +74,7 @@ export const status: Handler = (io, root, args) => {
   }
   let report;
   try {
-    report = collectStatus({ git: systemGit(io.env), io }, root, {
+    report = collectStatus({ git: localGit(io.env), io }, root, {
       audit: values.audit === true,
       scope: values.scope ?? "all",
       since,

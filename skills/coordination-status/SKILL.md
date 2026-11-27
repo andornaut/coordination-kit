@@ -37,10 +37,12 @@ when available. Distinguish a proposal awaiting approval from a recorded pending
 State when native prompt visibility is unknown.
 
 Report READY, integration, exact-commit CI verification, and delivery as separate milestones.
-In standalone mode, `ready` has a candidate, `merged` still awaits landing verification,
-and `landed` has `mergedSha` and `landingEvidence`. Report CI verified only when the evidence
-names the integrated commit. Cite the deployment or release evidence when delivery applies.
-Mark assumed delivery as assumed and unavailable evidence as unknown.
+In standalone mode, `ready` has a candidate, review approval covers that exact candidate,
+`merged` awaits landing verification, and `landed` has `mergedSha` and `landingEvidence`.
+In shared mode, report the `finished` disposition alongside the separate READY, merged,
+and verified evidence. Report CI verified only when its evidence names the integrated commit.
+Cite the deployment or release evidence when delivery applies. Mark assumed delivery as
+assumed and unavailable evidence as unknown.
 
 For a general backlog, include every outstanding in-scope record regardless of age, including
 records with missing files. Group by repository or project and count each open unmatched

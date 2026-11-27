@@ -10,7 +10,7 @@ import {
   type Io,
 } from "../core/cli/io.ts";
 import type { Options } from "../core/cli/usage.ts";
-import { systemGit } from "../core/git.ts";
+import { localGit } from "../core/git.ts";
 import { WORK_STAGES, type WorkStage } from "../store/work-records/work.ts";
 import {
   type LiveContext,
@@ -112,7 +112,7 @@ function liveContext(io: Io): LiveContext {
     clock: systemClock,
     coordinatorRoot: coordinatorRoot(io.env),
     env: io.env,
-    git: systemGit(io.env),
+    git: localGit(io.env),
   };
 }
 
