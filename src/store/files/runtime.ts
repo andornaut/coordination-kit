@@ -1,67 +1,52 @@
-import type { DatabaseSync } from "node:sqlite";
-
 import type { Layout } from "../../core/configuration/layout.ts";
 import { readRegistry } from "../../registry/store.ts";
-import { latestStoreReview } from "../eventCodec.ts";
+import { latestStoreReview, payloadText } from "../eventCodec.ts";
 import type { FileProjection } from "../fileProjection.ts";
 import { selectedFileCheckpoint } from "./compaction/generation.ts";
 import { openFileJournal } from "./journal.ts";
 import { fileRecords } from "./records.ts";
 import { verifiedWorkerForEvent } from "./workerProof.ts";
 
-function ownerLookup(index: DatabaseSync, query: string, throughSeq: number) {
-  const stmt = index.prepare(query);
-  return (id: string): string | null => {
-    const owner = stmt.get(id, throughSeq)?.owner;
-    return typeof owner === "string" ? owner : null;
-  };
+function text(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
 }
 
 export function fileLayoutProjection(layout: Layout, target: string): FileProjection {
   return {
     ...(selectedFileCheckpoint(target) ?? { journal: openFileJournal(target) }),
-    records(index, throughSeq, events) {
+    records(index, throughSeq, events, history) {
       const registry = readRegistry(layout);
-      const message = index.prepare(
-        "SELECT from_role, to_role FROM messages WHERE id = ? AND sent_seq <= ?",
-      );
-      const work = index.prepare(
-        `SELECT json_extract(payload, '$.owner') AS owner FROM events
-         WHERE kind = 'work.started' AND json_extract(payload, '$.repository') = ?
-           AND json_extract(payload, '$.id') = ? AND seq <= ? ORDER BY seq DESC LIMIT 1`,
-      );
-      const review = latestStoreReview(index, throughSeq);
+      const review = latestStoreReview(history, throughSeq);
+      let workOwners: Map<string, string | null> | undefined;
+      function priorRow(table: string, id: string, sequence: string) {
+        const row = index.get(table, [id]);
+        const position = row?.[sequence];
+        return typeof position === "number" && position <= throughSeq ? row : undefined;
+      }
       return fileRecords(events, {
-        holdOwner: ownerLookup(
-          index,
-          "SELECT role AS owner FROM holds WHERE id = ? AND set_seq <= ?",
-          throughSeq,
-        ),
+        holdOwner: (id) => text(priorRow("holds", id, "set_seq")?.role),
         messageOwner: (id) => {
-          const value = message.get(id, throughSeq);
-          return value === undefined
+          const row = priorRow("messages", id, "sent_seq");
+          return row === undefined
             ? null
-            : {
-                recipient: typeof value.to_role === "string" ? value.to_role : null,
-                sender: typeof value.from_role === "string" ? value.from_role : null,
-              };
+            : { recipient: text(row.to_role), sender: text(row.from_role) };
         },
-        questionOwner: ownerLookup(
-          index,
-          "SELECT role AS owner FROM questions WHERE id = ? AND opened_seq <= ?",
-          throughSeq,
-        ),
+        questionOwner: (id) => text(priorRow("questions", id, "opened_seq")?.role),
         registeredRoles: new Set(Object.keys(registry.roles)),
-        requestOwner: ownerLookup(
-          index,
-          "SELECT owner FROM requests WHERE id = ? AND imported_seq <= ?",
-          throughSeq,
-        ),
+        requestOwner: (id) => text(priorRow("requests", id, "imported_seq")?.owner),
         verifiedWorker: (event, parentRole) =>
           verifiedWorkerForEvent(registry, review, event, parentRole),
         workOwner: (repository, id) => {
-          const owner = work.get(repository, id, throughSeq)?.owner;
-          return typeof owner === "string" ? owner : null;
+          if (workOwners === undefined) {
+            workOwners = new Map();
+            for (const { payload, seq } of history.events({ kinds: ["work.started"] })) {
+              if (seq <= throughSeq) {
+                const key = JSON.stringify([payload.repository, payload.id]);
+                workOwners.set(key, payloadText(payload, "owner"));
+              }
+            }
+          }
+          return workOwners.get(JSON.stringify([repository, id])) ?? null;
         },
       });
     },

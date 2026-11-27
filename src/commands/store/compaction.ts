@@ -16,7 +16,7 @@ import { withLock } from "../../core/files/lock.ts";
 import { systemGit } from "../../core/git.ts";
 import { isCanonicalUuid, uuid5 } from "../../core/ids.ts";
 import { registry, type StoreServiceContext } from "../../store/context.ts";
-import { storePath, storeRoot } from "../../store/db.ts";
+import { legacyStorePath, storeRoot } from "../../store/db.ts";
 import { canonicalJson, REF, sha256 } from "../../store/eventCodec.ts";
 import { fileAuthority } from "../../store/files/authority.ts";
 import type { CheckpointHead } from "../../store/files/compaction/checkpoint.ts";
@@ -226,8 +226,8 @@ function maintainer(context: StoreServiceContext, values: Values) {
 
 function files(context: StoreServiceContext) {
   const { layout } = context;
-  const source = fileAuthority(systemGit(context.env), layout, storePath(layout));
-  if (source.kind !== "files") {
+  const source = fileAuthority(systemGit(context.env), layout, legacyStorePath(layout));
+  if (source === null) {
     throw new StoreError("compaction-file-authority-required");
   }
   return source;

@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import type { SQLOutputValue } from "node:sqlite";
 
 import { MEMORY, READ_ONLY_CLOCK, Store } from "../../db.ts";
 import { canonicalJson } from "../../eventCodec.ts";
@@ -79,42 +78,23 @@ function removedBodyBytes(
   return bytes;
 }
 
-function quote(identifier: string): string {
-  return `"${identifier.replaceAll('"', '""')}"`;
-}
-
-function sqliteValue(value: SQLOutputValue): unknown {
-  if (typeof value === "bigint") {
-    return { integer: value.toString() };
-  }
-  if (value instanceof Uint8Array) {
-    return { bytes: Buffer.from(value).toString("base64") };
-  }
-  return value;
-}
-
 function projectionDigest(
   store: Store,
-  name: string,
+  table: string,
   selected: ReadonlySet<string>,
 ): ProjectionDigest {
-  const table = quote(name);
-  const columns = store.db.prepare(`PRAGMA table_xinfo(${table})`).all();
-  ensure(columns.length > 0, MISMATCH);
-  // For messages the first key is the unique ID, so later columns cannot reorder equal rows
-  // when one of the compared bodies is hidden.
-  const ordered = columns.map(({ name: column }) => `${quote(String(column))} COLLATE BINARY`);
-  const statement = store.db.prepare(`SELECT * FROM ${table} ORDER BY ${ordered.join(", ")}`);
-  statement.setReadBigInts(true);
-  const hash = createHash("sha256").update(`${canonicalJson(columns)}\n`);
-  let rows = 0;
-  for (const row of statement.iterate()) {
-    const hideBody = name === "messages" && typeof row.id === "string" && selected.has(row.id);
-    const values = Object.values(hideBody ? { ...row, body: null } : row).map(sqliteValue);
-    hash.update(`${canonicalJson(values)}\n`);
-    rows += 1;
+  const rows = store.index
+    .rows(table)
+    .map((row) => {
+      const hideBody = table === "messages" && typeof row.id === "string" && selected.has(row.id);
+      return canonicalJson(hideBody ? { ...row, body: null } : row);
+    })
+    .sort();
+  const hash = createHash("sha256");
+  for (const row of rows) {
+    hash.update(`${row}\n`);
   }
-  return { rows, sha256: hash.digest("hex") };
+  return { rows: rows.length, sha256: hash.digest("hex") };
 }
 
 /** Qualify a restored source and a candidate without opening a filesystem journal or writing it. */
@@ -165,7 +145,7 @@ export function verifyClosedHistoryReplay(
       stateEquivalent: true,
     };
   } catch {
-    // Replayed values and database details are private evidence.
+    // Replayed values and projection details are private evidence.
     throw new StoreError(MISMATCH);
   } finally {
     after?.close();

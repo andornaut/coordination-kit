@@ -16,7 +16,7 @@ import { expect, it, vi } from "vitest";
 import { main } from "../../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../../core/cli/io.ts";
 import { gameLayout } from "../../core/configuration/layout.ts";
-import { TEST_CLOCK, TEST_CONTEXT, TEST_GIT } from "../../core/testFixtures.ts";
+import { TEST_CLOCK, TEST_CONTEXT } from "../../core/testFixtures.ts";
 import { updateRegistry } from "../../registry/store.ts";
 import { showBrief, storeReview } from "../../review/storeBrief.ts";
 import { Store } from "../../store/db.ts";
@@ -31,7 +31,6 @@ import {
   readFileJournalReservation,
   retiredFileJournalSnapshot,
 } from "../../store/files/journal.ts";
-import { activateMigration, prepareMigration } from "../../store/files/migration.ts";
 import { closeMessage, messageStatus, sendMessage } from "../../store/messages/messages.ts";
 import { recordSession } from "../../store/sessions/handoffs.ts";
 import { COORDINATOR, GAME, storeFixture, TECH } from "../../store/testStore.ts";
@@ -82,13 +81,6 @@ function fixture(hasReplacement = true) {
   });
   const head = store.head();
   store.close();
-  const { receipt: cutover } = prepareMigration(
-    TEST_GIT,
-    layout,
-    join(base, "backup.db"),
-    join(base, "restore.db"),
-  );
-  activateMigration(TEST_GIT, layout, cutover.id);
   const target = join(layout.varDir, "coordination");
   const restore = join(base, "restored-journal");
   cpSync(target, restore, { recursive: true });
