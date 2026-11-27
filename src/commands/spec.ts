@@ -185,7 +185,7 @@ export const SPECS = {
     forms: [["SKILL", "harness", "scope"]],
     group: "project",
     options: SKILLS_INSTALL_OPTIONS,
-    summary: "install the bundled workflow or status skill in the primary Git checkout",
+    summary: "install the bundled lifecycle or status skill in the primary Git checkout",
     values: { harness: "codex|claude", scope: "project" },
   },
   "project register": {

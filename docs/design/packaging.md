@@ -30,4 +30,4 @@ Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
 | ck-0060 | Add approved Dependabot coverage for Coordination Kit            | [ck-0060.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0060.md) |
 | ck-0070 | Document first use of Coordination Kit                           | [ck-0070.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0070.md) |
 | ck-0072 | Organize Coordination Kit source by responsibility               | [ck-0072.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0072.md) |
-| ck-0073 | Package Coordination Kit workflow and status skills              | [ck-0073.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0073.md) |
+| ck-0073 | Package Coordination Kit lifecycle and status skills             | [ck-0073.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0073.md) |

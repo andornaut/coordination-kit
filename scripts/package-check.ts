@@ -83,7 +83,7 @@ export function inspectPackage(
   mkdirSync(skillsProject);
   run(skillsProject, "git", ["init", "--quiet"]);
   for (const [skill, harness, base, name] of [
-    ["workflow", "codex", ".agents", "coordination-kit-workflow"],
+    ["lifecycle", "codex", ".agents", "coordination-lifecycle"],
     ["status", "claude", ".claude", "coordination-status"],
   ] as const) {
     const path = join(base, "skills", name, "SKILL.md");

@@ -20,7 +20,7 @@ export const SKILLS_INSTALL_OPTIONS = {
   scope: { type: "string" },
 } as const;
 
-const SKILLS = { status: "coordination-status", workflow: "coordination-kit-workflow" } as const;
+const SKILLS = { lifecycle: "coordination-lifecycle", status: "coordination-status" } as const;
 const DIRECTORIES = { claude: ".claude", codex: ".agents" } as const;
 
 function directory(parent: string, name: string): string {
@@ -77,8 +77,8 @@ export const skillsInstall: Handler = (io, root, args) => {
     const { positionals, values } = parseOptions(SKILLS_INSTALL_OPTIONS, args, 1);
     const [skill] = positionals;
     const harness = required(values, "harness");
-    if (skill !== "workflow" && skill !== "status") {
-      throw new Usage("choose the workflow or status skill");
+    if (skill !== "lifecycle" && skill !== "status") {
+      throw new Usage("choose the lifecycle or status skill");
     }
     if (harness !== "codex" && harness !== "claude") {
       throw new Usage("--harness must be codex or claude");

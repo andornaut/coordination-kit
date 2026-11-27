@@ -1,9 +1,9 @@
 ---
-name: coordination-kit-workflow
+name: coordination-lifecycle
 description: Run approved work through Coordination Kit in a standalone Git repository, from task intake and ownership through review, merge and exact-commit landing verification.
 ---
 
-# Coordination Kit workflow
+# Coordination lifecycle
 
 Use the project's pinned Coordination Kit CLI. Run commands from the primary checkout or pass its path with `--root`. Read `coordination-kit.json` for the project roles and review policy. The installed package's `docs/standalone.md` covers setup, review and landing commands.
 
