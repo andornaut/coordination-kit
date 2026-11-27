@@ -18,20 +18,20 @@ your project guides, requirements and work records easy to find.
 ## Get the CLI
 
 You need Node 24.21.0 or later, Git and `flock`. Download the archive and its verification files
-from the same [7.13.0 release][release]. Use a directory outside any repository.
+from the same [8.0.0 release][release]. Use a directory outside any repository.
 
 ```sh
-kit_dir="$HOME/.local/share/coordination-kit/7.13.0"
-kit_release="https://github.com/andornaut/coordination-kit/releases/download/v7.13.0"
+kit_dir="$HOME/.local/share/coordination-kit/8.0.0"
+kit_release="https://github.com/andornaut/coordination-kit/releases/download/v8.0.0"
 mkdir -p "$kit_dir"
 (
   set -e
   cd "$kit_dir"
-  for asset in coordination-kit-7.13.0.tgz SOURCE_COMMIT SHA256SUMS; do
+  for asset in coordination-kit-8.0.0.tgz SOURCE_COMMIT SHA256SUMS; do
     curl -fLO "$kit_release/$asset"
   done
   sha256sum -c SHA256SUMS
-  tar -xzf coordination-kit-7.13.0.tgz
+  tar -xzf coordination-kit-8.0.0.tgz
   cmp SOURCE_COMMIT package/SOURCE_COMMIT
 )
 ck() { node "$kit_dir/package/dist/cli.js" "$@"; }
@@ -39,7 +39,7 @@ ck --version
 ```
 
 Both checksum lines should say `OK`, the two `SOURCE_COMMIT` files should match, and the version
-should be `7.13.0`. Keep the `ck` function in the shell where you run the standalone example.
+should be `8.0.0`. Keep the `ck` function in the shell where you run the standalone example.
 A shared workspace can [pin the same release with npm](#set-up-an-app-workspace).
 Delivery Kit's runner uses that workspace pin for reviews and event ingests. Its bundled
 libraries have a [separate compatibility range](upgrading.md#coordination-kit-78).
@@ -104,7 +104,7 @@ repository/
   docs/work/task-0001.md             tracked with the implementation when created
   .coordination-kit/                 local and ignored
     registry.json                    native role bindings
-    coordination.db                  task, approval and message history
+    coordination/                   task, approval and message journal
 ```
 
 | Review policy | What happens at review                                                                       |
@@ -159,7 +159,7 @@ Install the checked release, commit `package.json` and `package-lock.json`, and 
 
 ```sh
 npm install --save-dev \
-  https://github.com/andornaut/coordination-kit/releases/download/v7.13.0/coordination-kit-7.13.0.tgz
+  https://github.com/andornaut/coordination-kit/releases/download/v8.0.0/coordination-kit-8.0.0.tgz
 workspace="$(pwd -P)"
 ck() { node "$workspace/node_modules/@andornaut/coordination-kit/dist/cli.js" --root "$workspace" "$@"; }
 ck --version
@@ -237,7 +237,7 @@ workspace/
   node_modules/                                            local dependency install
   var/                                                      local and ignored
     registry.json                                           native role bindings
-    coordination.db                                         initial SQLite store
+    coordination/                                          filesystem journal
     route.json, reviews/                                    optional scheduled review state
     apps/dashboard/bus/                                     optional delivery state
 dashboard/
@@ -327,4 +327,4 @@ review.
 See the [command reference](../reference/commands.md) for syntax and the [documentation index](../README.md)
 for the remaining guides.
 
-[release]: https://github.com/andornaut/coordination-kit/releases/tag/v7.13.0
+[release]: https://github.com/andornaut/coordination-kit/releases/tag/v8.0.0

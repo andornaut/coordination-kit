@@ -1,5 +1,30 @@
 # Upgrading
 
+## Coordination Kit 8.0
+
+8.0 uses the filesystem journal for standalone and shared coordination. A standalone checkout
+uses `.coordination-kit/coordination/` and the primary coordinator checkout uses
+`var/coordination/`. The first successful write initializes fresh state. Reads leave a fresh
+checkout untouched.
+
+For an existing file-backed workspace, keep the journal and its active authority receipt,
+source-fence records, checkpoints, tails and independent backup. Keep the registry, channel
+configuration, wake and artifact paths, runner controls and cursors in their existing places.
+Confirm compatible installed CLI and library pins before switching readers and writers. Verify
+the deployed reader on normal inbox, status, scheduled review and ingest operations where used.
+
+A dormant legacy database or sidecar without active file authority blocks startup with
+`file-authority-legacy-state`. Use the
+[7.13.0 authority runbook](https://github.com/andornaut/coordination-kit/blob/v7.13.0/docs/upgrading.md#filesystem-authority-migration)
+to qualify and activate existing history before adopting 8.0. Read or export legacy databases
+with the verified 7.13.0 CLI and [historical store guide](https://github.com/andornaut/coordination-kit/blob/v7.13.0/docs/store.md).
+For an explicitly approved fresh
+reinstall, preserve the legacy state elsewhere before initializing the new checkout.
+
+The optional [GitHub Issues task store](standalone.md#use-github-issues-for-active-tasks) is for
+standalone GitHub projects that want shared task state. Existing standalone file tasks require
+a migration before enabling it.
+
 ## Coordination Kit 7.13
 
 New standalone work files place Verification immediately before Outcome and link dependencies
@@ -180,8 +205,7 @@ together.
      (schema 2, with `role`), both under the state root.
    - `cancelQuestion(store, actor, id, reason)` in `build/store` takes no fourth argument.
 4. Old `wake/<uuid>.json` and `channel/<uuid>.json` files are no longer read and are safe to
-   remove once every channel is reconnected. Journals and SQLite stores written by earlier
-   versions open and rebuild as before.
+   remove once every channel is reconnected. Those older stores remained readable under 6.0.
 
 ## Coordination Kit 4.0
 
@@ -213,36 +237,9 @@ approval and recovery.
 
 ## Filesystem authority migration
 
-The coordinator-installed CLI supports the existing SQLite source during preparation. Its
-normal runner seam remains schema 1. Use an exact Delivery Kit pin whose coordinator CLI range
-accepts the installed Coordination Kit version. Use the absolute primary coordinator root for commands from every working
-directory. The target is the ignored `var/coordination/` under that root.
-
-1. Install the exact immutable Coordination Kit archive with the verified lockfile integrity.
-   Confirm the installed CLI digest and the existing runner's actual CLI observations. Let in-flight
-   runner batches and reporters drain at an existing idle boundary. Use the normal cadence to verify
-   the compatible reader and writer.
-2. Run `store migration-prepare --backup ABSOLUTE_FILE --restore ABSOLUTE_FILE` under the active
-   game-coordinator binding. Both files must be fresh paths outside the coordinator checkout.
-   The command copies a consistent SQLite snapshot, restores it independently and checks the event
-   chain, every durable projection and the committed files for role records. It returns a prepared
-   receipt. SQLite remains the authority at this point.
-3. Confirm the prepared receipt against `store migration-status`. Use
-   `store migration-activate --id RECEIPT_ID` under the same binding at the coordinated idle
-   boundary. It verifies the source head, backup, restored copy, candidate and unchanged runtime
-   inventory, freezes SQLite event inserts, and then selects the file authority. If the legacy head
-   advanced, prepare a fresh snapshot and use the new receipt. If the command is interrupted after
-   the freeze, retry activation with the original receipt. The pending transition rejects ordinary
-   access until it is completed.
-4. Verify `store migration-status` reports the exact active receipt. Exercise normal role reads and
-   inspect the actual next scheduled review and runner ingest. Their evidence must cover the same
-   installed digest, continued cursor progression and preserved holds and questions. Retain the
-   independent backup and restored copy outside the checkout.
-
-The runtime uses the journal as authority and rebuilds its query index from committed events.
-Role files and immutable message dispositions are included in the commit manifests. The frozen
-SQLite source remains readable for migration evidence. Runner controls, event logs, cursor,
-notification endpoints and registry stay at their existing locations.
+For historical migration or exports from the retired database authority, use the
+[7.13.0 runbook](https://github.com/andornaut/coordination-kit/blob/v7.13.0/docs/upgrading.md#filesystem-authority-migration)
+with that verified CLI. See the [8.0 upgrade steps](#coordination-kit-80) for current adoption.
 
 ## From 3.0.0
 

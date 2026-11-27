@@ -34,6 +34,9 @@ when planning verification and recording evidence.
 ## Standalone project
 
 Read `coordination-kit.json` for project roles and review policy.
+When it selects GitHub Issues task storage, follow the
+[GitHub Issues workflow](https://github.com/andornaut/coordination-kit/blob/main/docs/guides/standalone.md#use-github-issues-for-active-tasks)
+for issue IDs, pull request actions and verified landing.
 
 1. The maintainer records the user's actual build approval with `task approve`. The assigned
    owner runs `task start ID` after prerequisites land. Resume from the recorded stage.

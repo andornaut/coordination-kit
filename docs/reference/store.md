@@ -10,31 +10,25 @@ requests and the Phase 4 retirement. The design is in
 
 ## Location and settings
 
-Before activation, the store is `coordination.db` in the state root named by
-`var/work-protocol.json`, or `var/coordination.db` when that pointer is absent. The
-[filesystem migration](../guides/upgrading.md#filesystem-authority-migration) selects one authority at
-a time. Active file state belongs in the ignored `var/coordination/` of the explicit primary
-coordinator checkout. The immutable batch journal and committed records are authoritative.
-The query index is rebuilt from the journal in memory. Wake endpoints still use the existing
-state root. Runner state, routing and registry files retain their existing paths.
+The append-only filesystem journal is authoritative. Standalone projects use
+`.coordination-kit/coordination/`. Shared workspaces use `var/coordination/` under the explicit
+primary coordinator checkout. Read-only commands do not create state. The first write opens a
+fresh runtime by recording an authority receipt and its source-fence witness.
 
-Before activation the SQLite source opens through `node:sqlite` (`DatabaseSync`, built into Node 24.21 with no flag) with
-`journal_mode=WAL`, `synchronous=FULL`, `busy_timeout=5000` and `foreign_keys=ON`. A new file is
-created with mode 0600 in a 0700 directory. `PRAGMA user_version` holds the schema version, 1; a
-newer version is refused with `store-schema-newer`. Every write is one `BEGIN IMMEDIATE`
-transaction holding the event and its projection updates. No native call runs inside a
-transaction.
+An already activated filesystem store reuses its journal and existing authority receipt.
+If a legacy database or sidecar exists without active file authority, the store refuses to
+initialize with `file-authority-legacy-state`.
+See the [8.0 upgrade procedure](../guides/upgrading.md#coordination-kit-80).
+Wake endpoints and exported artifacts use the existing [state root](configuration.md#state).
+The JavaScript query indexes are rebuilt in memory from committed events.
 
 ## Filesystem layout
 
-The following example shows an activated store with records for Archie. Sequence numbers and
+The following example shows filesystem records for Archie. Sequence numbers and
 record IDs are illustrative. Subdirectories appear as records are written.
 
 ```text
 var/coordination/
-├── qualification.json
-├── source-fence.json
-├── .migration.lock
 ├── journal/
 │   ├── writer.lock
 │   ├── batches/0000000000000001.json
@@ -55,16 +49,17 @@ var/coordination/
 └── legacy/quarantine/50.json
 ```
 
-| Path                                                         | Meaning                                                                                                                                                                        |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `qualification.json`, `source-fence.json`, `.migration.lock` | Migration proof, durable source-fence witness and migration lock. The authority receipt is the sibling `var/coordination-authority.json`.                                      |
-| `journal/batches/<first-seq>.json`                           | Immutable commit manifest with the event range, hash chain and exact companion path digests. The filename is the first sequence padded to 16 decimal digits.                   |
-| `journal/keys/`, `journal/writer.lock`                       | Per-event idempotency index and bounded journal writer lock. A pending transaction may leave prepare or staging files in `journal/` for recovery.                              |
-| `roles/<encoded-role>/messages/`                             | Sender-owned originals and separate recipient-owned dispositions by exact message ID and event sequence. `%2F` encodes a slash in a game role key.                             |
-| `roles/<encoded-role>/`                                      | Per-role inbox reads and wakes, sessions, work, requests, questions, decisions and holds. Verified worker work records can use a child namespace under the actual parent role. |
-| `coordinator/`                                               | Policy holds, handoff records, runner ingest and scheduled review evidence.                                                                                                    |
-| `legacy/quarantine/`                                         | Events or event parts whose ownership or scope could not be verified. They stay available as evidence with their reason.                                                       |
+| Path                                   | Meaning                                                                                                                                                                        |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `source-fence.json`                    | The witness for the sibling `coordination-authority.json` authority receipt.                                                                                                   |
+| `journal/batches/<first-seq>.json`     | Immutable commit manifest with the event range, hash chain and exact companion path digests. The filename is the first sequence padded to 16 decimal digits.                   |
+| `journal/keys/`, `journal/writer.lock` | Per-event idempotency index and bounded journal writer lock. A pending transaction may leave prepare or staging files in `journal/` for recovery.                              |
+| `roles/<encoded-role>/messages/`       | Sender-owned originals and separate recipient-owned dispositions by exact message ID and event sequence. `%2F` encodes a slash in a game role key.                             |
+| `roles/<encoded-role>/`                | Per-role inbox reads and wakes, sessions, work, requests, questions, decisions and holds. Verified worker work records can use a child namespace under the actual parent role. |
+| `coordinator/`                         | Policy holds, handoff records, runner ingest and scheduled review evidence.                                                                                                    |
+| `legacy/quarantine/`                   | Events or event parts whose ownership or scope could not be verified. They stay available as evidence with their reason.                                                       |
 
+Preserve any existing authority receipt, qualification and source-fence records when upgrading.
 A companion path carries authority only when a committed batch names its exact digest. The next
 writer recovers uncommitted preparation. Use the CLI to read and change coordination state.
 Keep the journal, companion records and authority metadata out of Git, and retain independent
@@ -269,27 +264,24 @@ automatic activation are outside this procedure.
 
 ## Schema
 
-`events` is append-only; triggers abort any `UPDATE` or `DELETE`.
+The committed journal is append-only.
 
-| Column            | Content                                                                                                    |
-| ----------------- | ---------------------------------------------------------------------------------------------------------- |
-| `seq`             | 1, 2, 3, ... in commit order.                                                                              |
-| `key`             | Unique idempotency key, one per command (`msg.sent:<id>`, `msg.closed:<id>`, `msg.imported:<id>`, ...).    |
-| `kind`            | Dotted lower-case kind, such as `msg.sent`.                                                                |
-| `actor_role`      | The fenced caller's registry role, or null for import-time wakes and maintenance.                          |
-| `actor_native_id` | The caller's native conversation ID, or null.                                                              |
-| `actor_worker`    | The caller's unverified `--worker` attribution, or null.                                                   |
-| `at`              | ISO 8601 UTC time of the write.                                                                            |
-| `payload`         | The canonical JSON payload: keys sorted at every depth, no whitespace.                                     |
-| `prev_hash`       | The previous event's `hash`; 64 zeros for seq 1.                                                           |
-| `hash`            | sha256 of `prev_hash`, a newline and the canonical JSON of `{actor, at, key, kind, payload, schema, seq}`. |
+| Field      | Content                                                                                                   |
+| ---------- | --------------------------------------------------------------------------------------------------------- |
+| `seq`      | 1, 2, 3, ... in commit order.                                                                             |
+| `key`      | Unique idempotency key, one per command (`msg.sent:<id>`, `msg.closed:<id>`, `msg.imported:<id>`, ...).   |
+| `kind`     | Dotted lower-case kind, such as `msg.sent`.                                                               |
+| `actor`    | The fenced role, native conversation ID and optional worker attribution.                                  |
+| `at`       | ISO 8601 UTC time of the write.                                                                           |
+| `payload`  | The canonical JSON payload: keys sorted at every depth, no whitespace.                                    |
+| `prevHash` | The previous event's `hash`; 64 zeros for seq 1.                                                          |
+| `hash`     | sha256 of `prevHash`, a newline and the canonical JSON of `{actor, at, key, kind, payload, schema, seq}`. |
 
-Projections, updated in the same transaction as their event:
+In-memory projection maps derived from committed events:
 
 - `messages`: one row per message with its sender, recipient, intent, body, `body_sha256`, links,
   state (`sent`, `delivered`, `handled`, `retained` or `superseded`), `unconfirmed`, delivery and
-  close times, work ID, superseding ID, evidence, retention and legacy provenance. Indexed by
-  `(to_role, state, sent_seq)` and `(from_role, sent_seq)`.
+  close times, work ID, superseding ID, evidence, retention and legacy provenance. Look up messages by recipient, sender or ID.
 - `wake_state`: per recipient, `pending` (a send since its last pull) and the `outstanding` wake.
 - `wakes`: the wake log, one row per claimed or guarded wake with its harness, conversation,
   count, outcome and detail.
@@ -306,7 +298,7 @@ Projections, updated in the same transaction as their event:
 - `work_retained`: one row per retained item of a work item: owner, reason and next boundary.
 - `questions`: one row per question with its owning role, title, work ID, options, state
   (`pending`, `answered` or `cancelled`), opening and closing times, the answering decision and
-  the cancellation reason. Indexed by `(role, state, opened_seq)`.
+  the cancellation reason.
 - `question_answers`: the exact answer, its recording sequence and its Markdown projection status.
 - `decisions`: one row per decision, `{id, work, n, question, by, at, role, supersedes, text}`,
   unique per `(work, n)`, where `id` is `<work>/D<n>` and `supersedes` is `<work>/D<k>` or null.
@@ -316,7 +308,6 @@ Projections, updated in the same transaction as their event:
   approval references for set and release.
 - `holds`: one row per hold with its owning role (null for an imported hold without one), scope,
   covered work items, source, ledger state, reason, state (`active` or `released`) and times.
-  Indexed by `(role, state, set_seq)`.
 - `sessions`: the latest `session.started` per role: harness, native ID, CLI version, cwd and time.
 - `handoffs`: one row per handoff with its scope, from and to harness, state and opening and update
   times; `handoff_roles` holds each role's source harness and ready and active times.
@@ -334,14 +325,10 @@ later projection can read it on its next rebuild. A journal may also hold `remin
 native notice proofs, and generated coordinator attention as ordinary messages. They replay
 without error: a notice ends the exact outstanding wake it names, an attention message closed with
 `attention-source-cleared` keeps no delivery time, and the reminder kinds project nothing.
-Compaction still qualifies all of them. `store rebuild` drops the retired `pending_notices`,
-`reminder_claims` and `reminder_originals` tables. A store written before a projection existed
-gets that projection's tables when it is opened, filled from the existing events in one
-transaction; the events and their hashes are untouched.
+Compaction still qualifies these events.
 
-`store rebuild` recomputes every hash from seq 1, refuses with `chain-broken` at the first
-mismatch, then drops and recreates the projection tables and replays every event in one
-transaction. `Store.verify()` is the same check without the rebuild.
+`store rebuild` verifies the selected checkpoint and tail, or the full journal hash chain, and
+replays the committed events into fresh in-memory maps. `Store.verify()` checks the same history.
 
 ## Message lifecycle
 
@@ -1009,7 +996,9 @@ inserted and unchanged events per type (`events`), SHA fields that are not objec
 
 `@andornaut/coordination-kit/build/store` exports:
 
-- `Store.open(clock, path)`, `Store.forLayout({clock, env}, layout)`, `Store.readLayout({env},
+- `Store.open(clock, path)` opens a bare journal directory or a disposable `:memory:` view.
+  `Store.fromEvents(clock, events)` verifies and replays a detached snapshot.
+  `Store.forLayout({clock, env}, layout)`, `Store.readLayout({env},
 layout)`, `storePath(layout)` and `storeRoot(layout)`. `clock` times the events a store appends;
   `env` is the environment for the Git checks of the file authority. A `readLayout` store refuses
   to time an event (`store-read-only`). The service contexts, such as `StoreServiceContext` and
@@ -1024,8 +1013,8 @@ layout)`, `storePath(layout)` and `storeRoot(layout)`. `clock` times the events 
 - Wakes: `wakeRecipient(context, role)` after a committed send, `wakeState`, `pendingWakeRoles`
   and `rearmWake(store, actor, role, reason)` for the review.
 - Projections: `PROJECTIONS` and `MESSAGES_PROJECTION`. A new projection is a `Projection` with
-  its tables, DDL and one applier per event kind, appended to `PROJECTIONS`; `rebuild` recreates
-  it from the existing events.
+  its index names and one applier per event kind. Appliers populate JavaScript maps.
+  `rebuild` replays existing events into fresh maps.
 - Requests and retirement: `importRequest`, `closeRequest`, `readRequests`, `REQUESTS_PROJECTION`,
   `storeRetire`, `readLedgerRequests`, `RETIRED_PATHS`, `READ_WITH` and `COORDINATOR_ROLE`.
 - Runner events: `ingestEvents(context, game)`, `parseBusLine`, `busEventId`, `readCursor`,

@@ -52,7 +52,7 @@ repository/
 ├── docs/work/task-0001.md           tracked with the task implementation
 └── .coordination-kit/              ignored
     ├── registry.json              exact native session and worktree bindings
-    ├── coordination.db            task, decision and message journal
+    ├── coordination/              task, decision and message journal
     └── handoffs/                   optional local session checkpoints
 ```
 
@@ -183,3 +183,54 @@ When the project uses its own CI or local checks, the owner runs the required ch
 their exact-commit evidence with `task verify ID --evidence REF`. A task only reaches `landed`
 after the target and required evidence are present. A GitHub or GitLab release, host rollout or
 game departure remains a separate action under that project's policy.
+
+## Use GitHub Issues for active tasks
+
+The optional GitHub Issues backend shares active standalone task state across checkouts. It
+requires GitHub integration, `review: "pr"` and the local `gh` account of an authorized writer.
+Local project registration still verifies the operator's native session and role. Raw session IDs
+stay local.
+
+Choose one existing, open issue in the configured repository for the coordination journal.
+List the trusted GitHub accounts by their numeric IDs. This example reserves issue 99 and trusts
+account 42.
+
+```json
+{
+  "schema": 1,
+  "project": { "id": "examples", "roles": ["maintainer", "implementation"] },
+  "review": "pr",
+  "integration": {
+    "provider": "github",
+    "repository": "example/examples",
+    "requiredChecks": ["test"]
+  },
+  "taskStore": { "backend": "github-issues", "issue": 99, "writers": [42] }
+}
+```
+
+Create a separate issue for each task in GitHub. The task ID is `issue-NUMBER`, for example
+`issue-123` for issue 123. Starting a proposal requires an existing open issue. The control
+issue is reserved for the append-only task journal. The task's own issue receives visible
+status markers with task scope and the linked pull request. Treat task text, approvals and
+evidence references as visible to the repository's GitHub audience.
+
+1. Propose `issue-123` with `task propose` and follow the normal build approval and start steps.
+2. Commit the work file, run the planned checks, and record the exact candidate with
+   `task ready`. Open the pull request in GitHub with a non-closing reference such as
+   `Refs #123`.
+3. Link the exact candidate pull request with `task link-review issue-123 --number PR_NUMBER`.
+   Record explicit review approval for the exact candidate head and revision using
+   `task approve-review`. Merge through GitHub after its required checks and review.
+4. Run `task verify issue-123` on the integrated revision. The task issue closes as landed only
+   after the exact merge and its required checks are verified. A recorded decline or cancellation
+   also closes its task issue.
+
+A landed task remains visible in `task show` if publication of the issue's status or closure is
+unverified. Retry `task verify issue-123` to reconcile the issue. The refusal identifies either
+`project-github-issue-status-unverified` or `project-github-issue-close-unverified`.
+
+`task open-review` and `task merge` defer to native GitHub actions for this backend.
+An existing local task history requires migration before enabling GitHub Issues. The CLI
+refuses the switch until that history has been reconciled and stays on the selected backend
+if GitHub is unavailable.

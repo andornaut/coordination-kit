@@ -1,7 +1,8 @@
 # Simplification
 
-Approved by the user on 2026-11-18. Each phase is a work item below; deletions need separate user approval.
-For current operation, see the [store](../reference/store.md) and [command reference](../reference/commands.md).
+This is the historical simplification plan approved on 2026-11-18. Its SQLite architecture
+describes the 2.0 transition. For current operation, see the
+[filesystem store](../reference/store.md) and [command reference](../reference/commands.md).
 
 ## Summary
 

@@ -87,7 +87,7 @@ For the example app, the grants in `permissions` could be:
 ```
 
 Grant `store:maintain` to the workspace maintainer for
-[filesystem authority migration](../guides/upgrading.md#filesystem-authority-migration).
+[store maintenance](store.md#filesystem-compaction-runbook).
 Grant `delivery:operate` only to an operator authorized for manual delivery. See
 [app-mode permissions](store.md#app-mode-permissions) for scope and identity checks.
 
@@ -115,18 +115,12 @@ Grant `delivery:operate` only to an operator authorized for manual delivery. See
    the supplied bindings.
 3. From an active registered session, set `coordinator_root` to the absolute primary checkout
    path and run `session start`.
-   With the default authority, a successful first store open creates `coordination.db` in the
-   configured state root, or under `var/` when no pointer exists.
+   A successful first write initializes the filesystem journal at `var/coordination/`.
 
 ```sh
 node "$coordinator_root/node_modules/@andornaut/coordination-kit/dist/cli.js" \
   --root "$coordinator_root" session start
 ```
-
-A fresh workspace starts with SQLite. To select filesystem authority, qualify the existing
-SQLite source with an independent backup and restore, then activate the exact receipt through
-the [migration procedure](../guides/upgrading.md#filesystem-authority-migration). Creating an empty
-`var/coordination/` does not select it.
 
 ### Registry seed example
 
@@ -182,6 +176,12 @@ JS
 
 ## State
 
+Standalone projects use `.coordination-kit/coordination/` for local coordination.
+An optional `taskStore` setting can select the
+[GitHub Issues active-task backend](../guides/standalone.md#use-github-issues-for-active-tasks).
+It requires the existing GitHub PR-review configuration and a control issue with trusted
+numeric writer account IDs. The registry and non-task records remain local.
+
 | Location                                                                                  | Git                  | Content                                                                                                 |
 | ----------------------------------------------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------- |
 | `config.json`, `package.json`, `package-lock.json` in the workspace                       | Tracked              | App or game definitions, role grants and the installed kit pin.                                         |
@@ -190,17 +190,16 @@ JS
 | `var/coordination/`, `var/coordination-authority.json`, `var/coordination-authority.lock` | Ignored              | [Filesystem journal and role records](store.md#filesystem-layout), authority receipt and switch lock.   |
 | `var/apps/<id>/bus/` or `var/games/<id>/bus/`                                             | Ignored              | Runner state and event logs, ingest cursor and quarantine, review result receipts and decision markers. |
 | `var/reviews/` or `var/game-dev/`                                                         | Ignored              | Local review and inbox diagnostics, acknowledgements and retentions.                                    |
-| `var/work-protocol.json`                                                                  | Ignored              | Optional external state-root pointer for the SQLite source, channel and wake files, and artifacts.      |
-| External state root and independent backups                                               | Outside the checkout | `coordination.db`, transport state, artifacts and retirement archives.                                  |
+| `var/work-protocol.json`                                                                  | Ignored              | Optional external state root for channel and wake files and artifacts.                                  |
+| External state root and independent backups                                               | Outside the checkout | Transport state, artifacts, retirement archives and retained legacy database backups.                   |
 
 The state pointer is `{"schema":2,"stateRoot":"/abs"}`. The 2.1 shape (`schema` 1 with
 `workspaceId` and `generation`) is still read. The configured root must be absolute and outside
 every configured repository, registered worktree and Git checkout (`state-root-excluded`).
-A malformed pointer is `invalid-state-root-config`. Without a pointer, the source database,
-`wake/`, `channel/`, `artifacts/` and any retirement `archive/` are under `var/`. Filesystem
-activation moves store authority only. It retains the configured transport and artifact paths.
+A malformed pointer is `invalid-state-root-config`. Without a pointer, `wake/`, `channel/`, `artifacts/` and any retirement `archive/` are under
+`var/`. The journal stays in the primary checkout.
 
-Example fresh app workspace and sibling repository after filesystem activation. See the
+Example app workspace and sibling repository. See the
 [filesystem layout](store.md#filesystem-layout) for journal and role records.
 
 ```text
@@ -218,14 +217,10 @@ dashboard/
   delivery-kit.json, docs/work/                   tracked
 ```
 
-With SQLite selected and no pointer, the database is `var/coordination.db`. With a pointer,
-the SQLite database, transport state and artifacts live under its external `stateRoot`.
-
 Only the runner writes `events.jsonl` and its rotated `events.<epochSeconds>.jsonl` logs.
 `events ingest` owns `events.cursor`, `events.quarantine.jsonl` and `events.ingest.lock`. See
 [runner events](store.md#runner-events). The bus `unblock/` directory holds `review-deliver/`
 receipts and the recipient decision records the Codex wake guard reads.
 
-Registry and authority metadata use durable file replacement. SQLite writes use transactions.
-The filesystem journal uses [batch publication](store.md#filesystem-layout). State locks use
-`flock(1)`. The kit writes nothing under any `.claude/` directory.
+Registry and authority metadata use durable file replacement. The journal uses
+[batch publication](store.md#filesystem-layout). State locks use `flock(1)`.

@@ -164,15 +164,6 @@ and `graph` for `graph` and `graph why`. The `task` family covers the standalone
   code, such as `coordination-kit: session-held: phase held`.
 - **Output:** one JSON object on stdout, or DOT for `graph --format dot`.
 
-## Filesystem migration commands
-
-`store migration-status` reads the current authority and any prepared receipt.
-`store migration-prepare --backup ABSOLUTE_FILE --restore ABSOLUTE_FILE` qualifies fresh
-independent copies outside the checkout and prepares the ignored filesystem target.
-`store migration-activate --id RECEIPT_ID` requires the exact prepared receipt. Preparation and
-activation require the current active game-coordinator binding. See the
-[migration runbook](../guides/upgrading.md#filesystem-authority-migration).
-
 ## Filesystem compaction commands
 
 - `store compaction-plan` reports history windows, measured bytes and protected reasons at the
@@ -211,6 +202,11 @@ exact existing user decision reference. Activation also requires approval for th
 See the [one-time runbook](store.md#one-time-closed-history-compaction).
 
 ## Command semantics
+
+- In a standalone project with [GitHub Issues task storage](../guides/standalone.md#use-github-issues-for-active-tasks),
+  use GitHub to open and merge pull requests. `task open-review` and `task merge` refuse with
+  `project-github-use-native-pr`. Use `task link-review` to associate the exact candidate
+  with an existing pull request and `task verify` to record exact landing checks.
 
 - `claude channel`: by default it serves the `reports.recipient` that every app (or each
   `--app`) names, and requires that role's effective harness to be `claude`. Apps that name
