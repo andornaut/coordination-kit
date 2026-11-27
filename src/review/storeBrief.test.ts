@@ -388,7 +388,7 @@ describe("stored review brief", () => {
           sendMessage(
             seeded,
             { nativeId: COORDINATOR, role: "game-coordinator" },
-            { body: `Task ${second}.`, id: uuid(second), to: TECH_ROLE },
+            { body: `Task ${second}.`, id: uuid(second), intent: "queue", to: TECH_ROLE },
           );
         }
       });
