@@ -28,7 +28,7 @@ function fixture(missingGuide?: string) {
   const staging = join(base, "staging");
   mkdirSync(source);
   mkdirSync(output);
-  for (const path of ["VERSION", "package.json", "README.md", "LICENSE", "dist"]) {
+  for (const path of ["VERSION", "package.json", "README.md", "LICENSE", "dist", "skills"]) {
     cpSync(join(root, path), join(source, path), { recursive: true });
   }
   writeFileSync(join(source, "SOURCE_COMMIT"), fixtureCommit);

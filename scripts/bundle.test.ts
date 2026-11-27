@@ -12,7 +12,8 @@ import { packagedDocs } from "./docs-check.ts";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LIBRARIES = ["registry", "review", "shared", "store"];
 const BUNDLES = ["dist/cli.js", ...LIBRARIES.map((name) => `dist/${name}.js`)];
-const METADATA = ["LICENSE", "SOURCE_COMMIT", "package.json", ...packagedDocs(root)];
+const SKILLS = ["skills/coordination-kit-workflow/SKILL.md", "skills/coordination-status/SKILL.md"];
+const METADATA = ["LICENSE", "SOURCE_COMMIT", "package.json", ...packagedDocs(root), ...SKILLS];
 
 beforeAll(() => {
   for (const bundle of BUNDLES) {
@@ -134,7 +135,7 @@ export { check, wrong, readRegistry, RevisionConflict, updateRegistry };
 });
 
 describe("packed package", () => {
-  it("contains exactly the bundles, their declarations and metadata", () => {
+  it("contains exactly the bundles, declarations, skills and metadata", () => {
     const [pack] = JSON.parse(
       execFileSync("npm", ["pack", "--dry-run", "--json", "--offline", "--ignore-scripts"], {
         cwd: root,
@@ -150,6 +151,7 @@ describe("packed package", () => {
     expect(METADATA.filter((path) => path.startsWith("docs/") && !files.includes(path))).toEqual(
       [],
     );
+    expect(files.filter((path) => path.startsWith("skills/"))).toEqual(SKILLS);
     expect(files.filter((path) => path.startsWith("docs/work/"))).toEqual([]);
     expect(
       dist.filter((path) => !path.startsWith("dist/types/") && !path.startsWith("dist/chunks/")),
