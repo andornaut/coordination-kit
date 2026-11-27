@@ -50,3 +50,4 @@ Reference: [review](../review.md#scheduled-review-seam), [libraries](../librarie
 | ck-0053 | Remove question reconcile                                  | [ck-0053.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0053.md) |
 | ck-0068 | Normalize app coordination and explicit role permissions   | [ck-0068.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0068.md) |
 | ck-0071 | Review and improve CLI ergonomics                          | [ck-0071.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0071.md) |
+| ck-0074 | Find assigned work by description                         | [ck-0074.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0074.md) |
