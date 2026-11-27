@@ -34,7 +34,15 @@ import { type GitRunner, systemGit } from "../../core/git.ts";
 import { CONVERSATION_ID_PATTERN, ValidationError } from "../../core/validate.ts";
 import { type Harness, HARNESSES, type Registry } from "../../registry/schema.ts";
 import { createRegistry, readRegistry, updateRegistry } from "../../registry/store.ts";
-import { errorMessage, parseOptions, required, systemClock, Usage } from "../args.ts";
+import {
+  errorMessage,
+  parseOptions,
+  required,
+  systemClock,
+  text,
+  Usage,
+  type Values,
+} from "../args.ts";
 import { syncProjectSkills } from "../managedSkills.ts";
 
 export const INIT_OPTIONS = {
@@ -76,6 +84,15 @@ export function projectRoot(git: GitRunner, root: string): string {
     throw new Error("standalone commands require the primary Git checkout as --root");
   }
   return canonical;
+}
+
+/** A role can be omitted only when the project declares exactly one. */
+export function projectRole(
+  values: Values,
+  option: "role" | "owner",
+  roles: readonly string[],
+): string {
+  return roles.length === 1 ? (text(values, option) ?? roles[0]!) : required(values, option);
 }
 
 /** Mutating commands do not follow an existing symlink when inspecting their own file paths. */
@@ -347,7 +364,6 @@ async function syncRegisteredSkills(io: Io, checkout: string, harness: Harness) 
 export const projectRegister: Handler = async (io, root, args) => {
   try {
     const { values } = parseOptions(PROJECT_REGISTER_OPTIONS, args);
-    const role = required(values, "role");
     const harness = HARNESSES.find((value) => value === values.harness);
     const nativeId = required(values, "native-id");
     if (harness === undefined) {
@@ -368,6 +384,7 @@ export const projectRegister: Handler = async (io, root, args) => {
       throw new Error("run coordination-kit init in this project first");
     }
     const layout = loadLayout(repo);
+    const role = projectRole(values, "role", layout.config.sharedRoles);
     if (!lstatSync(layout.varDir).isDirectory()) {
       throw new Error(`${layout.varDir}: expected a directory`);
     }

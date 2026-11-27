@@ -45,7 +45,7 @@ import {
   type Values,
   verbFamily,
 } from "../args.ts";
-import { projectRoot } from "./init.ts";
+import { projectRole, projectRoot } from "./init.ts";
 
 export const TASK_READ_OPTIONS = {} as const;
 export const TASK_FIND_OPTIONS = { owner: { type: "string" } } as const;
@@ -397,7 +397,7 @@ export const taskPropose = task(
   TASK_PROPOSE_OPTIONS,
   (context, values, [id]) =>
     mutate(context, values, (store, actor) => {
-      const assigned = required(values, "owner");
+      const assigned = projectRole(values, "owner", context.settings.project.roles);
       ensure(context.settings.project.roles.includes(assigned), "project-owner-unconfigured");
       return proposeProjectTask(store, actor, {
         dependsOn: (values["depends-on"] as string[] | undefined) ?? [],

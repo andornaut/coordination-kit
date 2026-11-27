@@ -20,6 +20,7 @@ import { readJson } from "../../core/files/durable.ts";
 import { systemGit } from "../../core/git.ts";
 import { readRegistry } from "../../registry/store.ts";
 import { init, projectRegister } from "./init.ts";
+import { taskPropose } from "./tasks.ts";
 
 const MAINTAINER = "00000000-0000-4000-8000-000000000001";
 const REVIEWER = "00000000-0000-4000-8000-000000000002";
@@ -444,5 +445,77 @@ describe("standalone project register", () => {
       json: { worktree: "linked" },
     });
     expect(await run(init, path, "--project", "sample")).toMatchObject({ code: EXIT_INVALID });
+  });
+});
+
+describe("standalone project role defaults", () => {
+  const registration = ["--harness", "codex", "--native-id", MAINTAINER];
+  const proposal = [
+    "task-0001",
+    "--native-id",
+    MAINTAINER,
+    "--title",
+    "Check the workflow",
+    "--scope",
+    "Check the project inputs.",
+  ];
+
+  it("uses the sole configured role and still rejects invalid explicit roles", async () => {
+    const root = fixture();
+    await run(init, root, "--project", "sample", "--role", "builder");
+    expect(await run(projectRegister, root, "--native-id", MAINTAINER)).toMatchObject({
+      code: EXIT_USAGE,
+      err: expect.stringContaining("--harness"),
+    });
+    expect(await run(projectRegister, root, "--harness", "codex")).toMatchObject({
+      code: EXIT_USAGE,
+      err: expect.stringContaining("--native-id"),
+    });
+    expect(await run(projectRegister, root, ...registration)).toMatchObject({
+      code: EXIT_OK,
+      json: { role: "builder" },
+    });
+    expect(await run(projectRegister, root, ...registration, "--role", "builder")).toMatchObject({
+      code: EXIT_OK,
+      json: { duplicate: true, role: "builder" },
+    });
+    expect(await run(projectRegister, root, ...registration, "--role", "")).toMatchObject({
+      code: EXIT_INVALID,
+    });
+    expect(await run(projectRegister, root, ...registration, "--role", "maintainer")).toMatchObject(
+      {
+        code: EXIT_INVALID,
+      },
+    );
+    expect(await run(taskPropose, root, ...proposal, "--owner", "")).toMatchObject({
+      code: EXIT_USAGE,
+    });
+    expect(await run(taskPropose, root, ...proposal, "--owner", "maintainer")).toMatchObject({
+      code: EXIT_INVALID,
+    });
+    expect(await run(taskPropose, root, ...proposal)).toMatchObject({
+      code: EXIT_OK,
+      json: { task: { owner: "builder" } },
+    });
+  });
+
+  it("requires an explicit selection when several roles are configured", async () => {
+    const root = fixture();
+    await run(init, root, "--project", "sample", "--role", "maintainer", "--role", "reviewer");
+    expect(await run(projectRegister, root, ...registration)).toMatchObject({
+      code: EXIT_USAGE,
+      err: expect.stringContaining("--role"),
+    });
+    expect(await run(projectRegister, root, ...registration, "--role", "maintainer")).toMatchObject(
+      { code: EXIT_OK },
+    );
+    expect(await run(taskPropose, root, ...proposal)).toMatchObject({
+      code: EXIT_USAGE,
+      err: expect.stringContaining("--owner"),
+    });
+    expect(await run(taskPropose, root, ...proposal, "--owner", "maintainer")).toMatchObject({
+      code: EXIT_OK,
+      json: { task: { owner: "maintainer" } },
+    });
   });
 });
