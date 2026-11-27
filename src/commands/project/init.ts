@@ -410,7 +410,9 @@ export const projectRegister: Handler = async (io, root, args) => {
     }
     const skillSync = await syncRegisteredSkills(io, repo, harness);
     if (skillSync.status !== "synced") {
-      io.err(`coordination-kit: skills sync ${skillSync.status}. Review skillSync before retrying.\n`);
+      io.err(
+        `coordination-kit: skills sync ${skillSync.status}. Review skillSync before retrying.\n`,
+      );
     }
     io.out(
       `${JSON.stringify({
