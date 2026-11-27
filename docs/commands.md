@@ -1,8 +1,9 @@
 # Commands
 
 Per-command semantics for the `coordination-kit` CLI, beyond the group table in the
-[README](../README.md#usage). `coordination-kit --help` lists
-every form and flag.
+[README](../README.md#usage). `coordination-kit --help` lists every form and flag.
+For one command, run `coordination-kit COMMAND --help`, for example
+`coordination-kit msg send --help`.
 
 ## Command forms
 
@@ -40,7 +41,7 @@ reviewable changes. Both accept the repository as `--root`. See the [documentati
 | `review deliver --app ID --slot ISO_TIMESTAMP`                                                                                                                                                                                                                                         | Deliver one slot's scheduled review once; see [review](review.md#cli-seam).                                                        |
 | `review show [--app ID] [--slot ISO_TIMESTAMP]`                                                                                                                                                                                                                                        | Print a stored brief's full record; see [stored brief](review.md#stored-brief).                                                    |
 | `events ingest --app ID`                                                                                                                                                                                                                                                               | Ingest the runner's event log into the store; see [runner events](store.md#runner-events).                                         |
-| `status [--scope all\|APP\|KIT\|ROLE] [--since ISO_TIMESTAMP] [--state STATE]... [--audit] [--verify-since ISO_TIMESTAMP] [--format json\|markdown]`                                                                                                                                   | Read-only status of every registered repository's work items; see [status](#status).                                               |
+| `status [--scope SCOPE] [--since ISO_TIMESTAMP] [--state STATE]... [--audit] [--verify-since ISO_TIMESTAMP] [--format json\|markdown]`                                                                                                                                                 | Read-only status of every registered repository's work items; see [status](#status).                                               |
 | `work check [--decisions] [--root DIR]`, `work report [--root DIR]`                                                                                                                                                                                                                    | Validate a repository's work files and report their state; see [work files](work-files.md).                                        |
 | `work start ID [--parent REPOSITORY:WORK_ID]`, `work evidence ID --stage STAGE --sha SHA [--ref REF]`                                                                                                                                                                                  | Start your approved item, or record a stage commit; see [work records](store.md#work-records).                                     |
 | `work block ID --reason TEXT [--owner ROLE]`, `work unblock ID`, `work ready ID`, `work finish ID`                                                                                                                                                                                     | Record your item blocked, unblocked, ready, or finished once its work file is `done`, `superseded` or `cancelled` on `main`.       |
@@ -56,14 +57,15 @@ Every command parses its options strictly. An unknown option, an option without 
 single-value option given more than once is a usage error, exit 2. Only the options that `--help`
 shows with `...` repeat, such as `--link`, `--option`, `--depends-on` and `msg done --evidence`.
 
-The store, `work` and `graph` verbs share one wrapper, with one rule each for the cases below.
+The store, `task`, `work` and `graph` verbs share one wrapper.
 The family is `store` for the `msg`, `inbox`, `store`, `question`, `hold`, `decision`, `request`,
 `session` and `handoff` verbs, `work` for `work start|evidence|block|unblock|ready|finish|show|history`
-and `graph` for `graph` and `graph why`.
+and `graph` for `graph` and `graph why`. The `task` family covers the standalone task verbs.
 
 - **Positionals:** exactly the ones the form names (`ID`), else none.
-- **Usage errors:** a blank option value or positional is also a usage error. Each prints
-  `coordination-kit: invalid_FAMILY_options (COMMAND)` on stderr and exits 2.
+- **Usage errors:** a blank option value or positional is also a usage error. The first stderr line
+  is `coordination-kit: invalid_FAMILY_options (COMMAND)`. Safe guidance follows and the command
+  exits 2.
 - **Refusals:** exit 1 with `coordination-kit: CODE` on stderr, where `CODE` is the store refusal
   code, else `FAMILY_operation_failed`. A refusal that carries a short reason prints it after the
   code, such as `coordination-kit: session-held: phase held`.
@@ -205,9 +207,11 @@ commands.
   `pendingQuestions` reports stored wording, ordered options and the opening thread of a question
   with a Codex record when available. `unread` lists exact original IDs and wake evidence within
   the selection. Reading status leaves delivery and native prompts untouched.
-- **Scope.** The default `all` selects every repository. An app or kit ID selects its repository.
-  A registry role key selects its repository and keeps items owned by that role in a request,
-  store record or work file. The work commands and status both use the explicit `owner` if
+- **Scope.** Use `all` for every repository, `workspace` for the workspace repository,
+  `app:ID` for an app, `kit:ID` for a kit or `role:KEY` for work and records owned by that role.
+  Unambiguous bare app IDs, kit IDs and role keys still work. When names collide, choose
+  the explicit scope in the error. Use a prefix for app, kit or role IDs named `all` or `workspace`.
+  The work commands and status both use the explicit `owner` if
   given, then the repository's only role, then the game's registered `design` role with Tech
   as the fallback.
 - **Filters:** `--state` is repeatable and keeps items with any named status; `--state unverified`

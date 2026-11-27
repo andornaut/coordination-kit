@@ -30,8 +30,10 @@ import {
 import { createRegistry, type Registry } from "../registry/index.ts";
 import { Store } from "../store/db.ts";
 import { sendMessage } from "../store/messages.ts";
+import { setPolicyHold } from "../store/policyHolds.ts";
 import { openQuestion, setHold } from "../store/questions.ts";
 import { importRequest, type RequestImport } from "../store/requests.ts";
+import { startWork } from "../store/work.ts";
 import { collectStatus, type StatusItem, type StatusReport } from "./collect.ts";
 
 type StatusOptions = Parameters<typeof collectStatus>[2];
@@ -669,6 +671,154 @@ describe("status", () => {
     expect(run(fixture, { scope: KIT }).unread).toEqual([]);
     expect(run(fixture, { scope: KIT }).activeHolds).toEqual([]);
     expect(() => run(fixture, { scope: "nowhere" })).toThrow(/--scope/);
+  });
+
+  it("keeps the explicit app, role and workspace scopes distinct when their names collide", async () => {
+    const id = "shared-name";
+    const workspaceRole = "operations";
+    const otherAppRole = "designer";
+    const base = mkdtempSync(join(tmpdir(), "status-scopes-"));
+    const root = join(base, id);
+    const app = join(base, "app-checkout");
+    const path = "docs/work/sc-0001.md";
+    initRepo(root);
+    initRepo(app);
+    commit(root, "Start workspace", {
+      ".gitignore": "var/\n",
+      "config.json": JSON.stringify({
+        apps: { [id]: { name: "Sample", path: "../app-checkout", roles: [id, otherAppRole] } },
+        kits: {},
+        permissions: { [workspaceRole]: { apps: {}, workspace: ["policy:manage"] } },
+        schema: 1,
+        sharedRoles: [workspaceRole],
+        timezone: "UTC",
+        wakeMinutes: [],
+      }),
+      [path]: work("sc-0001", "Workspace change", "approved"),
+    });
+    commit(app, "Start app", {
+      [path]: work("sc-0001", "App change", "approved", { owner: id }),
+      "docs/work/sc-0002.md": work("sc-0002", "Design change", "approved", { owner: otherAppRole }),
+    });
+    const layout = loadLayout(root);
+    const workspaceActor = { nativeId: CLAUDE_COORDINATOR, role: workspaceRole };
+    const appActor = { nativeId: CLAUDE_TECH, role: id };
+    const registry = createRegistry(TEST_CLOCK, layout, {
+      harness: "claude",
+      host: { nativeProjectId: "project-1", root: "." },
+      operations: {},
+      roles: {
+        [id]: {
+          conversations: { claude: appActor.nativeId },
+          ownership: "active",
+          worktree: "../app-checkout",
+        },
+        [otherAppRole]: { conversations: {}, ownership: "active", worktree: "../app-checkout" },
+        [workspaceRole]: {
+          conversations: { claude: workspaceActor.nativeId },
+          ownership: "active",
+          worktree: ".",
+        },
+      },
+      schema: 1,
+      transfers: [],
+    });
+    const stateRoot = stateRootFixture(layout);
+    const store = Store.open(TEST_CLOCK, join(stateRoot, "coordination.db"));
+    try {
+      startWork(store, appActor, {
+        owner: id,
+        parent: null,
+        ref: { id: "sc-0001", repository: id },
+      });
+      startWork(store, workspaceActor, {
+        owner: workspaceRole,
+        parent: null,
+        ref: { id: "sc-0003", repository: id },
+      });
+      importRequest(store, workspaceActor, request("app-request", id, { work: ["sc-0001"] }));
+      importRequest(
+        store,
+        workspaceActor,
+        request("workspace-request", workspaceRole, { work: ["sc-0001"] }),
+      );
+      openQuestion(store, appActor, {
+        id: "app-question",
+        title: "Choose app mode",
+        work: "sc-0001",
+      });
+      setPolicyHold(store, { layout, registry }, workspaceActor, {
+        approval: "request-1",
+        id: "policy-app",
+        reason: "Paused by the user.",
+        scope: `app:${id}`,
+      });
+      setHold(store, workspaceActor, {
+        id: "app-hold",
+        reason: "Waiting for a check.",
+        scope: `app:${id}`,
+      });
+    } finally {
+      store.close();
+    }
+    const collision = { base, game: app, root, sha: {}, stateRoot };
+    const appScope = run(collision, { scope: `app:${id}` });
+    expect(appScope.repositories).toMatchObject([{ kind: "game", path: app }]);
+    expect(appScope.items.map(({ id: workId }) => workId)).toEqual(["sc-0001", "sc-0002"]);
+    expect(item(appScope, "sc-0001")).toMatchObject({
+      requests: [{ id: "app-request" }],
+      store: { owner: id },
+      waitingOnUser: true,
+    });
+    expect(appScope.activeHolds.map(({ id: holdId }) => holdId)).toEqual([
+      "policy-app",
+      "app-hold",
+    ]);
+
+    const workspace = run(collision, { scope: "workspace" });
+    expect(workspace.repositories).toMatchObject([{ kind: "coordinator", path: root }]);
+    expect(workspace.items.map(({ id: workId }) => workId)).toEqual(["sc-0001", "sc-0003"]);
+    expect(item(workspace, "sc-0001")).toMatchObject({
+      requests: [{ id: "workspace-request" }],
+      store: null,
+      waitingOnUser: false,
+    });
+    expect(workspace.pendingQuestions).toEqual([]);
+    expect(workspace.activeHolds).toEqual([]);
+
+    const role = run(collision, { scope: `role:${id}` });
+    expect(role.repositories).toMatchObject([{ kind: "game", path: app }]);
+    expect(role.items.map(({ id: workId }) => workId)).toEqual(["sc-0001"]);
+    const ambiguous = await cli(collision, "--scope", id);
+    expect(ambiguous.code).toBe(EXIT_USAGE);
+    expect(ambiguous.err).toContain(
+      `--scope is ambiguous; use app:${id} or role:${id} or workspace`,
+    );
+    const digest = await cli(collision, "--format", "markdown");
+    const appDigest = digest.out.slice(0, digest.out.indexOf(`## ${id} (workspace)`));
+    const workspaceDigest = digest.out.slice(digest.out.indexOf(`## ${id} (workspace)`));
+    expect(appDigest).toContain(`## ${id} (app)`);
+    expect(appDigest).toContain("App change");
+    expect(appDigest).not.toContain("Workspace change");
+    expect(workspaceDigest).toContain("Workspace change");
+    expect(workspaceDigest).not.toContain("App change");
+  });
+
+  it("accepts explicit scopes only when the ID belongs to the named kind", async () => {
+    expect(run(fixture, { scope: `app:${GAME}` }).repositories).toMatchObject([{ name: GAME }]);
+    expect(run(fixture, { scope: `kit:${KIT}` }).items).toEqual(run(fixture, { scope: KIT }).items);
+    expect(run(fixture, { scope: `role:${TECH_ROLE}` }).items).toEqual(
+      run(fixture, { scope: TECH_ROLE }).items,
+    );
+    const badScopes = [
+      `kit:${GAME}`,
+      `role:${GAME}`,
+      `app:${KIT}`,
+      "app:missing",
+      "workspace:other",
+    ];
+    const invalid = await Promise.all(badScopes.map((scope) => cli(fixture, "--scope", scope)));
+    expect(invalid.map(({ code }) => code)).toEqual(badScopes.map(() => EXIT_USAGE));
   });
 
   it("scopes approved work using explicit owners and the Tech fallback before work starts", async () => {

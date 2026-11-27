@@ -9,17 +9,18 @@ import { makeFixture, registryInput, TEST_CLOCK } from "./core/testFixtures.ts";
 import { VERSION } from "./core/version.ts";
 import { createRegistry, type Registry } from "./registry/index.ts";
 
-async function run(
-  root: string,
-  ...argv: string[]
-): Promise<{ code: number; out: string; err: string }> {
+async function dispatch(...argv: string[]): Promise<{ code: number; out: string; err: string }> {
   let out = "";
   let err = "";
   const code = await main(
     { cwd: "/nonexistent", env: {}, err: (text) => (err += text), out: (text) => (out += text) },
-    [...argv, "--root", root],
+    argv,
   );
   return { code, err, out };
+}
+
+function run(root: string, ...argv: string[]) {
+  return dispatch(...argv, "--root", root);
 }
 
 function withRegistry(root: string): void {
@@ -69,6 +70,46 @@ describe("dispatcher", () => {
       schema: 1,
       version: VERSION,
       distSha256: "0".repeat(64),
+    });
+  });
+
+  it("prints scoped help before reading configuration or running the command", async () => {
+    const help = await run("/nonexistent", "msg", "send", "--help");
+    expect(help).toMatchObject({ code: EXIT_OK, err: "" });
+    expect(help.out).toContain("usage: coordination-kit msg send");
+    expect(help.out).toContain("--to ROLE");
+    expect(help.out).not.toContain("harness doctor");
+    const invalid = await Promise.all(
+      [
+        ["--help", "--help"],
+        ["--help", "--unknown"],
+        ["--", "--help"],
+      ].map((rest) => run("/nonexistent", "msg", "send", ...rest)),
+    );
+    for (const result of invalid) {
+      expect(result).toMatchObject({ code: EXIT_USAGE, out: "" });
+    }
+  });
+
+  it("accepts one root in either form and leaves tokens after -- for the command", async () => {
+    const { root } = makeFixture();
+    const separated = await run(root, "status");
+    expect(await dispatch(`--root=${root}`, "status")).toEqual(separated);
+    expect(await dispatch("status", `--root=${root}`)).toEqual(separated);
+    expect(await run(root, "--version", "--root=/other")).toMatchObject({
+      code: EXIT_USAGE,
+      err: expect.stringContaining("--root is given more than once"),
+      out: "",
+    });
+    expect(await dispatch("--version", "--root=")).toMatchObject({
+      code: EXIT_USAGE,
+      err: expect.stringContaining("--root needs a directory"),
+      out: "",
+    });
+    expect(await dispatch("work", "check", "--", "--root", root)).toMatchObject({
+      code: EXIT_USAGE,
+      err: expect.stringContaining("usage: coordination-kit work check"),
+      out: "",
     });
   });
 

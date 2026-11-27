@@ -25,7 +25,7 @@ export const STATUS_SPEC = {
     "read-only status of each registered repository's work items, store records and imported requests",
   values: {
     format: "json|markdown",
-    scope: "all|APP|KIT|ROLE",
+    scope: "all|workspace|app:ID|kit:ID|role:KEY|NAME",
     since: "ISO_TIMESTAMP",
     state: "STATE",
     "verify-since": "ISO_TIMESTAMP",
@@ -40,6 +40,7 @@ function usage(io: Io, reason?: string): number {
     io.err(`coordination-kit: ${reason}\n`);
   }
   io.err(`coordination-kit: ${USAGE} [--root DIR]\n`);
+  io.err("Scopes are all, workspace, app:ID, kit:ID, role:KEY or an unambiguous bare name.\n");
   return EXIT_USAGE;
 }
 

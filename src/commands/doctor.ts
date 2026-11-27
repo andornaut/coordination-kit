@@ -1,9 +1,9 @@
 // Doctor reports capabilities without sending, activating or changing registry state.
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../core/io.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../core/io.ts";
 import { loadLayout } from "../core/layout.ts";
 import { readRegistry } from "../registry/store.ts";
 import { diagnoseHarness } from "../review/diagnostics.ts";
-import { parseOptions } from "./args.ts";
+import { parseOptions, usageHint } from "./args.ts";
 
 export const DOCTOR_OPTIONS = {
   app: { multiple: true, type: "string" },
@@ -16,22 +16,29 @@ const USAGE =
   "coordination-kit harness doctor --game ID ... [--role ROLE ...]\n" +
   "coordination-kit harness doctor --role ROLE ...";
 
+function invalidScope(io: Io, hint: string): number {
+  io.err(`coordination-kit: invalid_doctor_scope\n${USAGE}\n${hint}`);
+  return EXIT_USAGE;
+}
+
 export const harnessDoctor: Handler = async (io, root, args) => {
   let values;
   try {
     ({ values } = parseOptions(DOCTOR_OPTIONS, args));
-    if (
-      (values.app !== undefined && values.game !== undefined) ||
-      (values.app === undefined && values.game === undefined && values.role === undefined) ||
-      [...(values.app ?? values.game ?? []), ...(values.role ?? [])].some(
-        (value) => value.trim() === "",
-      )
-    ) {
-      throw new Error("scope required");
-    }
-  } catch {
-    io.err(`coordination-kit: invalid_doctor_scope\n${USAGE}\n`);
-    return EXIT_USAGE;
+  } catch (error) {
+    return invalidScope(io, usageHint("harness doctor", DOCTOR_OPTIONS, error));
+  }
+  if (
+    (values.app !== undefined && values.game !== undefined) ||
+    (values.app === undefined && values.game === undefined && values.role === undefined) ||
+    [...(values.app ?? values.game ?? []), ...(values.role ?? [])].some(
+      (value) => value.trim() === "",
+    )
+  ) {
+    return invalidScope(
+      io,
+      "Hint: Choose one selector form above and supply nonblank IDs or roles.\n",
+    );
   }
   try {
     const layout = loadLayout(root);
@@ -43,7 +50,10 @@ export const harnessDoctor: Handler = async (io, root, args) => {
     io.out(`${JSON.stringify(report)}\n`);
     return report.roles.some((row) => row.failed_layer !== null) ? EXIT_INVALID : EXIT_OK;
   } catch {
-    io.err("coordination-kit: doctor_configuration_unavailable\n");
+    io.err(
+      "coordination-kit: doctor_configuration_unavailable\n" +
+        "Hint: Check the workspace configuration and registry, then use a configured app or role.\n",
+    );
     return EXIT_INVALID;
   }
 };

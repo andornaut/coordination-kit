@@ -22,8 +22,74 @@ type Parsed<O extends Options> = ReturnType<
   typeof parseArgs<{ options: O; strict: true }>
 >["values"];
 
-/** A usage error: the handler prints its usage refusal and exits 2. */
-export class Usage extends Error {}
+type UsageProblem =
+  | "unknown-option"
+  | "option-value"
+  | "unexpected-positional"
+  | "positional-count"
+  | "blank-positional"
+  | { readonly kind: "repeated" | "missing" | "blank"; readonly name: string };
+
+/** A usage error with an optional cause suitable for public guidance. */
+export class Usage extends Error {
+  readonly problem: UsageProblem | undefined;
+
+  constructor(message?: string, problem?: UsageProblem) {
+    super(message);
+    this.problem = problem;
+  }
+}
+
+function parserProblem(error: unknown): UsageProblem | undefined {
+  const code = error instanceof Error && "code" in error ? error.code : undefined;
+  switch (code) {
+    case "ERR_PARSE_ARGS_UNKNOWN_OPTION":
+      return "unknown-option";
+    case "ERR_PARSE_ARGS_INVALID_OPTION_VALUE":
+      return "option-value";
+    case "ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL":
+      return "unexpected-positional";
+    default:
+      return undefined;
+  }
+}
+
+function usageAdvice(options: Options, problem: UsageProblem | undefined): string {
+  switch (problem) {
+    case "unknown-option":
+      return "Use only the options listed for this command. ";
+    case "option-value":
+      return "Check which options take values and supply the required values. ";
+    case "unexpected-positional":
+      return "Remove extra positional arguments. ";
+    case "positional-count":
+      return "Use the number of arguments shown in the command syntax. ";
+    case "blank-positional":
+      return "Supply a nonblank positional argument. ";
+    case undefined:
+      return "";
+  }
+  const { kind, name } = problem;
+  if (!Object.hasOwn(options, name) || !/^[a-z][a-z0-9-]*$/.test(name)) {
+    return "";
+  }
+  switch (kind) {
+    case "repeated":
+      return `Give --${name} only once. `;
+    case "missing":
+      return `Supply --${name}. `;
+    case "blank":
+      return `Give --${name} a nonblank value. `;
+    default:
+      return "";
+  }
+}
+
+/** Use a registered command name and curated guidance, without rendering the error's message. */
+export function usageHint(command: string, options: Options, error: unknown): string {
+  const advice = usageAdvice(options, error instanceof Usage ? error.problem : undefined);
+  return `Hint: ${advice}Run coordination-kit ${command} --help for accepted syntax.\n`;
+}
 
 /** The wall clock the command layer passes down to library code. */
 export const systemClock: Clock = () => new Date();
@@ -48,19 +114,22 @@ export function parseOptions<const O extends Options>(
       tokens: true,
     });
   } catch (error) {
-    throw new Usage(errorMessage(error));
+    throw new Usage(errorMessage(error), parserProblem(error));
   }
   const seen = new Set<string>();
   for (const token of parsed.tokens) {
     if (token.kind === "option" && options[token.name]?.multiple !== true) {
       if (seen.has(token.name)) {
-        throw new Usage(`--${token.name} must be given once`);
+        throw new Usage(`--${token.name} must be given once`, {
+          kind: "repeated",
+          name: token.name,
+        });
       }
       seen.add(token.name);
     }
   }
   if (parsed.positionals.length !== positionals) {
-    throw new Usage(`expected ${positionals} positional argument(s)`);
+    throw new Usage(`expected ${positionals} positional argument(s)`, "positional-count");
   }
   return { positionals: parsed.positionals, values: parsed.values as Parsed<O> };
 }
@@ -82,7 +151,7 @@ function reasonOf(error: unknown): string {
  * The one wrapper for the store, `work` and `graph` verbs. It parses with `parseOptions`, also
  * refusing a blank option value or positional, builds the family's context and runs `action`. A
  * string result prints as is; any other result prints as one JSON line. A `Usage` error prints
- * `coordination-kit: invalid_FAMILY_options (COMMAND)` and exits 2. Any other error prints
+ * `coordination-kit: invalid_FAMILY_options (COMMAND)` with a hint and exits 2. Any other error prints
  * `coordination-kit: CODE`, the store refusal code or `FAMILY_operation_failed`, with the
  * refusal's short reason after it when it carries one, and exits 1.
  */
@@ -95,8 +164,9 @@ export function verbFamily<C>(
   action: (context: C, values: Values, positionals: readonly string[]) => unknown,
   positionals?: number,
 ) => Handler {
-  const usage = (io: Io, command: string): number => {
-    io.err(`coordination-kit: invalid_${family}_options (${command})\n`);
+  const usage = (io: Io, command: string, options: Options, error: unknown): number => {
+    const hint = usageHint(command, options, error);
+    io.err(`coordination-kit: invalid_${family}_options (${command})\n${hint}`);
     return EXIT_USAGE;
   };
   return (command, options, action, positionals = 0) =>
@@ -104,17 +174,17 @@ export function verbFamily<C>(
       let parsed;
       try {
         parsed = parseOptions(options, args, positionals);
-        const strings = [
-          ...Object.values(parsed.values as Values).flatMap((value) =>
-            Array.isArray(value) ? value : [value],
-          ),
-          ...parsed.positionals,
-        ];
-        if (strings.some((value) => typeof value === "string" && value.trim() === "")) {
-          throw new Usage();
+        for (const [name, value] of Object.entries(parsed.values as Values)) {
+          const entries = Array.isArray(value) ? value : [value];
+          if (entries.some((entry) => typeof entry === "string" && entry.trim() === "")) {
+            throw new Usage(undefined, { kind: "blank", name });
+          }
         }
-      } catch {
-        return usage(io, command);
+        if (parsed.positionals.some((value) => value.trim() === "")) {
+          throw new Usage(undefined, "blank-positional");
+        }
+      } catch (error) {
+        return usage(io, command, options, error);
       }
       try {
         const result = await action(
@@ -126,7 +196,7 @@ export function verbFamily<C>(
         return EXIT_OK;
       } catch (error) {
         if (error instanceof Usage) {
-          return usage(io, command);
+          return usage(io, command, options, error);
         }
         io.err(
           `coordination-kit: ${refusalCode(error, `${family}_operation_failed`)}${reasonOf(error)}\n`,
@@ -144,7 +214,7 @@ export function text(values: Values, key: string): string | undefined {
 export function required(values: Values, key: string): string {
   const value = text(values, key);
   if (value === undefined) {
-    throw new Usage(`--${key} is required`);
+    throw new Usage(`--${key} is required`, { kind: "missing", name: key });
   }
   return value;
 }

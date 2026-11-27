@@ -10,7 +10,7 @@ references.
 
 Commands that use the coordinator root resolve it in this order.
 
-1. `--root DIR`, anywhere on the command line, at most once;
+1. `--root DIR` or `--root=DIR`, at most once before the `--` option terminator.
 2. `COORDINATION_KIT_ROOT`, unless empty;
 3. `DELIVERY_KIT_ROOT`, the variable delivery-kit's runners and existing sessions already set;
 4. the working directory.

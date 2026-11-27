@@ -25,8 +25,8 @@ separate compatibility range. See [7.8 upgrade notes](docs/upgrading.md#coordina
 ## Usage
 
 Commands resolve the workspace from
-`--root DIR`, else `COORDINATION_KIT_ROOT`, else `DELIVERY_KIT_ROOT`, else the working directory.
-`--root` may appear anywhere on the command line, at most once. The runner commands
+`--root DIR` or `--root=DIR`, else `COORDINATION_KIT_ROOT`, else `DELIVERY_KIT_ROOT`, else the
+working directory. Pass the root at most once, before the `--` option terminator. The runner commands
 `review deliver`, `review show` and `events ingest` accept `--app ID` or `--game ID`.
 See [runner examples and compatibility](docs/store.md#runner-events). The `work` commands read
 `--root` as the repository to inspect and default to
@@ -54,8 +54,8 @@ the working directory. They take the coordinator root only from `COORDINATION_KI
 | `work`                    | `check`, `report`, `start`, `evidence`, `block`, `unblock`, `ready`, `finish`, `show`, `history`       | Validate a repository's work files and report them; record each item's live progress in the store.       |
 | `graph`                   | (none), `why`                                                                                          | The live decision graph and supersedes chains.                                                           |
 
-`coordination-kit --help` lists every command form; it is generated from each command's parser
-options. Per-command semantics are in [docs/commands.md](docs/commands.md).
+`coordination-kit --help` lists every command form. Use `coordination-kit COMMAND --help` for
+one command's syntax and summary. Both use the parser options. See the [command reference](docs/commands.md).
 
 Exit status is 0 on success, 1 for invalid configuration, a failed precondition, an unavailable
 read or work-check findings, and 2 for a usage error or an unexpected failure. `review deliver`

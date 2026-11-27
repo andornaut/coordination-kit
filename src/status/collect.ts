@@ -45,6 +45,8 @@ import { readStoreWork, type StoreWorkSnapshot } from "./sources.ts";
 
 const STATUS_SCHEMA = 2;
 const WORK_DIRECTORY = "docs/work";
+/** Keeps distinct repositories grouped in Markdown without changing the JSON report. */
+export const statusRepositoryPath = Symbol("statusRepositoryPath");
 
 export class StatusUsageError extends Error {
   constructor(message: string) {
@@ -54,7 +56,7 @@ export class StatusUsageError extends Error {
 }
 
 interface StatusOptions {
-  /** `all`, a game ID, a kit ID or a registry role key. */
+  /** `all`, `workspace`, an explicit app, kit or role scope, or an unambiguous bare selector. */
   readonly scope: string;
   readonly since: string | null;
   /** Derived statuses, or `unverified` for done items without deployment evidence. */
@@ -111,6 +113,7 @@ interface GitDeployment {
 }
 
 export interface StatusItem {
+  readonly [statusRepositoryPath]?: string | null;
   readonly repository: string;
   readonly id: string;
   readonly title: string | null;
@@ -258,7 +261,13 @@ export function repositories(
       roles: [role],
     });
   }
-  return [...found.values()].sort((left, right) => (left.name < right.name ? -1 : 1));
+  return [...found.values()].sort((left, right) =>
+    left.name === right.name
+      ? left.path.localeCompare(right.path)
+      : left.name < right.name
+        ? -1
+        : 1,
+  );
 }
 
 function userSource(request: RequestRecord): boolean {
@@ -368,6 +377,7 @@ function repositoryItems(
   storeWork: StoreWorkSnapshot,
   verifySince: string,
   role: string | null,
+  matchesOwner: ((owner: string) => boolean) | null,
 ): Pick<RepositoryItems, "items" | "linked"> {
   const { channel, history, points, repository } = evidence;
   const { doneAt, files, statusAt } = evidence.mainFiles;
@@ -398,14 +408,21 @@ function repositoryItems(
   const items: StatusItem[] = [];
   for (const work of workFiles) {
     const linkedRequests = [...storeWork.requests.values()].filter(
-      (request) => request.id === work.id || requestWork(request).includes(work.id),
+      (request) =>
+        (matchesOwner === null || matchesOwner(request.owner)) &&
+        (request.id === work.id || requestWork(request).includes(work.id)),
     );
     // A role filter must not turn a linked request into a standalone item.
     linkedRequests.forEach((request) => linked.add(request.id));
     const requests = linkedRequests
       .sort((left, right) => (left.id < right.id ? -1 : 1))
       .map(requestEntry);
-    const record = storeWork.records.get(`${repository.name}\n${work.id}`) ?? null;
+    const stored = storeWork.records.get(`${repository.name}\n${work.id}`);
+    const record =
+      stored !== undefined &&
+      (matchesOwner === null || (stored.owner !== null && matchesOwner(stored.owner)))
+        ? stored
+        : null;
     if (
       role !== null &&
       record?.owner !== role &&
@@ -491,6 +508,7 @@ function repositoryItems(
       repository: repository.name,
       requests,
       status: derived.status,
+      [statusRepositoryPath]: repository.path,
       store: record,
       title: work.title,
       userOriginated:
@@ -519,6 +537,7 @@ function readRepository(
   storeWork: StoreWorkSnapshot,
   verifySince: string,
   role: string | null,
+  matchesOwner: ((owner: string) => boolean) | null,
 ): RepositoryItems {
   const channel: DeploymentChannel =
     repository.kind === "game" ? "bus" : repository.kind === "kit" ? "release-tag" : "none";
@@ -577,6 +596,7 @@ function readRepository(
     storeWork,
     verifySince,
     role,
+    matchesOwner,
   );
   return {
     items,
@@ -595,7 +615,7 @@ function readRepository(
 /** Open imported requests that no work file names: `requested` items of their owner's repository. */
 function requestedItems(
   requests: readonly RequestRecord[],
-  repositoryOf: (role: string) => string | null,
+  repositoryOf: (role: string) => Repository | undefined,
 ): StatusItem[] {
   const items: StatusItem[] = [];
   for (const request of requests) {
@@ -603,7 +623,7 @@ function requestedItems(
       continue;
     }
     const repository = repositoryOf(request.owner);
-    if (repository === null) {
+    if (repository === undefined) {
       continue;
     }
     const entry = requestEntry(request);
@@ -617,9 +637,10 @@ function requestedItems(
       id: request.id,
       latestEvidenceAt: latest([request.updatedAt]),
       replacement: null,
-      repository,
+      repository: repository.name,
       requests: [entry],
       status: "requested",
+      [statusRepositoryPath]: repository.path,
       store: null,
       title: request.summary,
       userOriginated: entry.userSource,
@@ -631,7 +652,7 @@ function requestedItems(
 }
 
 /** Preserve work records when a repository or its current work file cannot be read. */
-function recordOnlyItem(record: WorkRecord): StatusItem {
+function recordOnlyItem(record: WorkRecord, repository: Repository | undefined): StatusItem {
   const block = record.state === "finished" ? null : record.block;
   const merged = record.evidence.some(({ stage }) => stage === "merged");
   const deployed = record.evidence.some(({ stage }) => stage === "deployed");
@@ -659,6 +680,7 @@ function recordOnlyItem(record: WorkRecord): StatusItem {
             : record.startedAt === null
               ? "requested"
               : "in-progress",
+    [statusRepositoryPath]: repository?.path ?? null,
     store: record,
     title: null,
     userOriginated: false,
@@ -673,21 +695,71 @@ function selectScope(
   registry: Registry,
   repos: readonly Repository[],
   scope: string,
-): { names: Set<string>; role: string | null } {
+): { repositories: ReadonlySet<Repository>; role: string | null } {
+  const select = (matches: (repo: Repository) => boolean, role: string | null = null) => ({
+    repositories: new Set(repos.filter(matches)),
+    role,
+  });
   if (scope === "all") {
-    return { names: new Set(repos.map((repo) => repo.name)), role: null };
+    return select(() => true);
   }
-  if (Object.hasOwn(layout.config.apps, scope) || Object.hasOwn(layout.config.kits, scope)) {
-    return {
-      names: new Set(repos.filter((repo) => repo.name === scope).map((r) => r.name)),
-      role: null,
-    };
+  if (scope === "workspace") {
+    return select((repo) => repo.kind === "coordinator");
   }
-  if (Object.hasOwn(registry.roles, scope)) {
-    const repo = repos.find((candidate) => candidate.roles.includes(scope));
-    return { names: new Set(repo === undefined ? [] : [repo.name]), role: scope };
+  const delimiter = scope.indexOf(":");
+  const type = delimiter === -1 ? null : scope.slice(0, delimiter);
+  const id = delimiter === -1 ? scope : scope.slice(delimiter + 1);
+  const app = Object.hasOwn(layout.config.apps, id);
+  const kit = Object.hasOwn(layout.config.kits, id);
+  const role = Object.hasOwn(registry.roles, id);
+  const isApp = (repo: Repository) => repo.kind === "game" && repo.name === id;
+  const isKit = (repo: Repository) => repo.kind === "kit" && repo.name === id;
+  const ownsRole = (repo: Repository) => repo.roles.includes(id);
+  if (type === "app" && app) {
+    return select(isApp);
   }
-  throw new StatusUsageError(`--scope names no app, kit or registered role: ${scope}`);
+  if (type === "kit" && kit) {
+    return select(isKit);
+  }
+  if (type === "role" && role) {
+    return select(ownsRole, id);
+  }
+  if (type === null) {
+    const workspace = repos.find((repo) => repo.kind === "coordinator" && repo.name === id);
+    const roleRepo = repos.find(ownsRole);
+    const kitRoleAlias = kit && roleRepo !== undefined && isKit(roleRepo);
+    const workspaceRoleAlias = workspace === roleRepo && workspace?.roles.length === 1;
+    const choices = [
+      app,
+      kit,
+      role && !kitRoleAlias,
+      workspace !== undefined && !workspaceRoleAlias,
+    ];
+    if (choices.filter(Boolean).length > 1) {
+      const selectors = [
+        ...(app ? [`app:${id}`] : []),
+        ...(kit ? [`kit:${id}`] : []),
+        ...(role ? [`role:${id}`] : []),
+        ...(workspace === undefined ? [] : ["workspace"]),
+      ];
+      throw new StatusUsageError(`--scope is ambiguous; use ${selectors.join(" or ")}`);
+    }
+    if (app) {
+      return select(isApp);
+    }
+    if (kit) {
+      return select(isKit);
+    }
+    if (role) {
+      return select(ownsRole, id);
+    }
+    if (workspace !== undefined) {
+      return select((repo) => repo === workspace);
+    }
+  }
+  throw new StatusUsageError(
+    "--scope must name a configured app (app:ID), kit (kit:ID), registered role (role:KEY), workspace or all",
+  );
 }
 
 /** Collect, derive and filter the status of every selected repository's items. */
@@ -701,24 +773,42 @@ export function collectStatus(
   const repos = repositories(context, layout, registry);
   const selected = selectScope(layout, registry, repos, options.scope);
   const storeWork = readStoreWork(context.io.env, layout);
+  const repositoriesByName = Map.groupBy(repos, (repo) => repo.name);
+  const repositoriesByRole = new Map(
+    repos.flatMap((repo) => repo.roles.map((role) => [role, repo])),
+  );
+  const coordinator = repos.find((repo) => repo.kind === "coordinator");
+  const refRepository = (name: string, owner: string | null) => {
+    const matches = repositoriesByName.get(name);
+    if (matches?.length === 1) {
+      return matches[0];
+    }
+    const ownerRepository = owner === null ? undefined : repositoriesByRole.get(owner);
+    return ownerRepository?.name === name ? ownerRepository : undefined;
+  };
   const reports = repos
-    .filter((repo) => selected.names.has(repo.name))
+    .filter((repo) => selected.repositories.has(repo))
     .map((repo) =>
-      readRepository(context, layout, repo, storeWork, options.verifySince, selected.role),
+      readRepository(
+        context,
+        layout,
+        repo,
+        storeWork,
+        options.verifySince,
+        selected.role,
+        repositoriesByName.get(repo.name)!.length === 1
+          ? null
+          : (owner) => repositoriesByRole.get(owner) === repo,
+      ),
     );
   const linked = new Set(reports.flatMap((report) => [...report.linked]));
-  const coordinator = repos.find((repo) => repo.kind === "coordinator")?.name ?? null;
-  const repositoriesByRole = new Map(
-    repos.flatMap((repo) => repo.roles.map((role) => [role, repo.name])),
-  );
-  const namedRepository = (role: string): string | null => repositoriesByRole.get(role) ?? null;
-  const repositoryOf = (role: string): string | null => {
-    const name = namedRepository(role) ?? coordinator;
-    return name !== null && selected.names.has(name) ? name : null;
+  const repositoryOf = (role: string) => {
+    const repo = repositoriesByRole.get(role) ?? coordinator;
+    return repo !== undefined && selected.repositories.has(repo) ? repo : undefined;
   };
   const inScope = (role: string) =>
     options.scope === "all" ||
-    (selected.role === null ? repositoryOf(role) !== null : selected.role === role);
+    (selected.role === null ? repositoryOf(role) !== undefined : selected.role === role);
   const since = options.since === null ? null : Date.parse(options.since);
   const recent = (at: string | null): at is string =>
     at !== null && (since === null || Date.parse(at) >= since);
@@ -734,45 +824,69 @@ export function collectStatus(
   const unmatchedRequests = unmatched.map((request): UnmatchedRequest => ({
     ...requestEntry(request),
     closedAt: request.closed?.at ?? null,
-    repository: namedRepository(request.owner),
+    repository: repositoriesByRole.get(request.owner)?.name ?? null,
     summary: request.summary,
     work: requestWork(request),
   }));
   const questions = storeWork.questions.filter((question) => inScope(question.role));
   const pendingQuestions = questions.filter(({ state }) => state === "pending");
   const unread = storeWork.unread.filter(({ to }) => inScope(to));
-  const activeHolds = storeWork.holds.filter(
-    (hold) =>
-      options.scope === "all" ||
-      (hold.role !== null && inScope(hold.role)) ||
-      (hold.policy?.target.kind === "work" && selected.names.has(hold.policy.target.repository)) ||
-      (hold.scope.startsWith("game:") && selected.names.has(hold.scope.slice(5))) ||
-      (hold.source === "approval-ledger" &&
+  const appInScope = (id: string) =>
+    [...selected.repositories].some((repo) => repo.name === id && repo.kind === "game");
+  const refInScope = (name: string, id: string, owner: string | null) => {
+    const repo = refRepository(name, storeWork.records.get(`${name}\n${id}`)?.owner ?? owner);
+    return repo !== undefined && selected.repositories.has(repo);
+  };
+  const activeHolds = storeWork.holds.filter((hold) => {
+    if (options.scope === "all") {
+      return true;
+    }
+    const target = hold.policy?.target;
+    if (target?.kind === "work") {
+      return refInScope(target.repository, target.id, null);
+    }
+    const [kind, id] = hold.scope.split(":");
+    if ((kind === "app" || kind === "game") && id !== undefined) {
+      return appInScope(id);
+    }
+    if (hold.source === "approval-ledger") {
+      return (
+        (hold.role !== null && inScope(hold.role)) ||
         hold.scope
           .slice(5)
           .split(",")
-          .some((ref) => selected.names.has(ref.split(":")[0]!))),
-  );
+          .some((ref) => {
+            const [name, workId] = ref.split(":");
+            return workId !== undefined && refInScope(name!, workId, hold.role);
+          })
+      );
+    }
+    return hold.role !== null && inScope(hold.role);
+  });
   const workItems = reports.flatMap((report) => report.items);
-  const workKeys = new Set(workItems.map((item) => `${item.repository}\n${item.id}`));
-  const recordsWithoutFiles = [...storeWork.records.values()]
-    .filter(
-      (record) =>
-        (options.scope === "all" || selected.names.has(record.repository)) &&
-        (selected.role === null || record.owner === selected.role) &&
-        !workKeys.has(`${record.repository}\n${record.id}`),
-    )
-    .map(recordOnlyItem);
+  const attached = new Set(workItems.map((item) => item.store));
+  const recordsWithoutFiles = [...storeWork.records.values()].flatMap((record) => {
+    const repo = refRepository(record.repository, record.owner);
+    return !attached.has(record) &&
+      (options.scope === "all" || (repo !== undefined && selected.repositories.has(repo))) &&
+      (selected.role === null || record.owner === selected.role)
+      ? [recordOnlyItem(record, repo)]
+      : [];
+  });
   const questionsByItem = new Map<string, QuestionView[]>();
   for (const question of storeWork.questions) {
-    const repository = namedRepository(question.role);
+    const repository = repositoriesByRole.get(question.role);
     const refs =
       question.codex?.dependsOn ??
-      (inScope(question.role) && repository !== null && question.work !== null
-        ? [{ id: question.work, repository }]
+      (inScope(question.role) && repository !== undefined && question.work !== null
+        ? [{ id: question.work, repository: repository.name }]
         : []);
     for (const ref of refs) {
-      const key = `${ref.repository}\n${ref.id}`;
+      const repo = refRepository(ref.repository, question.role);
+      if (repo === undefined) {
+        continue;
+      }
+      const key = `${repo.path}\n${ref.id}`;
       const belonging = questionsByItem.get(key) ?? [];
       belonging.push(question);
       questionsByItem.set(key, belonging);
@@ -783,7 +897,7 @@ export function collectStatus(
     ...recordsWithoutFiles,
     ...requestedItems(unmatched, repositoryOf),
   ].map((item) => {
-    const belonging = questionsByItem.get(`${item.repository}\n${item.id}`);
+    const belonging = questionsByItem.get(`${item[statusRepositoryPath]}\n${item.id}`);
     return belonging === undefined
       ? item
       : {
@@ -805,11 +919,11 @@ export function collectStatus(
   if (options.audit) {
     items = items.filter((item) => item.userOriginated);
   }
-  const order = new Map(repos.map((repo, index) => [repo.name, index]));
+  const order = new Map(repos.map((repo, index) => [repo.path, index]));
   items.sort(
     (left, right) =>
-      (order.get(left.repository) ?? repos.length) -
-        (order.get(right.repository) ?? repos.length) ||
+      (order.get(left[statusRepositoryPath] ?? "") ?? repos.length) -
+        (order.get(right[statusRepositoryPath] ?? "") ?? repos.length) ||
       left.repository.localeCompare(right.repository) ||
       (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
   );

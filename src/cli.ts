@@ -1,5 +1,5 @@
 // coordination-kit command dispatcher. Every command is a noun group and its verb. Commands resolve
-// game-coordinator from --root (in any position, once), COORDINATION_KIT_ROOT, DELIVERY_KIT_ROOT or
+// game-coordinator from --root, COORDINATION_KIT_ROOT, DELIVERY_KIT_ROOT or
 // the working directory, in that order; the work group reads --root as the repository instead.
 import { errorMessage, parseOptions } from "./commands/args.ts";
 import { channel } from "./commands/channel.ts";
@@ -56,7 +56,7 @@ import {
   handoffState,
   sessionStart,
 } from "./commands/session.ts";
-import { type Command, GROUPS, SPECS, synopsis } from "./commands/spec.ts";
+import { type Command, commandUsage, GROUPS, SPECS, synopsis } from "./commands/spec.ts";
 import { status } from "./commands/status.ts";
 import {
   inbox,
@@ -113,10 +113,11 @@ const USAGE = [
   ]),
   "",
   "  help, --help      print this text",
+  "  COMMAND --help    print help for one command",
   "  --version         print the version",
   "  --version --json  print {schema, version, distSha256} as one JSON line",
   "",
-  "--root DIR can appear once in any position.",
+  "--root DIR or --root=DIR can appear once before the -- option terminator.",
   "init, project and task use the primary Git checkout, defaulting to the working directory.",
   "work uses --root for the repository, defaulting to the working directory, and reads its",
   "coordinator root from COORDINATION_KIT_ROOT or DELIVERY_KIT_ROOT.",
@@ -205,24 +206,33 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "work start": workStart,
   "work unblock": workUnblock,
 };
-/** Take every `--root DIR` out of the arguments; at most one is allowed. */
+/** Extract one global root option before the option terminator. */
 function extractRoot(args: string[]): {
   root?: string;
   error?: string;
 } {
-  const at = args.indexOf("--root");
-  if (at < 0) {
-    return {};
+  let root: string | undefined;
+  for (let at = 0; at < args.length; at++) {
+    const token = args[at]!;
+    if (token === "--") {
+      break;
+    }
+    const separate = token === "--root";
+    if (!separate && !token.startsWith("--root=")) {
+      continue;
+    }
+    if (root !== undefined) {
+      return { error: "--root is given more than once" };
+    }
+    const value = separate ? args[at + 1] : token.slice("--root=".length);
+    if (value === undefined || value === "" || (separate && value.startsWith("--"))) {
+      return { error: "--root needs a directory" };
+    }
+    root = value;
+    args.splice(at, separate ? 2 : 1);
+    at--;
   }
-  const value = args[at + 1];
-  if (value === undefined || value.startsWith("--")) {
-    return { error: "--root needs a directory" };
-  }
-  args.splice(at, 2);
-  if (args.includes("--root")) {
-    return { error: "--root is given more than once" };
-  }
-  return { root: value };
+  return root === undefined ? {} : { root };
 }
 /** The command a line names: a noun group and its verb, or a single-word command. */
 function commandOf(args: readonly string[]):
@@ -287,6 +297,10 @@ export async function main(io: Io, argv: readonly string[]): Promise<number> {
   if (found === undefined) {
     io.err(USAGE);
     return EXIT_USAGE;
+  }
+  if (found.rest.length === 1 && found.rest[0] === "--help") {
+    io.out(`${commandUsage(found.command)}\n\n${SPECS[found.command].summary}\n`);
+    return EXIT_OK;
   }
   const group = SPECS[found.command].group;
   const root =

@@ -1,6 +1,6 @@
 // The `status --format markdown` digest: per repository, items under Done, In progress, New,
 // Outstanding and Waiting on the user. Each item appears under exactly one heading.
-import type { StatusItem, StatusReport } from "./collect.ts";
+import { type StatusItem, type StatusReport, statusRepositoryPath } from "./collect.ts";
 import type { DerivedStatus } from "./derive.ts";
 
 const DIGEST_HEADINGS = [
@@ -157,7 +157,12 @@ export function renderMarkdown(report: StatusReport): string {
     section(out, "Recent completions", report.recentCompletions.map(timed));
   }
   for (const repo of report.repositories) {
-    out.push(`## ${repo.name}`, "");
+    const collision = report.repositories.some(
+      (other) => other.path !== repo.path && other.name === repo.name,
+    );
+    const kind =
+      repo.kind === "game" ? "app" : repo.kind === "coordinator" ? "workspace" : repo.kind;
+    out.push(`## ${repo.name}${collision ? ` (${kind})` : ""}`, "");
     if (repo.status === "unavailable") {
       out.push(`Unavailable: ${repo.reason ?? "unknown"}.`, "");
     }
@@ -167,14 +172,22 @@ export function renderMarkdown(report: StatusReport): string {
         "",
       );
     }
-    const items = report.items.filter((item) => item.repository === repo.name);
+    const items = report.items.filter(
+      (item) =>
+        item[statusRepositoryPath] === repo.path ||
+        (item[statusRepositoryPath] === undefined && item.repository === repo.name),
+    );
     for (const heading of DIGEST_HEADINGS) {
       const under = items.filter((item) => digestHeading(item) === heading);
       out.push(`### ${heading}`, "", ...(under.length === 0 ? ["None."] : under.map(line)), "");
     }
   }
   const reported = new Set(report.repositories.map(({ name }) => name));
-  const unregistered = report.items.filter(({ repository }) => !reported.has(repository));
+  const unregistered = report.items.filter(
+    (item) =>
+      item[statusRepositoryPath] === null ||
+      (item[statusRepositoryPath] === undefined && !reported.has(item.repository)),
+  );
   if (unregistered.length > 0) {
     section(
       out,

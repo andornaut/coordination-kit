@@ -55,7 +55,7 @@ describe("parseOptions", () => {
     ).not.toThrow();
     expect(() =>
       parseOptions(options, [...positionals, ...once, ...once], positionals.length),
-    ).toThrow(new Usage(`--${name} must be given once`));
+    ).toThrow(new Usage(`--${name} must be given once`, { kind: "repeated", name }));
   });
 
   const lists = COMMANDS.flatMap((command) =>
@@ -126,41 +126,69 @@ describe("the verb wrapper", () => {
 
   it.each([
     // A repeated single-value option is refused before the verb runs; once, the verb runs.
-    ["store", ["hold", "list", "--state", "active"], EXIT_OK, "invalid_store_options (hold list)"],
-    [
-      "work",
-      ["work", "start", "ck-0001", "--parent", "a"],
-      EXIT_INVALID,
-      "invalid_work_options (work start)",
-    ],
-    ["graph", ["graph", "--depth", "1"], EXIT_INVALID, "invalid_graph_options (graph)"],
-  ] as const)("refuses a repeated option for the %s family", async (_family, argv, once, code) => {
-    const { root } = makeFixture();
-    const [option, value] = argv.slice(-2) as [string, string];
-    expect((await run({}, root, ...argv)).code).toBe(once);
-    expect(await run({}, root, ...argv, option, value)).toEqual({
-      code: EXIT_USAGE,
-      err: `coordination-kit: ${code}\n`,
-      out: "",
-    });
-  });
-
-  it.each([
-    ["store", ["msg", "done", " "], "invalid_store_options (msg done)"],
-    ["store", ["hold", "list", "--role", ""], "invalid_store_options (hold list)"],
-    ["work", ["work", "show", " "], "invalid_work_options (work show)"],
-    ["graph", ["graph", "--work", " "], "invalid_graph_options (graph)"],
+    ["store", ["hold", "list", "--state", "active"], EXIT_OK, "hold list"],
+    ["work", ["work", "start", "ck-0001", "--parent", "a"], EXIT_INVALID, "work start"],
+    ["graph", ["graph", "--depth", "1"], EXIT_INVALID, "graph"],
   ] as const)(
-    "refuses a blank value or positional for the %s family",
-    async (_family, argv, code) => {
+    "refuses a repeated option for the %s family",
+    async (family, argv, once, command) => {
       const { root } = makeFixture();
-      expect(await run({}, root, ...argv)).toEqual({
+      const [option, value] = argv.slice(-2) as [string, string];
+      expect((await run({}, root, ...argv)).code).toBe(once);
+      expect(await run({}, root, ...argv, option, value)).toEqual({
         code: EXIT_USAGE,
-        err: `coordination-kit: ${code}\n`,
+        err:
+          `coordination-kit: invalid_${family}_options (${command})\n` +
+          `Hint: Give ${option} only once. Run coordination-kit ${command} --help for accepted syntax.\n`,
         out: "",
       });
     },
   );
+
+  it.each([
+    ["store", ["msg", "done", " "], "msg done", "Supply a nonblank positional argument."],
+    ["store", ["hold", "list", "--role", ""], "hold list", "Give --role a nonblank value."],
+    ["work", ["work", "show", " "], "work show", "Supply a nonblank positional argument."],
+    ["graph", ["graph", "--work", " "], "graph", "Give --work a nonblank value."],
+  ] as const)(
+    "refuses a blank value or positional for the %s family",
+    async (family, argv, command, hint) => {
+      const { root } = makeFixture();
+      expect(await run({}, root, ...argv)).toEqual({
+        code: EXIT_USAGE,
+        err:
+          `coordination-kit: invalid_${family}_options (${command})\n` +
+          `Hint: ${hint} Run coordination-kit ${command} --help for accepted syntax.\n`,
+        out: "",
+      });
+    },
+  );
+
+  it.each([
+    [["--DO_NOT_PRINT"], "Use only the options listed for this command."],
+    [["/DO_NOT_PRINT"], "Remove extra positional arguments."],
+    [["--state"], "Check which options take values and supply the required values."],
+  ] as const)("guides recovery from malformed arguments %j", async (args, hint) => {
+    const { root } = makeFixture();
+    expect(await run({}, root, "hold", "list", ...args)).toEqual({
+      code: EXIT_USAGE,
+      err:
+        "coordination-kit: invalid_store_options (hold list)\n" +
+        `Hint: ${hint} Run coordination-kit hold list --help for accepted syntax.\n`,
+      out: "",
+    });
+  });
+
+  it("names a required registered option without rendering supplied values", async () => {
+    const { root } = makeFixture();
+    expect(await run({}, root, "msg", "send", "--body", "DO_NOT_PRINT")).toEqual({
+      code: EXIT_USAGE,
+      err:
+        "coordination-kit: invalid_store_options (msg send)\n" +
+        "Hint: Supply --to. Run coordination-kit msg send --help for accepted syntax.\n",
+      out: "",
+    });
+  });
 
   it.each(["store", "work", "graph"] as const)(
     "prints the %s family's codes: its fallback, a store refusal and a refusal's reason",
@@ -176,7 +204,10 @@ describe("the verb wrapper", () => {
         [new Error("not a store refusal"), `${family}_operation_failed`],
         [new StoreError("not-owner"), "not-owner"],
         [reasoned, "session-held: phase held"],
-        [new Usage(), `invalid_${family}_options (x run)`],
+        [
+          new Usage("DO_NOT_PRINT", { kind: "missing", name: "DO_NOT_PRINT" }),
+          `invalid_${family}_options (x run)\nHint: Run coordination-kit x run --help for accepted syntax.`,
+        ],
       ] as const;
       for (const [error, printed] of cases) {
         const output = { err: "", out: "" };
