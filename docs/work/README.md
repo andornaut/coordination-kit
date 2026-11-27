@@ -6,8 +6,8 @@ live in the design summaries or, for a longer table, `index/<area>.md`. Live pro
 blocks, stage evidence and finish) is recorded in the coordination store with the `work` verbs.
 See the [documentation index](../README.md) for the operating guides.
 
-Use the [work-file format](../work-files.md#work-item-structure) for front matter and sections,
-including the [Verification plan](../work-files.md#verification).
+Use the [work-file format](../reference/work-files.md#work-item-structure) for front matter and sections,
+including the [Verification plan](../reference/work-files.md#verification).
 
 - Every user request gets a work file. A request not yet approved is a `proposed` stub; a refused
   one becomes `declined`, and an approved one `approved`.
@@ -20,6 +20,6 @@ including the [Verification plan](../work-files.md#verification).
 - Work files are public: no session IDs, hostnames, local home-directory paths or quoted
   conversation, only short approval references.
 - `coordination-kit work check` validates the indexed file structure in `make lint` and CI
-  ([work files](../work-files.md)).
+  ([work files](../reference/work-files.md)).
 - Docs-only changes run only the attribution and lint checks.
 - Work files are not part of the npm package.

@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { isMain } from "./check.ts";
 
 /** The directories whose Markdown files must each be packaged or deliberately excluded. */
-const DOC_DIRS = ["docs", "docs/design"];
+const DOC_DIRS = ["docs", "docs/guides", "docs/reference", "docs/design"];
 
 export interface DocsFinding {
   readonly path: string;
@@ -92,7 +92,7 @@ export function docsFindings(root: string): DocsFinding[] {
           });
     }
   }
-  // A packaged directory is one that holds a packaged file, such as docs/ for docs/commands.md.
+  // A packaged directory is one that holds a packaged file, such as docs/reference/ for commands.md.
   const shipped = (target: string) =>
     manifestFiles(root).some(
       (entry) => !entry.startsWith("!") && (entry === target || entry.startsWith(`${target}/`)),

@@ -47,10 +47,10 @@ check, the work-file check and ShellCheck) runs for every push and pull request.
 `test`, `contract` and `package` jobs run only when a path outside `docs/` changed, and otherwise
 report as skipped. A forced push, a new branch or a base the clone does not have runs every job.
 
-The packaged-docs check (`npm run lint:docs`) holds `package.json` `files` to the tree: every
-listed doc exists, every `docs/*.md` and `docs/design/*.md` is listed or excluded with a `!`
-entry, and no packaged doc links by relative path to a file the package leaves out. Packaged docs
-link to `docs/work/` by its repository URL.
+The packaged-docs check (`npm run lint:docs`) verifies the `package.json` `files` list. Each Markdown
+file at the docs root and in `docs/guides/`, `docs/reference/` and `docs/design/` must be listed
+or excluded with a `!` entry. Packaged docs use relative links for files in the package and repository
+URLs for work history under `docs/work/`.
 
 Package inspection always reports `immutableCommitClaim: false`. Snapshot metadata retains
 `CHECK_REVISION`, `CHECK_SOURCE_SHA256` and `CHECK_SOURCE_DIRTY` when supplied; native inspection

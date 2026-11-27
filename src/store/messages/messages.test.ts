@@ -146,7 +146,7 @@ describe("secret-shaped bodies", () => {
       "Reason tokens: outbox-unreadable, cli-error.",
       "Use the credential reference faramir://home/router/admin.",
       "Commit 0123456789abcdef0123456789abcdef01234567 is on main.",
-      "https://github.com/andornaut/coordination-kit/blob/main/docs/store.md",
+      "https://github.com/andornaut/coordination-kit/blob/main/docs/reference/store.md",
     ]) {
       expect(secretShape(body), body).toBeNull();
     }

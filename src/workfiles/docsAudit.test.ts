@@ -110,7 +110,7 @@ describe("committed documentation audit", () => {
         "Evidence: `app-9001`",
         "[broken fragment](#not-a-heading)",
       ]),
-      "docs/review.md": '<a name="rule-play-safe"></a>\n# Review\n',
+      "docs/reference/review.md": '<a name="rule-play-safe"></a>\n# Review\n',
       "docs/work/app-0001.md": markdown([
         "---",
         "id: app-0001",

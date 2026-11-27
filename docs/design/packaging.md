@@ -11,8 +11,8 @@ the same npm commands natively, with docs-only changes limited to lint. Releases
 workflow passes on the exact commit, and a published tag is never moved. Public interfaces and
 on-disk formats follow semver.
 
-Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
-[developing](../development.md#developing), [compatibility and releases](../development.md#compatibility-and-releases).
+Reference: [libraries](../reference/libraries.md), [upgrading](../guides/upgrading.md),
+[developing](../guides/development.md#developing), [compatibility and releases](../guides/development.md#compatibility-and-releases).
 
 ## Work items
 

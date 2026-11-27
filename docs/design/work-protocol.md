@@ -10,7 +10,7 @@ accounting tracks requested outcomes separately from message delivery and handli
 copies legacy state byte-exact after a verified backup and restore.
 
 Retired in 3.0 ([simplification](simplification.md#phase-4-thin-protocol-and-retirement)); the
-state is in the Phase 4 archive ([retirement](../store.md#retirement)).
+state is in the Phase 4 archive ([retirement](../reference/store.md#retirement)).
 
 ## Work items
 

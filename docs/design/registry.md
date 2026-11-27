@@ -13,7 +13,7 @@ effective Claude binding, the role is neither held nor in an open handoff, and t
 revision is unchanged since the read. It replaces only that role's `conversations.claude`. Every
 other case keeps the existing fence refusals, and Codex is unchanged.
 
-Reference: [registry](../registry.md).
+Reference: [registry](../reference/registry.md).
 
 ## Work items
 

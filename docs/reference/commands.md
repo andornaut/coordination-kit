@@ -28,7 +28,7 @@ Errors go to stderr prefixed `coordination-kit:`. Commands with a JSON result ke
 
 Use `docs audit [--area TOPIC] [--format markdown|json]` to check committed local links and list
 marked rules. Use `docs compact [--plan] [--area TOPIC] [--format markdown|json]` to prepare
-reviewable changes. Both accept the repository as `--root`. See the [documentation guide](README.md).
+reviewable changes. Both accept the repository as `--root`. See the [documentation guide](../guides/project-documentation.md).
 
 | Command                                                                                                                                                                                                                                                                                  | Purpose                                                                                                                            |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
@@ -142,7 +142,7 @@ to the Git root. Each skill folder holds its `SKILL.md`.
 
 An identical file makes the command a no-op. If the target has different contents, the installer
 stops and preserves it for review. Install separately from `init` or copy the release's bundled
-skill to the corresponding path yourself. See [standalone setup](getting-started.md#set-up-a-standalone-project).
+skill to the corresponding path yourself. See [standalone setup](../guides/getting-started.md#set-up-a-standalone-project).
 
 ## Options and refusals
 
@@ -171,7 +171,7 @@ and `graph` for `graph` and `graph why`. The `task` family covers the standalone
 independent copies outside the checkout and prepares the ignored filesystem target.
 `store migration-activate --id RECEIPT_ID` requires the exact prepared receipt. Preparation and
 activation require the current active game-coordinator binding. See the
-[migration runbook](upgrading.md#filesystem-authority-migration).
+[migration runbook](../guides/upgrading.md#filesystem-authority-migration).
 
 ## Filesystem compaction commands
 

@@ -4,15 +4,15 @@ The coordination store behind the `msg`, `inbox`, `work`, `graph`, `question`, `
 `session` and `handoff` commands: its schema, the library API, the writer fence, wakes, questions, holds and decisions,
 runner event ingest, work records, the decision graph, the approval-ledger import, imported
 requests and the Phase 4 retirement. The design is in
-[simplification](design/simplification.md#phase-2-one-store-and-one-message-path) and
-[Phase 3](design/simplification.md#phase-3-work-decisions-questions-and-holds) and
-[Phase 4](design/simplification.md#phase-4-thin-protocol-and-retirement).
+[simplification](../design/simplification.md#phase-2-one-store-and-one-message-path) and
+[Phase 3](../design/simplification.md#phase-3-work-decisions-questions-and-holds) and
+[Phase 4](../design/simplification.md#phase-4-thin-protocol-and-retirement).
 
 ## Location and settings
 
 Before activation, the store is `coordination.db` in the state root named by
 `var/work-protocol.json`, or `var/coordination.db` when that pointer is absent. The
-[filesystem migration](upgrading.md#filesystem-authority-migration) selects one authority at
+[filesystem migration](../guides/upgrading.md#filesystem-authority-migration) selects one authority at
 a time. Active file state belongs in the ignored `var/coordination/` of the explicit primary
 coordinator checkout. The immutable batch journal and committed records are authoritative.
 The query index is rebuilt from the journal in memory. Wake endpoints still use the existing
@@ -180,7 +180,7 @@ unreferenced loose copies. Preserve the committed chain even after that review.
 Legacy unreserved prepare and activate remain available for the first checkpoint when no
 reservation exists. The retained journals and restored copy contain the original bodies.
 There is no scheduled activation or cleanup. Before a second activation, follow the
-[repeat compaction compatibility requirements](upgrading.md#repeat-filesystem-compaction).
+[repeat compaction compatibility requirements](../guides/upgrading.md#repeat-filesystem-compaction).
 
 ## One-time closed-history compaction
 
@@ -1131,4 +1131,4 @@ archive       {path, manifest, sha256, bytes}   (sha256 and bytes null on a dry 
 ```
 
 `unowned` lists imported requests whose owner is not a registered role, which no binding can
-close. The runbook and rollback are in [upgrading](upgrading.md#from-21).
+close. The runbook and rollback are in [upgrading](../guides/upgrading.md#from-21).

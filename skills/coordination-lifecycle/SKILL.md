@@ -28,7 +28,7 @@ uncommitted changes and unpushed commits. Check the project's authorized push ow
 before publishing a candidate or integrated commit. When another owner pushes, hand off the exact
 revision and keep following it through verification.
 
-Follow the [work-file format](https://github.com/andornaut/coordination-kit/blob/main/docs/work-files.md#work-item-structure)
+Follow the [work-file format](https://github.com/andornaut/coordination-kit/blob/main/docs/reference/work-files.md#work-item-structure)
 when planning verification and recording evidence.
 
 ## Standalone project

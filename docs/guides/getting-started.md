@@ -2,17 +2,17 @@
 
 Choose how the repositories and roles work together.
 
-| If you want to                                                           | Start here                                                                                      |
-| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
-| Track work and review changes in one Git repository using its own checks | [Set up a standalone project](#set-up-a-standalone-project)                                     |
-| Give one or more apps a shared registry and inbox                        | [Set up an app workspace](#set-up-an-app-workspace)                                             |
-| Keep the state of an existing game coordinator while adopting app mode   | [Migrate a legacy coordinator in place](configuration.md#migrate-a-legacy-coordinator-in-place) |
+| If you want to                                                           | Start here                                                                                                   |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Track work and review changes in one Git repository using its own checks | [Set up a standalone project](#set-up-a-standalone-project)                                                  |
+| Give one or more apps a shared registry and inbox                        | [Set up an app workspace](#set-up-an-app-workspace)                                                          |
+| Keep the state of an existing game coordinator while adopting app mode   | [Migrate a legacy coordinator in place](../reference/configuration.md#migrate-a-legacy-coordinator-in-place) |
 
 Both setups work with Codex or Claude. The examples use Codex and one role. Use the
 conversation ID of the actual session doing the work. The harness supplies it to commands
 through `CODEX_THREAD_ID` for Codex or `CLAUDE_CODE_SESSION_ID` for Claude.
 If your role is already registered, go to [session startup](#start-or-resume-a-registered-session).
-Use the [recommended documentation layout](README.md#organize-project-documentation) to keep
+Use the [recommended documentation layout](project-documentation.md#organize-project-documentation) to keep
 your project guides, requirements and work records easy to find.
 
 ## Get the CLI
@@ -89,7 +89,7 @@ ck --root "$primary" task find "Document the local checks"
 ```
 
 1. [Build and prepare an exact candidate](standalone.md#approve-and-build). Write the work
-   file's [Verification plan](work-files.md#verification) before building. Commit the work file and implementation together,
+   file's [Verification plan](../reference/work-files.md#verification) before building. Commit the work file and implementation together,
    run the planned checks, fetch the configured remote and record the candidate with `task ready`.
 2. [Review and merge](standalone.md#review-and-merge). Under the example's `chat` policy,
    record the user's explicit approval for that exact head and run `task merge`.
@@ -143,8 +143,8 @@ the lifecycle skill and run
 ck --root . skills sync --harness codex --scope project --adopt "lifecycle=$reviewed_sha256"
 ```
 
-Repeat `--adopt` for each approved conflict. See [sync options](commands.md#skills-sync) and
-[individual installers](commands.md#skills-install).
+Repeat `--adopt` for each approved conflict. See [sync options](../reference/commands.md#skills-sync) and
+[individual installers](../reference/commands.md#skills-install).
 
 ## Set up an app workspace
 
@@ -246,11 +246,11 @@ dashboard/
 ```
 
 Keep the local state and back it up independently of Git. See
-[configuration and filesystem state](configuration.md#state) for an external state
+[configuration and filesystem state](../reference/configuration.md#state) for an external state
 pointer or an activated filesystem store. If you use Delivery Kit, configure explicit
-[runner grants](store.md#app-mode-permissions), the app's committed reporting settings,
-the local [review route](review.md#review-route) and a runner cadence. Use
-[workspace configuration](configuration.md#workspace-configjson) to add roles and set
+[runner grants](../reference/store.md#app-mode-permissions), the app's committed reporting settings,
+the local [review route](../reference/review.md#review-route) and a runner cadence. Use
+[workspace configuration](../reference/configuration.md#workspace-configjson) to add roles and set
 review minutes.
 
 ## Start or resume a registered session
@@ -293,7 +293,7 @@ ck inbox --include-body
 
 Reconcile each original by its exact ID after handling. For retained originals, record the owner,
 reason and next boundary.
-See the [message lifecycle](store.md#message-lifecycle).
+See the [message lifecycle](../reference/store.md#message-lifecycle).
 
 ## Clean up agent-owned resources
 
@@ -324,7 +324,7 @@ review.
 | Wake guarded or unavailable               | Pull the recipient's `inbox` at a safe boundary. Use `inbox --peek` for unread metadata without changing delivery state. |
 | Task review or merge cannot find its base | Fetch the configured remote and verify the target branch and exact candidate revision.                                   |
 
-See the [command reference](commands.md) for syntax and the [documentation index](README.md)
+See the [command reference](../reference/commands.md) for syntax and the [documentation index](../README.md)
 for the remaining guides.
 
 [release]: https://github.com/andornaut/coordination-kit/releases/tag/v7.13.0

@@ -38,8 +38,8 @@ native conversation IDs from the workspace owner. A null conversation marks an u
 For a new game, first add its role keys to [the coordinator configuration](configuration.md#add-a-game).
 The coordinator then adds those roles and their worktree paths to the registry using the current
 revision. The CLI's `harness select` only changes existing role overrides.
-For a new app workspace, see [Getting started](getting-started.md#set-up-an-app-workspace).
-Standalone projects use their own [registration command](standalone.md#install-and-initialize).
+For a new app workspace, see [Getting started](../guides/getting-started.md#set-up-an-app-workspace).
+Standalone projects use their own [registration command](../guides/standalone.md#install-and-initialize).
 
 ## Scoped harness selection
 

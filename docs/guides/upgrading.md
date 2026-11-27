@@ -7,13 +7,13 @@ to their work files. The [standalone workflow](standalone.md#approve-and-build) 
 to plan verification before building and record exact check results. Upgrade the CLI used for
 `task ready` before preparing a candidate in the new format. The 7.13 CLI also accepts the
 earlier work-file format.
-Existing projects can [sync the managed lifecycle skill](commands.md#skills-sync) after upgrading.
+Existing projects can [sync the managed lifecycle skill](../reference/commands.md#skills-sync) after upgrading.
 
 ## Coordination Kit 7.12
 
 Use 7.12.1 or later for any real one-time closed-history operation. The 7.12.0 variant lacks
 the required audited cohort boundary. An approved
-[closed-history compaction](store.md#one-time-closed-history-compaction)
+[closed-history compaction](../reference/store.md#one-time-closed-history-compaction)
 can reduce eligible closed message bodies in a filesystem checkpoint without collecting individual
 replacement evidence. It requires the exact audited cohort file and the SHA256 of its raw
 bytes through plan, prepare and activation. It also requires an independent restore, writer
@@ -24,7 +24,7 @@ Retain the archive and restored history for verification and replay.
 ## Coordination Kit 7.11
 
 The pinned package now synchronizes reusable skills at standalone project registration.
-Existing standalone and shared workspaces can use the [managed skill sync](commands.md#skills-sync)
+Existing standalone and shared workspaces can use the [managed skill sync](../reference/commands.md#skills-sync)
 for the harness they actually use. Review any differing files by exact digest before adoption.
 The managed set covers lifecycle, status, handoff and recovery. Cleanup remains individually installable.
 
@@ -33,20 +33,20 @@ The managed set covers lifecycle, status, handoff and recovery. Cleanup remains 
 Install the bundled `agent-cleanup` skill with `skills install agent-cleanup` in a
 project checkout. The skill covers attributable work and confirmed orphans and requires
 a specific retention reason for Git bundles in the authorized cleanup scope. Existing
-state and project pins can stay in use. See the [skill installer](commands.md#skills-install).
+state and project pins can stay in use. See the [skill installer](../reference/commands.md#skills-install).
 
 ## Coordination Kit 7.9
 
 The read-only `task find` and `work find` commands add description lookup to standalone
 projects and shared workspaces. The release also bundles the optional `coordination-lifecycle`
-and `coordination-status` skills. The [command reference](commands.md#skills-install) shows
+and `coordination-status` skills. The [command reference](../reference/commands.md#skills-install) shows
 how to install them. Existing clients can keep their pins and store state.
 
 ## Coordination Kit 7.8
 
 7.8.0 reads both legacy `games` configurations and schema-1 `apps` workspaces. To adopt
 app mode without moving existing bus, review or registry state, use the
-[in-place migration](configuration.md#migrate-a-legacy-coordinator-in-place).
+[in-place migration](../reference/configuration.md#migrate-a-legacy-coordinator-in-place).
 
 Qualify the exact coordinator CLI pin before adopting a runner that writes `appId` in
 schema-1 events. The 7.8 CLI reads both event spellings. `--game` keeps the legacy
@@ -55,8 +55,8 @@ its bundled library pin. Compare the installed `--version --json` digest with th
 approved release and verify the next scheduled review using the workspace's existing controls.
 
 In app mode, runners and privileged operators need
-[explicit grants](store.md#app-mode-permissions). A recipient can still collect a message
-from an unbound sender. An [unverified original](store.md#unverified-originals) needs
+[explicit grants](../reference/store.md#app-mode-permissions). A recipient can still collect a message
+from an unbound sender. An [unverified original](../reference/store.md#unverified-originals) needs
 an exact user decision before the recipient records handling.
 
 Direct `build/store` callers of `setPolicyHold` and `releasePolicyHold` pass
@@ -71,9 +71,9 @@ separate bundled-library pin within `COORDINATION_KIT_RANGE`.
 Verify the installed digest with `--version --json`, then check each resident runner's CLI
 observation and the next scheduled review. The review result schema remains 1. The new wake
 plan can resume an interrupted review on an exact same-slot retry. See the
-[review seam](review.md#cli-seam) for retry limits.
+[review seam](../reference/review.md#cli-seam) for retry limits.
 
-`msg send` now accepts [unbound senders](messages.md). Global help and version forms use strict
+`msg send` now accepts [unbound senders](../reference/messages.md). Global help and version forms use strict
 option parsing. Unknown or repeated flags exit 2.
 
 ## Coordination Kit 7.2
@@ -117,7 +117,7 @@ as explicit parameters. Upgrade Delivery Kit first, then game-coordinator and it
    `scripts/sessions.mjs` is unchanged; the managed socket now comes from `env.HOME`.
 3. No script, test or document in Delivery Kit, game-coordinator or the game repositories passes a
    repeated single-value option.
-4. Breaking CLI changes ([options and refusals](commands.md#options-and-refusals)):
+4. Breaking CLI changes ([options and refusals](../reference/commands.md#options-and-refusals)):
    - Every command refuses a single-value option given more than once with exit 2. The `work`
      store verbs, `graph`, `graph why`, `work check`, `status`, `claude channel`,
      `review deliver`, `review show` and `events ingest` took the last value. The store verbs and
@@ -168,7 +168,7 @@ together.
      The channel configuration is unchanged; the reconnect loads code that reads the new wake
      and channel status file locations. A session already rotated by `/clear` reconnects with
      its old launch `--conversation`; the channel follows the `/clear` lineage to the role's
-     current binding ([Claude channel](review.md#claude-channel)), so no relaunch is needed.
+     current binding ([Claude channel](../reference/review.md#claude-channel)), so no relaunch is needed.
 3. Breaking changes:
    - The `reminder list`, `reminder claim`, `reminder check`, `reminder settle`,
      `decision marker` and `decision resolve` verbs are removed. No wake reads a decision
@@ -197,7 +197,7 @@ together.
    Old cache files and SQLite cache tables can remain on disk during the cutover.
 
 Filesystem compaction is a separate coordinator operation with its own restore, approval and
-idle boundary. Follow the [compaction runbook](store.md#filesystem-compaction-runbook) before activation.
+idle boundary. Follow the [compaction runbook](../reference/store.md#filesystem-compaction-runbook) before activation.
 
 ## Repeat filesystem compaction
 
@@ -208,7 +208,7 @@ Coordination Kit 4.1.x checks the selected receipt against the original journal'
 After a successor is selected it refuses access with `checkpoint-fence-mismatch`. Existing open
 old-generation writers also refuse because their own journal is permanently fenced. Keep the
 prior checkpoint, tails and independent restore. Re-selecting a predecessor cannot roll back
-the store. Follow the [compaction runbook](store.md#filesystem-compaction-runbook) for custody,
+the store. Follow the [compaction runbook](../reference/store.md#filesystem-compaction-runbook) for custody,
 approval and recovery.
 
 ## Filesystem authority migration
@@ -251,7 +251,7 @@ notification endpoints and registry stay at their existing locations.
 
 ## From 2.1
 
-3.0 removes the Phase 4 layers of the [simplification plan](design/simplification.md#phase-4-thin-protocol-and-retirement).
+3.0 removes the Phase 4 layers of the [simplification plan](../design/simplification.md#phase-4-thin-protocol-and-retirement).
 Identity and fencing come from the registry binding alone.
 
 Removed:
@@ -270,7 +270,7 @@ Removed:
   `storeCutover` and adds the request and retirement functions. `build/registry` and
   `build/shared` are unchanged.
 - Output: `status` is schema 2 without `coordinator.protocol`, `coordinator.ledger` and
-  item `protocol` ([status](commands.md#status)); `work report` has no `publications` and no
+  item `protocol` ([status](../reference/commands.md#status)); `work report` has no `publications` and no
   `unconfigured` state; `claude ready` and `codex ready` print no `accounting`; `harness doctor`
   reports `channel_reference` as the wake file (`source: "wake_file"`).
 
@@ -279,7 +279,7 @@ Added:
 - Commands: `session start` and `handoff open|ready|state|active|show`,
   with the `sessions`,
   `handoffs` and `handoff_roles` projections, added when a 2.1 store is first opened; see
-  [sessions and handoffs](store.md#sessions-and-handoffs). The schema version stays 1.
+  [sessions and handoffs](../reference/store.md#sessions-and-handoffs). The schema version stays 1.
 
 `var/work-protocol.json` becomes `{"schema":2,"stateRoot":"/abs"}`. 3.0 still reads the 2.1
 shape and ignores `work-protocol-fence.json` and `<stateRoot>/workspace.json`.
@@ -326,9 +326,9 @@ manifest's `readWith` names against that copy.
 
 ## From 2.0
 
-2.1 adds [work records](store.md#work-records), the [decision graph](store.md#decision-graph), the
-[approval-ledger import](store.md#approval-ledger-import) and
-[questions, holds and decisions](store.md#questions-holds-and-decisions). The store file, its
+2.1 adds [work records](../reference/store.md#work-records), the [decision graph](../reference/store.md#decision-graph), the
+[approval-ledger import](../reference/store.md#approval-ledger-import) and
+[questions, holds and decisions](../reference/store.md#questions-holds-and-decisions). The store file, its
 schema version and every 2.0 event are unchanged; message and runner behaviour is unchanged apart
 from the wake guard below.
 
@@ -369,7 +369,7 @@ from the wake guard below.
 
 ## From 1.3
 
-2.0 adds the [coordination store](store.md), `coordination.db` beside the wake files, its verbs,
+2.0 adds the [coordination store](../reference/store.md), `coordination.db` beside the wake files, its verbs,
 runner event ingest, the stored review brief and the cutover. Until `store cutover --apply`, every
 1.3 path behaves as before: the legacy message store, the `message` commands, native review
 briefs, `events flush` and the event outbox.
@@ -387,14 +387,14 @@ briefs, `events flush` and the event outbox.
   artifact and `message reconcile` sequence.
 - Runner seam: delivery-kit 6.1 runners append to `var/games/<g>/bus/events.jsonl` and call
   `events ingest`, which stores runner events and COMPLETE as messages from `delivery-kit`
-  ([runner events](store.md#runner-events)). 6.0 runners keep `events flush`. Install 2.0 at the
+  ([runner events](../reference/store.md#runner-events)). 6.0 runners keep `events flush`. Install 2.0 at the
   coordinator root before any 6.1 runner starts; 6.1 requires `>=2.0.0 <3.0.0`.
 - Store mode: the [2.0 store cutover fence](https://github.com/andornaut/coordination-kit/blob/v2.0.0/docs/store.md#store-mode) selects it. Then `review deliver`
-  stores a one-page brief per (game, slot) ([stored brief](review.md#stored-brief)), review
+  stores a one-page brief per (game, slot) ([stored brief](../reference/review.md#stored-brief)), review
   health goes to the store, and legacy message writes are refused with `store-cutover`.
 - Doctor: Claude rows report `channel_command` (the configured channel command against the stable
   path) and `channel_server` (the version and digest the running channel wrote at start).
-- Channel: `claude channel` writes a [status file](review.md#channel-status-file) at start. Move
+- Channel: `claude channel` writes a [status file](../reference/review.md#channel-status-file) at start. Move
   every channel MCP config to the stable command
   `node <root>/node_modules/@andornaut/coordination-kit/dist/cli.js --root <root> claude channel`
   before the cutover; an `npx` command needs one relaunch onto it.
@@ -416,13 +416,13 @@ work against the same state.
   and adoption are not refused for it. The library seam `deliverScheduledReview` takes
   `options.capture`; without it a bundled runner's reviews do not capture either.
 - Runner seam: `review deliver --game G --slot S` and `events flush --game G` print one typed JSON
-  line each ([review](review.md#cli-seam)). They replace parsing `DEFERRED_PREFIX` and
+  line each ([review](../reference/review.md#cli-seam)). They replace parsing `DEFERRED_PREFIX` and
   `flushEvents` calls in the runner. Recorded results are new files under
   `games/<g>/bus/unblock/review-deliver/`. `flushEvents` now returns its result.
 - Identity: `--version --json` prints the version and the sha256 of `dist/cli.js`; every seam result
   carries the same pair. Plain `--version` is unchanged.
 - Channel: `claude channel` drains the legacy spools as before and also watches the conversation's
-  [wake file](review.md#wake-files); no wake file is written yet. A channel configuration that runs
+  [wake file](../reference/review.md#wake-files); no wake file is written yet. A channel configuration that runs
   `node <gc>/node_modules/@andornaut/coordination-kit/dist/cli.js --root <gc> claude channel` keeps
   the same command across releases, so after this one-time change `npm ci` plus `/mcp` reconnect
   adopts each later release without a relaunch. A session started with another command needs one

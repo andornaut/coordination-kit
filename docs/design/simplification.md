@@ -1,7 +1,7 @@
 # Simplification
 
 Approved by the user on 2026-11-18. Each phase is a work item below; deletions need separate user approval.
-For current operation, see the [store](../store.md) and [command reference](../commands.md).
+For current operation, see the [store](../reference/store.md) and [command reference](../reference/commands.md).
 
 ## Summary
 

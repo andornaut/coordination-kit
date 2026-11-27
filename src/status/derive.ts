@@ -1,5 +1,5 @@
 // One derived status per item, by documented precedence over front matter, store records,
-// imported request state and delivery evidence. Pure; see docs/commands.md#status.
+// imported request state and delivery evidence. Pure; see docs/reference/commands.md#status.
 
 const DERIVED_STATUSES = [
   "requested",

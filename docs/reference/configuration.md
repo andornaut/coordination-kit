@@ -67,7 +67,7 @@ This kit uses only `reports`:
 
 ## Start an app workspace
 
-Follow [Getting started](getting-started.md#set-up-an-app-workspace) to install the
+Follow [Getting started](../guides/getting-started.md#set-up-an-app-workspace) to install the
 published CLI, create a registry and collect your first message. The example works
 with a single app and no delivery runner.
 
@@ -87,7 +87,7 @@ For the example app, the grants in `permissions` could be:
 ```
 
 Grant `store:maintain` to the workspace maintainer for
-[filesystem authority migration](upgrading.md#filesystem-authority-migration).
+[filesystem authority migration](../guides/upgrading.md#filesystem-authority-migration).
 Grant `delivery:operate` only to an operator authorized for manual delivery. See
 [app-mode permissions](store.md#app-mode-permissions) for scope and identity checks.
 
@@ -125,7 +125,7 @@ node "$coordinator_root/node_modules/@andornaut/coordination-kit/dist/cli.js" \
 
 A fresh workspace starts with SQLite. To select filesystem authority, qualify the existing
 SQLite source with an independent backup and restore, then activate the exact receipt through
-the [migration procedure](upgrading.md#filesystem-authority-migration). Creating an empty
+the [migration procedure](../guides/upgrading.md#filesystem-authority-migration). Creating an empty
 `var/coordination/` does not select it.
 
 ### Registry seed example
@@ -176,7 +176,7 @@ JS
 2. Register the exact role sessions and worktrees with the coordinator's revision-checked
    registry writer. Set `reports.recipient` to a registered role. Any optional review membership
    uses the same role keys in the coordinator's local [route](review.md#review-route).
-3. Follow the [coordinator workspace setup guide](https://github.com/andornaut/game-coordinator/blob/main/docs/setup.md#add-a-game)
+3. Follow the [coordinator workspace setup guide](https://github.com/andornaut/game-coordinator/blob/main/docs/guides/setup.md#add-a-game)
    for readiness, acceptance and activation. The kit validates references and records coordination state. The coordinator
    provisions native sessions, adopts routing and controls, and authorizes scheduled delivery.
 

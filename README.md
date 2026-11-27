@@ -8,20 +8,20 @@ for standalone repositories and shared app, game and kit workspaces.
 <a id="find-work-by-description"></a>
 <a id="clean-up-agent-owned-resources"></a>
 
-- [Getting started](docs/getting-started.md) covers installation, registration, and your first task or inbox check.
+- [Getting started](docs/guides/getting-started.md) covers installation, registration, and your first task or inbox check.
 
 <a id="usage"></a>
 <a id="documentation"></a>
 
 - [Documentation index](docs/README.md) maps the guides, design and work records.
-- [CLI commands](docs/commands.md) covers invocation, task lookup, and skill setup.
-- [Coordination store](docs/store.md) describes messages, work, approvals, holds and recovery.
+- [CLI commands](docs/reference/commands.md) covers invocation, task lookup, and skill setup.
+- [Coordination store](docs/reference/store.md) describes messages, work, approvals, holds and recovery.
 
 <a id="developing"></a>
 <a id="source-layout"></a>
 <a id="compatibility-and-releases"></a>
 
-- [Development and releases](docs/development.md) covers checks, source layout, packaging, and release gates.
+- [Development and releases](docs/guides/development.md) covers checks, source layout, packaging, and release gates.
 
 ## Licence
 

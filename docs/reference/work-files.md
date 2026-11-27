@@ -7,7 +7,7 @@ Each item's live progress is recorded with the `work` store verbs
 ([work records](store.md#work-records)).
 
 This guide covers the indexed work-file convention used by shared workspaces. The
-[standalone task workflow](standalone.md#approve-and-build) renders its own work file with
+[standalone task workflow](../guides/standalone.md#approve-and-build) renders its own work file with
 `task work-file` and tracks approval and review with `task` commands.
 
 `--root DIR` names the repository (default: the working directory). The coordinator root comes
@@ -43,7 +43,7 @@ links or validating the affected command example can be enough.
 
 Record what actually passed on the exact revision and identify any failed, skipped or pending
 checks in Outcome. Link durable evidence and keep the detailed logs at those references.
-Standalone tasks also record actual results through [task evidence](standalone.md#approve-and-build).
+Standalone tasks also record actual results through [task evidence](../guides/standalone.md#approve-and-build).
 Existing finished items keep their original record.
 
 For example, a work item that validates input might record the following.

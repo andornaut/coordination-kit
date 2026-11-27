@@ -71,7 +71,7 @@ ck --root "$(pwd -P)" task find "Validate input" --owner implementation
 
 Use the returned task ID with `task show ID` to inspect its current owner, state and approval.
 Resolve multiple matches to an exact ID before acting.
-See [discovery results](commands.md#task-and-work-discovery).
+See [discovery results](../reference/commands.md#task-and-work-discovery).
 
 ## Approve and build
 
@@ -90,7 +90,7 @@ In a project with one configured role, `task propose` defaults to that owner. Pa
 explicitly when the project has multiple roles.
 
 From the task worktree, generate the work file from the approved task record. Fill in the
-[Verification plan](work-files.md#verification) before building. Keep the approved snapshot as
+[Verification plan](../reference/work-files.md#verification) before building. Keep the approved snapshot as
 rendered, including its dependency links. Edit Verification and Outcome as needed.
 Use `task ready` and `task verify`
 for evidence of the candidate checks and landing checks respectively. Commit the work file

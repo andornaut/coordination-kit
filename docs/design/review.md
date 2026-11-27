@@ -10,7 +10,7 @@ wake file. Codex receives a guarded notice through the control socket. Recipient
 record handling of exact originals in the store. Unavailable native capabilities stay
 explicitly unknown and are never reported as an empty queue or as clearance.
 
-Reference: [review](../review.md), [commands](../commands.md#command-semantics).
+Reference: [review](../reference/review.md), [commands](../reference/commands.md#command-semantics).
 
 ## Work items
 

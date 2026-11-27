@@ -12,7 +12,7 @@ and attempts delivery. The runner writes its events and calls `events ingest` to
 them in the store. The utilities both kits need (durable files, locks, the
 layout, validation, `delivery-kit.json` loading and the command contract) are exported once from
 `build/shared`, and the API bundles share module instances so locks and error classes are the
-same across subpaths. The [runner event seam](../store.md#runner-events) documents accepted
+same across subpaths. The [runner event seam](../reference/store.md#runner-events) documents accepted
 event spellings and the persisted cursor.
 
 `work check` and `work report` apply the work-file convention to any repository's docs and join
@@ -21,8 +21,8 @@ Git refs only and derives one status per item from front matter, protocol and le
 landing commit on `main`, and the runner COMPLETE event, last deployed SHA or release tag that
 contains it.
 
-Reference: [review](../review.md#scheduled-review-seam), [libraries](../libraries.md),
-[work files](../work-files.md), [status](../commands.md#status), [upgrading](../upgrading.md).
+Reference: [review](../reference/review.md#scheduled-review-seam), [libraries](../reference/libraries.md),
+[work files](../reference/work-files.md), [status](../reference/commands.md#status), [upgrading](../guides/upgrading.md).
 
 ## Work items
 

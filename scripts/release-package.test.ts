@@ -58,7 +58,7 @@ describe("actual release package", () => {
     execFileSync("tar", ["-xzf", archive, "-C", extracted]);
     const pkg = join(extracted, "package");
     const readme = readFileSync(join(pkg, "README.md"), "utf8");
-    expect(readme).toMatch(/\]\((?:\.\/)?docs\/store\.md(?:#[^)]*)?\)/u);
+    expect(readme).toMatch(/\]\((?:\.\/)?docs\/reference\/store\.md(?:#[^)]*)?\)/u);
     for (const doc of packagedDocs(root)) {
       expect(readFileSync(join(pkg, doc))).toEqual(readFileSync(join(root, doc)));
     }
@@ -82,13 +82,13 @@ describe("actual release package", () => {
   });
 
   it("refuses a missing required guide before emitting any release artifact", () => {
-    const test = fixture("docs/commands.md");
+    const test = fixture("docs/reference/commands.md");
     const result = spawnSync(process.execPath, [helper, test.staging, test.output], {
       cwd: test.source,
       encoding: "utf8",
     });
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("docs/commands.md");
+    expect(result.stderr).toContain("docs/reference/commands.md");
     expect(existsSync(join(test.output, `coordination-kit-${test.version}.tgz`))).toBe(false);
     expect(readdirSync(test.output)).toEqual([]);
   });

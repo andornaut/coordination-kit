@@ -15,6 +15,8 @@ const WORK_URL = "https://github.com/example/fixture-kit/blob/main/docs/work/ck-
 function tree(files: string[], docs: Record<string, string>): string {
   const directory = mkdtempSync(join(tmpdir(), "docs-check-"));
   mkdirSync(join(directory, "docs", "design"), { recursive: true });
+  mkdirSync(join(directory, "docs", "guides"));
+  mkdirSync(join(directory, "docs", "reference"));
   mkdirSync(join(directory, "docs", "work"));
   writeFileSync(join(directory, "package.json"), JSON.stringify({ files }));
   for (const [path, text] of Object.entries(docs)) {
@@ -23,10 +25,17 @@ function tree(files: string[], docs: Record<string, string>): string {
   return directory;
 }
 
-const FILES = ["dist", "README.md", "docs/commands.md", "docs/design/README.md", "LICENSE"];
+const FILES = [
+  "dist",
+  "README.md",
+  "docs/reference/commands.md",
+  "docs/design/README.md",
+  "LICENSE",
+];
 const DOCS = {
-  "README.md": "See [commands](docs/commands.md#usage), [design](docs/design/) and [home](#top).\n",
-  "docs/commands.md": `Back to [README](../README.md); work items are [on GitHub](${WORK_URL}).\n`,
+  "README.md":
+    "See [commands](docs/reference/commands.md#usage), [design](docs/design/) and [home](#top).\n",
+  "docs/reference/commands.md": `Back to [README](../../README.md); work items are [on GitHub](${WORK_URL}).\n`,
   "docs/design/README.md": "Topic docs are in [docs/](..).\n",
   "docs/work/ck-0001.md": "---\nid: ck-0001\n---\n",
 };
@@ -49,9 +58,16 @@ describe("docsFindings", () => {
   });
 
   it("reports a doc that is neither listed nor excluded, and accepts an excluded one", () => {
-    const docs = { ...DOCS, "docs/design/draft.md": "# Draft\n", "docs/notes.md": "# Notes\n" };
+    const docs = {
+      ...DOCS,
+      "docs/design/draft.md": "# Draft\n",
+      "docs/guides/notes.md": "# Notes\n",
+    };
     expect(docsFindings(tree([...FILES, "!docs/design/draft.md"], docs))).toEqual([
-      { message: "is neither listed nor excluded in package.json files", path: "docs/notes.md" },
+      {
+        message: "is neither listed nor excluded in package.json files",
+        path: "docs/guides/notes.md",
+      },
     ]);
   });
 
