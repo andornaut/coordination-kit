@@ -87,7 +87,7 @@ describe("help", () => {
     const help = await run(claudeFixture().layout.root, ["--help"]);
     expect(help.out).toContain("review deliver --game ID --slot ISO_TIMESTAMP\n");
     expect(help.out).toContain("events ingest --game ID\n");
-    expect(help.out).toContain("store retire --dry-run");
+    expect(help.out).toContain("store retire [--dry-run]");
     for (const retired of [
       "events flush",
       "message send",

@@ -194,8 +194,14 @@ export const msgRetain: Handler = storeVerb(
     const boundary = text(values, "next-boundary");
     const until = text(values, "until");
     const nextReview = values["next-review"] === true;
-    if ([boundary !== undefined, until !== undefined, nextReview].filter(Boolean).length > 1) {
+    const boundaries = [boundary !== undefined, until !== undefined, nextReview].filter(
+      Boolean,
+    ).length;
+    if (boundaries > 1) {
       throw new Usage();
+    }
+    if (boundaries === 0 && context.layout.config.wakeMinutes.length === 0) {
+      throw new Usage(undefined, { kind: "missing", name: "next-boundary" });
     }
     const deadline = until === undefined ? null : retentionInstant(until);
     if (until !== undefined && deadline === null) {

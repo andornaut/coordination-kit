@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -533,6 +533,21 @@ describe("store message commands", () => {
     });
     expect(await retain("--next-review", "--until", "2026-11-22T18:15Z")).toMatchObject({
       code: EXIT_USAGE,
+    });
+  });
+
+  it("requires an explicit retention boundary in a workspace without scheduled reviews", async () => {
+    const { base, root, layout } = storeFixture();
+    const config = JSON.parse(readFileSync(layout.configFile, "utf8")) as object;
+    writeFileSync(layout.configFile, JSON.stringify({ ...config, wakeMinutes: [] }));
+    const coordinator = cli(root, base, { CLAUDE_CODE_SESSION_ID: COORDINATOR });
+    const tech = cli(root, base, { CLAUDE_CODE_SESSION_ID: TECH });
+    await coordinator("msg", "send", "--to", TECH_ROLE, "--body", "Original.", "--id", ID);
+    const retain = ["msg", "retain", ID, "--reason", "Waiting"];
+    expect(await tech(...retain)).toMatchObject({ code: EXIT_USAGE });
+    expect(await tech(...retain, "--next-boundary", "After owner review")).toMatchObject({
+      code: EXIT_OK,
+      json: { message: { retention: { nextBoundary: "After owner review" } } },
     });
   });
 

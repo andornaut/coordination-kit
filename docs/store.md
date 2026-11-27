@@ -269,7 +269,7 @@ transaction. `Store.verify()` is the same check without the rebuild.
 4. The recipient records one disposition with `msg done ID` (`handled`, or `superseded` with
    `--superseded-by`), or `msg retain ID` with an owner, reason and next boundary. A retained
    message stays open and can be retained again or closed. The next scheduled review is the
-   default boundary. A close or retention of a message
+   default boundary. Set an explicit boundary when the workspace has no review schedule. A close or retention of a message
    still `sent` also sets its delivery time, since the recipient acted on it.
 
 Both commands accept repeatable `--evidence REF` links. `msg status ID` exposes the evidence

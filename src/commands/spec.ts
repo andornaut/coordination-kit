@@ -205,14 +205,14 @@ export const SPECS = {
     forms: [["role?", "harness", "native-id", "native-project-id?", "worktree?"]],
     group: "project",
     options: PROJECT_REGISTER_OPTIONS,
-    summary: "register a native session; the role defaults to the sole configured project role",
+    summary: "register a session with the sole configured role by default",
     values: { harness: "claude|codex", "native-project-id": "ID", worktree: "PATH" },
   },
   "task propose": {
     forms: [["ID", "owner?", "title", "scope", "depends-on?", "native-id?"]],
     group: "project",
     options: TASK_PROPOSE_OPTIONS,
-    summary: "record an idea; the owner defaults to the sole configured project role",
+    summary: "record an idea with the sole configured role as the default owner",
     values: { scope: "TEXT", "depends-on": "TASK_ID" },
   },
   "task approve": {
@@ -351,7 +351,7 @@ export const SPECS = {
     ],
     group: "msg",
     options: MSG_RETAIN_OPTIONS,
-    summary: "retain your own open message; the boundary defaults to the next review",
+    summary: "retain your own open message until the next scheduled review by default",
     values: { until: "ISO_TIMESTAMP" },
   },
   "msg status": {
@@ -449,7 +449,7 @@ export const SPECS = {
     forms: [["dry-run?"], ["apply", "native-id?", "worker?"]],
     group: "store",
     options: STORE_RETIRE_OPTIONS,
-    summary: "preview retirement; --apply imports open ledger requests and archives retired state",
+    summary: "preview retirement by default or apply with --apply",
   },
   "store migration-status": {
     forms: [[]],
@@ -485,7 +485,7 @@ export const SPECS = {
     group: "decisions",
     options: QUESTION_ANSWER_OPTIONS,
     summary:
-      "record the answer and attempt Markdown writeback; --work defaults to the recorded work ID",
+      "record the answer and attempt Markdown writeback using the recorded work ID by default",
   },
   "question project": {
     forms: [["id", "native-id?", "worker?"]],
