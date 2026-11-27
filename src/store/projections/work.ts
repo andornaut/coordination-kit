@@ -18,8 +18,15 @@ function touch(index: ProjectionIndex, event: StoredEvent, changes: ProjectionRo
   const id = text(event.payload, "id");
   const key = [repository, id];
   const row: ProjectionRow = {
+    block: null,
+    finished_at: null,
     id,
+    owner: null,
+    parent_id: null,
+    parent_repository: null,
+    ready_at: null,
     repository,
+    started_at: null,
     ...index.get("work", key),
     ...changes,
     updated_at: event.at,
