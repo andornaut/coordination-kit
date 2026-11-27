@@ -46,7 +46,7 @@ suite("runner seam", () => {
     expect(line(first.stdout)).toMatchObject({
       schema: 1,
       kind: "review-deliver",
-      game: ws.game,
+      appId: ws.game,
       slot: SLOT,
       status: "delivered",
       reason: null,
@@ -56,9 +56,7 @@ suite("runner seam", () => {
     expect(repeat.stdout).toBe(first.stdout);
     const app = await cli(ws, ["review", "deliver", "--app", ws.game, "--slot", SLOT]);
     expect(app.code, app.stderr).toBe(0);
-    const { game, ...legacy } = line(first.stdout);
-    expect(game).toBe(ws.game);
-    expect(line(app.stdout)).toEqual({ ...legacy, appId: ws.game });
+    expect(app.stdout).toBe(first.stdout);
     expect(Object.keys(line(app.stdout))).toEqual([
       "schema",
       "kind",
@@ -74,9 +72,8 @@ suite("runner seam", () => {
     const show = await cli(ws, ["review", "show", "--app", ws.game, "--slot", SLOT]);
     expect(unscoped.code, unscoped.stderr).toBe(0);
     expect(show.code, show.stderr).toBe(0);
-    const { game: shownGame, ...brief } = line(unscoped.stdout);
-    expect(shownGame).toBe(ws.game);
-    expect(line(show.stdout)).toEqual({ ...brief, appId: ws.game });
+    expect(line(unscoped.stdout)).toMatchObject({ appId: ws.game });
+    expect(show.stdout).toBe(unscoped.stdout);
 
     const usage = await cli(ws, ["review", "deliver", "--slot", "not-a-time"]);
     expect(usage).toMatchObject({ code: 2, stdout: "" });

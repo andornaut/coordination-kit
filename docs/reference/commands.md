@@ -13,8 +13,8 @@ workflows, and `tar` for store retirement.
 Commands resolve the workspace from
 `--root DIR` or `--root=DIR`, else `COORDINATION_KIT_ROOT`, else `DELIVERY_KIT_ROOT`, else the
 working directory. Pass the root at most once, before the `--` option terminator. The runner commands
-`review deliver`, `review show` and `events ingest` accept `--app ID` or `--game ID`.
-See [runner examples and compatibility](store.md#runner-events). Pass the shared coordinator
+`review deliver`, `review show` and `events ingest` use `--app ID`.
+See [runner examples](store.md#runner-events). Pass the shared coordinator
 as `--root` to `work find`. The other `work` commands use `--root` as the repository to inspect,
 defaulting to the working directory. They take the coordinator root only from
 `COORDINATION_KIT_ROOT` or `DELIVERY_KIT_ROOT`.
@@ -67,8 +67,6 @@ reviewable changes. Both accept the repository as `--root`. See the [documentati
 | `work show ID`, `work history ID`                                                                                                                                                                                                                                                        | Read an item's owner, store record and covering holds, or its work events.                                                         |
 | `graph [--work [REPOSITORY:]ID] [--depth N] [--format json\|dot]`, `graph why --decision ID`                                                                                                                                                                                             | The live decision graph and supersedes chains; see [decision graph](store.md#decision-graph).                                      |
 | `help`, `--help`, `--version`, `--version --json`                                                                                                                                                                                                                                        | Usage, the version, and the version with the `dist/cli.js` sha256 as one JSON line.                                                |
-
-Commands with an app selector also accept the legacy `--game` spelling. Use one spelling per invocation.
 
 ## Task and work discovery
 
@@ -251,7 +249,7 @@ See the [one-time runbook](store.md#one-time-closed-history-compaction).
   See [Codex question recovery](store.md#codex-question-recovery).
 - `hold policy-set` and `hold policy-release` require an active `policy:manage` binding and the
   exact user approval reference for the action. Policy IDs start with `policy-`. Set names one
-  target as `role:ROLE`, `app:APP`, the legacy `game:GAME` or `work:REPOSITORY:WORK_ID`. Release names its exact policy
+  target as `role:ROLE`, `app:APP` or `work:REPOSITORY:WORK_ID`. Release names its exact policy
   ID. See [user policy holds](store.md#user-policy-holds).
 - `session start`, `handoff ready` and `handoff active` identify the caller through the registry
   fence. `handoff open` and `handoff state` also require the workspace `handoff:manage` grant.

@@ -47,15 +47,17 @@ class ReasonedStoreError extends StoreError {
 }
 
 /** The checkpoint for a role: `games/<game>/<role>`, `kits/<kit>` or `game-coordinator`. */
-export function checkpointPath(role: string): string {
+function checkpointScope(role: string): string {
   const [game, name] = role.split("/");
-  const scope =
-    name !== undefined
-      ? `games/${game}/${name}`
-      : role === COORDINATOR_ROLE
-        ? COORDINATOR_ROLE
-        : `kits/${role}`;
-  return `var/handoffs/${scope}/current.md`;
+  return name !== undefined
+    ? `games/${game}/${name}`
+    : role === COORDINATOR_ROLE
+      ? COORDINATOR_ROLE
+      : `kits/${role}`;
+}
+
+export function checkpointPath(role: string): string {
+  return `var/handoffs/${checkpointScope(role)}/current.md`;
 }
 
 export interface SessionOutput {
@@ -194,10 +196,12 @@ export async function storeSessionStart(
     throw new ReasonedStoreError("session-held", `phase ${record.phase}`);
   }
   const harness = resolveHarness(roles, actor.role);
-  const game = actor.role.includes("/") ? actor.role.split("/")[0]! : null;
+  const apps = Object.entries(context.layout.config.apps)
+    .filter(([, app]) => app.roles.includes(actor.role))
+    .map(([id]) => id);
+  const appScopes = new Set(apps.flatMap((id) => [`app:${id}`, `game:${id}`]));
   return withStore(context, (store) => {
     const event = recordSession(store, actor, { harness, key: randomUUID(), ...request });
-    const gameScope = game === null ? "" : `game:${game}`;
     const inbox = store.index
       .rows("messages")
       .filter(
@@ -214,13 +218,14 @@ export async function storeSessionStart(
           )
         : [];
     return {
-      checkpoint:
-        context.layout.mode === "legacy"
-          ? checkpointPath(actor.role)
-          : relative(
-              context.layout.root,
-              join(context.layout.handoffsDir, actor.role, "current.md"),
-            ),
+      checkpoint: relative(
+        context.layout.root,
+        join(
+          context.layout.handoffsDir,
+          context.layout.mode === "legacy" ? checkpointScope(actor.role) : actor.role,
+          "current.md",
+        ),
+      ),
       conversation: actor.nativeId,
       counts: {
         holds:
@@ -229,7 +234,8 @@ export async function storeSessionStart(
             .filter(
               (hold) =>
                 hold.state === "active" &&
-                ((hold.role === actor.role && hold.scope === "role") || hold.scope === gameScope),
+                ((hold.role === actor.role && hold.scope === "role") ||
+                  appScopes.has(hold.scope as string)),
             ).length + activePolicyHoldsForRole(store, actor.role, context.layout),
         inbox: inbox.length,
         questions: store.index

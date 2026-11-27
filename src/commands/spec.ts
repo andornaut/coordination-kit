@@ -89,7 +89,6 @@ const VALUES: Readonly<Record<string, string>> = {
   "depends-on": "REPOSITORY:WORK_ID",
   evidence: "REF",
   "expected-revision": "N",
-  game: "ID",
   harness: "claude|codex|default",
   id: "SAFE_ID",
   intent: "queue|unblock",
@@ -136,14 +135,10 @@ interface GroupedSpec extends CommandSpec {
 }
 const SCOPE = {
   app: { multiple: true, type: "string" },
-  game: { multiple: true, type: "string" },
   role: { multiple: true, type: "string" },
 } as const;
 const READY = {
-  forms: [
-    ["app?", "role?"],
-    ["game", "role?"],
-  ],
+  forms: [["app?", "role?"]],
   group: "harness",
   options: SCOPE,
   summary:
@@ -537,7 +532,7 @@ export const SPECS = {
     group: "decisions",
     options: POLICY_HOLD_SET_OPTIONS,
     summary: "record an explicit user policy hold with policy authority",
-    values: { scope: "role:ROLE|app:APP|game:GAME|work:REPOSITORY:WORK_ID" },
+    values: { scope: "role:ROLE|app:APP|work:REPOSITORY:WORK_ID" },
   },
   "hold policy-release": {
     forms: [["id", "approval", "native-id?"]],
@@ -612,16 +607,13 @@ export const SPECS = {
   "claude ready": READY,
   "codex ready": READY,
   "harness doctor": {
-    forms: [["app", "role?"], ["game", "role?"], ["role"]],
+    forms: [["app", "role?"], ["role"]],
     group: "harness",
     options: DOCTOR_OPTIONS,
     summary: "diagnose explicitly selected roles without sending or activating",
   },
   "harness ready": {
-    forms: [
-      ["app?", "role?"],
-      ["game", "role?"],
-    ],
+    forms: [["app?", "role?"]],
     group: "harness",
     options: SCOPE,
     summary: "probe each selected role's effective harness without sending or activating",
@@ -629,7 +621,6 @@ export const SPECS = {
   "harness select": {
     forms: [
       ["harness", "expected-revision", "app", "role?", "native-id?"],
-      ["harness", "expected-revision", "game", "role?", "native-id?"],
       ["harness", "expected-revision", "role", "native-id?"],
     ],
     group: "harness",
@@ -642,40 +633,30 @@ export const SPECS = {
     summary: "atomically select harness overrides for an explicit scope without activating roles",
   },
   "claude channel": {
-    forms: [
-      ["app?", "conversation?", "poll-seconds?"],
-      ["game", "conversation?", "poll-seconds?"],
-    ],
+    forms: [["app?", "conversation?", "poll-seconds?"]],
     group: "harness",
     options: {
       app: SCOPE.app,
       conversation: { type: "string" },
-      game: { multiple: true, type: "string" },
       "poll-seconds": { type: "string" },
     },
     summary:
       "the stdio server the Claude recipient session starts; emits one notification per wake",
   },
   "review deliver": {
-    forms: [
-      ["app", "slot"],
-      ["game", "slot"],
-    ],
+    forms: [["app", "slot"]],
     group: "review",
     options: REVIEW_DELIVER_OPTIONS,
     summary: "deliver the scheduled review for one slot once; prints one typed JSON result line",
   },
   "review show": {
-    forms: [
-      ["app?", "slot?"],
-      ["game", "slot?"],
-    ],
+    forms: [["app?", "slot?"]],
     group: "review",
     options: REVIEW_SHOW_OPTIONS,
     summary: "print a stored review brief's full record: the slot's, else the latest",
   },
   "events ingest": {
-    forms: [["app"], ["game"]],
+    forms: [["app"]],
     group: "review",
     options: EVENTS_INGEST_OPTIONS,
     summary: "ingest the app's runner event log from its cursor; prints one typed JSON result line",

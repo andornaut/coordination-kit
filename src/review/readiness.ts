@@ -14,7 +14,7 @@ import { gameRecipients } from "../core/configuration/delivery.ts";
 import type { Layout } from "../core/configuration/layout.ts";
 import { resolveHarness } from "../registry/resolve.ts";
 import type { Harness, Registry } from "../registry/schema.ts";
-import { type HarnessSelection, resolveSelectedRoles } from "../registry/selection.ts";
+import { resolveSelectedRoles, type RoleSelection } from "../registry/selection.ts";
 
 interface RoleReadiness {
   readonly role: string;
@@ -24,7 +24,7 @@ interface RoleReadiness {
   readonly probed_harness?: Harness;
 }
 
-export type ReadinessScope = Pick<HarnessSelection, "games" | "roles">;
+export type ReadinessScope = RoleSelection;
 
 interface SelectedRoleReadiness extends RoleReadiness {
   readonly current_harness: Harness;

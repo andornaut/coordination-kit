@@ -10,7 +10,6 @@ import {
   REASON_TOKENS,
   type ReasonToken,
   type ReviewResult,
-  type RunnerIdField,
   type SeamStatus,
 } from "../core/cli/outcome.ts";
 import type { GameLayout, Layout } from "../core/configuration/layout.ts";
@@ -137,13 +136,12 @@ export function reviewDeliverLine(
   id: string,
   slot: string,
   result: ReviewResult,
-  field: RunnerIdField = "game",
 ): string {
   return `${JSON.stringify(
     Object.fromEntries([
       ["schema", 1],
       ["kind", "review-deliver"],
-      [field, id],
+      ["appId", id],
       ["slot", slot],
       ["status", result.status],
       ["reason", result.reason],

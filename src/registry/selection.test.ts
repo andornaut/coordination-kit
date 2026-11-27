@@ -68,13 +68,13 @@ describe("resolveSelectedRoles", () => {
     const layout = setup();
     expect(
       resolveSelectedRoles(layout, readRegistry(layout), {
-        games: [ARCHIE],
+        apps: [ARCHIE],
         roles: ["game-coordinator", `${ARCHIE}/tech`],
       }),
     ).toEqual([`${ARCHIE}/art`, `${ARCHIE}/gameplay`, `${ARCHIE}/tech`, "game-coordinator"]);
   });
 
-  it("selects a configured unprefixed app role using either app selector", () => {
+  it("selects a configured unprefixed app role using its app selector", () => {
     const { root } = makeFixture();
     writeFixtureJson(join(root, "config.json"), {
       apps: { dashboard: { name: "Dashboard", path: "../dashboard", roles: ["operator"] } },
@@ -101,10 +101,6 @@ describe("resolveSelectedRoles", () => {
       transfers: [],
     });
     expect(resolveSelectedRoles(layout, registry, { apps: ["dashboard"] })).toEqual(["operator"]);
-    expect(resolveSelectedRoles(layout, registry, { games: ["dashboard"] })).toEqual(["operator"]);
-    expect(() =>
-      resolveSelectedRoles(layout, registry, { apps: ["dashboard"], games: ["dashboard"] }),
-    ).toThrow("use apps or games for the app selection");
     const updated = selectHarness(TEST_CLOCK, layout, registry.revision, {
       apps: ["dashboard"],
       harness: "claude",
@@ -120,7 +116,7 @@ describe("selectHarness", () => {
     const before = readRegistry(layout);
     const next = selectHarness(TEST_CLOCK, layout, before.revision, {
       harness: "claude",
-      games: [ARCHIE],
+      apps: [ARCHIE],
     });
     const expected = structuredClone(before.roles) as RegistryDraft["roles"];
     for (const role of layout.config.games[ARCHIE]!.roles) {
@@ -138,7 +134,7 @@ describe("selectHarness", () => {
 
   it("clears only selected overrides for default and resolves the global transport", () => {
     const layout = setup();
-    const selected = selectHarness(TEST_CLOCK, layout, 1, { harness: "claude", games: [ARCHIE] });
+    const selected = selectHarness(TEST_CLOCK, layout, 1, { harness: "claude", apps: [ARCHIE] });
     const next = selectHarness(TEST_CLOCK, layout, selected.revision, {
       harness: "default",
       roles: [`${ARCHIE}/tech`],
@@ -168,7 +164,7 @@ describe("selectHarness", () => {
     });
     const before = readFileSync(layout.registryFile);
     expect(() =>
-      selectHarness(TEST_CLOCK, layout, registry.revision, { harness: "claude", games: [ARCHIE] }),
+      selectHarness(TEST_CLOCK, layout, registry.revision, { harness: "claude", apps: [ARCHIE] }),
     ).toThrow(/selected conversation is unavailable/);
     expect(readFileSync(layout.registryFile)).toEqual(before);
   });

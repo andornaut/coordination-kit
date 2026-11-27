@@ -57,7 +57,7 @@ function line(result: Run): Record<string, unknown> {
 }
 
 function deliver(fixture: ClaudeFixture, slot = ISO, ...extra: string[]): Promise<Run> {
-  return run(fixture.layout.root, ["review", "deliver", "--game", GAME, "--slot", slot, ...extra]);
+  return run(fixture.layout.root, ["review", "deliver", "--app", GAME, "--slot", slot, ...extra]);
 }
 
 describe("--version", () => {
@@ -85,8 +85,8 @@ describe("--version", () => {
 describe("help", () => {
   it("lists the seam commands and no retired command", async () => {
     const help = await run(claudeFixture().layout.root, ["--help"]);
-    expect(help.out).toContain("review deliver --game ID --slot ISO_TIMESTAMP\n");
-    expect(help.out).toContain("events ingest --game ID\n");
+    expect(help.out).toContain("review deliver --app ID --slot ISO_TIMESTAMP\n");
+    expect(help.out).toContain("events ingest --app ID\n");
     expect(help.out).toContain("store retire [--dry-run]");
     for (const retired of [
       "events flush",
@@ -96,6 +96,7 @@ describe("help", () => {
       "inbox snapshot",
       "--input-file",
       "--capture",
+      "--game",
     ]) {
       expect(help.out).not.toContain(retired);
     }
@@ -109,18 +110,18 @@ describe("review deliver", () => {
     useEnv(fixture);
     const root = fixture.layout.root;
     for (const argv of [
-      ["review", "deliver", "--game", GAME],
+      ["review", "deliver", "--app", GAME],
       ["review", "deliver", "--slot", ISO],
-      ["review", "deliver", "--game", GAME, "--slot", "1793556000"],
-      ["review", "deliver", "--game", GAME, "--slot", "2026-11-18T15:30:30Z"],
-      ["review", "deliver", "--game", GAME, "--slot", "2026-11-18T15:30:00"],
-      ["review", "deliver", "--game", "no-such-game", "--slot", ISO],
-      ["review", "deliver", "--game", GAME, "--slot", ISO, "--extra"],
-      ["review", "deliver", "--app", GAME, "--game", GAME, "--slot", ISO],
+      ["review", "deliver", "--app", GAME, "--slot", "1793556000"],
+      ["review", "deliver", "--app", GAME, "--slot", "2026-11-18T15:30:30Z"],
+      ["review", "deliver", "--app", GAME, "--slot", "2026-11-18T15:30:00"],
+      ["review", "deliver", "--app", "no-such-game", "--slot", ISO],
+      ["review", "deliver", "--app", GAME, "--slot", ISO, "--extra"],
+      ["review", "deliver", "--game", GAME, "--slot", ISO],
       ["events", "ingest"],
-      ["events", "ingest", "--game", "no-such-game"],
-      ["events", "ingest", "--app", GAME, "--game", GAME],
-      ["review", "show", "--app", GAME, "--game", GAME],
+      ["events", "ingest", "--app", "no-such-game"],
+      ["events", "ingest", "--game", GAME],
+      ["review", "show", "--game", GAME],
     ]) {
       // eslint-disable-next-line no-await-in-loop
       const result = await run(root, argv);
@@ -128,11 +129,11 @@ describe("review deliver", () => {
       expect(result.out).toBe("");
       expect(result.err).toMatch(/^coordination-kit: /);
     }
-    expect((await run(root, ["events", "flush", "--game", GAME])).code).toBe(EXIT_USAGE);
+    expect((await run(root, ["events", "flush", "--app", GAME])).code).toBe(EXIT_USAGE);
     const missing = await run(join(fixture.base, "absent"), [
       "review",
       "deliver",
-      "--game",
+      "--app",
       GAME,
       "--slot",
       ISO,
@@ -151,7 +152,7 @@ describe("review deliver", () => {
     useEnv(fixture);
     const aborted = await run(
       fixture.layout.root,
-      ["review", "deliver", "--game", GAME, "--slot", ISO],
+      ["review", "deliver", "--app", GAME, "--slot", ISO],
       { signal: AbortSignal.abort() },
     );
     expect(aborted).toMatchObject({ code: EXIT_INVALID, out: "" });
@@ -168,7 +169,7 @@ describe("review deliver", () => {
 });
 
 describe("app runner permissions", () => {
-  it("authenticates both selector forms in app mode before any runner state is written", async () => {
+  it("authenticates both mutating commands in app mode before any runner state is written", async () => {
     const fixture = claudeFixture();
     const { apps, kits, schema, sharedRoles, timezone, wakeMinutes } = fixture.layout.config;
     writeFileSync(
@@ -191,7 +192,7 @@ describe("app runner permissions", () => {
     );
     for (const argv of [
       ["review", "deliver", "--app", GAME, "--slot", ISO],
-      ["events", "ingest", "--game", GAME],
+      ["events", "ingest", "--app", GAME],
     ]) {
       // eslint-disable-next-line no-await-in-loop
       expect(await run(fixture.layout.root, argv)).toMatchObject({

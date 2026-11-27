@@ -57,9 +57,8 @@ exactly one stdout line, shown expanded here:
 store and prints the same keys with `kind` `events-ingest` and the counts `delivered`, `held`,
 `ingested`, `quarantined` and `completed`; see [runner events](store.md#runner-events).
 
-Use either `--app A` or the backward-compatible `--game A` selector. With `--game` the
-result uses the legacy `game` field. In app mode both calls require the active bound runner
-and the respective [app grant](store.md#app-mode-permissions).
+Both commands use `--app A` and return `appId`. In app mode they require the active
+bound runner and the respective [app grant](store.md#app-mode-permissions).
 
 - `status` is `delivered`, `deferred` or `skipped`.
 - `reason` is `null` for `delivered`, otherwise a token from `REASON_TOKENS` (below).
@@ -67,8 +66,8 @@ and the respective [app grant](store.md#app-mode-permissions).
 - `cli` is the running package version and the sha256 of the `dist/cli.js` bytes, the same as
   `coordination-kit --version --json`. From source the digest is 64 zeros.
 
-Exit status is 0 for every typed result, 2 for a usage error (conflicting selectors, a missing
-or invalid required option, or an unknown app) and 1 for a failed precondition or internal failure. An internal
+Exit status is 0 for every typed result, 2 for a usage error (a missing or invalid required option,
+or an unknown app) and 1 for a failed precondition or internal failure. An internal
 failure prints nothing on stdout and one `coordination-kit:` line on stderr; the runner reports
 it, a timeout or unparsable output as no delivery claimed, with the `cli-error` token.
 

@@ -85,17 +85,12 @@ function ready(harness: Harness | "mixed"): Handler {
       io.err(`coordination-kit: ${errorMessage(error)}\n${commandUsage(command)}\n`);
       return EXIT_USAGE;
     }
-    const { app, game, role } = values;
-    if (app !== undefined && game !== undefined) {
-      io.err(`${commandUsage(command)}\n`);
-      return EXIT_USAGE;
-    }
+    const { app, role } = values;
     const scope =
-      app === undefined && game === undefined && role === undefined
+      app === undefined && role === undefined
         ? undefined
         : {
             ...(app === undefined ? {} : { apps: app }),
-            ...(game === undefined ? {} : { games: game }),
             ...(role === undefined ? {} : { roles: role }),
           };
     return readiness(io, root, harness, scope);

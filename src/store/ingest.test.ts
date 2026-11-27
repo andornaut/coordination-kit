@@ -669,14 +669,14 @@ describe("events ingest", () => {
       err: (value: string) => (err += value),
       out: (value: string) => (out += value),
     };
-    expect(await main(io, ["--root", test.layout.root, "events", "ingest", "--game", GAME])).toBe(
+    expect(await main(io, ["--root", test.layout.root, "events", "ingest", "--app", GAME])).toBe(
       EXIT_OK,
     );
     const result = JSON.parse(out) as Record<string, unknown>;
     expect(Object.keys(result)).toEqual([
       "schema",
       "kind",
-      "game",
+      "appId",
       "status",
       "reason",
       "detail",
@@ -688,7 +688,7 @@ describe("events ingest", () => {
       "cli",
     ]);
     expect(result).toMatchObject({
-      game: GAME,
+      appId: GAME,
       kind: "events-ingest",
       schema: 1,
       status: "delivered",
@@ -697,6 +697,6 @@ describe("events ingest", () => {
       expect(Number.isSafeInteger(result[key]) && (result[key] as number) >= 0).toBe(true);
     }
     expect(await main(io, ["--root", test.layout.root, "events", "ingest"])).toBe(EXIT_USAGE);
-    expect(err).toContain("--game is required");
+    expect(err).toContain("--app is required");
   });
 });

@@ -576,7 +576,7 @@ export function composeBrief(
     (item) => item.newlyStalled === true && item.reviewGenerated !== true,
   ).length;
   const newlyOverdue = options.newlyOverdue ?? 0;
-  const show = `coordination-kit review show --game ${game.id} --slot ${new Date(slot * 1000).toISOString()}`;
+  const show = `coordination-kit review show --app ${game.id} --slot ${new Date(slot * 1000).toISOString()}`;
   const head = [
     `Scheduled review, ${game.name}, slot ${new Date(slot * 1000).toISOString()} (stored brief)`,
     `Open messages: ${String(counts.open)} (sent ${states.sent}, delivered ${states.delivered}, ` +

@@ -41,7 +41,7 @@ describe("dispatcher", () => {
     expect(help.out).not.toContain("reminder");
     expect(help.out).not.toContain("decision marker");
     expect(help.out).not.toContain("decision resolve");
-    expect(help.out).toContain("harness doctor --game ID ... [--role ROLE ...]");
+    expect(help.out).not.toContain("--game");
     expect(help.out).toContain("harness doctor --role ROLE ...");
     expect(help.out).not.toContain("harness doctor [");
     expect(help.out).toContain(

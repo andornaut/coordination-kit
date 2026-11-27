@@ -1,4 +1,4 @@
-// Node adapter shape: `node dist/cli.js <group> <verb> --game <g>` with game-coordinator as the
+// Node adapter shape: `node dist/cli.js <group> <verb> --app <a>` with game-coordinator as the
 // working directory and COORDINATION_KIT_ROOT. The CLI resolves config.json, the game's
 // delivery-kit.json and var/ itself. Cases are skipped until dist/cli.js exists.
 //
@@ -149,7 +149,7 @@ function command(ws: Workspace, words: string[]): Command {
   // Every command is a noun group and its verb.
   const verb = words.slice(0, 2);
   const rest = words.slice(2);
-  const target = rest.includes("--app") || rest.includes("--game") ? [] : ["--game", ws.game];
+  const target = rest.includes("--app") ? [] : ["--app", ws.game];
   return {
     argv: [process.execPath, CLI, ...verb, ...target, ...rest],
     cwd: ws.coordinator,

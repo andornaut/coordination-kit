@@ -50,7 +50,7 @@ suite("mixed harness CLI", () => {
       const before = structuredClone(ws.registry());
       const control = ws.read("delivery-control.json");
       const target = await execute(
-        impl.bare(ws, ["claude", "ready", "--game", ARCHIE, "--game", CHIBI]),
+        impl.bare(ws, ["claude", "ready", "--app", ARCHIE, "--app", CHIBI]),
       );
       expect(target.code, target.stderr).toBe(0);
       expect(JSON.parse(target.stdout).roles).toHaveLength(6);
@@ -63,9 +63,9 @@ suite("mixed harness CLI", () => {
           "claude",
           "--expected-revision",
           "1",
-          "--game",
+          "--app",
           ARCHIE,
-          "--game",
+          "--app",
           CHIBI,
         ]),
       );
@@ -101,7 +101,7 @@ suite("mixed harness CLI", () => {
         "claude",
         "--expected-revision",
         "1",
-        "--game",
+        "--app",
         ARCHIE,
       ]),
     );
@@ -114,9 +114,9 @@ suite("mixed harness CLI", () => {
         impl.bare(ws, [
           "harness",
           "ready",
-          "--game",
+          "--app",
           ARCHIE,
-          "--game",
+          "--app",
           CHIBI,
           "--role",
           "game-coordinator",
@@ -131,7 +131,7 @@ suite("mixed harness CLI", () => {
       expect(JSON.parse(result.stdout).roles).toHaveLength(7);
       expect(socket.methods()).toEqual(["initialize", "initialized"]);
       expect(readFileSync(join(ws.coordinator, "var", "registry.json"), "utf8")).toBe(before);
-      const unavailable = await execute(impl.bare(ws, ["claude", "ready", "--game", ADA]));
+      const unavailable = await execute(impl.bare(ws, ["claude", "ready", "--app", ADA]));
       expect(unavailable.code).toBe(1);
       expect(
         JSON.parse(unavailable.stdout).roles.every(
@@ -145,9 +145,7 @@ suite("mixed harness CLI", () => {
           )
         ).code,
       ).toBe(2);
-      expect((await execute(impl.bare(ws, ["harness", "ready", "--game", "unknown"]))).code).toBe(
-        1,
-      );
+      expect((await execute(impl.bare(ws, ["harness", "ready", "--app", "unknown"]))).code).toBe(1);
     } finally {
       await socket.close();
     }

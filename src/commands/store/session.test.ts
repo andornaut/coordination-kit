@@ -20,7 +20,14 @@ import {
   storeHandoffState,
   storeSessionStart,
 } from "../../store/sessions/service.ts";
-import { COORDINATOR, GAMEPLAY, storeFixture, TECH, TECH_CODEX } from "../../store/testStore.ts";
+import {
+  COORDINATOR,
+  GAME,
+  GAMEPLAY,
+  storeFixture,
+  TECH,
+  TECH_CODEX,
+} from "../../store/testStore.ts";
 
 const KIT = "art-kit";
 const KIT_CLAUDE = "00000000-0000-4000-8000-0000000000c7";
@@ -107,6 +114,55 @@ describe("session start", () => {
     );
   });
 
+  it("counts current and historical app holds on session start", async () => {
+    const { coordinator, layout, tech } = setup();
+    const actor = { nativeId: COORDINATOR, role: "game-coordinator" };
+    const store = Store.forLayout(TEST_CONTEXT, layout);
+    store.append({
+      actor,
+      key: "hold.set:historical",
+      kind: "hold.set",
+      payload: {
+        id: "historical",
+        reason: "Earlier hold.",
+        role: actor.role,
+        scope: `game:${GAME}`,
+      },
+    });
+    store.append({
+      actor,
+      key: "hold.policy-set:policy-historical",
+      kind: "hold.policy-set",
+      payload: {
+        approval: "original",
+        id: "policy-historical",
+        issuer: actor.role,
+        reason: "Earlier policy.",
+        scope: `game:${GAME}`,
+      },
+    });
+    store.close();
+    const set = (id: string, scope: string) =>
+      coordinator("hold", "set", "--id", id, "--scope", scope, "--reason", "New hold.");
+    expect((await set("new-app", `app:${GAME}`)).code).toBe(EXIT_OK);
+    expect((await set("old-alias", `game:${GAME}`)).err).toContain("invalid-scope");
+    expect((await tech("session", "start")).json).toMatchObject({ counts: { holds: 3 } });
+    expect((await coordinator("hold", "release", "--id", "historical")).code).toBe(EXIT_OK);
+    expect(
+      (
+        await coordinator(
+          "hold",
+          "policy-release",
+          "--id",
+          "policy-historical",
+          "--approval",
+          "new",
+        )
+      ).code,
+    ).toBe(EXIT_OK);
+    expect((await tech("session", "start")).json).toMatchObject({ counts: { holds: 1 } });
+  });
+
   it("writes the journal locally when an external artifact root is configured", async () => {
     const { base, kit, layout } = setup();
     const state = join(base, "state");
@@ -118,6 +174,19 @@ describe("session start", () => {
     expect((await kit("session", "start")).code).toBe(EXIT_OK);
     expect(existsSync(storePath(layout))).toBe(true);
     expect(existsSync(join(state, "coordination"))).toBe(false);
+  });
+
+  it("keeps the legacy role scope under the configured handoffs directory", async () => {
+    const { layout } = setup();
+    const context = {
+      ...TEST_CONTEXT,
+      env: { CLAUDE_CODE_SESSION_ID: TECH, PATH: process.env.PATH },
+      layout: { ...layout, handoffsDir: join(layout.root, ".coordination-kit", "handoffs") },
+    };
+    const result = await storeSessionStart(context, {}, { cwd: layout.root, version: "9.0.0" });
+    expect(result.checkpoint).toBe(
+      ".coordination-kit/handoffs/games/archies-dog-walks/tech/current.md",
+    );
   });
 
   it("derives the checkpoint for game, kit and coordinator roles", () => {

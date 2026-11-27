@@ -18,14 +18,13 @@ export const harnessSelect: Handler = (io, root, args) => {
     io.err(`coordination-kit: ${message}\n${commandUsage("harness select")}\n`);
     return EXIT_USAGE;
   }
-  const { app, "expected-revision": revision, game, harness, role } = values;
+  const { app, "expected-revision": revision, harness, role } = values;
   if (
     (harness !== "claude" && harness !== "codex" && harness !== "default") ||
     typeof revision !== "string" ||
     !/^(0|[1-9][0-9]*)$/.test(revision) ||
     !Number.isSafeInteger(Number(revision)) ||
-    (app !== undefined && game !== undefined) ||
-    (app === undefined && game === undefined && role === undefined)
+    (app === undefined && role === undefined)
   ) {
     io.err(`${commandUsage("harness select")}\n`);
     return EXIT_USAGE;
@@ -39,7 +38,6 @@ export const harnessSelect: Handler = (io, root, args) => {
     }
     const registry = selectHarness(systemClock, layout, Number(revision), {
       ...(app === undefined ? {} : { apps: app }),
-      ...(game === undefined ? {} : { games: game }),
       harness,
       ...(role === undefined ? {} : { roles: role }),
     });

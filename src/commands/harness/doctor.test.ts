@@ -34,7 +34,7 @@ describe("harness doctor handler", () => {
     [["--role", " "], "Choose one selector form above and supply nonblank IDs or roles."],
     [
       ["--app", "DO_NOT_PRINT", "--game", "DO_NOT_PRINT"],
-      "Choose one selector form above and supply nonblank IDs or roles.",
+      `Use only the options listed for this command. ${help}`,
     ],
     [["--DO_NOT_PRINT", "DO_NOT_PRINT"], `Use only the options listed for this command. ${help}`],
     [["--role"], `Check which options take values and supply the required values. ${help}`],

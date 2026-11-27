@@ -1,7 +1,7 @@
 // `coordination-kit claude channel`: the stdio MCP server that the recipient Claude session launches
 // from game-coordinator's node_modules. It watches its role's wake file and emits one notification
 // per seq increase. The role is the one whose Claude conversation is `--conversation UUID`, else
-// the one reports.recipient that every game (or each `--game`) names. The wake file and the
+// the one reports.recipient that every game (or each `--app`) names. The wake file and the
 // channel status file are keyed by role, so the channel keeps serving the role, and the doctor
 // and the review keep finding its status, after `session start` rebinds it after /clear.
 import { writeSync } from "node:fs";
@@ -12,7 +12,7 @@ import { wakeFilePath, WakeWatcher } from "../../adapters/claude/wakeFile.ts";
 import { EXIT_INVALID, EXIT_USAGE, type Io } from "../../core/cli/io.ts";
 import { cliIdentity } from "../../core/cli/version.ts";
 import { gameRecipients } from "../../core/configuration/delivery.ts";
-import { appLayout, gameLayout, type Layout, loadLayout } from "../../core/configuration/layout.ts";
+import { appLayout, type Layout, loadLayout } from "../../core/configuration/layout.ts";
 import { isCanonicalUuid } from "../../core/ids.ts";
 import { claudeProjectsDir, clearSuccessor } from "../../registry/claudeLineage.ts";
 import { resolveConversation, resolveHarness } from "../../registry/resolve.ts";
@@ -162,19 +162,13 @@ export async function channel(
     if (values.conversation !== undefined && !isCanonicalUuid(values.conversation)) {
       throw new ChannelUsage("--conversation must be a canonical session UUID");
     }
-    if (values.app !== undefined && values.game !== undefined) {
-      throw new ChannelUsage("use --app or --game to select apps");
-    }
-    const apps = values.app ?? values.game;
+    const apps = values.app;
     if (apps !== undefined) {
       if (apps.length !== new Set(apps).size) {
-        throw new ChannelUsage(
-          `each --${values.app === undefined ? "game" : "app"} may appear once`,
-        );
+        throw new ChannelUsage("each --app may appear once");
       }
       const layout = loadLayout(root);
-      const selectedLayout = values.app === undefined ? gameLayout : appLayout;
-      apps.forEach((app) => selectedLayout(layout, app));
+      apps.forEach((app) => appLayout(layout, app));
     }
     conversation = values.conversation;
     if (conversation === undefined) {

@@ -442,8 +442,8 @@ these grants. A workspace grant applies across the workspace. An app grant appli
 checks for that app ID. A workspace-only check requires a workspace grant.
 
 - `review deliver` and `events ingest` require `review:deliver` and `events:ingest`
-  respectively for the selected app. Provision the active runner binding explicitly. The
-  same checks apply with `--game`. Unattended legacy game runners retain their established
+  respectively for the selected app. Provision the active runner binding explicitly.
+  Unattended legacy game runners retain their established
   route and operation checks.
 - `delivery:operate` grants the app permission for manual delivery. Delivery still requires
   the existing verified operator check. The operation's `busOwner` is a registry reference.
@@ -605,7 +605,7 @@ caller; `role` scopes it to the owner itself. Repeating it with the same owner, 
 while active is a no-op; any other reuse of the ID, including after release, is `id-conflict`.
 `hold release --id H` releases the caller's own hold, including an imported
 `approval-ledger:<id>` hold it owns; a repeated release is a no-op. Holds also gate `work start`
-([hold seam](#hold-seam)). `game:G` remains a supported scope.
+([hold seam](#hold-seam)). Historical `game:G` holds retain their effect and can be released.
 
 ### User policy holds
 
@@ -619,7 +619,7 @@ Set appends `hold.policy-set` with the ID, issuer, scope, reason and approval re
 | Scope                     | Work starts covered                 | Wakes covered        |
 | ------------------------- | ----------------------------------- | -------------------- |
 | `role:ROLE`               | Items owned by the registered role  | The registered role  |
-| `app:APP` or `game:GAME`  | Items in the configured app         | Its registered roles |
+| `app:APP`                 | Items in the configured app         | Its registered roles |
 | `work:REPOSITORY:WORK_ID` | That exact repository and work item | None                 |
 
 `hold policy-release --id H --approval REF` appends `hold.policy-released` for the exact policy
@@ -721,10 +721,8 @@ node node_modules/@andornaut/coordination-kit/dist/cli.js review show --app dash
 node node_modules/@andornaut/coordination-kit/dist/cli.js events ingest --app dashboard
 ```
 
-`--game ID` is the backward-compatible selector for the same app and paths. Use one
-selector per invocation. The schema-1 response echoes the ID as `appId` for `--app`, or as
-`game` for `--game`. `review show` can omit the selector to look across apps and retains the
-legacy `game` result field in that form. Other response fields and exit codes are unchanged.
+The schema-1 response identifies the app as `appId`. Omit the selector on `review show`
+to look across apps.
 
 The runner alone writes `var/apps/<id>/bus/events.jsonl`, or
 `var/games/<id>/bus/events.jsonl` with the legacy state layout
@@ -911,8 +909,8 @@ prints the item's work events in order.
 
 `work start` and `work show` ask a `HoldLookup` port for the active holds covering the item. The
 default, `storeHolds`, reads the [hold records](#holds): a `work:` hold that names the item, a
-`role` hold whose owner is the item's owner, and a `game:` hold whose game is the item's
-repository. It also covers items under an exact [user policy hold](#user-policy-holds).
+`role` hold whose owner is the item's owner, and an `app:` hold whose app is the item's
+repository. Historical `game:` holds still cover the same repository. It also covers items under an exact [user policy hold](#user-policy-holds).
 `store import --approval-ledger` records each ledger hold as one `hold.imported`
 event, which the hold projection applies:
 

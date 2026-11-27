@@ -134,7 +134,7 @@ describe("work verbs", () => {
     );
   });
 
-  it("reads the store's hold records: work, role and game scopes, set and imported", () => {
+  it("reads the store's hold records: work, role and app scopes, set and imported", () => {
     const fixture = kitFixture();
     const kit = live(fixture, IDS.kit);
     const tech = live(fixture, IDS.tech);
@@ -146,7 +146,7 @@ describe("work verbs", () => {
     const holdIds = () => workShow(kit, sk).holds.map((hold) => hold.id);
     setHold(store, coordinator, { id: "h-work", reason: "Waiting", scope: "work:sk-0001" });
     setHold(store, kitActor, { id: "h-role", reason: "Paused", scope: "role" });
-    setHold(store, coordinator, { id: "h-game", reason: "Cutover", scope: `game:${GAME}` });
+    setHold(store, coordinator, { id: "h-app", reason: "Cutover", scope: `app:${GAME}` });
     setHold(store, coordinator, { id: "h-other", reason: "Other", scope: "work:sk-0002" });
     store.append({
       actor: coordinator,
@@ -165,7 +165,7 @@ describe("work verbs", () => {
     expect(holdIds()).toEqual(["h-work", "h-role", "approval-ledger:hold-1"]);
     expect(code(() => workStart(kit, {}, sk))).toBe("work-held");
     expect(code(() => workStart(tech, {}, sg))).toBe("work-held");
-    releaseHold(store, coordinator, "h-game");
+    releaseHold(store, coordinator, "h-app");
     expect(workStart(tech, {}, sg).record.state).toBe("started");
     releaseHold(store, coordinator, "h-work");
     releaseHold(store, kitActor, "h-role");
@@ -190,18 +190,18 @@ describe("work verbs", () => {
         scope,
       });
     set("policy-exact", `work:${GAME}:sg-0001`);
-    set("policy-game", `game:${GAME}`);
+    set("policy-app", `app:${GAME}`);
     set("policy-art", `role:${ROLES.art}`);
     expect(workShow(live(fixture), item("sg-0001")).holds).toMatchObject([
       { id: "policy-exact", owner: ROLES.coordinator, policy: { target: { repository: GAME } } },
-      { id: "policy-game" },
+      { id: "policy-app" },
     ]);
     expect(code(() => workStart(live(fixture, IDS.tech), {}, item("sg-0001")))).toBe("work-held");
     expect(code(() => workStart(live(fixture, IDS.art), {}, item("sg-0002")))).toBe("work-held");
     expect(
       workStart(live(fixture, IDS.kit), {}, { id: "sk-0001", worktree: fixture.kit }).record.state,
     ).toBe("started");
-    releasePolicyHold(store, authority, actor, { approval: "request-2", id: "policy-game" });
+    releasePolicyHold(store, authority, actor, { approval: "request-2", id: "policy-app" });
     expect(code(() => workStart(live(fixture, IDS.tech), {}, item("sg-0001")))).toBe("work-held");
     releasePolicyHold(store, authority, actor, { approval: "request-3", id: "policy-exact" });
     expect(workStart(live(fixture, IDS.tech), {}, item("sg-0001")).record.state).toBe("started");

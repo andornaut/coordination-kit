@@ -320,7 +320,7 @@ export async function storeHoldSet(
   const actor = resolveCaller(roles, context.env, options);
   if (context.layout.mode === "app") {
     const [kind, app] = holdScope(request.scope).split(":");
-    if (kind === "app" || kind === "game") {
+    if (kind === "app") {
       requirePermission(context.layout, roles, actor, "policy:manage", app);
     }
   }
@@ -359,9 +359,6 @@ export async function storePolicyHoldSet(
   }
   if (target.kind === "app" && !Object.hasOwn(apps, target.app)) {
     throw new StoreError("policy-app-unregistered");
-  }
-  if (target.kind === "game" && !Object.hasOwn(games, target.game)) {
-    throw new StoreError("policy-game-unregistered");
   }
   if (
     target.kind === "work" &&

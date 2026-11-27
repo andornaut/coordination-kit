@@ -1,5 +1,13 @@
 # Upgrading
 
+## App selectors
+
+Update Coordination Kit callers to use `--app ID` and `app:ID` for new holds.
+Review and ingest responses identify the app as `appId`. Use a Delivery Kit runner that
+supports that command and response before changing the installed Coordination Kit pin.
+Existing journal records, workspace configurations and runner event files keep their
+original formats. Existing holds remain active until released through the ordinary commands.
+
 ## Coordination Kit 8.0
 
 8.0 uses the filesystem journal for standalone and shared coordination. A standalone checkout

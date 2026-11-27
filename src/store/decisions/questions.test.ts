@@ -203,7 +203,7 @@ describe("holds", () => {
     setHold(store, COORDINATOR_ACTOR, {
       id: "h-3",
       reason: "Cutover",
-      scope: "game:archies-dog-walks",
+      scope: "app:archies-dog-walks",
     });
     expect(
       setHold(store, TECH_ACTOR, { id: "h-1", reason: "Waiting on art", scope: "work:ag-0001" })

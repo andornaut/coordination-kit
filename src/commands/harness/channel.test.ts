@@ -61,7 +61,8 @@ describe("claude channel options", () => {
     const streams = { input: new PassThrough(), write: () => undefined };
     for (const args of [
       ["--conversation", RECIPIENT.toUpperCase().replace("0", "A")],
-      ["--game", "archies-dog-walks", "--game", "archies-dog-walks"],
+      ["--app", "archies-dog-walks", "--app", "archies-dog-walks"],
+      ["--game", "archies-dog-walks"],
       ["--state-dir", join(fixture.game.busDir, "unblock")],
       ["--poll-seconds", "0"],
       ["--unknown"],
@@ -85,7 +86,7 @@ describe("claude channel options", () => {
       "the selected games name different reports.recipient roles",
     );
     const input = new PassThrough();
-    const done = channel(io(), fixture.layout.root, ["--game", "archies-dog-walks"], {
+    const done = channel(io(), fixture.layout.root, ["--app", "archies-dog-walks"], {
       input,
       write: () => undefined,
     });

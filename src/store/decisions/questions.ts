@@ -656,14 +656,14 @@ export function listDecisions(
     .map(decisionRow);
 }
 
-/** Validate work, role and app hold scopes, including the legacy game spelling. */
+/** Validate a new work, role or app hold scope. */
 export function holdScope(scope: string): string {
   const [kind, ref, ...rest] = scope.split(":");
   ensure(
     rest.length === 0 &&
       ((kind === "role" && ref === undefined) ||
         (kind === "work" && ref !== undefined && WORK_ID.test(ref)) ||
-        ((kind === "app" || kind === "game") && ref !== undefined && GAME.test(ref))),
+        (kind === "app" && ref !== undefined && GAME.test(ref))),
     "invalid-scope",
   );
   return scope;

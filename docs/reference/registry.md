@@ -68,7 +68,7 @@ coordination-kit harness select \
   --app chibis-way-home
 ```
 
-Each `--app` selects every configured role for that app. `--game` remains a legacy alias.
+Each `--app` selects every configured role for that app.
 Use one selector spelling per invocation. Repeat `--role` to select additional
 registered role names; the union is changed once. Missing or invalid roles,
 an unknown game, an unavailable selected conversation ID, or a changed revision refuse the entire mutation. At least one scope is

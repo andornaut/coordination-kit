@@ -102,7 +102,7 @@ describe("harness select", () => {
     const before = readRegistry(test.layout);
     const result = await run(
       test,
-      ...select("--game", ARCHIE, "--game", CHIBI, "--role", `${ARCHIE}/tech`),
+      ...select("--app", ARCHIE, "--app", CHIBI, "--role", `${ARCHIE}/tech`),
     );
     expect(result).toMatchObject({ code: 0, err: "" });
     const after = JSON.parse(result.out) as Registry;
@@ -151,19 +151,20 @@ describe("harness select", () => {
     expect(readRegistry(test.layout).roles["game-coordinator"]!.harness).toBe("codex");
   });
 
-  it("fails closed for missing selected roles, target IDs, invalid games and stale revisions", async () => {
+  it("fails closed for missing selected roles, target IDs, invalid apps and stale revisions", async () => {
     const test = setup();
     const before = readFileSync(test.layout.registryFile, "utf8");
     for (const scope of [
-      ["--game", "unknown"],
+      ["--app", "unknown"],
       ["--role", "unknown"],
-      ["--game", ADA],
-      ["--game", ARCHIE, "--game", ARCHIE],
+      ["--app", ADA],
+      ["--app", ARCHIE, "--app", ARCHIE],
     ]) {
       // eslint-disable-next-line no-await-in-loop
       expect((await run(test, ...select(...scope))).code).toBe(1);
     }
-    const stale = select("--game", ARCHIE);
+    expect((await run(test, ...select("--game", ARCHIE))).code).toBe(2);
+    const stale = select("--app", ARCHIE);
     stale[stale.indexOf("--expected-revision") + 1] = "0";
     expect((await run(test, ...stale)).code).toBe(1);
     expect(readFileSync(test.layout.registryFile, "utf8")).toBe(before);
@@ -173,7 +174,7 @@ describe("harness select", () => {
 describe("scoped and mixed readiness", () => {
   it("probes effective per-role adapters once without sending or changing selection", async () => {
     const test = setup();
-    expect((await run(test, ...select("--game", ARCHIE))).code).toBe(0);
+    expect((await run(test, ...select("--app", ARCHIE))).code).toBe(0);
     const control = await startFakeControl(test.base, () => ({ result: {} }));
     controls.push(control);
     test.env.CODEX_CONTROL_SOCKET = control.path;
@@ -182,9 +183,9 @@ describe("scoped and mixed readiness", () => {
       test,
       "harness",
       "ready",
-      "--game",
+      "--app",
       ARCHIE,
-      "--game",
+      "--app",
       CHIBI,
       "--role",
       "game-coordinator",
@@ -211,7 +212,7 @@ describe("scoped and mixed readiness", () => {
   it("reports unavailable adapters and missing selected conversations, and rejects invalid scopes", async () => {
     const test = setup();
     test.env.CLAUDE_BIN = "/unavailable/claude";
-    const missing = await run(test, "claude", "ready", "--game", ADA);
+    const missing = await run(test, "claude", "ready", "--app", ADA);
     expect(missing.code).toBe(1);
     expect(JSON.parse(missing.out)).toMatchObject({
       ready: false,
@@ -222,13 +223,14 @@ describe("scoped and mixed readiness", () => {
         (row: { conversation: unknown }) => row.conversation === null,
       ),
     ).toBe(true);
-    const effective = await run(test, "harness", "ready", "--game", CHIBI);
+    const effective = await run(test, "harness", "ready", "--app", CHIBI);
     expect(effective.code).toBe(1);
     expect(JSON.parse(effective.out)).toMatchObject({
       ready: false,
       adapters: { codex: { status: "unavailable" } },
     });
-    expect((await run(test, "harness", "ready", "--game", "unknown")).code).toBe(1);
+    expect((await run(test, "harness", "ready", "--app", "unknown")).code).toBe(1);
+    expect((await run(test, "harness", "ready", "--game", CHIBI)).code).toBe(2);
     expect((await run(test, "codex", "ready", "--unknown")).code).toBe(2);
   });
 });

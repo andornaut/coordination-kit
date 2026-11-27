@@ -426,7 +426,7 @@ describe("stored review brief", () => {
         root,
         "review",
         "show",
-        "--game",
+        "--app",
         GAME,
         "--slot",
         "2026-11-18T16:30:00Z",
@@ -434,7 +434,7 @@ describe("stored review brief", () => {
     ).toBe(EXIT_OK);
     const shown = JSON.parse(out) as Record<string, unknown>;
     expect(shown).toMatchObject({
-      game: GAME,
+      appId: GAME,
       kind: "review-show",
       messageId: derivedId("review-brief", GAME, NEXT),
       recipient: "game-coordinator",
@@ -525,7 +525,7 @@ describe("stored review brief", () => {
         root,
         "review",
         "show",
-        "--game",
+        "--app",
         GAME,
         "--slot",
         "2026-11-18T16:30:00Z",

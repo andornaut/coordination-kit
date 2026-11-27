@@ -703,7 +703,7 @@ describe("hold commands", () => {
     });
   });
 
-  it("validates registered policy scopes and distinguishes game wakes from exact work", async () => {
+  it("validates registered policy scopes and distinguishes app wakes from exact work", async () => {
     const { coordinator, reader } = setup();
     const set = (id: string, scope: string) =>
       coordinator(
@@ -718,7 +718,8 @@ describe("hold commands", () => {
         "--approval",
         "request-1",
       );
-    expect((await set("policy-invalid", "game:missing")).err).toContain("policy-game-unregistered");
+    expect((await set("policy-invalid", `game:${GAME}`)).err).toContain("invalid-policy-scope");
+    expect((await set("policy-invalid", "app:missing")).err).toContain("policy-app-unregistered");
     expect((await set("policy-invalid", "work:missing:ag-0001")).err).toContain(
       "policy-repository-unregistered",
     );
@@ -728,11 +729,11 @@ describe("hold commands", () => {
     expect(
       (await coordinator("msg", "send", "--to", TECH_ROLE, "--body", "Role inbox.")).json,
     ).toMatchObject({ wake: { status: "accepted" } });
-    expect((await set("policy-game", `game:${GAME}`)).json).toMatchObject({
-      hold: { policy: { target: { game: GAME, kind: "game" } } },
+    expect((await set("policy-app", `app:${GAME}`)).json).toMatchObject({
+      hold: { policy: { target: { app: GAME, kind: "app" } } },
     });
     expect((await reader("hold", "list", "--role", ART_ROLE)).json).toMatchObject({
-      holds: [{ id: "policy-game" }],
+      holds: [{ id: "policy-app" }],
     });
     expect(
       (await coordinator("hold", "policy-release", "--id", "policy-work", "--approval", "r2")).json,

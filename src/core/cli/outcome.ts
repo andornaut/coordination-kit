@@ -22,9 +22,6 @@ export type ReasonToken = (typeof REASON_TOKENS)[number];
 
 export type SeamStatus = "delivered" | "deferred" | "skipped";
 
-/** The schema-1 selector echoed by a runner seam. */
-export type RunnerIdField = "appId" | "game";
-
 /** One slot's typed `review deliver` result. */
 export interface ReviewResult {
   readonly status: SeamStatus;

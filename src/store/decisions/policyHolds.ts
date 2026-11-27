@@ -22,7 +22,7 @@ export interface HoldView {
   /** The owner; null for an imported hold whose ledger names no registered owner. */
   readonly role: string | null;
   /**
-   * `work:<id>`, `role` (the owner itself) or `game:<id>`. An imported hold is `work:` and its
+   * `work:<id>`, `role` (the owner itself) or `app:<id>`. An imported hold is `work:` and its
    * `<repository>:<id>` items joined by `,`.
    */
   readonly scope: string;
@@ -119,9 +119,6 @@ export function policyHoldTarget(scope: string): PolicyHoldTarget {
     if (kind === "role" && ROLE.test(value)) {
       return { kind, role: value };
     }
-    if (kind === "game" && TOKEN.test(value)) {
-      return { game: value, kind };
-    }
     if (kind === "app" && TOKEN.test(value)) {
       return { app: value, kind };
     }
@@ -130,6 +127,14 @@ export function policyHoldTarget(scope: string): PolicyHoldTarget {
     return { ...checkRef({ id, repository: value }), kind };
   }
   throw new StoreError("invalid-policy-scope");
+}
+
+function storedPolicyHoldTarget(scope: string): PolicyHoldTarget {
+  const [kind, value, ...rest] = scope.split(":");
+  if (kind === "game" && value !== undefined && TOKEN.test(value) && rest.length === 0) {
+    return { game: value, kind };
+  }
+  return policyHoldTarget(scope);
 }
 
 /** A work-only policy hold has no effect on a role's inbox wake or session count. */
@@ -152,7 +157,7 @@ export function policyTargetCoversRole(
 
 function policyView(row: Row): PolicyHoldView {
   const scope = row.scope as string;
-  const target = policyHoldTarget(scope);
+  const target = storedPolicyHoldTarget(scope);
   return {
     id: row.id as string,
     policy: {
@@ -235,7 +240,7 @@ export function releasePolicyHold(
     if (existing === undefined) {
       throw new StoreError("missing");
     }
-    requireTargetPermission(authority, actor, policyHoldTarget(existing.scope as string));
+    requireTargetPermission(authority, actor, storedPolicyHoldTarget(existing.scope as string));
     if (existing.state === "released") {
       if (existing.release_approval !== approval) {
         throw new StoreError("id-conflict");
