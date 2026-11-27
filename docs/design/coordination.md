@@ -52,3 +52,4 @@ Reference: [review](../review.md#scheduled-review-seam), [libraries](../librarie
 | ck-0071 | Review and improve CLI ergonomics                          | [ck-0071.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0071.md) |
 | ck-0074 | Find assigned work by description                          | [ck-0074.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0074.md) |
 | ck-0077 | Audit CLI flags and default unambiguous choices            | [ck-0077.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0077.md) |
+| ck-0078 | Qualify the approved batch of closed message bodies       | [ck-0078.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0078.md) |
