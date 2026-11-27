@@ -494,11 +494,9 @@ describe("handoff", () => {
     // control socket, so the native attempt itself does not succeed).
     const store = Store.forLayout(TEST_CONTEXT, layout);
     try {
-      const last = store.db
-        .prepare("SELECT harness, conversation, detail FROM wakes WHERE role = ? ORDER BY seq DESC")
-        .get(KIT) as { harness: string; conversation: string | null; detail: string | null };
+      const last = store.index.rows("wakes").findLast(({ role }) => role === KIT);
       expect(last).toMatchObject({ conversation: KIT_CODEX, harness: "codex" });
-      expect(last.detail).not.toBe("recipient-hold-active");
+      expect(last?.detail).not.toBe("recipient-hold-active");
     } finally {
       store.close();
     }

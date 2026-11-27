@@ -1,9 +1,9 @@
-// @andornaut/coordination-kit/build/store: the SQLite coordination store, its message lifecycle,
+// @andornaut/coordination-kit/build/store: the file journal, its message lifecycle,
 // wakes, the registry writer fence, runner event ingest, the retirement, imported requests, work
 // records, and questions, holds and decisions.
 export type { StoreServiceContext } from "./store/context.ts";
 export type { AppendResult, VerifyResult } from "./store/db.ts";
-export { Store, STORE_FILE, type StoreContext, storePath, storeRoot } from "./store/db.ts";
+export { Store, type StoreContext, storePath, storeRoot } from "./store/db.ts";
 export { type CodexQuestion, dependentQuestions } from "./store/decisions/codexQuestions.ts";
 export {
   appendDecisionLine,
