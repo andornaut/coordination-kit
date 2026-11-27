@@ -12,6 +12,8 @@ Both setups work with Codex or Claude. The examples use Codex and one role. Use 
 conversation ID of the actual session doing the work. The harness supplies it to commands
 through `CODEX_THREAD_ID` for Codex or `CLAUDE_CODE_SESSION_ID` for Claude.
 If your role is already registered, go to [session startup](#start-or-resume-a-registered-session).
+Use the [recommended documentation layout](README.md#organize-project-documentation) to keep
+your project guides, requirements and work records easy to find.
 
 ## Get the CLI
 
@@ -39,6 +41,8 @@ ck --version
 Both checksum lines should say `OK`, the two `SOURCE_COMMIT` files should match, and the version
 should be `7.12.1`. Keep the `ck` function in the shell where you run the standalone example.
 A shared workspace can [pin the same release with npm](#set-up-an-app-workspace).
+Delivery Kit's runner uses that workspace pin for reviews and event ingests. Its bundled
+libraries have a [separate compatibility range](upgrading.md#coordination-kit-78).
 
 ## Set up a standalone project
 
@@ -266,8 +270,9 @@ ck() { node "$kit_dir/package/dist/cli.js" "$@"; }
 ck --root "$primary" session start
 ```
 
-Use the `coordination-status` skill to find a task or check its status, and `coordination-lifecycle`
-to start or resume approved work.
+Use the `coordination-status` skill to find a task by description or check its recorded status.
+If several records match, confirm the exact ID. Give that ID to the `coordination-lifecycle`
+skill when starting or resuming approved work, and verify the checks for the exact landed revision.
 
 For a shared app or game workspace, use the CLI installed in the primary coordinator checkout.
 Use the existing shared registry and reserve `init` for standalone projects.

@@ -1,9 +1,28 @@
 # Commands
 
-Per-command semantics for the `coordination-kit` CLI, beyond the group table in the
-[README](../README.md#usage). `coordination-kit --help` lists every form and flag.
+`coordination-kit --help` lists every form and flag.
 For one command, run `coordination-kit COMMAND --help`, for example
 `coordination-kit msg send --help`.
+
+## Usage
+
+The `@andornaut/coordination-kit` package exposes the CLI as `dist/cli.js`. It uses Git and
+`flock`, `claude agents --json` for Claude readiness, `gh` or `glab` for optional forge
+workflows, and `tar` for store retirement.
+
+Commands resolve the workspace from
+`--root DIR` or `--root=DIR`, else `COORDINATION_KIT_ROOT`, else `DELIVERY_KIT_ROOT`, else the
+working directory. Pass the root at most once, before the `--` option terminator. The runner commands
+`review deliver`, `review show` and `events ingest` accept `--app ID` or `--game ID`.
+See [runner examples and compatibility](store.md#runner-events). Pass the shared coordinator
+as `--root` to `work find`. The other `work` commands use `--root` as the repository to inspect,
+defaulting to the working directory. They take the coordinator root only from
+`COORDINATION_KIT_ROOT` or `DELIVERY_KIT_ROOT`.
+
+Exit status is 0 on success, 1 for invalid configuration, a failed precondition, an unavailable
+read or work-check findings, and 2 for a usage error or an unexpected failure. `review deliver`
+and `events ingest` exit 0 for every typed result, 2 for a usage error and 1 for any other failure.
+Errors go to stderr prefixed `coordination-kit:`. Commands with a JSON result keep it on stdout.
 
 ## Command forms
 

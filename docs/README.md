@@ -3,18 +3,38 @@
 [Getting started](getting-started.md) covers installation and the first workflow for
 a standalone repository or a shared app workspace.
 
+The topic pages at this level are the operating and developer reference. The
+[design index](design/README.md) covers current requirements and rationale. The
+[work index](https://github.com/andornaut/coordination-kit/blob/main/docs/work/README.md)
+covers individual work records and decisions from the source repository.
+
 | Topic                   | Reference                                                                                         |
 | ----------------------- | ------------------------------------------------------------------------------------------------- |
 | Setup and state         | [Configuration](configuration.md), [standalone projects](standalone.md), [upgrades](upgrading.md) |
 | CLI and library         | [Commands](commands.md), [library exports](libraries.md)                                          |
 | Roles and communication | [Registry](registry.md), [messages](messages.md), [scheduled reviews](review.md)                  |
-| Work and decisions      | [Work files](work-files.md), [store](store.md), [design areas](design/README.md)                  |
+| Work and decisions      | [Work files](work-files.md), [store](store.md)                                                    |
+| Development and release | [Checks, source layout, and releases](development.md)                                             |
 | Project documentation   | [Layout, audits, and compaction](#organize-project-documentation)                                 |
 
 ## Organize project documentation
 
 Link the repository README to `docs/README.md`. Use the latter as a short map of the
 current requirements, technical design, and task history.
+
+```text
+README.md                    project overview and entry points
+docs/
+  README.md                  documentation map
+  getting-started.md         setup and first use
+  design/
+    README.md                current requirements and design areas
+    <topic>.md                rules and rationale for a topic
+  work/
+    README.md                conventions and routes to work records
+    <id>.md                   one request, its decisions and outcome
+    index/<area>.md           optional topic work table
+```
 
 - Put current requirements and rationale under `docs/design/` or in one clearly linked
   authoritative document. Choose topic names that suit the project. Games can keep a

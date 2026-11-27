@@ -1,9 +1,10 @@
 # Work items
 
-Each tracked request is one file, `docs/work/<id>.md`. It records scope and milestones. Live
-progress (start, blocks, stage evidence and finish) is recorded in the coordination store with the
-`work` verbs. The [design index](../design/README.md) links each area. Its work table is
-either in the design summary or at `docs/work/index/<area>.md`.
+This directory records requests, approved scope, decisions and outcomes. Each request has one
+file, `<id>.md`. Find work by area through the [design index](../design/README.md). Area tables
+live in the design summaries or, for a longer table, `index/<area>.md`. Live progress (start,
+blocks, stage evidence and finish) is recorded in the coordination store with the `work` verbs.
+See the [documentation index](../README.md) for the operating guides.
 
 | Front matter | Content                                                                                                                   |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------- |

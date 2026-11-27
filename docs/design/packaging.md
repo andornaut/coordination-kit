@@ -12,7 +12,7 @@ workflow passes on the exact commit, and a published tag is never moved. Public 
 on-disk formats follow semver.
 
 Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
-[Developing](../../README.md#developing), [Compatibility and releases](../../README.md#compatibility-and-releases).
+[developing](../development.md#developing), [compatibility and releases](../development.md#compatibility-and-releases).
 
 ## Work items
 
