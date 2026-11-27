@@ -11,6 +11,7 @@ Choose how the repositories and roles work together.
 Both setups work with Codex or Claude. The examples use Codex and one role. Use the
 conversation ID of the actual session doing the work. The harness supplies it to commands
 through `CODEX_THREAD_ID` for Codex or `CLAUDE_CODE_SESSION_ID` for Claude.
+If your role is already registered, go to [session startup](#start-or-resume-a-registered-session).
 
 ## Get the CLI
 
@@ -247,6 +248,47 @@ pointer or an activated filesystem store. If you use Delivery Kit, configure exp
 the local [review route](review.md#review-route) and a runner cadence. Use
 [workspace configuration](configuration.md#workspace-configjson) to add roles and set
 review minutes.
+
+## Start or resume a registered session
+
+Run `session start` at startup or resume from the conversation already bound to your role.
+It reports the current binding, checkpoint and open counts. Use the primary checkout as the
+command root even when working in a linked worktree. Initialization and role registration belong
+to one-time setup. Replace the example paths below with the primary checkout and pinned CLI
+locations from your setup.
+
+For a standalone project, use the verified release archive.
+
+```sh
+primary=/absolute/path/to/primary-project
+kit_dir=/absolute/path/to/extracted-release
+ck() { node "$kit_dir/package/dist/cli.js" "$@"; }
+ck --root "$primary" session start
+```
+
+Use the `coordination-status` skill to find a task or check its status, and `coordination-lifecycle`
+to start or resume approved work.
+
+For a shared app or game workspace, use the CLI installed in the primary coordinator checkout.
+Use the existing shared registry and reserve `init` for standalone projects.
+
+```sh
+workspace=/absolute/path/to/primary-coordinator
+ck() {
+  node "$workspace/node_modules/@andornaut/coordination-kit/dist/cli.js" --root "$workspace" "$@"
+}
+ck session start
+```
+
+At a safe boundary, read your queued originals.
+
+```sh
+ck inbox --include-body
+```
+
+Reconcile each original by its exact ID after handling. For retained originals, record the owner,
+reason and next boundary.
+See the [message lifecycle](store.md#message-lifecycle).
 
 ## Clean up agent-owned resources
 
