@@ -1,5 +1,14 @@
 # Upgrading
 
+## Coordination Kit 7.12
+
+An approved one-time [closed-history compaction](store.md#one-time-closed-history-compaction)
+can reduce eligible closed message bodies in a filesystem checkpoint without collecting individual
+replacement evidence. It uses its own plan, an independent restore, writer custody, an exact
+reservation and separate activation approval. Check
+[repeat compaction compatibility](#repeat-filesystem-compaction) before selecting a successor.
+Retain the archive and restored history for verification and replay.
+
 ## Coordination Kit 7.11
 
 The pinned package now synchronizes reusable skills at standalone project registration.

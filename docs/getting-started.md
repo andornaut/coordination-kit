@@ -15,20 +15,20 @@ through `CODEX_THREAD_ID` for Codex or `CLAUDE_CODE_SESSION_ID` for Claude.
 ## Get the CLI
 
 You need Node 24.21.0 or later, Git and `flock`. Download the archive and its verification files
-from the same [7.11.0 release][release]. Use a directory outside any repository.
+from the same [7.12.0 release][release]. Use a directory outside any repository.
 
 ```sh
-kit_dir="$HOME/.local/share/coordination-kit/7.11.0"
-kit_release="https://github.com/andornaut/coordination-kit/releases/download/v7.11.0"
+kit_dir="$HOME/.local/share/coordination-kit/7.12.0"
+kit_release="https://github.com/andornaut/coordination-kit/releases/download/v7.12.0"
 mkdir -p "$kit_dir"
 (
   set -e
   cd "$kit_dir"
-  for asset in coordination-kit-7.11.0.tgz SOURCE_COMMIT SHA256SUMS; do
+  for asset in coordination-kit-7.12.0.tgz SOURCE_COMMIT SHA256SUMS; do
     curl -fLO "$kit_release/$asset"
   done
   sha256sum -c SHA256SUMS
-  tar -xzf coordination-kit-7.11.0.tgz
+  tar -xzf coordination-kit-7.12.0.tgz
   cmp SOURCE_COMMIT package/SOURCE_COMMIT
 )
 ck() { node "$kit_dir/package/dist/cli.js" "$@"; }
@@ -36,7 +36,7 @@ ck --version
 ```
 
 Both checksum lines should say `OK`, the two `SOURCE_COMMIT` files should match, and the version
-should be `7.11.0`. Keep the `ck` function in the shell where you run the standalone example.
+should be `7.12.0`. Keep the `ck` function in the shell where you run the standalone example.
 A shared workspace can [pin the same release with npm](#set-up-an-app-workspace).
 
 ## Set up a standalone project
@@ -154,7 +154,7 @@ Install the checked release, commit `package.json` and `package-lock.json`, and 
 
 ```sh
 npm install --save-dev \
-  https://github.com/andornaut/coordination-kit/releases/download/v7.11.0/coordination-kit-7.11.0.tgz
+  https://github.com/andornaut/coordination-kit/releases/download/v7.12.0/coordination-kit-7.12.0.tgz
 workspace="$(pwd -P)"
 ck() { node "$workspace/node_modules/@andornaut/coordination-kit/dist/cli.js" --root "$workspace" "$@"; }
 ck --version
@@ -280,4 +280,4 @@ review.
 See the [command reference](commands.md) for syntax and the [documentation index](README.md)
 for the remaining guides.
 
-[release]: https://github.com/andornaut/coordination-kit/releases/tag/v7.11.0
+[release]: https://github.com/andornaut/coordination-kit/releases/tag/v7.12.0

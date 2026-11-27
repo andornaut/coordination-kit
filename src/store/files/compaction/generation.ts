@@ -36,7 +36,7 @@ const HEX = /^[a-f0-9]{64}$/;
 
 type JournalSnapshot = ReturnType<FileJournal["snapshot"]>;
 
-interface FileCheckpointSource {
+export interface FileCheckpointSource {
   readonly archives: readonly string[];
   readonly events: JournalSnapshot["events"];
   readonly previous: CheckpointPredecessor | undefined;

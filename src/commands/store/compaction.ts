@@ -20,9 +20,12 @@ import { storePath, storeRoot } from "../../store/db.ts";
 import { canonicalJson, REF, sha256 } from "../../store/eventCodec.ts";
 import { fileAuthority } from "../../store/files/authority.ts";
 import type { CheckpointHead } from "../../store/files/compaction/checkpoint.ts";
+import { qualifyClosedHistory } from "../../store/files/compaction/closedHistory.ts";
+import { verifyClosedHistoryReplay } from "../../store/files/compaction/closedHistoryReplay.ts";
 import {
   fileCheckpointCandidate,
   fileCheckpointJournal,
+  type FileCheckpointSource,
   type PreparedFileCheckpoint,
   prepareFileCheckpoint,
   readFileCheckpointSource,
@@ -46,10 +49,16 @@ import { callerOf, required, text, type Values } from "../args.ts";
 import { storeVerb } from "./context.ts";
 
 export const COMPACTION_PREPARE_OPTIONS = {
+  "closed-history": { type: "string" },
   evidence: { type: "string" },
   id: { type: "string" },
   "native-id": { type: "string" },
   receipt: { type: "string" },
+  restore: { type: "string" },
+} as const;
+
+export const CLOSED_HISTORY_PLAN_OPTIONS = {
+  "closed-history": { type: "string" },
   restore: { type: "string" },
 } as const;
 
@@ -276,15 +285,12 @@ function reservationCommand(cancel: boolean): Handler {
 export const compactionReserve = reservationCommand(false);
 export const compactionCancel = reservationCommand(true);
 
-function operation(context: StoreServiceContext, values: Values) {
+function restoreSource(context: StoreServiceContext, values: Values) {
   const { layout } = context;
   const source = files(context);
   const { path, receipt: cutover } = source;
   const excluded = [layout.root, storeRoot(layout)];
   const restored = externalPath(canonicalPath(required(values, "restore")), ...excluded);
-  const file = required(values, "receipt");
-  externalPath(canonicalPath(file, dirname(file)), ...excluded, restored);
-  const proofPath = required(values, "evidence");
   independentRestore(restored);
   if (
     readFileJournalReservation(restored) !== undefined ||
@@ -293,23 +299,125 @@ function operation(context: StoreServiceContext, values: Values) {
     throw new StoreError("compaction-restore-reserved");
   }
   const restoredSource = readFileCheckpointSource(restored);
-  const initial = evidence(proofPath, restoredSource.events);
+  return { cutover, excluded, path, restored, restoredSource };
+}
+
+function registeredScope(context: StoreServiceContext): CompactionScope {
+  const { revision, roles } = registry(context);
+  return {
+    registeredGames: new Set(Object.keys(context.layout.config.games)),
+    registeredRoles: new Set(Object.keys(roles)),
+    registryRevision: revision,
+  };
+}
+
+function reviewedClosedHistory(
+  restoredSource: FileCheckpointSource,
+  scope: CompactionScope,
+  cutover: ReturnType<typeof files>["receipt"],
+  approval: string,
+) {
+  if (!reference(approval, REF)) {
+    throw new StoreError("closed-history-approval-invalid");
+  }
+  const plan = qualifyClosedHistory(restoredSource, scope, cutover.head);
+  const selectors = {
+    head: plan.head,
+    messageIds: new Set(plan.selected),
+    registryRevision: plan.registryRevision,
+    routineEventSequences: new Set<number>(),
+  };
+  const candidate =
+    plan.selected.length === 0
+      ? null
+      : fileCheckpointCandidate(
+          restoredSource,
+          { ...scope, verifiedEvidence: selectors },
+          cutover.head,
+        );
+  const replay =
+    candidate === null
+      ? null
+      : verifyClosedHistoryReplay(
+          restoredSource,
+          candidate.checkpoint,
+          candidate.receipt,
+          plan.selected,
+        );
+  const proof =
+    candidate === null
+      ? null
+      : {
+          approval,
+          checkpointDigest: candidate.receipt.digest,
+          cutoverId: cutover.id,
+          head: plan.head,
+          kind: "closed-history" as const,
+          registryRevision: plan.registryRevision,
+          schema: 2 as const,
+          selected: plan.selected,
+        };
+  return { plan, proof, replay, selectors };
+}
+
+export function closedHistoryPlan(context: StoreServiceContext, values: Values) {
+  const approval = required(values, "closed-history");
+  const { cutover, restoredSource } = restoreSource(context, values);
+  const scope = registeredScope(context);
+  const { plan, proof, replay } = reviewedClosedHistory(restoredSource, scope, cutover, approval);
+  if (registry(context).revision !== scope.registryRevision) {
+    throw new StoreError("compaction-registry-changed");
+  }
+  return {
+    ...plan,
+    evidence: proof,
+    kind: "closed-history-compaction-plan",
+    replay,
+    schema: 1,
+  };
+}
+
+function operation(context: StoreServiceContext, values: Values) {
+  const { layout } = context;
+  const file = required(values, "receipt");
+  const proofPath = required(values, "evidence");
+  const closedHistory = text(values, "closed-history");
+  const { cutover, excluded, path, restored, restoredSource } = restoreSource(context, values);
+  externalPath(canonicalPath(file, dirname(file)), ...excluded, restored);
+  let initial: ReturnType<typeof evidence>;
+  if (closedHistory === undefined) {
+    initial = evidence(proofPath, restoredSource.events);
+  } else {
+    externalPath(canonicalPath(proofPath), ...excluded, restored);
+    const supplied = regularJson(proofPath);
+    const review = reviewedClosedHistory(
+      restoredSource,
+      registeredScope(context),
+      cutover,
+      closedHistory,
+    );
+    if (review.proof === null || canonicalJson(supplied) !== canonicalJson(review.proof)) {
+      throw new StoreError("closed-history-evidence-mismatch");
+    }
+    initial = { digest: sha256(canonicalJson(supplied)), selectors: review.selectors };
+  }
   function scope(): CompactionScope {
-    const current = evidence(proofPath, restoredSource.events);
+    const digest = sha256(canonicalJson(regularJson(proofPath)));
     const { revision, roles } = maintainer(context, values);
-    if (current.digest !== initial.digest || current.selectors.registryRevision !== revision) {
+    if (digest !== initial.digest || initial.selectors.registryRevision !== revision) {
       throw new StoreError("compaction-evidence-changed");
     }
     return {
       registeredGames: new Set(Object.keys(layout.config.games)),
       registeredRoles: new Set(Object.keys(roles)),
       registryRevision: revision,
-      verifiedEvidence: current.selectors,
+      verifiedEvidence: initial.selectors,
     };
   }
   const { head, registryRevision } = initial.selectors;
   return {
     binding: { head, registryRevision },
+    closedHistory,
     cutover,
     file,
     initial,
@@ -349,6 +457,9 @@ export const compactionPrepare: Handler = storeVerb(
   COMPACTION_PREPARE_OPTIONS,
   (context, values) =>
     maintenanceLock(context, values, () => {
+      if (text(values, "closed-history") !== undefined && text(values, "id") === undefined) {
+        throw new StoreError("compaction-reservation-required");
+      }
       const input = operation(context, values);
       const { path } = fileCheckpointJournal(input.path);
       if (readFileJournalFence(path) !== undefined) {
@@ -412,6 +523,9 @@ export const compactionActivate: Handler = storeVerb(
         isCanonicalUuid(reservationId) && isCanonicalUuid(reservationNonce)
           ? { ...input.binding, id: reservationId, nonce: reservationNonce }
           : undefined;
+      if (input.closedHistory !== undefined && reservation === undefined) {
+        throw new StoreError("compaction-reservation-required");
+      }
       // Reserved IDs are version 5; legacy prepare issued random version 4 IDs.
       if ((id[14] === "5") !== (reservation !== undefined)) {
         throw new StoreError("compaction-receipt-mismatch");

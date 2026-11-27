@@ -11,6 +11,7 @@ import { storeExport } from "../../store/messages/service.ts";
 import { StoreError } from "../../store/types.ts";
 import { importApprovalLedger } from "../../work/approvals.ts";
 import { CALLER, callerOf, isoInstant, required, Usage } from "../args.ts";
+import { CLOSED_HISTORY_PLAN_OPTIONS, closedHistoryPlan } from "./compaction.ts";
 import { storeVerb } from "./context.ts";
 
 export const STORE_IMPORT_OPTIONS = {
@@ -22,7 +23,7 @@ export const STORE_IMPORT_OPTIONS = {
 export const STORE_EXPORT_OPTIONS = { ...CALLER, since: { type: "string" } } as const;
 
 export const STORE_REBUILD_OPTIONS = CALLER;
-export const STORE_COMPACTION_PLAN_OPTIONS = {} as const;
+export const STORE_COMPACTION_PLAN_OPTIONS = CLOSED_HISTORY_PLAN_OPTIONS;
 
 export const STORE_RETIRE_OPTIONS = {
   ...CALLER,
@@ -64,7 +65,10 @@ export const storeRebuildCommand: Handler = storeVerb(
 export const storeCompactionPlanCommand: Handler = storeVerb(
   "store compaction-plan",
   STORE_COMPACTION_PLAN_OPTIONS,
-  (context) => {
+  (context, values) => {
+    if (values["closed-history"] !== undefined || values.restore !== undefined) {
+      return closedHistoryPlan(context, values);
+    }
     const { revision, roles } = registry(context);
     const store = Store.readLayout(context, context.layout);
     try {

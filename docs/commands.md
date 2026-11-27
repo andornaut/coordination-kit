@@ -172,6 +172,23 @@ activation require the current active game-coordinator binding. See the
 Reserve, prepare, activate and cancel require the active workspace `store:maintain` binding. See the
 [filesystem compaction runbook](store.md#filesystem-compaction-runbook).
 
+### One-time closed-history compaction
+
+- `store compaction-plan --closed-history APPROVAL_REF --restore ABSOLUTE_DIR` plans against an
+  independent restore. The schema 1 result is `kind: "closed-history-compaction-plan"` with
+  `head`, `registryRevision`, `window`, `selected` and `excluded`. It includes a replay
+  equivalence summary in `replay` and a schema 2 recipe in `evidence`. Both fields are
+  `null` when the selection is empty.
+- `store compaction-prepare --closed-history APPROVAL_REF --restore ABSOLUTE_DIR --evidence ABSOLUTE_FILE --receipt ABSOLUTE_FILE --id REQUEST_UUID`
+  verifies the exact approved scope against the reserved source and independent restore.
+- `store compaction-activate --closed-history APPROVAL_REF --restore ABSOLUTE_DIR --evidence ABSOLUTE_FILE --receipt ABSOLUTE_FILE --id RECEIPT_ID --approval EXACT_ACTIVATION_REF`
+  rechecks the approval, evidence, restore and receipt before selecting the checkpoint.
+
+Reserve the exact plan head and registry revision with the ordinary reserve command. This form
+requires a reservation even for the first checkpoint. Prepare and activate use the same
+exact existing user decision reference. Activation also requires approval for the exact prepared receipt.
+See the [one-time runbook](store.md#one-time-closed-history-compaction).
+
 ## Command semantics
 
 - `claude channel`: by default it serves the `reports.recipient` that every app (or each

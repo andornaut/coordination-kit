@@ -389,11 +389,12 @@ export const SPECS = {
     summary: "verify the event hash chain and recreate every projection from the events",
   },
   "store compaction-plan": {
-    forms: [[]],
+    forms: [[], ["closed-history", "restore"]],
     group: "store",
     options: STORE_COMPACTION_PLAN_OPTIONS,
     summary:
       "report filesystem history windows, measured bytes and protected records without writing",
+    values: { "closed-history": "APPROVAL_REF", restore: "ABSOLUTE_DIR" },
   },
   "store compaction-reserve": {
     forms: [["id", "head-seq", "head-hash", "registry-revision", "native-id?"]],
@@ -421,11 +422,15 @@ export const SPECS = {
     },
   },
   "store compaction-prepare": {
-    forms: [["restore", "evidence", "receipt", "id?", "native-id?"]],
+    forms: [
+      ["restore", "evidence", "receipt", "id?", "native-id?"],
+      ["closed-history", "restore", "evidence", "receipt", "id", "native-id?"],
+    ],
     group: "store",
     options: COMPACTION_PREPARE_OPTIONS,
     summary: "qualify an exact filesystem checkpoint and write a new external receipt",
     values: {
+      "closed-history": "APPROVAL_REF",
       evidence: "ABSOLUTE_FILE",
       id: "REQUEST_UUID",
       receipt: "ABSOLUTE_FILE",
@@ -433,12 +438,16 @@ export const SPECS = {
     },
   },
   "store compaction-activate": {
-    forms: [["id", "restore", "evidence", "receipt", "approval", "native-id?"]],
+    forms: [
+      ["id", "restore", "evidence", "receipt", "approval", "native-id?"],
+      ["closed-history", "id", "restore", "evidence", "receipt", "approval", "native-id?"],
+    ],
     group: "store",
     options: COMPACTION_ACTIVATE_OPTIONS,
     summary: "select an exact restored checkpoint at the approved idle boundary",
     values: {
       approval: "REF",
+      "closed-history": "APPROVAL_REF",
       evidence: "ABSOLUTE_FILE",
       id: "RECEIPT_ID",
       receipt: "ABSOLUTE_FILE",

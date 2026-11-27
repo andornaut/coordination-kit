@@ -49,7 +49,7 @@ function recentId(index: number): string {
   return `00000000-0000-4000-8001-${String(index).padStart(12, "0")}`;
 }
 
-function fixture() {
+function fixture(hasReplacement = true) {
   const { base, layout, root } = storeFixture();
   execFileSync("git", ["-C", root, "init", "-q", "--initial-branch=main"]);
   writeFileSync(join(root, ".gitignore"), "/var/\n");
@@ -64,7 +64,7 @@ function fixture() {
   start("anchor");
   const routine = start("historical");
   sendMessage(store, SENDER, { body: BODY, id: ID, intent: "queue", to: OWNER.role });
-  closeMessage(store, OWNER, ID, { evidence: [REPLACEMENT] });
+  closeMessage(store, OWNER, ID, { evidence: hasReplacement ? [REPLACEMENT] : [] });
   const closeSeq = store.head().seq;
   store.transaction(() => {
     for (let index = 0; index < 100; index++) {
@@ -116,6 +116,66 @@ function fixture() {
   };
   return { base, common, head, layout, receipt, restore, run, selectors, target, writeEvidence };
 }
+
+it("replays a closed-history batch on an independent restore and switches only the reviewed selection", async () => {
+  const { common, head, restore, run, target, writeEvidence } = fixture(false);
+  const mode = ["--closed-history", "decision-closed-history"];
+  const original = openFileJournal(target).snapshot();
+  expect(await run(["compaction-prepare", ...common])).toMatchObject({
+    code: EXIT_INVALID,
+    err: "coordination-kit: compaction-message-replacement-unverified\n",
+  });
+  const preview = await run(["compaction-plan", ...mode, "--restore", restore]);
+  expect(preview.code, preview.err).toBe(EXIT_OK);
+  const plan = JSON.parse(preview.out) as {
+    evidence: { selected: string[] };
+    replay: unknown;
+    selected: string[];
+  };
+  expect(plan.selected).toEqual([ID]);
+  expect(plan.replay).toMatchObject({ stateEquivalent: true, removedBodies: 1 });
+  expect(openFileJournal(target).snapshot()).toEqual(original);
+  writeEvidence(plan.evidence);
+  const prepare = ["compaction-prepare", ...mode, ...common, "--id", OTHER_ID];
+  expect(await run(prepare)).toMatchObject({
+    code: EXIT_INVALID,
+    err: "coordination-kit: compaction-reservation-required\n",
+  });
+  expect(
+    await run([
+      "compaction-reserve",
+      "--id",
+      OTHER_ID,
+      "--head-seq",
+      String(head.seq),
+      "--head-hash",
+      head.hash,
+      "--registry-revision",
+      "1",
+    ]),
+  ).toMatchObject({ code: EXIT_OK });
+  writeEvidence({ ...plan.evidence, selected: [recentId(0)] });
+  expect(await run(prepare)).toMatchObject({
+    code: EXIT_INVALID,
+    err: "coordination-kit: closed-history-evidence-mismatch\n",
+  });
+  writeEvidence(plan.evidence);
+  const prepared = await run(prepare);
+  expect(prepared.code, prepared.err).toBe(EXIT_OK);
+  expect(openFileJournal(target).snapshot()).toEqual(original);
+  const { id } = JSON.parse(prepared.out) as { id: string };
+  const activated = await run([
+    "compaction-activate",
+    ...mode,
+    ...common,
+    "--id",
+    id,
+    "--approval",
+    "decision-activation",
+  ]);
+  expect(activated.code, activated.err).toBe(EXIT_OK);
+  expect(readFileCheckpointSource(target).previous?.selection.head).toEqual(head);
+});
 
 it("requires exact qualification, preserves original loose records and resumes the same fenced ID", async () => {
   const { base, common, head, layout, receipt, restore, run, selectors, target, writeEvidence } =

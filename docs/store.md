@@ -182,6 +182,77 @@ reservation exists. The retained journals and restored copy contain the original
 There is no scheduled activation or cleanup. Before a second activation, follow the
 [repeat compaction compatibility requirements](upgrading.md#repeat-filesystem-compaction).
 
+## One-time closed-history compaction
+
+Use this form only for an explicitly approved one-time reduction of aged closed message bodies.
+The approval replaces the requirement for an individual durable replacement for each selected
+body. It preserves the 100 most recent closed originals per recipient and the other protections
+for unresolved delivery, operational references, active work, questions, decisions, recovery and
+transitive references. The plan identifies exact selected IDs and exclusions. Routine event
+compaction stays in the ordinary procedure.
+
+Use the same independent restore and writer-custody checks as the
+[filesystem compaction runbook](#filesystem-compaction-runbook). Keep decisions, approvals,
+receipts and archives accessible. Use absolute paths outside the checkout and authoritative state
+for the restore, plan, evidence and receipt. Keep the evidence and receipt outside the restore.
+In the examples, shell variables stand for those paths and the operator's exact references and IDs.
+Set `approval_ref` to the existing user decision that authorizes this one-time scope.
+
+1. Run the read-only plan on the independent restore and save the output. Replay proof runs in
+   memory and reports state equivalence, the head and event count, covered projections, and the
+   count and byte size of removed bodies.
+
+   ```sh
+   coordination-kit --root "$workspace" store compaction-plan \
+     --closed-history "$approval_ref" --restore "$restore" > "$plan"
+   ```
+
+   Review the exact IDs and protection reasons. An empty selection reports `replay: null` and
+   `evidence: null` and ends the procedure. Otherwise, confirm `replay.stateEquivalent` and
+   extract the evidence for both later commands. The recipe binds the approval, exact selection
+   and checkpoint digest to the cutover, head and registry revision.
+
+   ```sh
+   jq -e '.evidence' "$plan" > "$evidence"
+   ```
+
+2. At the approved idle boundary, obtain writer custody and reserve the exact plan head and registry
+   revision with `store compaction-reserve` and a new request UUID. Keep custody until activation
+   or exact cancellation. If the source head or scope changed, qualify a new plan and restore.
+
+   ```sh
+   coordination-kit --root "$workspace" store compaction-reserve --id "$request_id" \
+     --head-seq "$(jq -r '.head.seq' "$plan")" \
+     --head-hash "$(jq -r '.head.hash' "$plan")" \
+     --registry-revision "$(jq -r '.registryRevision' "$plan")"
+   ```
+
+3. Prepare with a fresh receipt path and the same approval, restore and evidence.
+
+   ```sh
+   coordination-kit --root "$workspace" store compaction-prepare \
+     --closed-history "$approval_ref" --restore "$restore" --evidence "$evidence" \
+     --receipt "$receipt" --id "$request_id"
+   ```
+
+4. Obtain explicit activation approval for the exact returned receipt ID and preserve it outside
+   the reserved journal. At the same custody boundary, run activate with that receipt ID and approval.
+
+   ```sh
+   coordination-kit --root "$workspace" store compaction-activate \
+     --closed-history "$approval_ref" --restore "$restore" --evidence "$evidence" \
+     --receipt "$receipt" --id "$receipt_id" --approval "$activation_ref"
+   ```
+
+5. Verify that the selected checkpoint serves the expected metadata and reports `bodyExpired: true`
+   for the selected originals. Confirm that protected bodies and non-body projections stay
+   accessible. Preserve the independent restore and committed journal chain. Use the same
+   [cancellation or exact retry rules](#filesystem-compaction-runbook) if interrupted.
+
+The selected bodies become unavailable from the active checkpoint. The retained history,
+predecessor journals and independent restore still carry the original data. Disk reclamation and
+automatic activation are outside this procedure.
+
 ## Schema
 
 `events` is append-only; triggers abort any `UPDATE` or `DELETE`.

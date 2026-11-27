@@ -145,13 +145,12 @@ function reduce(event: StoredEvent): CheckpointEntry {
   return { event: reduced, reducedDigest: digest(reduced) };
 }
 
-/** Build a deterministic candidate from the complete, independently adjudicated source. */
-export function prepareCompactionCheckpoint(
+/** Verify the full source, the existing reductions and the exact cutover anchor. */
+export function verifyCheckpointInput(
   tail: readonly StoredEvent[],
-  scope: CompactionScope,
   cutoverAnchor?: CheckpointHead,
   previous?: CheckpointPredecessor,
-): { readonly checkpoint: CompactionCheckpoint; readonly receipt: CheckpointReceipt } {
+) {
   const prefix = previous && verifyCompactionCheckpoint(previous.checkpoint, previous.selection);
   const head = prefix
     ? verifyCompactionTail(prefix, tail)
@@ -167,6 +166,46 @@ export function prepareCompactionCheckpoint(
   ) {
     throw new StoreError("checkpoint-anchor-mismatch");
   }
+  const reduced = new Set(
+    prefix?.entries
+      .filter(({ reducedDigest }) => reducedDigest !== undefined)
+      .map(({ event }) => event.seq),
+  );
+  return { anchor, events, first, head, prefix, reduced };
+}
+
+function reduceAtAnchor(event: StoredEvent, anchorSequence: number): CheckpointEntry {
+  if (event.seq === anchorSequence) {
+    throw new StoreError("checkpoint-anchor-protected");
+  }
+  return reduce(event);
+}
+
+/** Check an exact message candidate with the same reducer and anchor guard as checkpoint writes. */
+export function messageReductionRefusal(event: StoredEvent, anchorSequence: number): string | null {
+  try {
+    reduceAtAnchor(event, anchorSequence);
+    return null;
+  } catch (error) {
+    if (error instanceof StoreError) {
+      return error.code;
+    }
+    throw error;
+  }
+}
+
+/** Build a deterministic candidate from the complete, independently adjudicated source. */
+export function prepareCompactionCheckpoint(
+  tail: readonly StoredEvent[],
+  scope: CompactionScope,
+  cutoverAnchor?: CheckpointHead,
+  previous?: CheckpointPredecessor,
+): { readonly checkpoint: CompactionCheckpoint; readonly receipt: CheckpointReceipt } {
+  const { anchor, events, first, head, prefix, reduced } = verifyCheckpointInput(
+    tail,
+    cutoverAnchor,
+    previous,
+  );
   const evidence = scope.verifiedEvidence;
   if (
     evidence === undefined ||
@@ -176,11 +215,6 @@ export function prepareCompactionCheckpoint(
     throw new StoreError("checkpoint-evidence-mismatch");
   }
   const count = evidence.messageIds.size + evidence.routineEventSequences.size;
-  const reduced = new Set(
-    prefix?.entries
-      .filter(({ reducedDigest }) => reducedDigest !== undefined)
-      .map(({ event }) => event.seq),
-  );
   const plan = planFileCompaction(events, scope, reduced);
   const eligible = plan.streams.reduce((sum, stream) => sum + stream.eligible.count, 0);
   if (count === 0 || eligible !== count) {
@@ -198,10 +232,7 @@ export function prepareCompactionCheckpoint(
     if (reduced.has(event.seq)) {
       entries.push(prefix!.entries[event.seq - 1]!);
     } else if (message || routine) {
-      if (event.seq === (anchor.seq || first.seq)) {
-        throw new StoreError("checkpoint-anchor-protected");
-      }
-      entries.push(reduce(event));
+      entries.push(reduceAtAnchor(event, anchor.seq || first.seq));
     } else {
       entries.push({ event });
     }

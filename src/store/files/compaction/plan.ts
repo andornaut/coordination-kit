@@ -49,6 +49,12 @@ type Reason =
   | "routine-source-unverified"
   | "protected-event-kind";
 
+export type MessageCompactionObserver = (
+  event: StoredEvent,
+  reason: Reason | null,
+  close?: StoredEvent,
+) => void;
+
 interface Stream {
   readonly kind: StreamKind;
   readonly source: string;
@@ -251,6 +257,7 @@ export function planFileCompaction(
   events: readonly StoredEvent[],
   scope: CompactionScope,
   alreadyReduced: ReadonlySet<number> = new Set(),
+  observeMessage?: MessageCompactionObserver,
 ): CompactionPlan {
   let head: Head = { hash: GENESIS, seq: 0 };
   const messages = new Map<string, Message>();
@@ -398,6 +405,7 @@ export function planFileCompaction(
       reason = "replacement-unverified";
     }
     report("messages", source, original, aged, reason);
+    observeMessage?.(original, reason, close);
   }
 
   for (const event of [...events].reverse()) {
@@ -405,6 +413,7 @@ export function planFileCompaction(
     if (event.kind === "msg.sent" || event.kind === "msg.imported") {
       if (id === null) {
         report("messages", "unknown", event, false, "ownership-unverified");
+        observeMessage?.(event, "ownership-unverified");
       }
       continue;
     }
