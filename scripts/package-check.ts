@@ -79,6 +79,51 @@ export function inspectPackage(
   });
   if (version.status !== 0 || version.stdout.trim() !== manifest.version)
     throw new Error("package CLI version differs from package.json");
+  const skillsProject = join(proof, "skills-project");
+  mkdirSync(skillsProject);
+  run(skillsProject, "git", ["init", "--quiet"]);
+  for (const [skill, harness, base, name] of [
+    ["workflow", "codex", ".agents", "coordination-kit-workflow"],
+    ["status", "claude", ".claude", "coordination-status"],
+  ] as const) {
+    const path = join(base, "skills", name, "SKILL.md");
+    const target = join(skillsProject, path);
+    const asset = readFileSync(join(pkg, "skills", name, "SKILL.md"));
+    const install = () =>
+      spawnSync(
+        process.execPath,
+        [
+          join(pkg, "dist/cli.js"),
+          "skills",
+          "install",
+          skill,
+          "--harness",
+          harness,
+          "--scope",
+          "project",
+        ],
+        { cwd: skillsProject, encoding: "utf8" },
+      );
+    for (const installed of [true, false]) {
+      const result = install();
+      if (
+        result.status !== 0 ||
+        result.stdout.trim() !== JSON.stringify({ installed, path }) ||
+        !readFileSync(target).equals(asset)
+      ) {
+        throw new Error(`packaged skill install differs: ${skill} ${result.stderr}`);
+      }
+    }
+    writeFileSync(target, "Local instructions.\n");
+    const conflict = install();
+    if (
+      conflict.status !== 1 ||
+      !conflict.stderr.includes("review the existing entry") ||
+      readFileSync(target, "utf8") !== "Local instructions.\n"
+    ) {
+      throw new Error("packaged skill install must preserve local changes: " + skill);
+    }
+  }
   const modules = ["registry", "review", "shared", "store"];
   const expectedExports = ["./package.json", ...modules.map((name) => `./build/${name}`)].sort();
   if (JSON.stringify(Object.keys(manifest.exports).sort()) !== JSON.stringify(expectedExports))

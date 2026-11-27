@@ -26,6 +26,7 @@ import {
   taskWorkFile,
 } from "./commands/project/tasks.ts";
 import { eventsIngest, reviewDeliver, reviewShow } from "./commands/runner.ts";
+import { skillsInstall } from "./commands/skills.ts";
 import { type Command, commandUsage, GROUPS, SPECS, synopsis } from "./commands/spec.ts";
 import { status } from "./commands/status.ts";
 import {
@@ -124,7 +125,7 @@ const USAGE = [
   "  --version --json  print {schema, version, distSha256} as one JSON line",
   "",
   "--root DIR or --root=DIR can appear once before the -- option terminator.",
-  "init, project and task use the primary Git checkout, defaulting to the working directory.",
+  "init, project, skills and task use the primary Git checkout, defaulting to the working directory.",
   "work uses --root for the repository, defaulting to the working directory, and reads its",
   "coordinator root from COORDINATION_KIT_ROOT or DELIVERY_KIT_ROOT.",
   "docs uses --root for the repository, defaulting to the working directory.",
@@ -174,6 +175,7 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "review deliver": reviewDeliver,
   "review show": reviewShow,
   "session start": sessionStart,
+  "skills install": skillsInstall,
   status,
   "store compaction-activate": compactionActivate,
   "store compaction-cancel": compactionCancel,

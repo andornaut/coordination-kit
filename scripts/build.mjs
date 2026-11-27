@@ -1,5 +1,5 @@
 // Build the self-contained CLI bundle and the public API bundles with declarations. dist/cli.js
-// imports only node: builtins, so a running process never reads its package again after startup.
+// imports only node: builtins. The optional skills installer reads the bundled Markdown assets.
 // The API bundles share their common modules through dist/chunks/, so a consumer importing several
 // subpaths gets one instance of each module, its classes and its locks.
 import { execFileSync } from "node:child_process";

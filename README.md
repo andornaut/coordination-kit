@@ -179,7 +179,7 @@ an incompatible change needs a major version.
 
 A release is three files from `pack`:
 
-- `coordination-kit-VERSION.tgz`, the npm package (`dist/`, `README.md`, the topic docs and `docs/design/`, `LICENSE`, `SOURCE_COMMIT`; not `docs/work/`);
+- `coordination-kit-VERSION.tgz`, the npm package (`dist/`, `README.md`, the topic docs and `docs/design/`, `skills/`, `LICENSE`, `SOURCE_COMMIT`; not `docs/work/`);
 - `SOURCE_COMMIT`, the exact commit it was built from, also inside the archive;
 - `SHA256SUMS`, covering the archive and `SOURCE_COMMIT`.
 

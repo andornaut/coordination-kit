@@ -4,7 +4,7 @@ The package is `@andornaut/coordination-kit`. `dist/cli.js` is the only runtime 
 imports only `node:` builtins; the public build APIs are explicit `build/` subpaths whose bundles
 share their common modules through `dist/chunks/`, so every subpath sees one instance of each
 module. The npm package ships `dist/`, the README, the topic docs, the design summaries,
-`LICENSE` and `SOURCE_COMMIT`; work files are not packaged, so packaged docs link to them by
+the bundled skills, `LICENSE` and `SOURCE_COMMIT`; work files are not packaged, so packaged docs link to them by
 their repository URL, and lint checks the packaged docs against `package.json` `files`. The
 `make` targets run every check in stock containers with the checkout bound read-only, and CI runs
 the same npm commands natively, with docs-only changes limited to lint. Releases are cut from `main` only after every required CI

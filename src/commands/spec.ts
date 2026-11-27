@@ -19,6 +19,7 @@ import {
   TASK_WRITE_OPTIONS,
 } from "./project/tasks.ts";
 import { EVENTS_INGEST_OPTIONS, REVIEW_DELIVER_OPTIONS, REVIEW_SHOW_OPTIONS } from "./runner.ts";
+import { SKILLS_INSTALL_OPTIONS } from "./skills.ts";
 import { STATUS_SPEC } from "./status.ts";
 import {
   COMPACTION_ACTIVATE_OPTIONS,
@@ -179,6 +180,13 @@ export const SPECS = {
       provider: "github|gitlab",
       repository: "OWNER/REPO",
     },
+  },
+  "skills install": {
+    forms: [["SKILL", "harness", "scope"]],
+    group: "project",
+    options: SKILLS_INSTALL_OPTIONS,
+    summary: "install the bundled workflow or status skill in the primary Git checkout",
+    values: { harness: "codex|claude", scope: "project" },
   },
   "project register": {
     forms: [["role", "harness", "native-id", "native-project-id?", "worktree?"]],
