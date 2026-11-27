@@ -26,10 +26,7 @@ function documentationCommand<T>(
     let selection: { readonly area?: string; readonly format: "markdown" | "json" };
     try {
       const { values } = parseOptions(options, args);
-      const { area, format = "markdown", plan } = values;
-      if (Object.hasOwn(options, "plan") && plan !== true) {
-        throw new Usage("--plan is required for read-only compaction planning");
-      }
+      const { area, format = "markdown" } = values;
       if (format !== "markdown" && format !== "json") {
         throw new Usage("--format must be markdown or json");
       }

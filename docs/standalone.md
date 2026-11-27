@@ -36,7 +36,9 @@ the maintainer that records the user's explicit decisions. These commands assume
 trusts the people and processes with write access to the local coordination state. Normal Git
 and forge permissions still apply.
 
-Registration syncs the lifecycle, status, handoff and recovery skills for the selected harness.
+Registration defaults to the sole configured project role. In a project with multiple roles,
+pass `--role` explicitly. Registration syncs the lifecycle, status, handoff and recovery skills
+for the selected harness.
 Commit the skill files with their manifest. For an existing checkout, or after upgrading the
 pinned CLI, follow [project skill sync](getting-started.md#sync-project-skills).
 
@@ -83,6 +85,9 @@ ck task propose task-0001 --owner implementation --title "Validate input" \
 ck task approve task-0001 --approval chat:build-decision
 ck task start task-0001
 ```
+
+In a project with one configured role, `task propose` defaults to that owner. Pass `--owner`
+explicitly when the project has multiple roles.
 
 From the task worktree, create the approved work file using the canonical task record and
 commit it alongside the implementation. Fetch the default branch before preparing the review.

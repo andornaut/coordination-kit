@@ -313,7 +313,10 @@ export async function main(io: Io, argv: readonly string[]): Promise<number> {
     return EXIT_USAGE;
   }
   if (found.rest.length === 1 && found.rest[0] === "--help") {
-    io.out(`${commandUsage(found.command)}\n\n${SPECS[found.command].summary}\n`);
+    io.out(
+      `${commandUsage(found.command)}\n\n${SPECS[found.command].summary}\n\n` +
+        "Use --root DIR or --root=DIR to select the checkout or workspace.\n",
+    );
     return EXIT_OK;
   }
   const group = SPECS[found.command].group;

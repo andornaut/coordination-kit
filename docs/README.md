@@ -63,10 +63,11 @@ same Git revision, rule ID, evidence, and one result for each rule.
 ## Plan compaction
 
 ```sh
-coordination-kit docs compact --plan --area gameplay
-coordination-kit docs compact --plan --format json
+coordination-kit docs compact --area gameplay
+coordination-kit docs compact --format json
 ```
 
+Compaction defaults to planning. Explicit `--plan` runs the same read-only command.
 Review the proposed changes against the reported revision. To mark a retired passage,
 put `<!-- compact: superseded by game-0010 -->` immediately before its heading and cite
 the approved replacement task. Terminal task records are candidates for owner review.

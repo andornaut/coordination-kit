@@ -209,7 +209,6 @@ never message bodies, raw errors, environments or authentication material.
 `<stateRoot>/transport/messages/recipients/<conversationId>/unblock` with an active work protocol,
 without creating state. An already
 active Claude session's existing channel process includes its exact conversation's generic bus
-alongside game bus directories by default. Explicit `--state-dir` is exclusive: configure
-`claude channel --conversation UUID --state-dir DIR` with existing absolute directories only.
+alongside game bus directories by default.
 Doctor reports the generic reference even if absent; neither the reference nor directory
 presence proves a connected channel. No inactive frontend or additional channel is started.

@@ -7,7 +7,7 @@ import { expect, it } from "vitest";
 import { main } from "../cli.ts";
 import { systemGit } from "../core/git.ts";
 
-it("audits a committed topic and requires explicit read-only compaction planning", async () => {
+it("audits a committed topic and defaults to read-only compaction planning", async () => {
   const root = mkdtempSync(join(tmpdir(), "ck-docs-"));
   const git = systemGit({});
   const invoke = async (...args: string[]) => {
@@ -81,8 +81,8 @@ it("audits a committed topic and requires explicit read-only compaction planning
       rules: [{ behavior: "unverified", id: "rule-jump" }],
     });
 
-    expect(await invoke("docs", "compact")).toMatchObject({ code: 2, out: "" });
-    const plan = await invoke("docs", "compact", "--plan", "--format", "json");
+    const plan = await invoke("docs", "compact", "--format", "json");
+    expect(await invoke("docs", "compact", "--plan", "--format", "json")).toEqual(plan);
     expect(plan).toMatchObject({ code: 0, err: "" });
     expect(JSON.parse(plan.out)).toMatchObject({
       head,

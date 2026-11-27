@@ -165,14 +165,17 @@ export const SPECS = {
     values: { area: "TOPIC", format: "markdown|json" },
   },
   "docs compact": {
-    forms: [["plan", "area?", "format?"]],
+    forms: [["plan?", "area?", "format?"]],
     group: "docs",
     options: DOCS_COMPACT_OPTIONS,
     summary: "prepare a read-only compaction plan for committed documentation",
     values: { area: "TOPIC", format: "markdown|json" },
   },
   init: {
-    forms: [["project", "role?", "review?", "provider?", "repository?"]],
+    forms: [
+      ["project", "role?", "review?"],
+      ["project", "role?", "review?", "provider", "repository"],
+    ],
     group: "project",
     options: INIT_OPTIONS,
     summary: "set up Coordination Kit in an existing Git repository",
@@ -199,17 +202,17 @@ export const SPECS = {
     values: { adopt: "SKILL=SHA256", harness: "codex|claude", scope: "project" },
   },
   "project register": {
-    forms: [["role", "harness", "native-id", "native-project-id?", "worktree?"]],
+    forms: [["role?", "harness", "native-id", "native-project-id?", "worktree?"]],
     group: "project",
     options: PROJECT_REGISTER_OPTIONS,
-    summary: "register a verified project session and sync reusable skills for its harness",
+    summary: "register a native session; the role defaults to the sole configured project role",
     values: { harness: "claude|codex", "native-project-id": "ID", worktree: "PATH" },
   },
   "task propose": {
-    forms: [["ID", "owner", "title", "scope", "depends-on?", "native-id?"]],
+    forms: [["ID", "owner?", "title", "scope", "depends-on?", "native-id?"]],
     group: "project",
     options: TASK_PROPOSE_OPTIONS,
-    summary: "record an idea with its owner and proposed scope",
+    summary: "record an idea; the owner defaults to the sole configured project role",
     values: { scope: "TEXT", "depends-on": "TASK_ID" },
   },
   "task approve": {
@@ -344,11 +347,11 @@ export const SPECS = {
     forms: [
       ["ID", "reason", "next-boundary", "owner?", "evidence?", "native-id?", "worker?"],
       ["ID", "reason", "until", "owner?", "evidence?", "native-id?", "worker?"],
-      ["ID", "reason", "next-review", "owner?", "evidence?", "native-id?", "worker?"],
+      ["ID", "reason", "next-review?", "owner?", "evidence?", "native-id?", "worker?"],
     ],
     group: "msg",
     options: MSG_RETAIN_OPTIONS,
-    summary: "retain your own open message with an owner, reason and next review boundary",
+    summary: "retain your own open message; the boundary defaults to the next review",
     values: { until: "ISO_TIMESTAMP" },
   },
   "msg status": {
@@ -443,11 +446,10 @@ export const SPECS = {
     },
   },
   "store retire": {
-    forms: [["dry-run"], ["apply", "native-id?", "worker?"]],
+    forms: [["dry-run?"], ["apply", "native-id?", "worker?"]],
     group: "store",
     options: STORE_RETIRE_OPTIONS,
-    summary:
-      "import open ledger requests and archive the retired protocol state; --dry-run writes nothing",
+    summary: "preview retirement; --apply imports open ledger requests and archives retired state",
   },
   "store migration-status": {
     forms: [[]],
@@ -479,10 +481,11 @@ export const SPECS = {
     summary: "record a pending prompt owned by your role; the ID defaults to q-<role>-<n>",
   },
   "question answer": {
-    forms: [["id", "work", "text", "by?", "supersedes?", "native-id?", "worker?"]],
+    forms: [["id", "work?", "text", "by?", "supersedes?", "native-id?", "worker?"]],
     group: "decisions",
     options: QUESTION_ANSWER_OPTIONS,
-    summary: "record your own question's answer, then attempt the Markdown writeback on main",
+    summary:
+      "record the answer and attempt Markdown writeback; --work defaults to the recorded work ID",
   },
   "question project": {
     forms: [["id", "native-id?", "worker?"]],
@@ -701,7 +704,7 @@ export const SPECS = {
     forms: [["ID", "reason", "owner?", "native-id?", "worker?"]],
     group: "work",
     options: WORK_BLOCK_OPTIONS,
-    summary: "record your work item blocked, with a reason and the role that can clear it",
+    summary: "record your work item blocked, with a reason and an optional role that can clear it",
   },
   "work unblock": {
     forms: [["ID", "native-id?", "worker?"]],
@@ -741,10 +744,10 @@ export const SPECS = {
     summary: "print a work item's store events in order",
   },
   graph: {
-    forms: [["work?", "depth?", "format?"]],
+    forms: [["format?"], ["work", "depth?", "format?"]],
     group: "graph",
     options: GRAPH_OPTIONS,
-    summary: "print the decision graph, or one work item's neighbourhood, as JSON or DOT",
+    summary: "print the decision graph, or a work item's neighbourhood with depth 2 by default",
     values: { depth: "N", format: "json|dot", work: "[REPOSITORY:]WORK_ID" },
   },
   "graph why": {

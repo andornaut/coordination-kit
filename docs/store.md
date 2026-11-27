@@ -268,7 +268,8 @@ transaction. `Store.verify()` is the same check without the rebuild.
    new and no wake state writes nothing.
 4. The recipient records one disposition with `msg done ID` (`handled`, or `superseded` with
    `--superseded-by`), or `msg retain ID` with an owner, reason and next boundary. A retained
-   message stays open and can be retained again or closed. A close or retention of a message
+   message stays open and can be retained again or closed. The next scheduled review is the
+   default boundary. A close or retention of a message
    still `sent` also sets its delivery time, since the recipient acted on it.
 
 Both commands accept repeatable `--evidence REF` links. `msg status ID` exposes the evidence
@@ -455,10 +456,11 @@ touched: a question record mirrors a prompt the owner has opened in its own sess
   (`q-archies-dog-walks-tech-3`), one above the highest such ID in the store. A retry that must
   not open a second question passes `--id`; repeating it with the same owner, title, work and
   options is a no-op (`duplicate: true`), and any other reuse is `id-conflict`.
-- `question answer --id Q --work W --text T [--by user] [--supersedes Dk]` closes the caller's
+- `question answer --id Q [--work W] --text T [--by user] [--supersedes Dk]` closes the caller's
   pending question and durably records the exact answer in a `question.answer-recorded` event before
-  Markdown projection. A question opened with `--work` must be answered for that item
-  (`work-mismatch`). `--by` defaults to `user`.
+  Markdown projection. The recorded work ID is the default. Supply `--work` when there is no
+  recorded ID. An explicit ID must agree with the recorded link (`work-mismatch`).
+  `--by` defaults to `user`.
 - `question project --id Q` retries the caller's stored answer without re-entering it. Repeating the
   same `question answer` also retries the writeback. Both use the active owner binding.
 - `question cancel --id Q --reason R` cancels the caller's pending question. Answering or
@@ -1007,10 +1009,9 @@ secret shape.
 
 ## Retirement
 
-`store retire` is the one-time 3.0 migration of the retired protocol state. Exactly one of
-`--dry-run` and `--apply` is required.
+`store retire` previews the one-time 3.0 migration of the retired protocol state.
 
-- `--dry-run` takes no caller and writes nothing; it reads an existing store read-only.
+- The default preview and explicit `--dry-run` take no caller and read the existing store without writing.
 - `--apply` requires `store:maintain` through the [writer fence](#writer-fence).
 
 It reads the frozen request ledger from `<stateRoot>/accounting/checkpoint.json`, which must be

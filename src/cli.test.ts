@@ -36,7 +36,7 @@ describe("dispatcher", () => {
     const { root } = makeFixture();
     const help = await run(root, "--help");
     expect(help.code).toBe(EXIT_OK);
-    expect(help.out).toContain("store retire --dry-run");
+    expect(help.out).toContain("store retire [--dry-run]");
     expect(help.out).toContain("request close --id SAFE_ID --reason TEXT [--work WORK_ID]");
     expect(help.out).not.toContain("reminder");
     expect(help.out).not.toContain("decision marker");
@@ -78,6 +78,7 @@ describe("dispatcher", () => {
     expect(help).toMatchObject({ code: EXIT_OK, err: "" });
     expect(help.out).toContain("usage: coordination-kit msg send");
     expect(help.out).toContain("--to ROLE");
+    expect(help.out).toContain("--root DIR");
     expect(help.out).not.toContain("harness doctor");
     const invalid = await Promise.all(
       [
