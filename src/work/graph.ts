@@ -2,7 +2,6 @@
 // Git is the durable copy (work files on each registered repository's `main`, with their front
 // matter and Decisions lines); the store adds work records (parent links, stage commits) and its
 // decision and question records.
-import type { DatabaseSync } from "node:sqlite";
 
 import { type GitRunner, readMainFiles } from "../core/git.ts";
 import type { Repository } from "../status/collect.ts";
@@ -102,15 +101,8 @@ interface ParsedFile {
   readonly text: string;
 }
 
-function tableExists(db: DatabaseSync, table: string): boolean {
-  return (
-    db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !==
-    undefined
-  );
-}
-
 /** The store's questions through `listQuestions`: id and owning role. */
-function storeQuestions(store: Pick<Store, "db">): { id: string; owner: string | null }[] {
+function storeQuestions(store: Pick<Store, "index">): { id: string; owner: string | null }[] {
   return listQuestions(store).map((question) => ({ id: question.id, owner: question.role }));
 }
 
@@ -118,7 +110,7 @@ function storeQuestions(store: Pick<Store, "db">): { id: string; owner: string |
 export function buildGraph(
   git: GitRunner,
   coordinator: Coordinator,
-  store: Pick<Store, "db"> | null,
+  store: Pick<Store, "index" | "event"> | null,
 ): Graph {
   const builder = new Builder();
   const unavailable: string[] = [];
@@ -224,33 +216,31 @@ function decisionTarget(
   return builder.node("decision", `${otherRepository}:${otherWork}/${decision}`);
 }
 
-function addStore(builder: Builder, store: Pick<Store, "db">): void {
-  if (tableExists(store.db, "work")) {
-    for (const record of readWorkRecords(store.db).values()) {
-      const work = builder.node("work", `${record.repository}:${record.id}`, {
-        repository: record.repository,
-        state: record.state,
-        work: record.id,
+function addStore(builder: Builder, store: Pick<Store, "index" | "event">): void {
+  for (const record of readWorkRecords(store).values()) {
+    const work = builder.node("work", `${record.repository}:${record.id}`, {
+      repository: record.repository,
+      state: record.state,
+      work: record.id,
+    });
+    if (record.owner !== null) {
+      builder.edge("owned-by", work, builder.node("role", record.owner), "store");
+    }
+    if (record.parent !== null) {
+      const parent = builder.node("work", `${record.parent.repository}:${record.parent.id}`, {
+        repository: record.parent.repository,
+        work: record.parent.id,
       });
-      if (record.owner !== null) {
-        builder.edge("owned-by", work, builder.node("role", record.owner), "store");
-      }
-      if (record.parent !== null) {
-        const parent = builder.node("work", `${record.parent.repository}:${record.parent.id}`, {
-          repository: record.parent.repository,
-          work: record.parent.id,
-        });
-        builder.edge("parent", work, parent, "store");
-      }
-      for (const evidence of record.evidence) {
-        builder.edge(
-          "implements",
-          builder.node("commit", evidence.sha),
-          work,
-          "store",
-          evidence.stage,
-        );
-      }
+      builder.edge("parent", work, parent, "store");
+    }
+    for (const evidence of record.evidence) {
+      builder.edge(
+        "implements",
+        builder.node("commit", evidence.sha),
+        work,
+        "store",
+        evidence.stage,
+      );
     }
   }
   for (const decision of storeDecisions(store)) {

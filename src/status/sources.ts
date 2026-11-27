@@ -1,12 +1,11 @@
 // Read the coordinator's status projections in one consistent, read-only snapshot.
-import type { DatabaseSync } from "node:sqlite";
-
 import type { Layout } from "../core/configuration/layout.ts";
 import { StateRootError } from "../core/configuration/stateRoot.ts";
 import { Store } from "../store/db.ts";
 import type { HoldView } from "../store/decisions/policyHolds.ts";
 import { listHolds, listQuestions, type QuestionView } from "../store/decisions/questions.ts";
 import { unreadMessages } from "../store/messages/wakeEvidence.ts";
+import type { ProjectionIndex } from "../store/projectionIndex.ts";
 import type { UnreadMessage } from "../store/types.ts";
 import { readRequests, type RequestRecord } from "../store/work-records/requests.ts";
 import { readWorkRecords, type WorkRecord } from "../store/work-records/work.ts";
@@ -42,27 +41,32 @@ function empty(state: StoreSourceState): StoreWorkSnapshot {
 }
 
 /** Successful runner deployments and historical COMPLETE events, grouped by game. */
-function readDeployments(db: DatabaseSync): ReadonlyMap<string, readonly DeployPoint[]> {
-  const rows = db
-    .prepare(
-      `SELECT game, at, sha, type, work FROM bus_events
-     WHERE sha IS NOT NULL AND status = 'ok'
-       AND ((kind = 'deploy' AND type = 'deploy_success') OR (kind = 'runner' AND type = 'complete'))
-     ORDER BY seq`,
-    )
-    .all() as unknown as (Parameters<typeof storedDeployPoint>[0] & { game: string })[];
+function readDeployments(index: ProjectionIndex): ReadonlyMap<string, readonly DeployPoint[]> {
+  const rows = [...index.rows("bus_events")].sort(
+    (left, right) => Number(left.seq) - Number(right.seq),
+  );
   const byGame = new Map<string, DeployPoint[]>();
-  for (const row of rows) {
-    const points = byGame.get(row.game) ?? [];
-    points.push(storedDeployPoint(row));
-    byGame.set(row.game, points);
+  for (const { at, game, kind, sha, status, type, work } of rows) {
+    if (
+      status !== "ok" ||
+      !(
+        (kind === "deploy" && type === "deploy_success") ||
+        (kind === "runner" && type === "complete")
+      ) ||
+      typeof sha !== "string"
+    ) {
+      continue;
+    }
+    const gameId = game as string;
+    const points = byGame.get(gameId) ?? [];
+    points.push(storedDeployPoint({ at: at as string, sha, type, work: work as string | null }));
+    byGame.set(gameId, points);
   }
   return byGame;
 }
 
 /**
- * The store's work records and imported requests, read through a read-only connection: nothing is created or migrated.
- * No store file is `absent`; a store without the work tables has no records.
+ * Read work records and imported requests from one snapshot without creating or migrating state.
  */
 export function readStoreWork(env: NodeJS.ProcessEnv, layout: Layout): StoreWorkSnapshot {
   let store: Store | null = null;
@@ -71,25 +75,16 @@ export function readStoreWork(env: NodeJS.ProcessEnv, layout: Layout): StoreWork
     if (store === null) {
       return empty({ status: "absent" });
     }
-    const { db } = store;
-    db.exec("BEGIN");
-    const present = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all() as {
-      name: string;
-    }[];
-    const tables = new Set(present.map(({ name }) => name));
-    const snapshot: StoreWorkSnapshot = {
-      deployments: tables.has("bus_events") ? readDeployments(db) : new Map(),
-      holds: tables.has("holds") ? listHolds({ db }, { states: ["active"] }) : [],
-      questions: tables.has("questions") ? listQuestions({ db }) : [],
-      records: ["work", "work_evidence", "work_retained"].every((name) => tables.has(name))
-        ? readWorkRecords(db)
-        : new Map(),
-      requests: new Map(readRequests(db).map((request) => [request.id, request])),
+    const { index } = store;
+    return {
+      deployments: readDeployments(index),
+      holds: listHolds(store, { states: ["active"] }),
+      questions: listQuestions(store),
+      records: readWorkRecords(store),
+      requests: new Map(readRequests(index).map((request) => [request.id, request])),
       state: { status: "available" },
-      unread: tables.has("messages") ? unreadMessages({ db }, null) : [],
+      unread: unreadMessages(store, null),
     };
-    db.exec("COMMIT");
-    return snapshot;
   } catch (error) {
     return empty({
       reason: error instanceof StateRootError ? error.message : "store-unreadable",

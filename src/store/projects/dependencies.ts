@@ -38,7 +38,7 @@ export function closeProjectTask(store: Store, actor: Actor, id: string, input: 
   const reason = workText(input.reason, "invalid-project-task-closure-reason");
   ensure(isClosedProjectTask(input.state), "invalid-project-task-closure-state");
   return store.transaction(() => {
-    const task = requireProjectTask(store.db, id);
+    const task = requireProjectTask(store.index, id);
     if (task.closure !== undefined) {
       ensure(
         task.state === input.state &&
@@ -71,7 +71,7 @@ function assertAcyclicReplacement(store: Store, id: string, replacement: string)
   const pending = new Set([replacement]);
   for (const dependency of pending) {
     ensure(dependency !== id, "project-task-dependency-cycle");
-    for (const child of requireProjectTask(store.db, dependency).dependsOn) {
+    for (const child of requireProjectTask(store.index, dependency).dependsOn) {
       pending.add(child);
     }
   }
@@ -88,7 +88,7 @@ export function replaceProjectDependency(
   const approval = checkedDecision(input.approval);
   const { dependency, replacement } = input;
   return store.transaction(() => {
-    const task = requireProjectTask(store.db, id);
+    const task = requireProjectTask(store.index, id);
     const previous = task.dependencyReplacements?.find((entry) => entry.dependency === dependency);
     if (previous !== undefined) {
       ensure(
@@ -105,12 +105,12 @@ export function replaceProjectDependency(
     );
     ensure(task.dependsOn.includes(dependency), "project-task-dependency-not-declared");
     ensure(
-      isClosedProjectTask(requireProjectTask(store.db, dependency).state),
+      isClosedProjectTask(requireProjectTask(store.index, dependency).state),
       "project-task-dependency-not-closed",
     );
     ensure(!task.dependsOn.includes(replacement), "duplicate-project-task-dependency");
     ensure(
-      !isClosedProjectTask(requireProjectTask(store.db, replacement).state),
+      !isClosedProjectTask(requireProjectTask(store.index, replacement).state),
       "project-task-replacement-closed",
     );
     assertAcyclicReplacement(store, id, replacement);

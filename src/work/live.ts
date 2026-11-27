@@ -208,14 +208,16 @@ function ownerActor(
           context,
           layout,
           registry,
-          (index, nativeId) =>
+          (store, nativeId) =>
             worker === "start" ||
-            index
-              .prepare(
-                `SELECT 1 FROM events WHERE kind = 'work.started' AND actor_native_id = ?
-           AND json_extract(payload, '$.repository') = ? AND json_extract(payload, '$.id') = ?`,
-              )
-              .get(nativeId, at.ref.repository, at.ref.id) !== undefined,
+            store
+              .events({ kinds: ["work.started"] })
+              .some(
+                ({ actor, payload }) =>
+                  actor.nativeId === nativeId &&
+                  payload.repository === at.ref.repository &&
+                  payload.id === at.ref.id,
+              ),
         );
   const actor = resolveCaller(registry, context.env, options, workerProof);
   if (actor.role !== at.owner) {
@@ -457,7 +459,7 @@ export function workShow(
         id: at.ref.id,
         owner: at.owner,
         ...(pendingQuestions.length === 0 ? {} : { pendingQuestions }),
-        record: readWorkRecord(store.db, at.ref),
+        record: readWorkRecord(store, at.ref),
         repository: at.ref.repository,
         schema: 1 as const,
         workFile: { path: at.file.path, status: at.file.status, title: at.file.title },
@@ -508,7 +510,7 @@ interface StoreDecision {
  * `<work>/D<n>` and `supersedes` keep their full form. Decisions record no repository: work IDs
  * carry their repository's prefix.
  */
-export function storeDecisions(store: Pick<Store, "db">): StoreDecision[] {
+export function storeDecisions(store: Pick<Store, "index">): StoreDecision[] {
   return listDecisions(store).map((decision) => ({
     at: decision.at,
     by: decision.by,

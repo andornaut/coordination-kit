@@ -92,7 +92,7 @@ describe("standalone project tasks", () => {
       start: { actor: OWNER },
       state: "in-progress",
     });
-    expect(listProjectTasks(store.db).map(({ id }) => id)).toEqual(["first", "second"]);
+    expect(listProjectTasks(store.index).map(({ id }) => id)).toEqual(["first", "second"]);
   });
 
   it("binds approval to the exact chat candidate and clears prior evidence when a merged task is revised", () => {
@@ -138,7 +138,7 @@ describe("standalone project tasks", () => {
     const before = store.verify();
     store.rebuild();
     expect(store.verify()).toEqual(before);
-    expect(readProjectTask(store.db, "change")).toEqual(landed);
+    expect(readProjectTask(store.index, "change")).toEqual(landed);
   });
 
   it("requires a linked PR for a forge-verified merge and invalidates its link on revision", () => {
@@ -196,6 +196,7 @@ describe("standalone project tasks", () => {
     expect(() => approveProjectReview(store, MAINTAINER, "change", FIRST, REVIEW_APPROVAL)).toThrow(
       "project-candidate-revision-mismatch",
     );
+    store.rebuild();
     expect(() =>
       approveProjectReview(
         store,
@@ -249,7 +250,7 @@ describe("standalone project tasks", () => {
     );
     const landed = landProjectTask(store, OWNER, "change", FIRST, MERGED, EVIDENCE).task;
     store.rebuild();
-    expect(readProjectTask(store.db, "change")).toEqual(landed);
+    expect(readProjectTask(store.index, "change")).toEqual(landed);
   });
 
   it("allows a new PR link after an explicit same-head policy refresh", () => {
@@ -288,21 +289,20 @@ describe("standalone project tasks", () => {
     );
   });
 
-  it("recovers candidate and review revisions from a legacy query projection", () => {
+  it("replays candidate and review revisions from journal events without revision fields", () => {
     begin(store, "change");
     readyProjectTask(store, OWNER, "change", candidate());
     const expected = approveProjectReview(store, MAINTAINER, "change", FIRST, REVIEW_APPROVAL).task;
-    store.db
-      .prepare(
-        `UPDATE project_tasks
-      SET record = json_set(
-        json_remove(record, '$.requiresRevisionApproval', '$.reviewApproval.candidateRevision'),
-        '$.candidateRevision', NULL
-      ) WHERE id = ?`,
-      )
-      .run("change");
+    const journal = store.events();
+    expect(journal.find(({ kind }) => kind === "project-task.ready")?.payload).not.toHaveProperty(
+      "candidateRevision",
+    );
+    expect(journal.at(-1)?.payload).not.toHaveProperty("candidateRevision");
 
-    expect(readProjectTask(store.db, "change")).toEqual(expected);
+    store.rebuild();
+
+    expect(store.events()).toEqual(journal);
+    expect(readProjectTask(store.index, "change")).toEqual(expected);
     expect(readyProjectTask(store, OWNER, "change", candidate()).duplicate).toBe(true);
     expect(
       approveProjectReview(store, MAINTAINER, "change", FIRST, REVIEW_APPROVAL).duplicate,
@@ -361,7 +361,9 @@ describe("standalone project tasks", () => {
       records: () => [],
     });
     try {
-      expect(readProjectTask(restored.db, "change")).toEqual(readProjectTask(store.db, "change"));
+      expect(readProjectTask(restored.index, "change")).toEqual(
+        readProjectTask(store.index, "change"),
+      );
       expect(restored.verify()).toEqual(store.verify());
     } finally {
       restored.close();

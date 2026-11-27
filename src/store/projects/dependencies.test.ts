@@ -221,7 +221,7 @@ describe("standalone project task dispositions", () => {
     expect(() =>
       replaceProjectDependency(store, MAINTAINER, "change", { ...REPLACE, dependency: "closed" }),
     ).toThrow("project-task-dependency-not-declared");
-    expect(readProjectTask(store.db, "change")?.dependsOn).toEqual(["already", "original"]);
+    expect(readProjectTask(store.index, "change")?.dependsOn).toEqual(["already", "original"]);
   });
 
   it("preserves disposition events in owner records and a compaction checkpoint", () => {
@@ -278,10 +278,12 @@ describe("standalone project task dispositions", () => {
       records: () => [],
     });
     try {
-      expect(readProjectTask(restored.db, "original")).toEqual(
-        readProjectTask(store.db, "original"),
+      expect(readProjectTask(restored.index, "original")).toEqual(
+        readProjectTask(store.index, "original"),
       );
-      expect(readProjectTask(restored.db, "change")).toEqual(readProjectTask(store.db, "change"));
+      expect(readProjectTask(restored.index, "change")).toEqual(
+        readProjectTask(store.index, "change"),
+      );
       expect(restored.verify()).toEqual(store.verify());
     } finally {
       restored.close();

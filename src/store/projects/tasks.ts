@@ -1,8 +1,7 @@
 // Standalone task commitments and progress, replayable from the same journal as the inbox.
-import type { DatabaseSync } from "node:sqlite";
-
 import type { Store } from "../db.ts";
 import { canonicalJson } from "../eventCodec.ts";
+import type { ProjectionIndex, ProjectionRow } from "../projectionIndex.ts";
 import {
   type Actor,
   ensure,
@@ -110,66 +109,28 @@ const EVENT = {
 type TaskEventKind = (typeof EVENT)[keyof typeof EVENT];
 export const PROJECT_TASK_KINDS: ReadonlySet<string> = new Set(Object.values(EVENT));
 
-const DDL = `
-CREATE TABLE IF NOT EXISTS project_tasks (
-  id TEXT PRIMARY KEY,
-  record TEXT NOT NULL
-);
-`;
+const TASKS = "project_tasks";
+const USED_APPROVALS = "project_task_used_approvals";
 
-function taskRow(db: DatabaseSync, row: { record?: unknown } | undefined): ProjectTask | null {
-  if (row === undefined) {
-    return null;
-  }
-  const task = JSON.parse(row.record as string) as ProjectTask;
-  if (
-    task.candidateRevision != null ||
-    (task.candidate === null && task.candidateRevision === null)
-  ) {
-    return task;
-  }
-  // Compatibility for an existing SQLite projection built before ready attempts carried revisions.
-  const previous =
-    task.candidate === null
-      ? undefined
-      : db
-          .prepare(
-            `SELECT hash, json_extract(payload, '$.policyRefresh') AS refreshed FROM events
-                  WHERE kind = ? AND json_extract(payload, '$.id') = ?
-                    AND json_extract(payload, '$.candidate.headSha') = ?
-                  ORDER BY seq DESC LIMIT 1`,
-          )
-          .get(EVENT.ready, task.id, task.candidate.headSha);
-  const candidateRevision = (previous?.hash as string | undefined) ?? null;
-  return {
-    ...task,
-    candidateRevision,
-    requiresRevisionApproval: previous?.refreshed === 1,
-    ...(candidateRevision === null
-      ? {}
-      : {
-          reviewApproval:
-            task.reviewApproval === null ? null : { ...task.reviewApproval, candidateRevision },
-          reviewRequest:
-            task.reviewRequest === null ? null : { ...task.reviewRequest, candidateRevision },
-        }),
-  };
+function taskRow(row: ProjectionRow): ProjectTask {
+  return JSON.parse(row.record as string) as ProjectTask;
 }
 
-export function readProjectTask(db: DatabaseSync, id: string): ProjectTask | null {
-  return taskRow(db, db.prepare("SELECT record FROM project_tasks WHERE id = ?").get(id));
+export function readProjectTask(index: ProjectionIndex, id: string): ProjectTask | null {
+  const row = index.get(TASKS, [id]);
+  return row === undefined ? null : taskRow(row);
 }
 
-export function listProjectTasks(db: DatabaseSync): ProjectTask[] {
-  return db
-    .prepare("SELECT record FROM project_tasks ORDER BY id")
-    .all()
-    .map((row) => taskRow(db, row)!);
+export function listProjectTasks(index: ProjectionIndex): ProjectTask[] {
+  return index
+    .rows(TASKS)
+    .map(taskRow)
+    .sort((left, right) => (left.id < right.id ? -1 : Number(left.id > right.id)));
 }
 
-function requiredTask(db: DatabaseSync, id: string): ProjectTask {
+function requiredTask(index: ProjectionIndex, id: string): ProjectTask {
   ensure(TASK_ID.test(id), "invalid-project-task-id");
-  const task = readProjectTask(db, id);
+  const task = readProjectTask(index, id);
   ensure(task !== null, "project-task-missing");
   return task;
 }
@@ -185,12 +146,13 @@ function bound(actor: Actor): asserts actor is BoundActor {
   );
 }
 
-function applyTask(db: DatabaseSync, event: StoredEvent): void {
+function applyTask(index: ProjectionIndex, event: StoredEvent): void {
   bound(event.actor);
   const receipt = { actor: event.actor, at: event.at };
   const id = event.payload.id as string;
   const payload = event.payload;
   if (event.kind === EVENT.proposed) {
+    ensure(index.get(TASKS, [id]) === undefined, "project-task-id-conflict");
     const task: ProjectTask = {
       approval: null,
       candidate: null,
@@ -210,16 +172,17 @@ function applyTask(db: DatabaseSync, event: StoredEvent): void {
       title: payload.title as string,
       updatedAt: event.at,
     };
-    db.prepare("INSERT INTO project_tasks (id, record) VALUES (?, ?)").run(
-      id,
-      JSON.stringify(task),
-    );
+    index.put(TASKS, [id], { id, record: JSON.stringify(task) });
     return;
   }
-  const previous = requiredTask(db, id);
+  const previous = requiredTask(index, id);
   const patch = taskUpdate(event, previous, receipt);
   const task = { ...previous, ...patch, updatedAt: event.at };
-  db.prepare("UPDATE project_tasks SET record = ? WHERE id = ?").run(JSON.stringify(task), id);
+  index.put(TASKS, [id], { id, record: JSON.stringify(task) });
+  if (event.kind === EVENT.reviewApproved && task.reviewApproval !== null) {
+    const { headSha, ref } = task.reviewApproval;
+    index.put(USED_APPROVALS, [id, headSha, ref], { head_sha: headSha, id, ref });
+  }
 }
 
 function taskUpdate(
@@ -296,8 +259,7 @@ function taskUpdate(
 
 export const PROJECT_TASKS_PROJECTION: Projection = {
   apply: Object.fromEntries(Object.values(EVENT).map((kind) => [kind, applyTask])),
-  ddl: DDL,
-  tables: ["project_tasks"],
+  tables: [TASKS, USED_APPROVALS],
 };
 
 function change(
@@ -309,9 +271,9 @@ function change(
   keySuffix?: string,
 ): TaskWrite {
   const key = `${kind}:${task.id}${keySuffix === undefined ? "" : `:${keySuffix}`}`;
-  ensure(store.eventByKey(key) === undefined, "project-task-transition-conflict");
+  ensure(store.event(key) === undefined, "project-task-transition-conflict");
   store.append({ actor, key, kind, payload: { ...payload, id: task.id, owner: task.owner } });
-  return { duplicate: false, task: requiredTask(store.db, task.id) };
+  return { duplicate: false, task: requiredTask(store.index, task.id) };
 }
 
 function duplicate(task: ProjectTask): TaskWrite {
@@ -333,9 +295,9 @@ export function proposeProjectTask(
   ensure(new Set(dependsOn).size === dependsOn.length, "duplicate-project-task-dependency");
   ensure(!dependsOn.includes(input.id), "invalid-project-task-dependency");
   return store.transaction(() => {
-    const task = readProjectTask(store.db, input.id);
+    const task = readProjectTask(store.index, input.id);
     if (task !== null) {
-      const original = store.eventByKey(`${EVENT.proposed}:${input.id}`)?.payload.dependsOn;
+      const original = store.event(`${EVENT.proposed}:${input.id}`)?.payload.dependsOn;
       ensure(
         task.title === title &&
           task.scope === scope &&
@@ -346,7 +308,7 @@ export function proposeProjectTask(
       return duplicate(task);
     }
     for (const id of dependsOn) {
-      requiredTask(store.db, id);
+      requiredTask(store.index, id);
     }
     return change(store, actor, EVENT.proposed, input, { dependsOn, scope, title });
   });
@@ -387,7 +349,7 @@ export function approveProjectTask(
   bound(actor);
   const approval = checkedApproval(input);
   return store.transaction(() => {
-    const task = requiredTask(store.db, id);
+    const task = requiredTask(store.index, id);
     ensure(!isClosedProjectTask(task.state), "project-task-closed");
     if (task.approval !== null) {
       ensure(sameApproval(task.approval, input), "project-task-approval-conflict");
@@ -401,7 +363,7 @@ export function approveProjectTask(
 export function startProjectTask(store: Store, actor: Actor, id: string): TaskWrite {
   bound(actor);
   return store.transaction(() => {
-    const task = requiredTask(store.db, id);
+    const task = requiredTask(store.index, id);
     ensure(task.owner === actor.role, "not-owner");
     ensure(!isClosedProjectTask(task.state), "project-task-closed");
     if (task.start !== null) {
@@ -409,7 +371,9 @@ export function startProjectTask(store: Store, actor: Actor, id: string): TaskWr
     }
     ensure(task.state === "approved", "project-task-not-approved");
     ensure(
-      task.dependsOn.every((dependency) => requiredTask(store.db, dependency).state === "landed"),
+      task.dependsOn.every(
+        (dependency) => requiredTask(store.index, dependency).state === "landed",
+      ),
       "project-task-dependency-unlanded",
     );
     return change(store, actor, EVENT.started, task);
@@ -450,7 +414,7 @@ export function readyProjectTask(
   bound(actor);
   const candidate = checkedCandidate(input);
   return store.transaction(() => {
-    const task = requiredTask(store.db, id);
+    const task = requiredTask(store.index, id);
     ensure(task.owner === actor.role, "not-owner");
     ensure(!isClosedProjectTask(task.state), "project-task-closed");
     const previous = task.candidate;
@@ -502,16 +466,10 @@ function attemptKey(task: ProjectTask, headSha: string): string {
 }
 
 function requireFreshApproval(store: Store, task: ProjectTask, headSha: string, ref: string): void {
-  const previous = store.db
-    .prepare(
-      `SELECT 1 FROM events
-              WHERE kind = ? AND json_extract(payload, '$.id') = ?
-                AND json_extract(payload, '$.headSha') = ?
-                AND json_extract(payload, '$.approval.ref') = ?
-              LIMIT 1`,
-    )
-    .get(EVENT.reviewApproved, task.id, headSha, ref);
-  ensure(previous === undefined, "project-review-approval-reused");
+  ensure(
+    store.index.get(USED_APPROVALS, [task.id, headSha, ref]) === undefined,
+    "project-review-approval-reused",
+  );
 }
 
 export function approveProjectReview(
@@ -525,7 +483,7 @@ export function approveProjectReview(
   bound(actor);
   const approval = checkedApproval(input);
   return store.transaction(() => {
-    const task = requiredTask(store.db, id);
+    const task = requiredTask(store.index, id);
     ensure(candidateFor(task, headSha).review !== "off", "project-review-disabled");
     if (task.requiresRevisionApproval || revision !== undefined) {
       ensure(revision === revisionOf(task), "project-candidate-revision-mismatch");
@@ -560,7 +518,7 @@ export function linkProjectReview(
   ensure(Number.isSafeInteger(input.number) && input.number > 0, "invalid-project-review-number");
   const url = workText(input.url, "invalid-project-review-url");
   return store.transaction(() => {
-    const task = requiredTask(store.db, id);
+    const task = requiredTask(store.index, id);
     ensure(candidateFor(task, headSha).review === "pr", "project-review-not-pr");
     if (task.reviewRequest !== null) {
       ensure(
@@ -591,7 +549,7 @@ export function mergeProjectTask(
   bound(actor);
   ensure(FULL_SHA.test(landedSha), "invalid-project-task-sha");
   return store.transaction(() => {
-    const task = requiredTask(store.db, id);
+    const task = requiredTask(store.index, id);
     const { review } = candidateFor(task, headSha);
     if (task.mergedSha !== null) {
       ensure(task.mergedSha === landedSha, "project-merge-conflict");
@@ -632,7 +590,7 @@ export function landProjectTask(
   bound(actor);
   const evidence = workText(evidenceRef, "invalid-project-landing-evidence");
   return store.transaction(() => {
-    const task = requiredTask(store.db, id);
+    const task = requiredTask(store.index, id);
     candidateFor(task, headSha);
     ensure(task.mergedSha !== null && task.mergedSha === landedSha, "project-merge-stale");
     if (task.landingEvidence !== null) {
