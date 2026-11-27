@@ -38,7 +38,15 @@ function setup(ports: WakePorts = {}) {
     return wakeRecipient({ env: {}, layout: fixture.layout, ports, store }, to);
   };
   const wakes = () =>
-    store.db.prepare("SELECT role, harness, count, outcome, detail FROM wakes ORDER BY seq").all();
+    [...store.index.rows("wakes")]
+      .sort((a, b) => Number(a.seq) - Number(b.seq))
+      .map(({ count, detail, harness, outcome, role }) => ({
+        count,
+        detail,
+        harness,
+        outcome,
+        role,
+      }));
   return { ...fixture, send, store, wakes };
 }
 
@@ -113,10 +121,12 @@ describe("Claude wakes", () => {
     expect(await send(TECH_ROLE)).toMatchObject({ status: "coalesced" });
     expect(onDisk(path)).toEqual({ count: 2, role: TECH_ROLE, schema: 1, seq: 2 });
     expect(
-      store.db
-        .prepare("SELECT conversation FROM wakes WHERE outcome = 'accepted' ORDER BY seq")
-        .all(),
-    ).toEqual([{ conversation: TECH }, { conversation: rotated }]);
+      store.index
+        .rows("wakes")
+        .filter(({ outcome }) => outcome === "accepted")
+        .sort((a, b) => Number(a.seq) - Number(b.seq))
+        .map(({ conversation }) => conversation),
+    ).toEqual([TECH, rotated]);
     expect(wakes()).toHaveLength(2);
   });
 
@@ -182,7 +192,7 @@ describe("Codex wakes", () => {
     });
     expect(JSON.stringify(evidence)).not.toContain(SECRET_BODY.trim());
     expect(codex.adds()).toHaveLength(0);
-    expect(store.db.prepare("SELECT state FROM messages").all()).toEqual([{ state: "sent" }]);
+    expect(store.index.rows("messages").map(({ state }) => state)).toEqual(["sent"]);
   });
 
   it.each([0, 1])("recognizes a queued wake after %i clear queue reads", async (clearReads) => {
@@ -283,8 +293,6 @@ describe("Codex wakes", () => {
     const { send, store } = setup({ connect: () => Promise.resolve(codex.client) });
     expect(await send(ART_ROLE)).toMatchObject({ status: "guarded" });
     expect(codex.adds()).toEqual([]);
-    expect(store.db.prepare("SELECT detail FROM wakes").get()).toEqual({
-      detail: "state-unavailable",
-    });
+    expect(store.index.rows("wakes")[0]?.detail).toBe("state-unavailable");
   });
 });

@@ -7,7 +7,7 @@ import { secretShape } from "../secrets.ts";
 import { DELIVERY_KIT_ROLE } from "../sessions/identity.ts";
 import { type Actor, ensure, type MessageDecision, ROLE } from "../types.ts";
 
-type Reader = Pick<Store, "eventByKey">;
+type Reader = Pick<Store, "event">;
 
 interface Original {
   readonly id: string;
@@ -32,18 +32,16 @@ const DECISION_KIND = "msg.decision";
 const promptKey = (id: string) => `msg.decision.prompt:${id}`;
 const answerKey = (id: string) => `msg.decision.answer:${id}`;
 
-export function verifiedSender(store: Pick<Store, "db">, original: Original): boolean {
-  const event = store.db
-    .prepare("SELECT kind, actor_role, actor_native_id, actor_worker FROM events WHERE seq = ?")
-    .get(original.sentSeq);
+export function verifiedSender(store: Pick<Store, "eventAt">, original: Original): boolean {
+  const event = store.eventAt(original.sentSeq);
   return (
     event?.kind === "msg.sent" &&
-    event.actor_role === original.from &&
+    event.actor.role === original.from &&
     ROLE.test(original.from) &&
-    (isCanonicalUuid(event.actor_native_id) ||
+    (isCanonicalUuid(event.actor.nativeId) ||
       (original.from === DELIVERY_KIT_ROLE &&
-        event.actor_native_id === null &&
-        event.actor_worker === null))
+        event.actor.nativeId === null &&
+        event.actor.worker === undefined))
   );
 }
 
@@ -52,7 +50,7 @@ function decisionId(original: Original): string {
 }
 
 function receipt(store: Reader, original: Original, key: string) {
-  const event = store.eventByKey(key);
+  const event = store.event(key);
   return event?.kind === DECISION_KIND &&
     event.actor.role === original.to &&
     event.actor.worker === undefined &&

@@ -10,7 +10,7 @@ import type { Store } from "../db.ts";
 import { secretShape } from "../secrets.ts";
 import { DELIVERY_KIT_ACTOR } from "../sessions/identity.ts";
 import type { MessageLink } from "../types.ts";
-import { sendMessage } from "./messages.ts";
+import { messageRow, sendMessage } from "./messages.ts";
 
 /** Intermediate CI and deploy events never count as successful outcomes. */
 export const INTERMEDIATE_TYPES: ReadonlySet<string> = new Set([
@@ -82,7 +82,7 @@ export interface Notice {
  * stored it. Runs in the caller's transaction.
  */
 export function storeNotice(store: Store, notice: Notice): boolean {
-  if (store.db.prepare("SELECT 1 FROM messages WHERE id = ?").get(notice.id) !== undefined) {
+  if (messageRow(store, notice.id) !== undefined) {
     return false;
   }
   const body = secretShape(notice.body) === null ? notice.body : notice.fallback;

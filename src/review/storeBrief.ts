@@ -2,8 +2,6 @@
 // recipient per (game, slot), capped at one page (60 lines, 4096 bytes) of counts and exceptions.
 // `review show` prints the full record. The message ID derives from (game, slot), so a repeated
 // call reuses the stored brief and may continue unattempted wakes. Native transports only wake.
-import type { SQLInputValue } from "node:sqlite";
-
 import { readRoleRoute, RouteError, routeRecipient } from "../adapters/shared/route.ts";
 import type { ReviewResult } from "../core/cli/outcome.ts";
 import type { GameLayout, Layout } from "../core/configuration/layout.ts";
@@ -12,6 +10,7 @@ import { readRegistry } from "../registry/store.ts";
 import { Store, type StoreContext } from "../store/db.ts";
 import { policyHoldEntries, type PolicyHoldView } from "../store/decisions/policyHolds.ts";
 import { holdGuard } from "../store/decisions/questions.ts";
+import { messageRow, messageRows } from "../store/messages/messages.ts";
 import { derivedId, storeNotice } from "../store/messages/notices.ts";
 import { NEXT_REVIEW_BOUNDARY, retentionInstant } from "../store/messages/retention.ts";
 import {
@@ -22,10 +21,12 @@ import {
   wakeState,
 } from "../store/messages/wake.ts";
 import { unreadMessages } from "../store/messages/wakeEvidence.ts";
+import type { ProjectionRow } from "../store/projectionIndex.ts";
 import { DELIVERY_KIT_ACTOR } from "../store/sessions/identity.ts";
 import {
   type Json,
   type JsonObject,
+  type MessageLink,
   type Retention,
   StoreError,
   type UnreadMessage,
@@ -41,8 +42,6 @@ import {
 
 export const BRIEF_MAX_LINES = 60;
 export const BRIEF_MAX_BYTES = 4096;
-
-type Row = Record<string, SQLInputValue>;
 
 interface StoreReviewContext extends StoreContext {
   readonly layout: Layout;
@@ -155,24 +154,37 @@ export interface BriefRecord {
   readonly reportedWorkerFailures: readonly string[];
 }
 
+/** Pick by newest slot, breaking cross-game ties by the original journal order. */
+function matchingBrief(
+  store: Store,
+  matches: (row: ProjectionRow) => boolean,
+): ProjectionRow | undefined {
+  let found: ProjectionRow | undefined;
+  for (const row of store.index.rows("review_briefs")) {
+    if (
+      matches(row) &&
+      (found === undefined ||
+        Number(row.slot) > Number(found.slot) ||
+        (row.slot === found.slot && Number(row.seq) > Number(found.seq)))
+    ) {
+      found = row;
+    }
+  }
+  return found;
+}
+
 function previousBrief(store: Store, game: string, slot: number): BriefRecord | undefined {
-  const row = store.db
-    .prepare(
-      `SELECT e.payload FROM review_briefs b JOIN events e ON e.seq = b.seq
-       WHERE b.game = ? AND b.slot < ? ORDER BY b.slot DESC LIMIT 1`,
-    )
-    .get(game, slot) as Row | undefined;
-  return row === undefined ? undefined : (JSON.parse(row.payload as string) as BriefRecord);
+  const row = matchingBrief(store, (row) => row.game === game && Number(row.slot) < slot);
+  return row === undefined
+    ? undefined
+    : (store.eventAt(Number(row.seq))?.payload as unknown as BriefRecord | undefined);
 }
 
 function recordedBrief(store: Store, game: string, slot: number): BriefRecord | undefined {
-  const row = store.db
-    .prepare(
-      `SELECT e.payload FROM review_briefs b JOIN events e ON e.seq = b.seq
-       WHERE b.game = ? AND b.slot = ?`,
-    )
-    .get(game, slot) as Row | undefined;
-  return row === undefined ? undefined : (JSON.parse(row.payload as string) as BriefRecord);
+  const row = store.index.get("review_briefs", [game, slot]);
+  return row === undefined
+    ? undefined
+    : (store.eventAt(Number(row.seq))?.payload as unknown as BriefRecord | undefined);
 }
 
 /** Roles the native collector never read: their prompt visibility has no supported survey. */
@@ -309,19 +321,21 @@ function survey(
   native: NativeSurvey,
   slot: number,
 ): Omit<BriefRecord, "game" | "slot" | "recipient" | "messageId" | "result"> {
-  const rows = store.db
-    .prepare(
-      `SELECT id, to_role, state, unconfirmed, retention, created_at,
-         from_role = 'delivery-kit' AND (
-           id IN (SELECT message_id FROM review_briefs) OR EXISTS (
-             SELECT 1 FROM json_each(links) AS link
-             WHERE json_extract(link.value, '$.kind') = 'event-kind'
-               AND json_extract(link.value, '$.ref') = 'review-stuck'
-           )
-         ) AS review_generated
-       FROM messages WHERE state IN ('sent', 'delivered', 'retained') ORDER BY to_role, sent_seq`,
-    )
-    .all() as Row[];
+  const rows = messageRows(store, null, ["sent", "delivered", "retained"]).sort((a, b) =>
+    a.to_role === b.to_role ? 0 : (a.to_role as string) < (b.to_role as string) ? -1 : 1,
+  );
+  const reviewOriginals = new Set(
+    store.index.rows("review_briefs").map(({ message_id }) => message_id),
+  );
+  function reviewGenerated(row: ProjectionRow): boolean {
+    return (
+      row.from_role === "delivery-kit" &&
+      (reviewOriginals.has(row.id) ||
+        (JSON.parse(row.links as string) as MessageLink[] | null)?.some(
+          ({ kind, ref }) => kind === "event-kind" && ref === "review-stuck",
+        ) === true)
+    );
+  }
   const before = new Set(previous?.open ?? []);
   const stalledBefore = new Set(
     previous?.exceptions.filter((exception) => exception.kind === "stalled").map(({ id }) => id),
@@ -368,7 +382,7 @@ function survey(
         role,
         sentAt: row.created_at as string,
         state,
-        ...(Number(row.review_generated) === 1 ? { reviewGenerated: true as const } : {}),
+        ...(reviewGenerated(row) ? { reviewGenerated: true as const } : {}),
       };
       if (state !== "retained") {
         if (stalledBefore.has(id)) {
@@ -385,13 +399,15 @@ function survey(
     }
   }
   const wakes = { ambiguous: 0, failed: 0, guarded: 0, outstanding: 0 };
-  const outstanding = store.db
-    .prepare(
-      `SELECT s.role, w.outcome, w.detail FROM wake_state s JOIN wakes w ON w.id = s.outstanding
-       ORDER BY s.role`,
-    )
-    .all() as Row[];
-  for (const row of outstanding) {
+  for (const role of store.index
+    .rows("wake_state")
+    .map(({ role }) => role as string)
+    .sort()) {
+    const id = wakeState(store, role).outstanding;
+    const row = id === null ? undefined : store.index.get("wakes", [id]);
+    if (row === undefined) {
+      continue;
+    }
     wakes.outstanding += 1;
     const outcome = (row.outcome as string | null) ?? "ambiguous";
     if (outcome === "failed" || outcome === "ambiguous") {
@@ -399,17 +415,22 @@ function survey(
       exceptions.push({
         detail: (row.detail as string | null) ?? "no outcome recorded",
         kind: outcome === "failed" ? "wake-failed" : "wake-ambiguous",
-        role: row.role as string,
+        role,
       });
+    }
+  }
+  const latestWakes = new Map<string, ProjectionRow>();
+  for (const row of store.index.rows("wakes")) {
+    const role = row.role as string;
+    if (Number(row.seq) > Number(latestWakes.get(role)?.seq ?? 0)) {
+      latestWakes.set(role, row);
     }
   }
   for (const role of pendingWakeRoles(store)) {
     if (wakeState(store, role).outstanding !== null) {
       continue;
     }
-    const last = store.db
-      .prepare("SELECT outcome, detail FROM wakes WHERE role = ? ORDER BY seq DESC LIMIT 1")
-      .get(role) as Row | undefined;
+    const last = latestWakes.get(role);
     if (last?.outcome === "guarded") {
       wakes.guarded += 1;
       exceptions.push({
@@ -419,18 +440,17 @@ function survey(
       });
     }
   }
-  const afterSeq = previous === undefined ? 0 : Number(previousSeq(store, previous));
+  const afterSeq =
+    previous === undefined
+      ? 0
+      : Number(store.index.get("review_briefs", [previous.game, previous.slot])?.seq ?? 0);
   const unread = unreadMessages(store, null);
-  const runner = store.db
-    .prepare(
-      `SELECT sum(kind = 'bus.event') AS events, sum(kind = 'bus.complete') AS completes
-       FROM events WHERE seq > ?`,
-    )
-    .get(afterSeq) as Row;
+  const runnerEvents = store.events({ afterSeq, kinds: ["bus.event", "bus.complete"] });
+  const completes = runnerEvents.filter(({ kind }) => kind === "bus.complete").length;
   return {
     counts: {
       byRole: byRole as unknown as Json,
-      completes: Number(runner.completes ?? 0),
+      completes,
       decisions: {
         pending: decisions.pending.length,
         recorded: decisions.recorded.reduce((sum, decision) => sum + decision.count, 0),
@@ -439,7 +459,7 @@ function survey(
       open: rows.length,
       policyHolds: policyHolds.length,
       readyHandoffs: readyHandoffs.length,
-      runnerEvents: Number(runner.events ?? 0),
+      runnerEvents: runnerEvents.length - completes,
       states,
       unconfirmed,
       unread: unread.length,
@@ -454,13 +474,6 @@ function survey(
     reportedWorkerFailures: checked.reported,
     unread,
   };
-}
-
-function previousSeq(store: Store, previous: BriefRecord): number {
-  const row = store.db
-    .prepare("SELECT seq FROM review_briefs WHERE game = ? AND slot = ?")
-    .get(previous.game, previous.slot) as Row | undefined;
-  return Number(row?.seq ?? 0);
 }
 
 function exceptionLine(exception: BriefException, titles: boolean): string {
@@ -643,10 +656,7 @@ async function wakeBrief(
   if (wakePlan === undefined || record.recipient !== recipient) {
     return;
   }
-  if (
-    store.db.prepare("SELECT 1 FROM review_briefs WHERE game = ? AND slot > ?").get(game, slot) !==
-    undefined
-  ) {
+  if (matchingBrief(store, (row) => row.game === game && Number(row.slot) > slot) !== undefined) {
     return;
   }
   // A review ignores pending questions in the store, while role and policy holds still apply.
@@ -771,26 +781,21 @@ export function showBrief(
     throw new StoreError("brief-missing");
   }
   try {
-    const row = store.db
-      .prepare(
-        `SELECT e.payload, e.at, m.body FROM review_briefs b JOIN events e ON e.seq = b.seq
-         LEFT JOIN messages m ON m.id = b.message_id
-         WHERE (? IS NULL OR b.game = ?) AND (? IS NULL OR b.slot = ?)
-         ORDER BY b.slot DESC, b.seq DESC LIMIT 1`,
-      )
-      .get(
-        selection.game ?? null,
-        selection.game ?? null,
-        selection.slot ?? null,
-        selection.slot ?? null,
-      ) as Row | undefined;
-    if (row === undefined) {
+    const row = matchingBrief(
+      store,
+      (row) =>
+        (selection.game === undefined || row.game === selection.game) &&
+        (selection.slot === undefined || row.slot === selection.slot),
+    );
+    const event = row === undefined ? undefined : store.eventAt(Number(row.seq));
+    if (event === undefined) {
       throw new StoreError("brief-missing");
     }
+    const body = messageRow(store, event.payload.messageId as string)?.body;
     return {
-      ...(JSON.parse(row.payload as string) as BriefRecord),
-      at: row.at as string,
-      body: (row.body as string | null) ?? "",
+      ...(event.payload as unknown as BriefRecord),
+      at: event.at,
+      body: (body as string | null) ?? "",
     };
   } finally {
     store.close();

@@ -9,31 +9,31 @@ export interface ReadyHandoff extends WorkRef {
 
 /** Use the current work projection and its exact parent link, even if the parent is unrecorded. */
 export function readReadyHandoffs(store: Store): ReadyHandoff[] {
-  const rows = store.db
-    .prepare(
-      `SELECT w.repository, w.id, w.owner, w.ready_at, w.parent_repository, w.parent_id,
-              p.owner AS parent_owner
-       FROM work w LEFT JOIN work p ON p.repository = w.parent_repository AND p.id = w.parent_id
-       WHERE w.state = 'ready' AND w.ready_at IS NOT NULL
-       ORDER BY w.ready_at, w.repository, w.id`,
-    )
-    .all() as {
-    id: string;
-    owner: string | null;
-    parent_id: string | null;
-    parent_owner: string | null;
-    parent_repository: string | null;
-    ready_at: string;
-    repository: string;
-  }[];
+  const rows = store.index
+    .rows("work")
+    .filter((row) => row.state === "ready" && row.ready_at != null)
+    .sort((a, b) => {
+      for (const key of ["ready_at", "repository", "id"]) {
+        if (a[key] !== b[key]) {
+          return (a[key] as string) < (b[key] as string) ? -1 : 1;
+        }
+      }
+      return 0;
+    });
   return rows.map((row) => ({
-    id: row.id,
-    owner: row.owner,
+    id: row.id as string,
+    owner: (row.owner as string | null) ?? null,
     parent:
-      row.parent_id === null || row.parent_repository === null
+      typeof row.parent_id !== "string" || typeof row.parent_repository !== "string"
         ? null
-        : { id: row.parent_id, owner: row.parent_owner, repository: row.parent_repository },
-    readyAt: row.ready_at,
-    repository: row.repository,
+        : {
+            id: row.parent_id,
+            owner:
+              (store.index.get("work", [row.parent_repository, row.parent_id])?.owner as
+                string | null) ?? null,
+            repository: row.parent_repository,
+          },
+    readyAt: row.ready_at as string,
+    repository: row.repository as string,
   }));
 }

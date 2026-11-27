@@ -44,6 +44,7 @@ import {
   type WakeGuard,
   type WakeOutcome,
 } from "../types.ts";
+import { messageRows } from "./messages.ts";
 import { coalescedMessages } from "./wakeEvidence.ts";
 
 /**
@@ -155,11 +156,7 @@ function checkStoreGuard(context: WakeContext, role: string, harness: Harness): 
 const SYSTEM: Actor = { nativeId: null, role: null };
 
 function undeliveredIds(store: Store, role: string): string[] {
-  return (
-    store.db
-      .prepare("SELECT id FROM messages WHERE to_role = ? AND state = 'sent' ORDER BY sent_seq")
-      .all(role) as { id: string }[]
-  ).map(({ id }) => id);
+  return messageRows(store, role, ["sent"]).map(({ id }) => id as string);
 }
 
 /** One recipient's wake state: pending since a send, and the outstanding wake if any. */
@@ -167,23 +164,18 @@ export function wakeState(
   store: Store,
   role: string,
 ): { readonly pending: boolean; readonly outstanding: string | null } {
-  const row = store.db
-    .prepare("SELECT pending, outstanding FROM wake_state WHERE role = ?")
-    .get(role) as { pending: number; outstanding: string | null } | undefined;
-  return { outstanding: row?.outstanding ?? null, pending: Number(row?.pending ?? 0) === 1 };
+  const row = store.index.get("wake_state", [role]);
+  return { outstanding: (row?.outstanding as string | null) ?? null, pending: row?.pending === 1 };
 }
 
 /** Recipients with unread originals since their last pull. A review seam read. */
 export function pendingWakeRoles(store: Store): string[] {
-  return (
-    store.db
-      .prepare(
-        `SELECT w.role FROM wake_state w WHERE w.pending = 1 AND EXISTS
-           (SELECT 1 FROM messages m WHERE m.to_role = w.role AND m.state = 'sent')
-         ORDER BY w.role`,
-      )
-      .all() as { role: string }[]
-  ).map((row) => row.role);
+  const recipients = new Set(messageRows(store, null, ["sent"]).map(({ to_role }) => to_role));
+  return store.index
+    .rows("wake_state")
+    .filter(({ pending, role }) => pending === 1 && recipients.has(role))
+    .map(({ role }) => role as string)
+    .sort();
 }
 
 /**
@@ -222,15 +214,15 @@ function outstandingWake(store: Store, role: string, target: Target | null) {
   if (id === null) {
     return null;
   }
-  const current = store.db
-    .prepare("SELECT id, seq, conversation, harness FROM wakes WHERE id = ? AND role = ?")
-    .get(id, role) as
-    { id: string; seq: number; conversation: string; harness: Harness } | undefined;
-  return current !== undefined &&
-    (target === null ||
-      (current.harness === target.harness && current.conversation === target.conversation))
-    ? current
-    : null;
+  const current = store.index.get("wakes", [id]);
+  if (
+    current?.role !== role ||
+    (target !== null &&
+      (current.harness !== target.harness || current.conversation !== target.conversation))
+  ) {
+    return null;
+  }
+  return { id, seq: Number(current.seq) };
 }
 
 const claudeWake: WakeAdapter = (context, role, target, wake) => {
@@ -411,7 +403,7 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
         key: `wake.guarded:${wake}`,
         kind: "wake.guarded",
         payload: {
-          blocker: blockerPayload(storedWakeBlocker(store.db, guard.blocker, role)),
+          blocker: blockerPayload(storedWakeBlocker(store.index, guard.blocker, role)),
           count,
           harness: target.harness,
           messages,
@@ -459,7 +451,7 @@ export async function wakeRecipient(context: WakeContext, role: string): Promise
     key: `wake.completed:${wake}`,
     kind: "wake.completed",
     payload: {
-      blocker: blockerPayload(storedWakeBlocker(store.db, delivery.blocker, role)),
+      blocker: blockerPayload(storedWakeBlocker(store.index, delivery.blocker, role)),
       detail: delivery.detail,
       outcome: delivery.outcome,
       role,

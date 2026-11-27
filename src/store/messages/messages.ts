@@ -2,10 +2,9 @@
 // superseded or retained by the recipient. Every function trusts its `actor`; the CLI resolves it
 // through the registry fence or marks an unbound sender explicitly. Native wakes are separate
 // and never change message state.
-import type { SQLInputValue } from "node:sqlite";
-
 import type { Store } from "../db.ts";
 import { canonicalJson, normalizeLinks, REF, sha256 } from "../eventCodec.ts";
+import type { Cell, ProjectionRow } from "../projectionIndex.ts";
 import { secretShape } from "../secrets.ts";
 import {
   type Actor,
@@ -34,23 +33,21 @@ export const MESSAGE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 export const MAX_BODY_BYTES = 1024 * 1024;
 const OPEN: readonly MessageState[] = ["sent", "delivered", "retained"];
 
-type Row = Record<string, SQLInputValue>;
+type Row = ProjectionRow;
 
-function parse<T>(value: SQLInputValue | undefined): T {
+function parse<T>(value: Cell | undefined): T {
   return JSON.parse((value as string | undefined) ?? "null") as T;
 }
 
-function bodyView(store: Pick<Store, "db">, row: Row): Pick<MessageView, "body" | "bodyExpired"> {
+function bodyView(
+  store: Pick<Store, "eventAt">,
+  row: Row,
+): Pick<MessageView, "body" | "bodyExpired"> {
   const body = row.body as string;
-  if (body === "") {
-    const original = store.db
-      .prepare("SELECT json_type(payload, '$.body') AS type FROM events WHERE seq = ?")
-      .get(row.sent_seq!);
-    if (original?.type === null) {
-      return { bodyExpired: true };
-    }
-  }
-  return { body };
+  const original = body === "" ? store.eventAt(Number(row.sent_seq)) : undefined;
+  return original !== undefined && original.payload.body === undefined
+    ? { bodyExpired: true }
+    : { body };
 }
 
 function originalOf(row: Row) {
@@ -64,7 +61,7 @@ function originalOf(row: Row) {
   };
 }
 
-type Reader = Pick<Store, "db" | "eventByKey">;
+type Reader = Pick<Store, "index" | "event" | "eventAt">;
 
 function rowView(
   store: Reader,
@@ -100,8 +97,24 @@ function rowView(
   };
 }
 
-function messageRow(store: Pick<Store, "db">, id: string): Row | undefined {
-  return store.db.prepare("SELECT * FROM messages WHERE id = ?").get(id) as Row | undefined;
+export function messageRow(store: Pick<Store, "index">, id: string): Row | undefined {
+  return store.index.get("messages", [id]);
+}
+
+/** Message rows in original send order, optionally narrowed to a recipient and states. */
+export function messageRows(
+  store: Pick<Store, "index">,
+  role: string | null,
+  states?: readonly MessageState[],
+): Row[] {
+  return store.index
+    .rows("messages")
+    .filter(
+      (row) =>
+        (role === null || row.to_role === role) &&
+        (states === undefined || states.includes(row.state as MessageState)),
+    )
+    .sort((a, b) => Number(a.sent_seq) - Number(b.sent_seq));
 }
 
 export interface SendInput {
@@ -190,18 +203,9 @@ export function readInbox(
   const role = actor.role;
   ensure(role !== null && ROLE.test(role), "invalid-actor");
   return store.transaction(() => {
-    const rows = (
-      options.all === true
-        ? store.db.prepare("SELECT * FROM messages WHERE to_role = ? ORDER BY sent_seq")
-        : store.db.prepare(
-            `SELECT * FROM messages WHERE to_role = ? AND state IN (${OPEN.map(() => "?").join(",")})
-             ORDER BY sent_seq`,
-          )
-    ).all(role, ...(options.all === true ? [] : OPEN)) as Row[];
+    const rows = messageRows(store, role, options.all === true ? undefined : OPEN);
     const undelivered = rows.filter((row) => row.state === "sent").map((row) => row.id as string);
-    const wake = store.db
-      .prepare("SELECT pending, outstanding FROM wake_state WHERE role = ?")
-      .get(role) as Row | undefined;
+    const wake = store.index.get("wake_state", [role]);
     let at: string | null = null;
     if (undelivered.length > 0 || Number(wake?.pending ?? 0) === 1 || wake?.outstanding != null) {
       at = store.now();
@@ -414,14 +418,7 @@ export function recipientMessages(
   role: string,
   states: readonly MessageState[],
 ): MessageView[] {
-  return (
-    store.db
-      .prepare(
-        `SELECT * FROM messages WHERE to_role = ? AND state IN (${states.map(() => "?").join(",")})
-         ORDER BY sent_seq`,
-      )
-      .all(role, ...states) as Row[]
-  ).map((row) => rowView(store, row, false));
+  return messageRows(store, role, states).map((row) => rowView(store, row, false));
 }
 
 export const MESSAGE_KINDS = [
@@ -515,31 +512,27 @@ function historyQuery(
   viewer: string | null,
   readAll: boolean,
 ): HistoryEntry[] {
-  const rows = store.db
-    .prepare(
-      `SELECT e.seq, e.kind, e.at, e.actor_role, e.actor_worker, e.payload FROM events e
-       LEFT JOIN messages m ON m.id = json_extract(e.payload, '$.id')
-       WHERE e.kind IN (${kinds.map(() => "?").join(",")})
-         AND (? IS NULL OR e.at >= ?)
-         AND (? IS NULL OR m.from_role = ? OR m.to_role = ?
-              OR json_extract(e.payload, '$.role') = ? OR e.actor_role = ?)
-       ORDER BY e.seq LIMIT ?`,
-    )
-    .all(...kinds, since, since, role, role, role, role, role, limit) as Row[];
-  return rows.map((row) => ({
-    actor: {
-      role: (row.actor_role as string | null) ?? null,
-      worker: (row.actor_worker as string | null) ?? null,
-    },
-    at: row.at as string,
-    detail: historyDetail(
-      { kind: row.kind as string, payload: parse<JsonObject>(row.payload) },
-      viewer,
-      readAll,
-    ),
-    kind: row.kind as string,
-    seq: Number(row.seq),
-  }));
+  return store
+    .events({ kinds })
+    .filter((event) => {
+      if (since !== null && event.at < since) {
+        return false;
+      }
+      if (role === null || event.actor.role === role || event.payload.role === role) {
+        return true;
+      }
+      const row =
+        typeof event.payload.id === "string" ? messageRow(store, event.payload.id) : undefined;
+      return row?.from_role === role || row?.to_role === role;
+    })
+    .slice(0, limit)
+    .map((event) => ({
+      actor: { role: event.actor.role, worker: event.actor.worker ?? null },
+      at: event.at,
+      detail: historyDetail(event, viewer, readAll),
+      kind: event.kind,
+      seq: event.seq,
+    }));
 }
 
 export interface ExportResult {
@@ -554,19 +547,17 @@ export interface ExportResult {
 
 /** Sends, closes and retentions recorded after `since`, in seq order. Imports are excluded. */
 export function exportSince(store: Store, since: string): ExportResult {
-  const rows = store.db
-    .prepare(
-      `SELECT seq, kind, at, actor_role, payload FROM events
-       WHERE kind IN ('msg.sent', 'msg.closed', 'msg.retained') AND at > ? ORDER BY seq`,
-    )
-    .all(since) as Row[];
+  const rows = store.events({ kinds: ["msg.sent", "msg.closed", "msg.retained"] });
   const messages: JsonObject[] = [];
   const expiredMessages: JsonObject[] = [];
   const closes: JsonObject[] = [];
   for (const row of rows) {
-    const payload = parse<JsonObject>(row.payload);
+    if (row.at <= since) {
+      continue;
+    }
+    const { payload } = row;
     if (row.kind === "msg.sent") {
-      const entry = { ...payload, at: row.at as string, seq: Number(row.seq) };
+      const entry = { ...payload, at: row.at, seq: Number(row.seq) };
       if (payload.body === undefined) {
         expiredMessages.push({ ...entry, bodyExpired: true });
       } else {
@@ -575,10 +566,10 @@ export function exportSince(store: Store, since: string): ExportResult {
     } else {
       closes.push({
         ...payload,
-        actor: (row.actor_role as string | null) ?? null,
-        at: row.at as string,
-        kind: row.kind as string,
-        seq: Number(row.seq),
+        actor: row.actor.role,
+        at: row.at,
+        kind: row.kind,
+        seq: row.seq,
       });
     }
   }

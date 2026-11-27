@@ -1,263 +1,190 @@
 // Messages, the per-role wake state and the wake attempts.
-import type { DatabaseSync } from "node:sqlite";
-
 import { payloadJson as json, payloadText as text } from "../eventCodec.ts";
-import type { JsonObject, Projection, StoredEvent } from "../types.ts";
+import type { ProjectionIndex, ProjectionRow } from "../projectionIndex.ts";
+import { ensure, type JsonObject, type Projection, type StoredEvent } from "../types.ts";
 
-const MESSAGES_DDL = `
-CREATE TABLE IF NOT EXISTS messages (
-  id TEXT PRIMARY KEY,
-  from_role TEXT NOT NULL,
-  to_role TEXT NOT NULL,
-  intent TEXT NOT NULL,
-  body TEXT NOT NULL,
-  body_sha256 TEXT NOT NULL,
-  links TEXT NOT NULL,
-  worker TEXT,
-  state TEXT NOT NULL CHECK (state IN ('sent', 'delivered', 'handled', 'retained', 'superseded')),
-  unconfirmed INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL,
-  sent_seq INTEGER NOT NULL,
-  delivered_at TEXT,
-  closed_at TEXT,
-  work TEXT,
-  superseded_by TEXT,
-  evidence TEXT NOT NULL DEFAULT '[]',
-  retention TEXT,
-  legacy TEXT,
-  updated_seq INTEGER NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS messages_inbox ON messages (to_role, state, sent_seq);
-CREATE INDEX IF NOT EXISTS messages_from ON messages (from_role, sent_seq);
-CREATE TABLE IF NOT EXISTS wake_state (
-  role TEXT PRIMARY KEY,
-  pending INTEGER NOT NULL DEFAULT 0,
-  outstanding TEXT
-);
-CREATE TABLE IF NOT EXISTS wakes (
-  id TEXT PRIMARY KEY,
-  role TEXT NOT NULL,
-  harness TEXT,
-  conversation TEXT,
-  count INTEGER NOT NULL,
-  at TEXT NOT NULL,
-  seq INTEGER NOT NULL,
-  outcome TEXT,
-  detail TEXT,
-  completed_at TEXT
-);
-CREATE INDEX IF NOT EXISTS wakes_role ON wakes (role, seq);
-`;
-
-function setPending(db: DatabaseSync, role: string): void {
-  db.prepare(
-    `INSERT INTO wake_state (role, pending, outstanding) VALUES (?, 1, NULL)
-     ON CONFLICT (role) DO UPDATE SET pending = 1`,
-  ).run(role);
+function setPending(index: ProjectionIndex, role: string): void {
+  const current = index.get("wake_state", [role]);
+  index.put("wake_state", [role], { outstanding: current?.outstanding ?? null, pending: 1, role });
 }
 
-const sent = (db: DatabaseSync, event: StoredEvent): void => {
+function original(index: ProjectionIndex, event: StoredEvent): void {
   const p = event.payload;
-  db.prepare(
-    `INSERT INTO messages (id, from_role, to_role, intent, body, body_sha256, links, worker, state,
-       created_at, sent_seq, updated_seq, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'sent', ?, ?, ?, ?)`,
-  ).run(
-    text(p, "id"),
-    text(p, "from"),
-    text(p, "to"),
-    text(p, "intent"),
-    text(p, "body"),
-    text(p, "bodySha256"),
-    json(p, "links"),
-    text(p, "worker"),
-    text(p, "createdAt"),
-    event.seq,
-    event.seq,
-    event.at,
-  );
-  setPending(db, text(p, "to")!);
-};
-
-const imported = (db: DatabaseSync, event: StoredEvent): void => {
-  const p = event.payload;
-  db.prepare(
-    `INSERT INTO messages (id, from_role, to_role, intent, body, body_sha256, links, worker, state,
-       unconfirmed, created_at, sent_seq, delivered_at, closed_at, work, superseded_by, evidence,
-       retention, legacy, updated_seq, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    text(p, "id"),
-    text(p, "from"),
-    text(p, "to"),
-    text(p, "intent"),
-    text(p, "body"),
-    text(p, "bodySha256"),
-    json(p, "links"),
-    text(p, "state"),
-    p.unconfirmed === true ? 1 : 0,
-    text(p, "createdAt"),
-    event.seq,
-    text(p, "deliveredAt"),
-    text(p, "closedAt"),
-    text(p, "work"),
-    text(p, "supersededBy"),
-    json(p, "evidence"),
-    p.retention === null || typeof p.retention !== "object"
-      ? null
-      : JSON.stringify({ ...(p.retention as JsonObject), at: event.at }),
-    json(p, "legacy"),
-    event.seq,
-    event.at,
-  );
-  if (p.state === "sent") {
-    setPending(db, text(p, "to")!);
+  const id = text(p, "id")!;
+  const to = text(p, "to")!;
+  const imported = event.kind === "msg.imported";
+  const state = imported ? text(p, "state") : "sent";
+  ensure(index.get("messages", [id]) === undefined, "message-id-conflict");
+  index.put("messages", [id], {
+    body: text(p, "body") ?? "",
+    body_sha256: text(p, "bodySha256"),
+    closed_at: imported ? text(p, "closedAt") : null,
+    created_at: text(p, "createdAt"),
+    delivered_at: imported ? text(p, "deliveredAt") : null,
+    evidence: imported ? json(p, "evidence") : "[]",
+    from_role: text(p, "from"),
+    id,
+    intent: text(p, "intent"),
+    legacy: imported ? json(p, "legacy") : null,
+    links: json(p, "links"),
+    retention:
+      imported && p.retention !== null && typeof p.retention === "object"
+        ? JSON.stringify({ ...(p.retention as JsonObject), at: event.at })
+        : null,
+    sent_seq: event.seq,
+    state,
+    superseded_by: imported ? text(p, "supersededBy") : null,
+    to_role: to,
+    unconfirmed: imported && p.unconfirmed === true ? 1 : 0,
+    updated_at: event.at,
+    updated_seq: event.seq,
+    work: imported ? text(p, "work") : null,
+    worker: imported ? null : text(p, "worker"),
+  });
+  if (state === "sent") {
+    setPending(index, to);
   }
-};
+}
 
-const inboxRead = (db: DatabaseSync, event: StoredEvent): void => {
+function updateMessage(
+  index: ProjectionIndex,
+  event: StoredEvent,
+  id: string,
+  current: ProjectionRow,
+  changes: ProjectionRow,
+): void {
+  index.put("messages", [id], {
+    ...current,
+    ...changes,
+    updated_at: event.at,
+    updated_seq: event.seq,
+  });
+}
+
+function inboxRead(index: ProjectionIndex, event: StoredEvent): void {
   const role = text(event.payload, "role")!;
-  const update = db.prepare(
-    `UPDATE messages SET state = 'delivered', delivered_at = ?, updated_seq = ?, updated_at = ?
-     WHERE id = ? AND to_role = ? AND state = 'sent'`,
-  );
   for (const id of (event.payload.delivered as readonly string[] | undefined) ?? []) {
-    update.run(event.at, event.seq, event.at, id, role);
+    const row = index.get("messages", [id]);
+    if (row?.to_role === role && row.state === "sent") {
+      updateMessage(index, event, id, row, { delivered_at: event.at, state: "delivered" });
+    }
   }
-  db.prepare(
-    `INSERT INTO wake_state (role, pending, outstanding) VALUES (?, 0, NULL)
-     ON CONFLICT (role) DO UPDATE SET pending = 0, outstanding = NULL`,
-  ).run(role);
-};
+  index.put("wake_state", [role], { outstanding: null, pending: 0, role });
+}
 
-const closed = (db: DatabaseSync, event: StoredEvent): void => {
+function closed(index: ProjectionIndex, event: StoredEvent): void {
   const p = event.payload;
+  const id = text(p, "id")!;
+  const row = index.get("messages", [id]);
+  if (row === undefined) {
+    return;
+  }
   // A journal may hold generated coordinator attention closed without delivery.
   const retiredAttention =
     event.actor.role === "game-coordinator" &&
     event.actor.nativeId === null &&
     Array.isArray(p.evidence) &&
     p.evidence[0] === "attention-source-cleared";
-  db.prepare(
-    `UPDATE messages SET state = ?, closed_at = ?, delivered_at = COALESCE(delivered_at, ?),
-       work = ?, superseded_by = ?, evidence = ?, updated_seq = ?, updated_at = ?
-     WHERE id = ?`,
-  ).run(
-    text(p, "state"),
-    event.at,
-    retiredAttention ? null : event.at,
-    text(p, "work"),
-    text(p, "supersededBy"),
-    json(p, "evidence"),
-    event.seq,
-    event.at,
-    text(p, "id"),
-  );
-};
+  updateMessage(index, event, id, row, {
+    closed_at: event.at,
+    delivered_at: row.delivered_at ?? (retiredAttention ? null : event.at),
+    evidence: json(p, "evidence"),
+    state: text(p, "state"),
+    superseded_by: text(p, "supersededBy"),
+    work: text(p, "work"),
+  });
+}
 
-const retained = (db: DatabaseSync, event: StoredEvent): void => {
+function retained(index: ProjectionIndex, event: StoredEvent): void {
   const p = event.payload;
-  db.prepare(
-    `UPDATE messages SET state = 'retained', delivered_at = COALESCE(delivered_at, ?),
-       retention = ?, evidence = COALESCE(?, evidence), updated_seq = ?, updated_at = ?
-     WHERE id = ?`,
-  ).run(
-    event.at,
-    JSON.stringify({
+  const id = text(p, "id")!;
+  const row = index.get("messages", [id]);
+  if (row === undefined) {
+    return;
+  }
+  updateMessage(index, event, id, row, {
+    delivered_at: row.delivered_at ?? event.at,
+    evidence: p.evidence === undefined ? row.evidence! : json(p, "evidence"),
+    retention: JSON.stringify({
       at: event.at,
       nextBoundary: text(p, "nextBoundary"),
       owner: text(p, "owner"),
       reason: text(p, "reason"),
     }),
-    p.evidence === undefined ? null : json(p, "evidence"),
-    event.seq,
-    event.at,
-    text(p, "id"),
-  );
-};
+    state: "retained",
+  });
+}
 
-const wakeClaimed = (db: DatabaseSync, event: StoredEvent): void => {
+function wakeAttempt(index: ProjectionIndex, event: StoredEvent): void {
   const p = event.payload;
-  db.prepare(
-    `INSERT INTO wakes (id, role, harness, conversation, count, at, seq) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    text(p, "wake"),
-    text(p, "role"),
-    text(p, "harness"),
-    text(p, "conversation"),
-    Number(p.count),
-    event.at,
-    event.seq,
-  );
-  db.prepare(
-    `INSERT INTO wake_state (role, pending, outstanding) VALUES (?, 1, ?)
-     ON CONFLICT (role) DO UPDATE SET outstanding = excluded.outstanding`,
-  ).run(text(p, "role"), text(p, "wake"));
-};
+  const id = text(p, "wake")!;
+  const role = text(p, "role")!;
+  const guarded = event.kind === "wake.guarded";
+  ensure(index.get("wakes", [id]) === undefined, "wake-id-conflict");
+  index.put("wakes", [id], {
+    at: event.at,
+    completed_at: guarded ? event.at : null,
+    conversation: guarded ? null : text(p, "conversation"),
+    count: Number(p.count),
+    detail: guarded ? text(p, "reason") : null,
+    harness: text(p, "harness"),
+    id,
+    outcome: guarded ? "guarded" : null,
+    role,
+    seq: event.seq,
+  });
+  if (!guarded) {
+    const row = index.get("wake_state", [role]);
+    index.put("wake_state", [role], { outstanding: id, pending: row?.pending ?? 1, role });
+  }
+}
 
-const wakeCompleted = (db: DatabaseSync, event: StoredEvent): void => {
+function clearWake(index: ProjectionIndex, role: string, expected?: string | null): void {
+  const row = index.get("wake_state", [role]);
+  if (row !== undefined && (expected === undefined || row.outstanding === expected)) {
+    index.put("wake_state", [role], { ...row, outstanding: null });
+  }
+}
+
+function wakeCompleted(index: ProjectionIndex, event: StoredEvent): void {
   const p = event.payload;
-  db.prepare(`UPDATE wakes SET outcome = ?, detail = ?, completed_at = ? WHERE id = ?`).run(
-    text(p, "outcome"),
-    text(p, "detail"),
-    event.at,
-    text(p, "wake"),
-  );
+  const id = text(p, "wake")!;
+  const row = index.get("wakes", [id]);
+  if (row !== undefined) {
+    index.put("wakes", [id], {
+      ...row,
+      completed_at: event.at,
+      detail: text(p, "detail"),
+      outcome: text(p, "outcome"),
+    });
+  }
   // A wake refused before any native action leaves nothing outstanding.
   if (p.outcome === "guarded") {
-    db.prepare(`UPDATE wake_state SET outstanding = NULL WHERE role = ? AND outstanding = ?`).run(
-      text(p, "role"),
-      text(p, "wake"),
-    );
+    clearWake(index, text(p, "role")!, id);
   }
-};
-
-const wakeGuarded = (db: DatabaseSync, event: StoredEvent): void => {
-  const p = event.payload;
-  db.prepare(
-    `INSERT INTO wakes (id, role, harness, conversation, count, at, seq, outcome, detail, completed_at)
-     VALUES (?, ?, ?, NULL, ?, ?, ?, 'guarded', ?, ?)`,
-  ).run(
-    text(p, "wake"),
-    text(p, "role"),
-    text(p, "harness"),
-    Number(p.count),
-    event.at,
-    event.seq,
-    text(p, "reason"),
-    event.at,
-  );
-};
-
-const wakeRearmed = (db: DatabaseSync, event: StoredEvent): void => {
-  db.prepare(`UPDATE wake_state SET outstanding = NULL WHERE role = ?`).run(
-    text(event.payload, "role"),
-  );
-};
+}
 
 /** A journal may hold native notice proofs, each of which ended its exact outstanding wake. */
-const noticeEnded = (db: DatabaseSync, event: StoredEvent): void => {
-  db.prepare(`UPDATE wake_state SET outstanding = NULL WHERE role = ? AND outstanding = ?`).run(
-    text(event.payload, "role"),
-    text(event.payload, "id"),
-  );
-};
+function noticeEnded(index: ProjectionIndex, { payload }: StoredEvent): void {
+  const id = text(payload, "id");
+  if (id !== null) {
+    clearWake(index, text(payload, "role")!, id);
+  }
+}
 
 export const MESSAGES_PROJECTION: Projection = {
   apply: {
     "inbox.read": inboxRead,
     "msg.closed": closed,
-    "msg.imported": imported,
+    "msg.imported": original,
     "msg.retained": retained,
-    "msg.sent": sent,
+    "msg.sent": original,
     "notice.consumed": noticeEnded,
     "notice.released": noticeEnded,
-    "wake.claimed": wakeClaimed,
+    "wake.claimed": wakeAttempt,
     "wake.completed": wakeCompleted,
-    "wake.guarded": wakeGuarded,
-    "wake.rearmed": wakeRearmed,
+    "wake.guarded": wakeAttempt,
+    "wake.rearmed": (index, { payload }) => clearWake(index, text(payload, "role")!),
   },
-  ddl: MESSAGES_DDL,
   tables: ["messages", "wake_state", "wakes"],
 };

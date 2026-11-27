@@ -1,14 +1,10 @@
 import type { Store } from "../db.ts";
+import type { ProjectionRow } from "../projectionIndex.ts";
 import { safeWakeReason, storedWakeBlocker } from "../projections/messageWake.ts";
 import type { MessageState, MessageWakeView, UnreadMessage } from "../types.ts";
+import { messageRow, messageRows } from "./messages.ts";
 
-type Reader = Pick<Store, "db">;
-
-function hasProjection(store: Reader): boolean {
-  return (
-    store.db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'message_wakes'").get() !== undefined
-  );
-}
+type Reader = Pick<Store, "index">;
 
 /** Later arrivals were outside the outstanding attempt, even when older membership is unknown. */
 export function coalescedMessages(
@@ -17,31 +13,52 @@ export function coalescedMessages(
   wake: string,
   afterSeq: number,
 ): string[] {
-  return (
-    store.db
-      .prepare(
-        `SELECT m.id FROM messages m
-       WHERE m.to_role = ? AND m.state = 'sent' AND m.sent_seq > ? AND NOT EXISTS (
-         SELECT 1 FROM message_wakes WHERE message_id = m.id AND wake_id = ?
-       )
-       ORDER BY m.sent_seq`,
-      )
-      .all(role, afterSeq, wake) as { id: string }[]
-  ).map(({ id }) => id);
+  return messageRows(store, role, ["sent"])
+    .filter(
+      ({ id, sent_seq }) =>
+        Number(sent_seq) > afterSeq && store.index.get("message_wakes", [id!, wake]) === undefined,
+    )
+    .map(({ id }) => id as string);
 }
 
 interface WakeRow {
-  readonly wake_id: string | null;
-  readonly coalesced: number | null;
+  readonly wake_id: string;
+  readonly coalesced: number;
   readonly outcome: string | null;
   readonly detail: string | null;
   readonly blocker: string | null;
 }
 
-const LATEST = `LEFT JOIN message_wakes mw ON mw.message_id = m.id AND mw.seq = (
-  SELECT seq FROM message_wakes WHERE message_id = m.id ORDER BY seq DESC LIMIT 1
-) LEFT JOIN wakes w ON w.id = mw.wake_id`;
-const EVIDENCE = "mw.wake_id, mw.coalesced, w.outcome, w.detail, mw.blocker";
+function withAttempt(store: Reader, link: ProjectionRow | undefined): WakeRow | undefined {
+  if (link === undefined) {
+    return undefined;
+  }
+  const wake = link.wake_id as string;
+  const attempt = store.index.get("wakes", [wake]);
+  return {
+    blocker: link.blocker as string | null,
+    coalesced: Number(link.coalesced),
+    detail: (attempt?.detail as string | null) ?? null,
+    outcome: (attempt?.outcome as string | null) ?? null,
+    wake_id: wake,
+  };
+}
+
+function exactLink(store: Reader, id: string, latest: boolean): ProjectionRow | undefined {
+  let found: ProjectionRow | undefined;
+  for (const row of store.index.rows("message_wakes")) {
+    if (row.message_id !== id) {
+      continue;
+    }
+    if (
+      found === undefined ||
+      (latest ? Number(row.seq) > Number(found.seq) : Number(row.seq) < Number(found.seq))
+    ) {
+      found = row;
+    }
+  }
+  return found;
+}
 
 function evidence(store: Reader, to: string, state: MessageState, row?: WakeRow): MessageWakeView {
   const wake = row?.wake_id ?? null;
@@ -66,7 +83,7 @@ function evidence(store: Reader, to: string, state: MessageState, row?: WakeRow)
           ? "prior-wake-outstanding"
           : safeWakeReason(row?.detail, `wake-${outcome}`);
   const blocker =
-    storedWakeBlocker(store.db, row?.blocker == null ? null : JSON.parse(row.blocker), to) ??
+    storedWakeBlocker(store.index, row?.blocker == null ? null : JSON.parse(row.blocker), to) ??
     (wake !== null && outcome !== "accepted" ? { id: wake, kind: "wake", owner: to } : null);
   let nextAction: MessageWakeView["nextAction"] = "none";
   if (state === "sent") {
@@ -92,12 +109,8 @@ export function messageWake(
   to: string,
   state: MessageState,
 ): MessageWakeView {
-  const row = hasProjection(store)
-    ? (store.db
-        .prepare(`SELECT ${EVIDENCE} FROM messages m ${LATEST} WHERE m.id = ?`)
-        .get(id) as unknown as WakeRow | undefined)
-    : undefined;
-  return evidence(store, to, state, row);
+  const link = messageRow(store, id) === undefined ? undefined : exactLink(store, id, true);
+  return evidence(store, to, state, withAttempt(store, link));
 }
 
 /** Earliest exact association, including a coalesced wake that predates this original. */
@@ -106,14 +119,7 @@ export function firstMessageWake(
   id: string,
   to: string,
 ): Omit<MessageWakeView, "nextAction"> | null {
-  const row = hasProjection(store)
-    ? (store.db
-        .prepare(
-          `SELECT ${EVIDENCE} FROM message_wakes mw LEFT JOIN wakes w ON w.id = mw.wake_id
-           WHERE mw.message_id = ? ORDER BY mw.seq LIMIT 1`,
-        )
-        .get(id) as unknown as WakeRow | undefined)
-    : undefined;
+  const row = withAttempt(store, exactLink(store, id, false));
   if (row === undefined) {
     return null;
   }
@@ -122,28 +128,19 @@ export function firstMessageWake(
 }
 
 export function unreadMessages(store: Reader, role: string | null): UnreadMessage[] {
-  const base = `FROM messages m WHERE m.state = 'sent' AND (? IS NULL OR m.to_role = ?) ORDER BY m.sent_seq`;
-  if (!hasProjection(store)) {
-    const rows = store.db
-      .prepare(`SELECT m.id, m.from_role, m.to_role ${base}`)
-      .all(role, role) as { id: string; from_role: string; to_role: string }[];
-    return rows.map(({ from_role, id, to_role }) => ({
-      from: from_role,
-      id,
-      to: to_role,
-      wake: evidence(store, to_role, "sent"),
-    }));
+  const unread = messageRows(store, role, ["sent"]);
+  const ids = new Set(unread.map(({ id }) => id));
+  const latest = new Map<string, ProjectionRow>();
+  for (const row of store.index.rows("message_wakes")) {
+    const id = row.message_id as string;
+    if (ids.has(id) && Number(row.seq) > Number(latest.get(id)?.seq ?? 0)) {
+      latest.set(id, row);
+    }
   }
-  const rows = store.db
-    .prepare(
-      `SELECT m.id, m.from_role, m.to_role, ${EVIDENCE}
-     FROM messages m ${LATEST} WHERE m.state = 'sent' AND (? IS NULL OR m.to_role = ?) ORDER BY m.sent_seq`,
-    )
-    .all(role, role) as unknown as (WakeRow & { id: string; from_role: string; to_role: string })[];
-  return rows.map((row) => ({
-    from: row.from_role,
-    id: row.id,
-    to: row.to_role,
-    wake: evidence(store, row.to_role, "sent", row),
+  return unread.map(({ from_role, id, to_role }) => ({
+    from: from_role as string,
+    id: id as string,
+    to: to_role as string,
+    wake: evidence(store, to_role as string, "sent", withAttempt(store, latest.get(id as string))),
   }));
 }

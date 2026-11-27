@@ -1,7 +1,6 @@
 // Each message's wake attempts and their safe blockers. Blocker and reason text is validated
 // before it is stored or printed, so nothing private reaches the projection.
-import type { DatabaseSync } from "node:sqlite";
-
+import type { ProjectionIndex } from "../projectionIndex.ts";
 import { secretShape } from "../secrets.ts";
 import {
   type JsonObject,
@@ -70,32 +69,37 @@ export function safeWakeBlocker(
 }
 
 export function storedWakeBlocker(
-  db: DatabaseSync,
+  index: ProjectionIndex,
   input: unknown,
   owner: string,
 ): WakeBlocker | null {
   const value = record(input);
   const issuer =
     value?.kind === "policy-hold" && safeId(value.id)
-      ? db.prepare("SELECT issuer FROM policy_holds WHERE id = ?").get(value.id)?.issuer
+      ? index.get("policy_holds", [value.id])?.issuer
       : undefined;
   return safeWakeBlocker(input, owner, typeof issuer === "string" ? issuer : undefined);
 }
 
-function exactMessages(db: DatabaseSync, event: StoredEvent): void {
+function exactMessages(index: ProjectionIndex, event: StoredEvent): void {
   const { blocker, messages, role, wake } = event.payload;
   if (!Array.isArray(messages) || typeof role !== "string" || typeof wake !== "string") {
     return;
   }
-  const safe = storedWakeBlocker(db, blocker, role);
-  const insert = db.prepare(
-    `INSERT INTO message_wakes (message_id, wake_id, seq, coalesced, blocker)
-     SELECT m.id, ?, ?, ?, ? FROM messages m WHERE m.id = ? AND m.to_role = ?
-     ON CONFLICT (message_id, wake_id) DO NOTHING`,
-  );
+  const safe = storedWakeBlocker(index, blocker, role);
   for (const id of messages) {
-    if (typeof id === "string") {
-      insert.run(wake, event.seq, event.kind === "wake.coalesced" ? 1 : 0, encode(safe), id, role);
+    if (typeof id !== "string" || index.get("messages", [id])?.to_role !== role) {
+      continue;
+    }
+    const key = [id, wake];
+    if (index.get("message_wakes", key) === undefined) {
+      index.put("message_wakes", key, {
+        blocker: encode(safe),
+        coalesced: event.kind === "wake.coalesced" ? 1 : 0,
+        message_id: id,
+        seq: event.seq,
+        wake_id: wake,
+      });
     }
   }
 }
@@ -112,26 +116,18 @@ export const MESSAGE_WAKE_PROJECTION: Projection = {
   apply: {
     "wake.claimed": exactMessages,
     "wake.coalesced": exactMessages,
-    "wake.completed": (db, event) => {
+    "wake.completed": (index, event) => {
       const { blocker, role, wake } = event.payload;
       if (typeof role === "string" && typeof wake === "string") {
-        db.prepare("UPDATE message_wakes SET blocker = ? WHERE wake_id = ? AND coalesced = 0").run(
-          encode(storedWakeBlocker(db, blocker, role)),
-          wake,
-        );
+        const safe = encode(storedWakeBlocker(index, blocker, role));
+        for (const row of index.rows("message_wakes")) {
+          if (row.wake_id === wake && row.coalesced === 0) {
+            index.put("message_wakes", [row.message_id!, wake], { ...row, blocker: safe });
+          }
+        }
       }
     },
     "wake.guarded": exactMessages,
   },
-  ddl: `CREATE TABLE IF NOT EXISTS message_wakes (
-    message_id TEXT NOT NULL,
-    wake_id TEXT NOT NULL,
-    seq INTEGER NOT NULL,
-    coalesced INTEGER NOT NULL,
-    blocker TEXT,
-    PRIMARY KEY (message_id, wake_id)
-  );
-  CREATE INDEX IF NOT EXISTS message_wakes_latest ON message_wakes (message_id, seq DESC);
-  CREATE INDEX IF NOT EXISTS message_wakes_attempt ON message_wakes (wake_id);`,
   tables: ["message_wakes"],
 };

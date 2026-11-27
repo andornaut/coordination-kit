@@ -1,12 +1,9 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import type { Clock } from "../../core/clock.ts";
-import { Store } from "../db.ts";
+import { MEMORY, Store } from "../db.ts";
 import { SECRET_SHAPES, secretShape } from "../secrets.ts";
 import {
   closeMessage,
@@ -30,7 +27,7 @@ function clock(): Clock {
 }
 
 function open(): Store {
-  return Store.open(clock(), join(mkdtempSync(join(tmpdir(), "store-msg-")), "coordination.db"));
+  return Store.open(clock(), MEMORY);
 }
 
 function send(store: Store, id = ID, body = "Please review.\n") {
@@ -60,9 +57,7 @@ describe("sendMessage", () => {
     });
     expect(message).not.toHaveProperty("body");
     expect(messageStatus(store, ID, true).body).toBe("Please review.\n");
-    expect(
-      store.db.prepare("SELECT pending FROM wake_state WHERE role = ?").get(TECH.role),
-    ).toEqual({ pending: 1 });
+    expect(store.index.get("wake_state", [TECH.role])?.pending).toBe(1);
     expect(store.events().map((event) => event.key)).toEqual([`msg.sent:${ID}`]);
   });
 
@@ -174,9 +169,7 @@ describe("message lifecycle", () => {
       ),
     ).toBe(true);
     expect(store.events()).toHaveLength(events);
-    expect(
-      store.db.prepare("SELECT pending, outstanding FROM wake_state WHERE role = ?").get(TECH.role),
-    ).toEqual({
+    expect(store.index.get("wake_state", [TECH.role])).toMatchObject({
       outstanding: null,
       pending: 0,
     });

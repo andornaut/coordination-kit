@@ -11,7 +11,7 @@ import { main } from "../cli.ts";
 import { EXIT_OK } from "../core/cli/io.ts";
 import { gameLayout, type Layout } from "../core/configuration/layout.ts";
 import { stateRoot } from "../core/configuration/stateRoot.ts";
-import { clockAt, TEST_CLOCK, TEST_CONTEXT, TEST_GIT, TEST_NOW } from "../core/testFixtures.ts";
+import { clockAt, TEST_CLOCK, TEST_CONTEXT, TEST_NOW } from "../core/testFixtures.ts";
 import { readRegistry, updateRegistry } from "../registry/store.ts";
 import { Store } from "../store/db.ts";
 import { setPolicyHold } from "../store/decisions/policyHolds.ts";
@@ -20,7 +20,6 @@ import {
   prepareFileCheckpoint,
   selectFileCheckpoint,
 } from "../store/files/compaction/generation.ts";
-import { activateMigration, prepareMigration } from "../store/files/migration.ts";
 import { messageStatus, retainMessage } from "../store/messages/messages.ts";
 import { derivedId, storeNotice } from "../store/messages/notices.ts";
 import { storeSend } from "../store/messages/service.ts";
@@ -111,11 +110,16 @@ function briefs(
 ): { id: string; body: string; from_role: string; to_role: string }[] {
   const store = Store.forLayout(TEST_CONTEXT, layout);
   try {
-    return store.db
-      .prepare(
-        "SELECT id, body, from_role, to_role FROM messages WHERE from_role = 'delivery-kit' ORDER BY sent_seq",
-      )
-      .all() as unknown as { id: string; body: string; from_role: string; to_role: string }[];
+    return store.index
+      .rows("messages")
+      .filter(({ from_role }) => from_role === "delivery-kit")
+      .sort((a, b) => Number(a.sent_seq) - Number(b.sent_seq))
+      .map(({ body, from_role, id, to_role }) => ({
+        body: body as string,
+        from_role: from_role as string,
+        id: id as string,
+        to_role: to_role as string,
+      }));
   } finally {
     store.close();
   }
@@ -133,15 +137,9 @@ it("reopens selected authority when compaction activates during the native surve
   const source = Store.forLayout(TEST_CONTEXT, layout);
   const start = (store: Store, key: string) =>
     recordSession(store, actor, { cwd: "/fixture", harness: "claude", key, version: "4.1.0" });
+  const cutoverHead = source.head();
   start(source, "anchor");
   source.close();
-  const { receipt: cutover } = prepareMigration(
-    TEST_GIT,
-    layout,
-    join(base, "backup.db"),
-    join(base, "restore.db"),
-  );
-  activateMigration(TEST_GIT, layout, cutover.id);
 
   const old = Store.forLayout(TEST_CONTEXT, layout);
   try {
@@ -166,10 +164,10 @@ it("reopens selected authority when compaction activates during the native surve
         routineEventSequences: new Set([expired.seq]),
       },
     };
-    const prepared = prepareFileCheckpoint(target, restored, scope, cutover.head);
+    const prepared = prepareFileCheckpoint(target, restored, scope, cutoverHead);
     const collect = vi.fn(async (request: CollectRequest) => {
       await Promise.resolve();
-      selectFileCheckpoint(target, restored, prepared, () => scope, cutover.head);
+      selectFileCheckpoint(target, restored, prepared, () => scope, cutoverHead);
       expect(() => old.transaction(() => {})).toThrow("journal-corrupt");
       return collectedFor(request);
     });
