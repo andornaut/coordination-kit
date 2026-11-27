@@ -66,7 +66,7 @@ export const storeCompactionPlanCommand: Handler = storeVerb(
   "store compaction-plan",
   STORE_COMPACTION_PLAN_OPTIONS,
   (context, values) => {
-    if (values["closed-history"] !== undefined || values.restore !== undefined) {
+    if (Object.keys(values).some((name) => Object.hasOwn(CLOSED_HISTORY_PLAN_OPTIONS, name))) {
       return closedHistoryPlan(context, values);
     }
     const { revision, roles } = registry(context);

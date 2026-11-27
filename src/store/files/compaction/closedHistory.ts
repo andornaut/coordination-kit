@@ -231,6 +231,7 @@ export function qualifyClosedHistory(
   source: FileCheckpointSource,
   scope: CompactionScope,
   anchor: CheckpointHead,
+  approved?: ReadonlySet<string>,
 ): ClosedHistoryQualification {
   const { events, first, head, reduced } = verifyCheckpointInput(
     source.tail.events,
@@ -269,12 +270,15 @@ export function qualifyClosedHistory(
     },
   );
   const states = operationalStates(events);
+  const inCohort = (id: string | null) =>
+    approved === undefined || (id !== null && approved.has(id));
   retainCanonicalReferences(events, originals);
   for (const original of all) {
     if (original.reason === null) {
-      original.reason =
-        messageReductionRefusal(original.event, anchor.seq || first.seq) ??
-        linkRefusal(original, originals, states);
+      original.reason = inCohort(original.id)
+        ? (messageReductionRefusal(original.event, anchor.seq || first.seq) ??
+          linkRefusal(original, originals, states))
+        : "outside-approved-cohort";
     }
   }
   retainLinkedMessages(originals, all);
@@ -282,6 +286,9 @@ export function qualifyClosedHistory(
   const selected: string[] = [];
   const excluded: { id: string | null; seq: number; reason: string }[] = [];
   for (const { event, id, reason } of all) {
+    if (!inCohort(id)) {
+      continue;
+    }
     if (reason === null && id !== null) {
       selected.push(id);
     } else {

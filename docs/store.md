@@ -188,15 +188,25 @@ Use this form only for an explicitly approved one-time reduction of aged closed 
 The approval replaces the requirement for an individual durable replacement for each selected
 body. It preserves the 100 most recent closed originals per recipient and the other protections
 for unresolved delivery, operational references, active work, questions, decisions, recovery and
-transitive references. The plan identifies exact selected IDs and exclusions. Routine event
-compaction stays in the ordinary procedure.
+transitive references. Protections are evaluated over the full restored history. Selection and
+exclusion lists include only the exact IDs from the audited cohort file. Routine event compaction
+stays in the ordinary procedure.
+
+The cohort file is schema 1 with state `requested-cohort-not-activation-evidence`. It records the
+audit's `head`, `registryRevision`, `window`, `count` and `originals`. Each original records
+`id`, `owner`, `originalSeq`, `closeSeq`, `disposition` and `bodySha256`. The audit head must
+match the restore head or a verified ancestor of it. The audit registry revision must be at or
+below the current revision. A later plan can therefore apply current protections to the same
+audited IDs.
 
 Use the same independent restore and writer-custody checks as the
 [filesystem compaction runbook](#filesystem-compaction-runbook). Keep decisions, approvals,
 receipts and archives accessible. Use absolute paths outside the checkout and authoritative state
 for the restore, plan, evidence and receipt. Keep the evidence and receipt outside the restore.
 In the examples, shell variables stand for those paths and the operator's exact references and IDs.
-Set `approval_ref` to the existing user decision that authorizes this one-time scope.
+Set `approval_ref` to the existing user decision that authorizes this one-time scope. Set `cohort`
+to the audited file's absolute path and `cohort_sha256` to the approved SHA256 of its raw bytes.
+Keep the file byte-identical through activation.
 
 1. Run the read-only plan on the independent restore and save the output. Replay proof runs in
    memory and reports state equivalence, the head and event count, covered projections, and the
@@ -204,13 +214,15 @@ Set `approval_ref` to the existing user decision that authorizes this one-time s
 
    ```sh
    coordination-kit --root "$workspace" store compaction-plan \
-     --closed-history "$approval_ref" --restore "$restore" > "$plan"
+     --closed-history "$approval_ref" --cohort "$cohort" --cohort-sha256 "$cohort_sha256" \
+     --restore "$restore" > "$plan"
    ```
 
    Review the exact IDs and protection reasons. An empty selection reports `replay: null` and
    `evidence: null` and ends the procedure. Otherwise, confirm `replay.stateEquivalent` and
-   extract the evidence for both later commands. The recipe binds the approval, exact selection
-   and checkpoint digest to the cutover, head and registry revision.
+   extract the evidence for both later commands. The plan and evidence both record `cohortSha256`.
+   The recipe binds the cohort digest, approval, exact selection and checkpoint digest to the
+   cutover, head and registry revision.
 
    ```sh
    jq -e '.evidence' "$plan" > "$evidence"
@@ -227,11 +239,12 @@ Set `approval_ref` to the existing user decision that authorizes this one-time s
      --registry-revision "$(jq -r '.registryRevision' "$plan")"
    ```
 
-3. Prepare with a fresh receipt path and the same approval, restore and evidence.
+3. Prepare with a fresh receipt path and the same approval, cohort, digest, restore and evidence.
 
    ```sh
    coordination-kit --root "$workspace" store compaction-prepare \
-     --closed-history "$approval_ref" --restore "$restore" --evidence "$evidence" \
+     --closed-history "$approval_ref" --cohort "$cohort" --cohort-sha256 "$cohort_sha256" \
+     --restore "$restore" --evidence "$evidence" \
      --receipt "$receipt" --id "$request_id"
    ```
 
@@ -240,7 +253,8 @@ Set `approval_ref` to the existing user decision that authorizes this one-time s
 
    ```sh
    coordination-kit --root "$workspace" store compaction-activate \
-     --closed-history "$approval_ref" --restore "$restore" --evidence "$evidence" \
+     --closed-history "$approval_ref" --cohort "$cohort" --cohort-sha256 "$cohort_sha256" \
+     --restore "$restore" --evidence "$evidence" \
      --receipt "$receipt" --id "$receipt_id" --approval "$activation_ref"
    ```
 

@@ -21,6 +21,10 @@ import { canonicalJson, REF, sha256 } from "../../store/eventCodec.ts";
 import { fileAuthority } from "../../store/files/authority.ts";
 import type { CheckpointHead } from "../../store/files/compaction/checkpoint.ts";
 import { qualifyClosedHistory } from "../../store/files/compaction/closedHistory.ts";
+import {
+  readClosedHistoryCohort,
+  verifyClosedHistoryCohort,
+} from "../../store/files/compaction/closedHistoryCohort.ts";
 import { verifyClosedHistoryReplay } from "../../store/files/compaction/closedHistoryReplay.ts";
 import {
   fileCheckpointCandidate,
@@ -45,21 +49,22 @@ import { MESSAGE_ID } from "../../store/messages/messages.ts";
 import { resolveCaller } from "../../store/sessions/identity.ts";
 import { requirePermission } from "../../store/sessions/permissions.ts";
 import { ROLE, type StoredEvent, StoreError } from "../../store/types.ts";
-import { callerOf, required, text, type Values } from "../args.ts";
+import { callerOf, required, text, Usage, type Values } from "../args.ts";
 import { storeVerb } from "./context.ts";
 
-export const COMPACTION_PREPARE_OPTIONS = {
+export const CLOSED_HISTORY_PLAN_OPTIONS = {
   "closed-history": { type: "string" },
+  cohort: { type: "string" },
+  "cohort-sha256": { type: "string" },
+  restore: { type: "string" },
+} as const;
+
+export const COMPACTION_PREPARE_OPTIONS = {
+  ...CLOSED_HISTORY_PLAN_OPTIONS,
   evidence: { type: "string" },
   id: { type: "string" },
   "native-id": { type: "string" },
   receipt: { type: "string" },
-  restore: { type: "string" },
-} as const;
-
-export const CLOSED_HISTORY_PLAN_OPTIONS = {
-  "closed-history": { type: "string" },
-  restore: { type: "string" },
 } as const;
 
 export const COMPACTION_ACTIVATE_OPTIONS = {
@@ -311,16 +316,26 @@ function registeredScope(context: StoreServiceContext): CompactionScope {
   };
 }
 
+function closedHistoryInput(values: Values) {
+  const approval = required(values, "closed-history");
+  if (!reference(approval, REF)) {
+    throw new StoreError("closed-history-approval-invalid");
+  }
+  const cohort = readClosedHistoryCohort(
+    required(values, "cohort"),
+    required(values, "cohort-sha256"),
+  );
+  return { approval, cohort };
+}
+
 function reviewedClosedHistory(
   restoredSource: FileCheckpointSource,
   scope: CompactionScope,
   cutover: ReturnType<typeof files>["receipt"],
-  approval: string,
+  { approval, cohort }: ReturnType<typeof closedHistoryInput>,
 ) {
-  if (!reference(approval, REF)) {
-    throw new StoreError("closed-history-approval-invalid");
-  }
-  const plan = qualifyClosedHistory(restoredSource, scope, cutover.head);
+  const approved = verifyClosedHistoryCohort(cohort, restoredSource.events, scope.registryRevision);
+  const plan = qualifyClosedHistory(restoredSource, scope, cutover.head, approved);
   const selectors = {
     head: plan.head,
     messageIds: new Set(plan.selected),
@@ -350,6 +365,7 @@ function reviewedClosedHistory(
       : {
           approval,
           checkpointDigest: candidate.receipt.digest,
+          cohortSha256: cohort.sha256,
           cutoverId: cutover.id,
           head: plan.head,
           kind: "closed-history" as const,
@@ -357,19 +373,25 @@ function reviewedClosedHistory(
           schema: 2 as const,
           selected: plan.selected,
         };
-  return { plan, proof, replay, selectors };
+  return { cohortSha256: cohort.sha256, plan, proof, replay, selectors };
 }
 
 export function closedHistoryPlan(context: StoreServiceContext, values: Values) {
-  const approval = required(values, "closed-history");
+  const input = closedHistoryInput(values);
   const { cutover, restoredSource } = restoreSource(context, values);
   const scope = registeredScope(context);
-  const { plan, proof, replay } = reviewedClosedHistory(restoredSource, scope, cutover, approval);
+  const { cohortSha256, plan, proof, replay } = reviewedClosedHistory(
+    restoredSource,
+    scope,
+    cutover,
+    input,
+  );
   if (registry(context).revision !== scope.registryRevision) {
     throw new StoreError("compaction-registry-changed");
   }
   return {
     ...plan,
+    cohortSha256,
     evidence: proof,
     kind: "closed-history-compaction-plan",
     replay,
@@ -381,7 +403,14 @@ function operation(context: StoreServiceContext, values: Values) {
   const { layout } = context;
   const file = required(values, "receipt");
   const proofPath = required(values, "evidence");
-  const closedHistory = text(values, "closed-history");
+  const closedHistory =
+    text(values, "closed-history") === undefined ? undefined : closedHistoryInput(values);
+  if (
+    closedHistory === undefined &&
+    (values.cohort !== undefined || values["cohort-sha256"] !== undefined)
+  ) {
+    throw new Usage();
+  }
   const { cutover, excluded, path, restored, restoredSource } = restoreSource(context, values);
   externalPath(canonicalPath(file, dirname(file)), ...excluded, restored);
   let initial: ReturnType<typeof evidence>;

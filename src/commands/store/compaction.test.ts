@@ -20,6 +20,7 @@ import { TEST_CLOCK, TEST_CONTEXT, TEST_GIT } from "../../core/testFixtures.ts";
 import { updateRegistry } from "../../registry/store.ts";
 import { showBrief, storeReview } from "../../review/storeBrief.ts";
 import { Store } from "../../store/db.ts";
+import { sha256 } from "../../store/eventCodec.ts";
 import {
   fileCheckpointJournal,
   readFileCheckpointSource,
@@ -44,6 +45,7 @@ const BODY = "Historical test original";
 const REPLACEMENT = "work/fixture#verified-original";
 const ID = "00000000-0000-4000-8000-000000000001";
 const OTHER_ID = "00000000-0000-4000-8000-000000000002";
+const OUTSIDE_ID = "00000000-0000-4000-8000-000000000003";
 
 function recentId(index: number): string {
   return `00000000-0000-4000-8001-${String(index).padStart(12, "0")}`;
@@ -66,6 +68,10 @@ function fixture(hasReplacement = true) {
   sendMessage(store, SENDER, { body: BODY, id: ID, intent: "queue", to: OWNER.role });
   closeMessage(store, OWNER, ID, { evidence: hasReplacement ? [REPLACEMENT] : [] });
   const closeSeq = store.head().seq;
+  if (!hasReplacement) {
+    sendMessage(store, SENDER, { body: BODY, id: OUTSIDE_ID, intent: "queue", to: OWNER.role });
+    closeMessage(store, OWNER, OUTSIDE_ID, { evidence: [] });
+  }
   store.transaction(() => {
     for (let index = 0; index < 100; index++) {
       start(`recent-${index}`);
@@ -118,21 +124,52 @@ function fixture(hasReplacement = true) {
 }
 
 it("replays a closed-history batch on an independent restore and switches only the reviewed selection", async () => {
-  const { common, head, restore, run, target, writeEvidence } = fixture(false);
-  const mode = ["--closed-history", "decision-closed-history"];
+  const { base, common, head, restore, run, selectors, target, writeEvidence } = fixture(false);
   const original = openFileJournal(target).snapshot();
+  const cohortPath = join(base, "cohort.json");
+  const cohort = JSON.stringify({
+    schema: 1,
+    state: "requested-cohort-not-activation-evidence",
+    head,
+    registryRevision: 1,
+    window: 100,
+    count: 1,
+    originals: [
+      {
+        id: ID,
+        owner: OWNER.role,
+        originalSeq: original.events.find(
+          ({ kind, payload }) => kind === "msg.sent" && payload.id === ID,
+        )?.seq,
+        closeSeq: selectors.messages[0]!.closeSeq,
+        disposition: "handled",
+        bodySha256: sha256(BODY),
+      },
+    ],
+  });
+  writeFileSync(cohortPath, cohort);
+  const approval = ["--closed-history", "decision-closed-history"];
+  const mode = [...approval, "--cohort", cohortPath, "--cohort-sha256", sha256(cohort)];
   expect(await run(["compaction-prepare", ...common])).toMatchObject({
     code: EXIT_INVALID,
     err: "coordination-kit: compaction-message-replacement-unverified\n",
   });
+  expect(await run(["compaction-plan", ...approval, "--restore", restore])).toMatchObject({
+    code: EXIT_USAGE,
+  });
   const preview = await run(["compaction-plan", ...mode, "--restore", restore]);
   expect(preview.code, preview.err).toBe(EXIT_OK);
   const plan = JSON.parse(preview.out) as {
-    evidence: { selected: string[] };
+    cohortSha256: string;
+    evidence: { cohortSha256: string; selected: string[] };
+    excluded: unknown[];
     replay: unknown;
     selected: string[];
   };
+  expect(plan.cohortSha256).toBe(sha256(cohort));
+  expect(plan.evidence.cohortSha256).toBe(plan.cohortSha256);
   expect(plan.selected).toEqual([ID]);
+  expect(plan.excluded).toEqual([]);
   expect(plan.replay).toMatchObject({ stateEquivalent: true, removedBodies: 1 });
   expect(openFileJournal(target).snapshot()).toEqual(original);
   writeEvidence(plan.evidence);
@@ -160,6 +197,16 @@ it("replays a closed-history batch on an independent restore and switches only t
     err: "coordination-kit: closed-history-evidence-mismatch\n",
   });
   writeEvidence(plan.evidence);
+  const reformatted = `${cohort}\n`;
+  writeFileSync(cohortPath, reformatted);
+  const changedCohort = prepare.map((argument) =>
+    argument === sha256(cohort) ? sha256(reformatted) : argument,
+  );
+  expect(await run(changedCohort)).toMatchObject({
+    code: EXIT_INVALID,
+    err: "coordination-kit: closed-history-evidence-mismatch\n",
+  });
+  writeFileSync(cohortPath, cohort);
   const prepared = await run(prepare);
   expect(prepared.code, prepared.err).toBe(EXIT_OK);
   expect(openFileJournal(target).snapshot()).toEqual(original);
@@ -174,7 +221,12 @@ it("replays a closed-history batch on an independent restore and switches only t
     "decision-activation",
   ]);
   expect(activated.code, activated.err).toBe(EXIT_OK);
-  expect(readFileCheckpointSource(target).previous?.selection.head).toEqual(head);
+  const selected = readFileCheckpointSource(target);
+  expect(selected.previous?.selection.head).toEqual(head);
+  expect(
+    selected.events.find(({ kind, payload }) => kind === "msg.sent" && payload.id === OUTSIDE_ID)
+      ?.payload.body,
+  ).toBe(BODY);
 });
 
 it("requires exact qualification, preserves original loose records and resumes the same fenced ID", async () => {
