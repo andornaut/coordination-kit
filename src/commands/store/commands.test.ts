@@ -537,7 +537,7 @@ describe("store message commands", () => {
   });
 
   it("requires an explicit retention boundary in a workspace without scheduled reviews", async () => {
-    const { base, root, layout } = storeFixture();
+    const { base, layout, root } = storeFixture();
     const config = JSON.parse(readFileSync(layout.configFile, "utf8")) as object;
     writeFileSync(layout.configFile, JSON.stringify({ ...config, wakeMinutes: [] }));
     const coordinator = cli(root, base, { CLAUDE_CODE_SESSION_ID: COORDINATOR });
