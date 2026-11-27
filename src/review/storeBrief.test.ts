@@ -20,7 +20,7 @@ import {
   prepareFileCheckpoint,
   selectFileCheckpoint,
 } from "../store/files/compaction/generation.ts";
-import { messageStatus, retainMessage } from "../store/messages/messages.ts";
+import { messageStatus, retainMessage, sendMessage } from "../store/messages/messages.ts";
 import { derivedId, storeNotice } from "../store/messages/notices.ts";
 import { storeSend } from "../store/messages/service.ts";
 import { recordSession } from "../store/sessions/handoffs.ts";
@@ -375,7 +375,26 @@ describe("stored review brief", () => {
   it("stores one bounded brief per slot with the new stall count and exact details", async () => {
     const { base, layout, root } = await storeModeFixture();
     const game = gameLayout(layout, GAME);
-    await send(layout, 100);
+    await send(layout, 1);
+    // Seed the remaining originals together; this case verifies review output, not send retries.
+    let second = 1;
+    const seeded = Store.forLayout(
+      { ...TEST_CONTEXT, clock: () => new Date(Date.parse(TEST_NOW) + second * 1000) },
+      layout,
+    );
+    try {
+      seeded.transaction(() => {
+        for (second = 2; second <= 100; second++) {
+          sendMessage(
+            seeded,
+            { nativeId: COORDINATOR, role: "game-coordinator" },
+            { body: `Task ${second}.`, id: uuid(second), to: TECH_ROLE },
+          );
+        }
+      });
+    } finally {
+      seeded.close();
+    }
     await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, SLOT);
     await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, NEXT);
     await deliverReview({ ...TEST_CONTEXT, env: {} }, layout, game, LATER);
