@@ -31,7 +31,7 @@ import {
 } from "../../core/files/durable.ts";
 import { withLock } from "../../core/files/lock.ts";
 import { type GitRunner, systemGit } from "../../core/git.ts";
-import { CONVERSATION_ID_PATTERN, ValidationError } from "../../core/validate.ts";
+import { CONVERSATION_ID_PATTERN, isObject, ValidationError } from "../../core/validate.ts";
 import { type Harness, HARNESSES, type Registry } from "../../registry/schema.ts";
 import { createRegistry, readRegistry, updateRegistry } from "../../registry/store.ts";
 import {
@@ -228,7 +228,12 @@ function existingConfig(
   if (!regularFile(path)) {
     return undefined;
   }
-  const config = validateStandaloneConfig(readJson(path));
+  const source = readJson(path);
+  if (isObject(source) && !Object.hasOwn(source, "project")) {
+    validateWorkspaceConfig(source, path);
+    throw new Error("this checkout already has a shared workspace layout");
+  }
+  const config = validateStandaloneConfig(source);
   if (!sameInit(config, requested)) {
     throw new Error(`${STANDALONE_CONFIG_FILE} conflicts with the requested project settings`);
   }

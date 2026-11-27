@@ -1,4 +1,5 @@
 // Committed configuration and ignored state paths for a workspace or standalone Git project.
+import { lstatSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { readJson, readJsonIfExists } from "../files/durable.ts";
@@ -61,6 +62,8 @@ export interface GameCoordinatorConfig {
   readonly games: Readonly<Record<string, GameEntry>>;
   readonly apps?: Readonly<Record<string, AppEntry>>;
   readonly appStateDir?: "apps" | "games";
+  /** Preserve existing app bus paths when the workspace state moves out of var/. */
+  readonly appStateRoot?: "var";
   readonly permissions?: Readonly<Record<string, RolePermissions>>;
   readonly kits: Readonly<Record<string, KitEntry>>;
   readonly sharedRoles: readonly string[];
@@ -106,6 +109,15 @@ export interface AppLayout extends GameLayout {
 
 export const CONFIG_FILE = "config.json";
 export const PROJECT_CONFIG_FILE = "delivery-kit.json";
+export const LEGACY_STATE_DIR = "var";
+
+const WORKSPACE_STATE_FILES = [
+  "coordination",
+  "coordination-authority.json",
+  "registry.json",
+  "route.json",
+  "work-protocol.json",
+] as const;
 
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/;
 export const ROLE_KEY_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}(?:\/[a-z0-9][a-z0-9-]{0,63})?$/;
@@ -208,10 +220,10 @@ function normalizedConfig(config: GameCoordinatorConfig): WorkspaceConfig {
   return Object.defineProperty({ ...config }, "games", { value: config.apps }) as WorkspaceConfig;
 }
 
-export function validateWorkspaceConfig(value: unknown): WorkspaceConfig {
+export function validateWorkspaceConfig(value: unknown, configFile = CONFIG_FILE): WorkspaceConfig {
   const issues = new Issues();
   const shape = {
-    optional: ["apps", "games", "appStateDir", "permissions"],
+    optional: ["apps", "games", "appStateDir", "appStateRoot", "permissions"],
     required: ["schema", "timezone", "wakeMinutes", "kits", "sharedRoles"],
   };
   if (checkObject(issues, "", shape, value)) {
@@ -227,6 +239,9 @@ export function validateWorkspaceConfig(value: unknown): WorkspaceConfig {
       );
     }
     const appMode = configuresApps(config);
+    if (config.appStateRoot !== undefined) {
+      checkEnum(issues, "/appStateRoot", [LEGACY_STATE_DIR], config.appStateRoot);
+    }
     if (appMode === Object.prototype.propertyIsEnumerable.call(config, "games")) {
       issues.add("/", "specify exactly one of apps or games");
     }
@@ -251,21 +266,37 @@ export function validateWorkspaceConfig(value: unknown): WorkspaceConfig {
       );
     }
   }
-  issues.throwIfAny(CONFIG_FILE);
+  issues.throwIfAny(configFile);
   return normalizedConfig(value as GameCoordinatorConfig);
 }
 
 export const validateGameCoordinatorConfig = validateWorkspaceConfig;
 
+function assertNoAlternateWorkspaceState(path: string): void {
+  const stat = lstatSync(path, { throwIfNoEntry: false });
+  if (stat === undefined || (!stat.isDirectory() && !stat.isSymbolicLink())) {
+    return;
+  }
+  if (
+    WORKSPACE_STATE_FILES.some((file) => lstatSync(resolve(path, file), { throwIfNoEntry: false }))
+  ) {
+    throw new Error(`${path}: conflicting workspace state; finish the layout migration`);
+  }
+}
+
 export function loadLayout(workspaceRoot: string): Layout {
   const root = resolve(workspaceRoot);
-  const standaloneFile = resolve(root, STANDALONE_CONFIG_FILE);
-  const source = readJsonIfExists(standaloneFile);
-  const project = source === undefined ? undefined : validateStandaloneConfig(source);
-  const configFile = project === undefined ? resolve(root, CONFIG_FILE) : standaloneFile;
+  const canonicalFile = resolve(root, STANDALONE_CONFIG_FILE);
+  const source = readJsonIfExists(canonicalFile);
+  const project =
+    isObject(source) && Object.hasOwn(source, "project")
+      ? validateStandaloneConfig(source)
+      : undefined;
+  const canonical = source !== undefined;
+  const configFile = canonical ? canonicalFile : resolve(root, CONFIG_FILE);
   const config =
     project === undefined
-      ? validateWorkspaceConfig(readJson(configFile))
+      ? validateWorkspaceConfig(canonical ? source : readJson(configFile), configFile)
       : normalizedConfig({
           games: {},
           kits: {},
@@ -275,7 +306,12 @@ export function loadLayout(workspaceRoot: string): Layout {
           wakeMinutes: [],
         });
   const mode = project === undefined ? (configuresApps(config) ? "app" : "legacy") : "standalone";
-  const varDir = resolve(root, project === undefined ? "var" : STANDALONE_STATE_DIR);
+  const varDir = resolve(root, canonical ? STANDALONE_STATE_DIR : LEGACY_STATE_DIR);
+  if (project === undefined) {
+    assertNoAlternateWorkspaceState(
+      resolve(root, canonical ? LEGACY_STATE_DIR : STANDALONE_STATE_DIR),
+    );
+  }
   return {
     config,
     configFile,
@@ -317,7 +353,9 @@ export class UnknownGame extends Error {
 function layoutForEntry(layout: Layout, appId: string, entry: AppEntry): GameLayout {
   const repo = resolve(layout.root, entry.path);
   const stateDir = resolve(
-    layout.varDir,
+    layout.config.appStateRoot === undefined
+      ? layout.varDir
+      : resolve(layout.root, layout.config.appStateRoot),
     layout.mode === "app" ? (layout.config.appStateDir ?? "apps") : "games",
     appId,
   );

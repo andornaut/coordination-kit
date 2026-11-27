@@ -114,29 +114,36 @@ describe("standalone init", () => {
     });
   });
 
-  it("refuses to initialize a configured app workspace before its registry exists", async () => {
-    const root = fixture();
-    const config = {
-      apps: { example: { name: "Example", path: "../example", roles: ["operator"] } },
-      kits: {},
-      permissions: {},
-      schema: 1,
-      sharedRoles: [],
-      timezone: "UTC",
-      wakeMinutes: [],
-    };
-    writeFileSync(join(root, "config.json"), JSON.stringify(config));
+  it.each(["config.json", "coordination-kit.json"])(
+    "refuses to initialize an app workspace configured in %s",
+    async (name) => {
+      const root = fixture();
+      const config = {
+        apps: { example: { name: "Example", path: "../example", roles: ["operator"] } },
+        kits: {},
+        permissions: {},
+        schema: 1,
+        sharedRoles: [],
+        timezone: "UTC",
+        wakeMinutes: [],
+      };
+      const configPath = join(root, name);
+      writeFileSync(configPath, JSON.stringify(config));
 
-    expect(await run(init, root, "--project", "sample")).toEqual({
-      code: EXIT_INVALID,
-      err: "coordination-kit: this checkout already has a shared workspace layout\n",
-      json: null,
-    });
-    expect(loadLayout(root).mode).toBe("app");
-    expect(existsSync(join(root, "coordination-kit.json"))).toBe(false);
-    expect(existsSync(join(root, ".coordination-kit"))).toBe(false);
-    expect(existsSync(join(root, ".gitignore"))).toBe(false);
-  });
+      expect(await run(init, root, "--project", "sample")).toEqual({
+        code: EXIT_INVALID,
+        err: "coordination-kit: this checkout already has a shared workspace layout\n",
+        json: null,
+      });
+      expect(loadLayout(root).mode).toBe("app");
+      expect(readFileSync(configPath, "utf8")).toBe(JSON.stringify(config));
+      expect(existsSync(join(root, "coordination-kit.json"))).toBe(
+        name === "coordination-kit.json",
+      );
+      expect(existsSync(join(root, ".coordination-kit"))).toBe(false);
+      expect(existsSync(join(root, ".gitignore"))).toBe(false);
+    },
+  );
 
   it("refuses linked task roots and resolves the caller before creating a database", async () => {
     const root = fixture();

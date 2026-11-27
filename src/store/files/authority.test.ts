@@ -5,6 +5,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -14,24 +15,35 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { loadLayout } from "../../core/configuration/layout.ts";
-import { coordinatorConfig, TEST_GIT, writeFixtureJson } from "../../core/testFixtures.ts";
+import { appLayout, loadLayout } from "../../core/configuration/layout.ts";
+import {
+  coordinatorConfig,
+  stateRootFixture,
+  TEST_CONTEXT,
+  TEST_GIT,
+  writeFixtureJson,
+} from "../../core/testFixtures.ts";
+import { readRegistry } from "../../registry/store.ts";
+import { legacyStorePath, Store } from "../db.ts";
+import { recordSession } from "../sessions/handoffs.ts";
+import { COORDINATOR, GAME, storeFixture } from "../testStore.ts";
 import { GENESIS } from "../types.ts";
 import { type CutoverReceipt, fileAuthority } from "./authority.ts";
 
-function fixture(standalone = false) {
+function fixture(mode: "legacy" | "workspace" | "standalone" = "legacy") {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "file-authority-")));
   TEST_GIT(root, ["init", "-q", "--initial-branch=main"]);
-  const name = standalone ? ".coordination-kit" : "var";
+  const name = mode === "legacy" ? "var" : ".coordination-kit";
   writeFileSync(join(root, ".gitignore"), `/${name}/\n`);
-  if (standalone) {
+  if (mode === "standalone") {
     writeFixtureJson(join(root, "coordination-kit.json"), {
       project: { id: "fixture", roles: ["maintainer"] },
       review: "off",
       schema: 1,
     });
   } else {
-    writeFixtureJson(join(root, "config.json"), coordinatorConfig());
+    const configFile = mode === "legacy" ? "config.json" : "coordination-kit.json";
+    writeFixtureJson(join(root, configFile), coordinatorConfig());
   }
   const layout = loadLayout(root);
   const legacyPath = join(layout.varDir, "coordination.db");
@@ -61,27 +73,30 @@ function activatedFixture() {
 }
 
 describe("file authority bootstrap", () => {
-  it.each([false, true])("creates only on write with standalone %s", (standalone) => {
-    const { authority, layout, legacyPath, marker, path, root, witness } = fixture(standalone);
-    expect(authority()).toBeNull();
-    expect(existsSync(layout.varDir)).toBe(false);
+  it.each(["legacy", "workspace", "standalone"] as const)(
+    "creates only on write in %s mode",
+    (mode) => {
+      const { authority, layout, legacyPath, marker, path, root, witness } = fixture(mode);
+      expect(authority()).toBeNull();
+      expect(existsSync(layout.varDir)).toBe(false);
 
-    const initialized = authority(true);
-    expect(initialized).toMatchObject({
-      kind: "files",
-      path,
-      receipt: { head: { hash: GENESIS, seq: 0 }, legacyPath, phase: "active", root, schema: 1 },
-    });
-    expect(authority()).toEqual(initialized);
-    expect(authority(true)).toEqual(initialized);
-    expect(existsSync(legacyPath)).toBe(false);
-    expect(readdirSync(path)).toEqual(["source-fence.json"]);
-    expect(JSON.parse(readFileSync(witness, "utf8"))).toEqual({
-      ...initialized?.receipt,
-      phase: "prepared",
-    });
-    expect(JSON.parse(readFileSync(marker, "utf8"))).toEqual(initialized?.receipt);
-  });
+      const initialized = authority(true);
+      expect(initialized).toMatchObject({
+        kind: "files",
+        path,
+        receipt: { head: { hash: GENESIS, seq: 0 }, legacyPath, phase: "active", root, schema: 1 },
+      });
+      expect(authority()).toEqual(initialized);
+      expect(authority(true)).toEqual(initialized);
+      expect(existsSync(legacyPath)).toBe(false);
+      expect(readdirSync(path)).toEqual(["source-fence.json"]);
+      expect(JSON.parse(readFileSync(witness, "utf8"))).toEqual({
+        ...initialized?.receipt,
+        phase: "prepared",
+      });
+      expect(JSON.parse(readFileSync(marker, "utf8"))).toEqual(initialized?.receipt);
+    },
+  );
 
   it("resumes first publication using the identical genesis witness", () => {
     const { authority, marker } = fixture();
@@ -106,6 +121,15 @@ describe("file authority bootstrap", () => {
     }
   });
 
+  it("blocks an unqualified former local database before creating canonical workspace state", () => {
+    const { authority, layout, root } = fixture("workspace");
+    mkdirSync(join(root, "var"));
+    writeFileSync(join(root, "var", "coordination.db-wal"), "Legacy source sidecar");
+    expect(() => authority()).toThrow("file-authority-legacy-state");
+    expect(() => authority(true)).toThrow("file-authority-legacy-state");
+    expect(existsSync(layout.varDir)).toBe(false);
+  });
+
   it("refuses an unignored or redirected state path", () => {
     const { authority, layout, root } = fixture();
     writeFileSync(join(root, ".gitignore"), "");
@@ -125,6 +149,89 @@ describe("file authority bootstrap", () => {
 });
 
 describe("activated fleet file authority", () => {
+  it("replays and extends a real relocated workspace journal without moving its app bus", () => {
+    const { layout: old, root } = storeFixture();
+    const external = stateRootFixture(old);
+    const bus = appLayout(old, GAME).busDir;
+    mkdirSync(bus, { recursive: true });
+    writeFileSync(join(bus, "events.jsonl"), "Fixture event data\n");
+    const registry = readRegistry(old);
+    const original = Store.forLayout(TEST_CONTEXT, old);
+    const record = (store: Store, key: string) =>
+      recordSession(
+        store,
+        { nativeId: COORDINATOR, role: "game-coordinator" },
+        { cwd: root, harness: "claude", key, version: "test" },
+      );
+    const first = record(original, "before-move");
+    const before = original.verify();
+    original.close();
+
+    renameSync(old.configFile, `${old.configFile}.prior`);
+    const moved = join(root, ".coordination-kit");
+    mkdirSync(moved);
+    for (const name of [
+      "coordination",
+      "coordination-authority.json",
+      "coordination-authority.lock",
+      "registry.json",
+      "registry.lock",
+      "work-protocol.json",
+    ]) {
+      renameSync(join(old.varDir, name), join(moved, name));
+    }
+    writeFileSync(join(root, ".gitignore"), "/var/\n/.coordination-kit/\n");
+    writeFixtureJson(join(root, "coordination-kit.json"), {
+      ...coordinatorConfig(),
+      appStateRoot: "var",
+    });
+    const current = loadLayout(root);
+    expect(readRegistry(current)).toEqual(registry);
+    expect(legacyStorePath(current)).toBe(join(external, "coordination.db"));
+    expect(appLayout(current, GAME).busDir).toBe(bus);
+    expect(readFileSync(join(bus, "events.jsonl"), "utf8")).toBe("Fixture event data\n");
+    const reopened = Store.forLayout(TEST_CONTEXT, current);
+    try {
+      expect(reopened.verify()).toEqual(before);
+      expect(reopened.events()).toEqual([first]);
+      const added = record(reopened, "after-move");
+      expect(added.prevHash).toBe(before.head.hash);
+      expect(reopened.verify().head).toEqual({ hash: added.hash, seq: before.head.seq + 1 });
+      expect(existsSync(join(old.varDir, "coordination"))).toBe(false);
+    } finally {
+      reopened.close();
+    }
+  });
+
+  it.each([false, true])(
+    "preserves the original receipt after moving a workspace with an external origin: %s",
+    (external) => {
+      const { layout: old, marker, path, root, witness } = fixture();
+      if (external) {
+        stateRootFixture(old);
+      }
+      const prepared = { ...PREPARED, legacyPath: legacyStorePath(old), root } as const;
+      const active = { ...prepared, phase: "active" } as const;
+      mkdirSync(path, { recursive: true });
+      writeFixtureJson(marker, active);
+      writeFixtureJson(witness, prepared);
+      const moved = join(root, ".coordination-kit");
+      renameSync(old.varDir, moved);
+      writeFileSync(join(root, ".gitignore"), "/.coordination-kit/\n");
+      writeFixtureJson(join(root, "coordination-kit.json"), coordinatorConfig());
+      const current = loadLayout(root);
+      const selected = fileAuthority(TEST_GIT, current, legacyStorePath(current));
+      expect(selected).toEqual({
+        kind: "files",
+        path: join(moved, "coordination"),
+        receipt: active,
+      });
+      expect(
+        JSON.parse(readFileSync(join(moved, "coordination", "source-fence.json"), "utf8")),
+      ).toEqual(prepared);
+    },
+  );
+
   it("recognizes the retained fleet evidence regardless of the legacy DB's presence", () => {
     const { active, authority, legacyPath, path } = activatedFixture();
     const expected = { kind: "files", path, receipt: active };

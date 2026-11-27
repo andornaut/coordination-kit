@@ -2,8 +2,11 @@ import { randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, readdirSync, realpathSync, type Stats } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 
-import type { Layout } from "../../core/configuration/layout.ts";
-import { STANDALONE_STATE_DIR } from "../../core/configuration/standalone.ts";
+import { CONFIG_FILE, type Layout, LEGACY_STATE_DIR } from "../../core/configuration/layout.ts";
+import {
+  STANDALONE_CONFIG_FILE,
+  STANDALONE_STATE_DIR,
+} from "../../core/configuration/standalone.ts";
 import { isRecord } from "../../core/encoding/pyjson.ts";
 import {
   fsyncDirectory,
@@ -152,7 +155,13 @@ function assertIgnoredTarget(git: GitRunner, layout: Layout, state: string): voi
 }
 
 function assertBinding(layout: Layout, legacyPath: string, receipt: CutoverReceipt): void {
-  if (receipt.root !== layout.root || receipt.legacyPath !== legacyPath) {
+  // A relocated workspace can retain the exact receipt for its previous local origin.
+  const priorLocalOrigin =
+    layout.mode !== "standalone" &&
+    layout.varDir === join(layout.root, STANDALONE_STATE_DIR) &&
+    legacyPath === join(layout.varDir, "coordination.db") &&
+    receipt.legacyPath === join(layout.root, LEGACY_STATE_DIR, "coordination.db");
+  if (receipt.root !== layout.root || (receipt.legacyPath !== legacyPath && !priorLocalOrigin)) {
     throw new StoreError("file-authority-binding-mismatch");
   }
 }
@@ -187,7 +196,11 @@ function activeAuthority(
 
 function assertNoLegacyState(layout: Layout, legacyPath: string): void {
   const localPath = join(layout.varDir, "coordination.db");
-  for (const path of new Set([legacyPath, localPath])) {
+  const sourcePaths = new Set([legacyPath, localPath]);
+  if (layout.mode !== "standalone" && layout.varDir === join(layout.root, STANDALONE_STATE_DIR)) {
+    sourcePaths.add(join(layout.root, LEGACY_STATE_DIR, "coordination.db"));
+  }
+  for (const path of sourcePaths) {
     if (["", "-wal", "-shm", "-journal"].some((suffix) => statIfPresent(`${path}${suffix}`))) {
       throw new StoreError("file-authority-legacy-state");
     }
@@ -219,8 +232,14 @@ export function fileAuthority(
   options: { readonly create?: boolean } = {},
 ): ActiveFileAuthority | null {
   const { root, varDir } = layout;
-  const state = layout.mode === "standalone" ? STANDALONE_STATE_DIR : "var";
-  if (varDir !== join(root, state) || !canonicalAbsolute(legacyPath)) {
+  const canonical = layout.configFile === join(root, STANDALONE_CONFIG_FILE);
+  const state = canonical ? STANDALONE_STATE_DIR : LEGACY_STATE_DIR;
+  if (
+    (!canonical &&
+      (layout.mode === "standalone" || layout.configFile !== join(root, CONFIG_FILE))) ||
+    varDir !== join(root, state) ||
+    !canonicalAbsolute(legacyPath)
+  ) {
     throw new StoreError("file-authority-binding-mismatch");
   }
   checkDirectory(varDir, "file-authority-non-primary-checkout");

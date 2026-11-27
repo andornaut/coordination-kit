@@ -1,7 +1,6 @@
-// The external state root. `var/work-protocol.json` names it: `{"schema":2,"stateRoot":"/abs"}`,
-// or the 2.1 shape (`schema` 1 with `workspaceId` and `generation`), which is read and never
-// written. Without the file the state root is the coordinator's `var/`. The root must be absolute
-// and outside every configured repository, registered worktree and Git checkout.
+// The selected runtime directory's work-protocol.json names the external state root. Without
+// the pointer, use the selected runtime directory. The configured root must be absolute and
+// outside every configured repository, registered worktree and Git checkout.
 import { lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
@@ -110,7 +109,7 @@ function registeredWorktrees(layout: Layout): string[] {
   }
 }
 
-/** The state root: the configured external directory, else the coordinator's `var/`. */
+/** The configured external state root, or the selected runtime directory when unset. */
 export function stateRoot(layout: Layout): string {
   const configured = configuredStateRoot(layout);
   if (configured === null) {

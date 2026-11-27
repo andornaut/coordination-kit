@@ -1,3 +1,4 @@
+import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -81,6 +82,59 @@ const appConfig = {
 } as const;
 
 describe("app workspace layout", () => {
+  it("uses the canonical config and state directory for a fresh workspace", () => {
+    const { root } = makeFixture();
+    writeFixtureJson(join(root, "coordination-kit.json"), appConfig);
+    const layout = loadLayout(root);
+    expect(layout).toMatchObject({
+      configFile: join(root, "coordination-kit.json"),
+      mode: "app",
+      registryFile: join(root, ".coordination-kit/registry.json"),
+      reviewDir: join(root, ".coordination-kit/reviews"),
+      routeFile: join(root, ".coordination-kit/route.json"),
+      varDir: join(root, ".coordination-kit"),
+    });
+    expect(appLayout(layout, "dashboard").busDir).toBe(
+      join(root, ".coordination-kit/apps/dashboard/bus"),
+    );
+    expect(existsSync(layout.varDir)).toBe(false);
+  });
+
+  it("rejects selecting either side of an incomplete workspace move", () => {
+    const { root } = makeFixture();
+    const oldRuntime = join(root, "var");
+    const newRuntime = join(root, ".coordination-kit");
+    const canonicalConfig = join(root, "coordination-kit.json");
+    mkdirSync(oldRuntime);
+    writeFileSync(join(oldRuntime, "registry.json"), "{}");
+    writeFixtureJson(canonicalConfig, appConfig);
+    expect(() => loadLayout(root)).toThrow(`${oldRuntime}: conflicting workspace state`);
+    renameSync(oldRuntime, newRuntime);
+    expect(loadLayout(root).varDir).toBe(newRuntime);
+    renameSync(canonicalConfig, `${canonicalConfig}.staged`);
+    expect(() => loadLayout(root)).toThrow(`${newRuntime}: conflicting workspace state`);
+  });
+
+  it("keeps the legacy game bus paths when its workspace changes storage roots", () => {
+    const { root } = makeFixture();
+    const game = "archies-dog-walks";
+    const old = loadLayout(root);
+    const bus = appLayout(old, game).busDir;
+    mkdirSync(bus, { recursive: true });
+    writeFixtureJson(join(root, "coordination-kit.json"), {
+      ...coordinatorConfig(),
+      appStateRoot: "var",
+    });
+    const next = loadLayout(root);
+    expect(next.mode).toBe(old.mode);
+    expect(next.registryFile).toBe(join(root, ".coordination-kit/registry.json"));
+    expect(appLayout(next, game).busDir).toBe(bus);
+    expect(roleKeys(next.config)).toEqual(roleKeys(old.config));
+    expect(() => validateWorkspaceConfig({ ...appConfig, appStateRoot: "../outside" })).toThrow(
+      "/appStateRoot: must be one of",
+    );
+  });
+
   it("loads an arbitrary operator key and fresh app and review paths", () => {
     const { base, root } = makeFixture();
     writeFixtureJson(join(root, "config.json"), appConfig);
