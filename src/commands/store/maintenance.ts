@@ -94,12 +94,13 @@ export const storeRetireCommand: Handler = storeVerb(
   "store retire",
   STORE_RETIRE_OPTIONS,
   (context, values) => {
-    if ((values.apply === true) === (values["dry-run"] === true)) {
+    const apply = values.apply === true;
+    if (apply && values["dry-run"] === true) {
       throw new Usage();
     }
-    if (values["dry-run"] === true && (values["native-id"] ?? values.worker) !== undefined) {
+    if (!apply && (values["native-id"] ?? values.worker) !== undefined) {
       throw new Usage();
     }
-    return storeRetire(context, callerOf(values), { apply: values.apply === true });
+    return storeRetire(context, callerOf(values), { apply });
   },
 );

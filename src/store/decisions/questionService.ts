@@ -30,7 +30,7 @@ import {
   setPolicyHold,
 } from "./policyHolds.ts";
 import {
-  type AnswerInput,
+  type AnswerRequest,
   cancelQuestion,
   closeLegacyQuestion,
   type DecisionRow,
@@ -219,21 +219,21 @@ function answerProjection(
   context: AnswerContext,
   options: CallerOptions,
   id: string,
-  request: AnswerInput | undefined,
+  request: AnswerRequest | undefined,
   wake: true,
 ): Promise<AnswerOutput>;
 function answerProjection(
   context: AnswerContext,
   options: CallerOptions,
   id: string,
-  request: AnswerInput | undefined,
+  request: AnswerRequest | undefined,
   wake: false,
 ): Promise<AnswerProjectionOutput>;
 function answerProjection(
   context: AnswerContext,
   options: CallerOptions,
   id: string,
-  request: AnswerInput | undefined,
+  request: AnswerRequest | undefined,
   wake: boolean,
 ): Promise<AnswerProjectionOutput | AnswerOutput> {
   const roles = registry(context);
@@ -258,7 +258,7 @@ export function storeQuestionAnswer(
   context: AnswerContext,
   options: CallerOptions,
   id: string,
-  request: AnswerInput,
+  request: AnswerRequest,
 ): Promise<AnswerOutput> {
   return answerProjection(context, options, id, request, true);
 }

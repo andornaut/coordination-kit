@@ -334,6 +334,9 @@ export interface AnswerInput {
   readonly fileNumbers?: readonly number[];
 }
 
+/** An owned question's recorded work can supply the answer's target. */
+export type AnswerRequest = Omit<AnswerInput, "work"> & { readonly work?: string };
+
 export interface AnswerResult extends QuestionResult {
   readonly decision: DecisionRow;
   /** The decision's number in its work item. */
@@ -388,7 +391,7 @@ export function recordQuestionAnswer(
   store: Store,
   actor: Actor,
   id: string,
-  input?: AnswerInput,
+  input?: AnswerRequest,
 ): QuestionResult {
   return store.transaction(() => {
     const row = ownQuestion(store, actor, id);
@@ -398,7 +401,9 @@ export function recordQuestionAnswer(
     if (input === undefined) {
       ensure(previous !== undefined, "question-unanswered");
     }
-    const answer = input === undefined ? previous! : validatedAnswer(hostname, input);
+    const work = input?.work ?? (row.work as string | null) ?? previous?.work;
+    ensure(work !== undefined, "question-work-required");
+    const answer = input === undefined ? previous! : validatedAnswer(hostname, { ...input, work });
     ensure(row.work == null || row.work === answer.work, "work-mismatch");
     const duplicate = row.state !== "pending";
     ensure(!duplicate || matchesAnswer(previous, answer), "already-closed");

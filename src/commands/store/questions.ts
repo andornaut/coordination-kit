@@ -26,6 +26,7 @@ import {
   storeQuestionOpen,
   storeQuestionProject,
 } from "../../store/decisions/questionService.ts";
+import { StoreError } from "../../store/types.ts";
 import { parseWorkRef } from "../../work/live.ts";
 import { CALLER, callerOf, required, text, Usage, type Values } from "../args.ts";
 import { storeVerb } from "./context.ts";
@@ -143,18 +144,26 @@ export const questionOpen: Handler = storeVerb(
 export const questionAnswer: Handler = storeVerb(
   "question answer",
   QUESTION_ANSWER_OPTIONS,
-  (context, values) =>
-    storeQuestionAnswer(
-      { ...context, hostname: hostname() },
-      callerOf(values),
-      required(values, "id"),
-      {
-        text: required(values, "text"),
-        work: required(values, "work"),
-        ...optional("by", text(values, "by")),
-        ...optional("supersedes", text(values, "supersedes")),
-      },
-    ),
+  async (context, values) => {
+    try {
+      return await storeQuestionAnswer(
+        { ...context, hostname: hostname() },
+        callerOf(values),
+        required(values, "id"),
+        {
+          text: required(values, "text"),
+          ...optional("by", text(values, "by")),
+          ...optional("supersedes", text(values, "supersedes")),
+          ...optional("work", text(values, "work")),
+        },
+      );
+    } catch (error) {
+      if (error instanceof StoreError && error.code === "question-work-required") {
+        throw new Usage(undefined, { kind: "missing", name: "work" });
+      }
+      throw error;
+    }
+  },
 );
 
 export const questionProject: Handler = storeVerb(

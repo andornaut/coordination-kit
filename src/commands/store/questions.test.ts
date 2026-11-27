@@ -353,6 +353,50 @@ describe("question commands", () => {
     });
   });
 
+  it("defaults answer work only from the exact owned question or its recorded answer", async () => {
+    const { base, coordinator, reader, tech } = setup();
+    gameRepository(base);
+    await tech("question", "open", "--id", "q-linked", "--title", "Palette?", "--work", "ag-0001");
+    await tech("question", "open", "--id", "q-unlinked", "--title", "Font?");
+    const linked = ["question", "answer", "--id", "q-linked", "--text", "Warm."];
+    const unlinked = ["question", "answer", "--id", "q-unlinked", "--text", "Keep it."];
+    expect(await coordinator(...linked)).toMatchObject({
+      code: EXIT_INVALID,
+      err: expect.stringContaining("not-owner"),
+    });
+    expect(await tech(...linked, "--work", "ag-0002")).toMatchObject({
+      code: EXIT_INVALID,
+      err: expect.stringContaining("work-mismatch"),
+    });
+    expect(await tech(...unlinked)).toMatchObject({
+      code: EXIT_USAGE,
+      err: expect.stringContaining("Supply --work."),
+    });
+    expect((await reader("question", "list", "--state", "pending")).json).toMatchObject({
+      questions: [{ id: "q-linked" }, { id: "q-unlinked" }],
+    });
+    expect(await tech(...linked)).toMatchObject({
+      code: EXIT_OK,
+      json: {
+        decision: { id: "ag-0001/D1" },
+        duplicate: false,
+        question: { answer: { work: "ag-0001" } },
+      },
+    });
+    expect(await tech(...unlinked, "--work", "ag-0001")).toMatchObject({
+      code: EXIT_OK,
+      json: {
+        decision: { id: "ag-0001/D2" },
+        duplicate: false,
+        question: { answer: { work: "ag-0001" }, work: null },
+      },
+    });
+    expect(await tech(...unlinked)).toMatchObject({
+      code: EXIT_OK,
+      json: { decision: { id: "ag-0001/D2" }, duplicate: true },
+    });
+  });
+
   it("persists an exact answer without a role worktree, then projects in receipt order", async () => {
     const { base, coordinator, reader, tech } = setup();
     await tech("question", "open", "--id", "q-a", "--title", "Palette?", "--work", "ag-0001");

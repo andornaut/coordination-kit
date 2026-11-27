@@ -499,7 +499,7 @@ describe("store message commands", () => {
     ]);
   });
 
-  it("retains a message with one explicit timed, scheduled, or dependency boundary", async () => {
+  it("defaults to the next scheduled review and accepts one explicit timed or dependency boundary", async () => {
     const { base, root } = storeFixture();
     const coordinator = cli(root, base, { CLAUDE_CODE_SESSION_ID: COORDINATOR });
     const tech = cli(root, base, { CLAUDE_CODE_SESSION_ID: TECH });
@@ -514,9 +514,13 @@ describe("store message commands", () => {
       code: EXIT_OK,
       json: { duplicate: true },
     });
+    expect(await retain()).toMatchObject({
+      code: EXIT_OK,
+      json: { duplicate: false, message: { retention: { nextBoundary: "Next scheduled review" } } },
+    });
     expect(await retain("--next-review")).toMatchObject({
       code: EXIT_OK,
-      json: { message: { retention: { nextBoundary: "Next scheduled review" } } },
+      json: { duplicate: true },
     });
     expect(await retain("--next-boundary", "  After the checked capture  ")).toMatchObject({
       code: EXIT_OK,
@@ -590,7 +594,7 @@ describe("store message commands", () => {
       ["msg", "send", "--to", TECH_ROLE, "--body", "x", "--intent", "later"],
       ["msg", "done"],
       ["msg", "done", ID, ID],
-      ["msg", "retain", ID, "--reason", "r"],
+      ["msg", "retain", ID],
       ["msg", "status", ID, "--native-id", COORDINATOR],
       ["msg", "history", "--since", "yesterday"],
       ["msg", "history", "--limit", "0"],
@@ -617,7 +621,7 @@ describe("store message commands", () => {
       "msg retain ID --reason TEXT --until ISO_TIMESTAMP [--owner ROLE] [--evidence REF ...]",
     );
     expect(help.out).toContain(
-      "msg retain ID --reason TEXT --next-review [--owner ROLE] [--evidence REF ...]",
+      "msg retain ID --reason TEXT [--next-review] [--owner ROLE] [--evidence REF ...]",
     );
     expect(help.out).toContain("msg status ID --include-body");
     expect(help.out).toContain(
@@ -626,6 +630,6 @@ describe("store message commands", () => {
     expect(help.out).toContain("inbox [--include-body] [--all]");
     expect(help.out).toContain("inbox --peek");
     expect(help.out).toContain("store import --approval-ledger FILE [--dry-run]");
-    expect(help.out).toContain("store retire --dry-run");
+    expect(help.out).toContain("store retire [--dry-run]");
   });
 });

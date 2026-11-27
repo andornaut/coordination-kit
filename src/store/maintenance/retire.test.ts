@@ -111,7 +111,7 @@ function tree(directory: string): string[] {
 }
 
 describe("store retire", () => {
-  it("prints the counts on a dry run and writes nothing", async () => {
+  it("defaults to the same read-only preview as an explicit dry run", async () => {
     const { cli, stateRoot } = setup();
     const before = tree(stateRoot);
     const dry = await cli({}, "store", "retire", "--dry-run");
@@ -142,9 +142,14 @@ describe("store retire", () => {
       { bytes: 2, files: 1, path: "migration-plan.json", present: true },
       { bytes: 12, files: 1, path: "var/work-protocol-fence.json", present: true },
     ]);
-    expect(tree(stateRoot)).toEqual(before);
-    expect((await cli({}, "store", "retire")).code).toBe(EXIT_USAGE);
+    expect(await cli({}, "store", "retire")).toEqual(dry);
     expect((await cli({}, "store", "retire", "--dry-run", "--apply")).code).toBe(EXIT_USAGE);
+    expect((await cli({}, "store", "retire", "--native-id", COORDINATOR)).code).toBe(EXIT_USAGE);
+    expect((await cli({}, "store", "retire", "--worker", "fixture")).code).toBe(EXIT_USAGE);
+    expect((await cli({}, "store", "retire", "--dry-run", "--native-id", COORDINATOR)).code).toBe(
+      EXIT_USAGE,
+    );
+    expect(tree(stateRoot)).toEqual(before);
   });
 
   it("archives the retired paths with a manifest, imports open requests and keeps originals", async () => {

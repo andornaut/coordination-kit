@@ -194,7 +194,7 @@ export const msgRetain: Handler = storeVerb(
     const boundary = text(values, "next-boundary");
     const until = text(values, "until");
     const nextReview = values["next-review"] === true;
-    if ([boundary !== undefined, until !== undefined, nextReview].filter(Boolean).length !== 1) {
+    if ([boundary !== undefined, until !== undefined, nextReview].filter(Boolean).length > 1) {
       throw new Usage();
     }
     const deadline = until === undefined ? null : retentionInstant(until);
