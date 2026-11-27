@@ -10,12 +10,13 @@ import {
   type StandaloneConfig,
   validateStandaloneConfig,
 } from "../../core/configuration/standalone.ts";
+import { findNamedWork } from "../../core/discovery.ts";
 import { LockBusy, withLock } from "../../core/files/lock.ts";
 import { systemGit } from "../../core/git.ts";
 import { resolveHarness } from "../../registry/resolve.ts";
 import { registry, withStore } from "../../store/context.ts";
 import type { Store } from "../../store/db.ts";
-import { holdGuard } from "../../store/decisions/questions.ts";
+import { holdGuard, listQuestions, storeHolds } from "../../store/decisions/questions.ts";
 import { closeProjectTask, replaceProjectDependency } from "../../store/projects/dependencies.ts";
 import {
   approveProjectReview,
@@ -46,6 +47,7 @@ import {
 import { projectRoot } from "./init.ts";
 
 export const TASK_READ_OPTIONS = {} as const;
+export const TASK_FIND_OPTIONS = { owner: { type: "string" } } as const;
 export const TASK_WRITE_OPTIONS = CALLER;
 export const TASK_PROPOSE_OPTIONS = {
   ...CALLER,
@@ -306,6 +308,68 @@ export const taskList = task("task list", TASK_READ_OPTIONS, (context) =>
   withStore(context, (store) => ({ schema: 1, tasks: listProjectTasks(store.db) }), {
     createMissing: false,
   }),
+);
+
+function readIfAvailable<T>(read: () => T): T | null {
+  try {
+    return read();
+  } catch {
+    return null;
+  }
+}
+
+export const taskFind = task(
+  "task find",
+  TASK_FIND_OPTIONS,
+  async (context, values, [query]) => {
+    const ownerRole = text(values, "owner");
+    if (ownerRole !== undefined) {
+      ensure(context.settings.project.roles.includes(ownerRole), "project-owner-unconfigured");
+    }
+    try {
+      return await withStore(
+        context,
+        (store) => {
+          const repository = context.settings.project.id;
+          const records = listProjectTasks(store.db).filter(
+            (item) => ownerRole === undefined || item.owner === ownerRole,
+          );
+          const result = findNamedWork(query!, records, true);
+          if (result.matches.length === 0) {
+            return { schema: 1, ...result };
+          }
+          const pending = readIfAvailable(() => listQuestions(store, { states: ["pending"] }));
+          const matches = result.matches.map((item) => {
+            const ref = { id: item.id, repository };
+            const holds = readIfAvailable(() =>
+              storeHolds(store, ref, { game: null, owner: item.owner }),
+            );
+            const questions =
+              pending?.filter(
+                (question) =>
+                  question.work === item.id ||
+                  question.codex?.dependsOn.some(
+                    (dependency) =>
+                      dependency.repository === repository && dependency.id === item.id,
+                  ),
+              ) ?? null;
+            return { ...item, holds, questions };
+          });
+          const complete = matches.every((item) => item.holds !== null && item.questions !== null);
+          return {
+            ...result,
+            matches,
+            schema: 1,
+            status: complete ? result.status : "unavailable",
+          };
+        },
+        { createMissing: false },
+      );
+    } catch {
+      return { schema: 1, ...findNamedWork<ProjectTask>(query!, [], false) };
+    }
+  },
+  1,
 );
 
 export const taskShow = task(
