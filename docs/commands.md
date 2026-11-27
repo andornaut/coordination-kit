@@ -51,6 +51,23 @@ reviewable changes. Both accept the repository as `--root`. See the [documentati
 
 Commands with an app selector also accept the legacy `--game` spelling. Use one spelling per invocation.
 
+## Skills install
+
+`skills install SKILL --harness codex|claude --scope project` installs one skill bundled with
+the current CLI release. Both flags are required. Use `--root DIR` to select the project explicitly.
+
+| Skill      | Folder name                 | What it covers                                        |
+| ---------- | --------------------------- | ----------------------------------------------------- |
+| `workflow` | `coordination-kit-workflow` | Approved standalone tasks through verified landing.   |
+| `status`   | `coordination-status`       | Read-only status in standalone and shared workspaces. |
+
+Codex skills go under `.agents/skills/` and Claude skills go under `.claude/skills/`, relative
+to the Git root. Each skill folder holds its `SKILL.md`.
+
+An identical file makes the command a no-op. If the target has different contents, the installer
+stops and preserves it for review. Install separately from `init` or copy the release's bundled
+skill to the corresponding path yourself. See [standalone setup](getting-started.md#set-up-a-standalone-project).
+
 ## Options and refusals
 
 Every command parses its options strictly. An unknown option, an option without its value or a

@@ -103,6 +103,21 @@ The [review guide](standalone.md#review-and-merge) explains policy changes and e
 approval. Run [landing verification](standalone.md#follow-the-merge-to-landing) after the
 merge with the evidence your repository requires for the integrated revision.
 
+### Install the workflow skill
+
+The optional workflow skill guides agents through approved standalone tasks, from starting work
+through review, merge and verification of the landed revision. Use a CLI release that lists
+`skills install` in its help. To install for Codex from the standalone example above, run
+
+```sh
+ck --root "$primary" skills install workflow --harness codex --scope project
+```
+
+Use `--harness claude` for Claude. Commit the installed skill to share it with the project's
+other checkouts. Review any local edits before replacing a skill with a newer bundled version.
+Install `status` in place of `workflow` for read-only status reporting in standalone or shared
+workspaces. See [installer options and destinations](commands.md#skills-install).
+
 ## Set up an app workspace
 
 Use a primary workspace Git checkout and at least one app checkout. The example app is the

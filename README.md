@@ -21,6 +21,7 @@ Verify and extract the [release archive](docs/getting-started.md#get-the-cli) fo
 workspace checkout. The CLI requires Node 24.21.0 or later. Delivery Kit's runner uses this
 workspace installation for reviews and event ingest. Its bundled build libraries have a
 separate compatibility range. See [7.8 upgrade notes](docs/upgrading.md#coordination-kit-78).
+Releases with the `skills install` command include the workflow and status skills in the archive.
 
 ## Usage
 
@@ -36,6 +37,7 @@ the working directory. They take the coordinator root only from `COORDINATION_KI
 | Group                     | Verbs                                                                                                  | Purpose                                                                                                  |
 | ------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
 | `init`, `project`, `task` | See [standalone project commands](docs/commands.md#command-forms)                                      | Set up one repository and track work from proposal to landing.                                           |
+| `skills`                  | `install`                                                                                              | Install bundled [workflow and status skills](docs/commands.md#skills-install).                           |
 | `msg`                     | `send`, `decide`, `done`, `retain`, `status`, `history`                                                | Deliver messages and record their handling or user decisions.                                            |
 | `inbox`                   | (none)                                                                                                 | Read your store inbox and record it delivered.                                                           |
 | `store`                   | `import`, `export`, `rebuild`, `retire`, `migration-status`, `migration-prepare`, `migration-activate` | Import, export, rebuild, retire, and qualify or activate filesystem authority.                           |
@@ -100,7 +102,7 @@ patched `katex` without the override.
 | `npm run build`         | Build the CLI and public build API bundles and declarations.                                                       |
 | `npm test`              | Unit tests, using at most four workers by default; build first.                                                    |
 | `npm run contract`      | Build, contract types and the complete native contract suite.                                                      |
-| `npm run package:check` | Inspect the extracted CLI, the build API subpaths and strict NodeNext declarations.                                |
+| `npm run package:check` | Inspect the extracted CLI, skill installer, build API subpaths and strict NodeNext declarations.                   |
 
 Explicit source or contract paths passed to `npm run verify --` select the corresponding suite;
 unscoped filters apply to both. Standalone `npm run contract -- --lock` regenerates the contract
