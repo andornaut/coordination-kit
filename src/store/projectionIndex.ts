@@ -2,7 +2,11 @@
 export type Cell = string | number | null;
 export type ProjectionRow = Readonly<Record<string, Cell>>;
 type Table = Map<string, ProjectionRow>;
-type Undo = { readonly table: Table; readonly key: string; readonly prior: ProjectionRow | undefined };
+type Undo = {
+  readonly table: Table;
+  readonly key: string;
+  readonly prior: ProjectionRow | undefined;
+};
 
 export class ProjectionIndex {
   readonly #tables = new Map<string, Table>();
