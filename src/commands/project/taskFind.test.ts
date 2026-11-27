@@ -6,9 +6,11 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 
 import { loadLayout } from "../../core/configuration/layout.ts";
-import { TEST_CONTEXT, writeFixtureJson } from "../../core/testFixtures.ts";
+import { TEST_CLOCK, TEST_CONTEXT, writeFixtureJson } from "../../core/testFixtures.ts";
+import { createRegistry } from "../../registry/store.ts";
 import { Store, storePath } from "../../store/db.ts";
 import { openQuestion, setHold } from "../../store/decisions/questions.ts";
+import { openFileJournal } from "../../store/files/journal.ts";
 import { approveProjectTask, proposeProjectTask } from "../../store/projects/tasks.ts";
 import { taskFind } from "./tasks.ts";
 
@@ -32,6 +34,7 @@ function fixture() {
   const root = mkdtempSync(join(tmpdir(), "ck-task-find-"));
   roots.push(root);
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: root });
+  writeFileSync(join(root, ".gitignore"), "/.coordination-kit/\n");
   writeFixtureJson(join(root, "coordination-kit.json"), {
     project: { id: "product", roles: [MAINTAINER.role, BUILDER.role] },
     review: "off",
@@ -68,6 +71,23 @@ it("distinguishes a fresh project from an invalid owner without creating state",
 
 it("reports candidate context and narrows an ambiguous title by owner", async () => {
   const { ask, layout } = fixture();
+  createRegistry(TEST_CLOCK, layout, {
+    harness: "codex",
+    host: { nativeProjectId: "fixture", root: "." },
+    operations: {},
+    roles: Object.fromEntries(
+      [MAINTAINER, BUILDER].map(({ nativeId, role }) => [
+        role,
+        {
+          conversations: { codex: nativeId },
+          ownership: "active",
+          worktree: ".",
+        },
+      ]),
+    ),
+    schema: 1,
+    transfers: [],
+  });
   const store = Store.forLayout(TEST_CONTEXT, layout);
   try {
     proposeProjectTask(store, MAINTAINER, {
@@ -101,7 +121,8 @@ it("reports candidate context and narrows an ambiguous title by owner", async ()
   } finally {
     store.close();
   }
-  const before = readFileSync(storePath(layout));
+  const journal = openFileJournal(storePath(layout));
+  const before = journal.snapshot();
   expect(await ask("fix inputs")).toMatchObject({
     code: 0,
     result: {
@@ -133,18 +154,18 @@ it("reports candidate context and narrows an ambiguous title by owner", async ()
     },
   });
   expect(await ask("task-0002")).toMatchObject({ result: { match: "id", status: "match" } });
-  expect(readFileSync(storePath(layout))).toEqual(before);
+  expect(journal.snapshot()).toEqual(before);
 });
 
 it("reports an unavailable store instead of an empty task list", async () => {
   const { ask, layout } = fixture();
   mkdirSync(layout.varDir);
   const path = storePath(layout);
-  writeFileSync(path, "invalid database");
+  writeFileSync(path, "invalid journal");
   expect(await ask("fix inputs")).toEqual({
     code: 1,
     err: "",
     result: { match: null, matches: [], schema: 1, status: "unavailable" },
   });
-  expect(readFileSync(path, "utf8")).toBe("invalid database");
+  expect(readFileSync(path, "utf8")).toBe("invalid journal");
 });

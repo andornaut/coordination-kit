@@ -1,6 +1,7 @@
 import {
   checkArray,
   checkEnum,
+  checkInteger,
   checkName,
   checkObject,
   checkString,
@@ -14,12 +15,19 @@ export const REVIEW_MODES = ["off", "chat", "pr"] as const;
 export const PROJECT_PROVIDERS = ["github", "gitlab"] as const;
 const GITHUB_MERGE_METHODS = ["merge", "squash", "rebase"] as const;
 
+export interface GitHubTaskStoreConfig {
+  readonly backend: "github-issues";
+  readonly issue: number;
+  readonly writers: readonly number[];
+}
+
 export interface StandaloneConfig {
   readonly schema: 1;
   readonly project: { readonly id: string; readonly roles: readonly string[] };
   readonly review: (typeof REVIEW_MODES)[number];
   readonly defaultBranch?: string;
   readonly remote?: string;
+  readonly taskStore?: GitHubTaskStoreConfig;
   readonly integration?: {
     readonly provider: (typeof PROJECT_PROVIDERS)[number];
     readonly repository: string;
@@ -27,6 +35,39 @@ export interface StandaloneConfig {
     readonly hostname?: string;
     readonly mergeMethod?: (typeof GITHUB_MERGE_METHODS)[number];
   };
+}
+
+function checkTaskStore(
+  issues: Issues,
+  value: unknown,
+  review: unknown,
+  integration: unknown,
+): void {
+  const at = "/taskStore";
+  if (!checkObject(issues, at, { required: ["backend", "issue", "writers"] }, value)) {
+    return;
+  }
+  checkEnum(issues, `${at}/backend`, ["github-issues"], value.backend);
+  checkInteger(issues, `${at}/issue`, { max: Number.MAX_SAFE_INTEGER, min: 1 }, value.issue);
+  if (checkArray(issues, `${at}/writers`, { nonEmpty: true, unique: true }, value.writers)) {
+    value.writers.forEach((writer, index) =>
+      checkInteger(
+        issues,
+        `${at}/writers/${index}`,
+        { max: Number.MAX_SAFE_INTEGER, min: 1 },
+        writer,
+      ),
+    );
+  }
+  if (
+    review !== "pr" ||
+    typeof integration !== "object" ||
+    integration === null ||
+    !("provider" in integration) ||
+    integration.provider !== "github"
+  ) {
+    issues.add(at, "requires review pr and a GitHub integration");
+  }
 }
 
 const GIT_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -100,7 +141,7 @@ function checkIntegration(issues: Issues, value: unknown): void {
 export function validateStandaloneConfig(value: unknown): StandaloneConfig {
   const issues = new Issues();
   const shape = {
-    optional: ["defaultBranch", "integration", "remote"],
+    optional: ["defaultBranch", "integration", "remote", "taskStore"],
     required: ["schema", "project", "review"],
   };
   if (checkObject(issues, "", shape, value)) {
@@ -134,6 +175,9 @@ export function validateStandaloneConfig(value: unknown): StandaloneConfig {
     }
     if (value.integration !== undefined) {
       checkIntegration(issues, value.integration);
+    }
+    if (value.taskStore !== undefined) {
+      checkTaskStore(issues, value.taskStore, value.review, value.integration);
     }
   }
   issues.throwIfAny(STANDALONE_CONFIG_FILE);

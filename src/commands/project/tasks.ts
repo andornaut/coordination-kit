@@ -46,6 +46,7 @@ import {
   type Values,
   verbFamily,
 } from "../args.ts";
+import { GitHubTasks, type IssueLink } from "./githubTasks.ts";
 import { projectRole, projectRoot } from "./init.ts";
 
 export const TASK_READ_OPTIONS = {} as const;
@@ -101,11 +102,16 @@ const task = verbFamily("task", (io, root) => {
   ensure(settings !== undefined, "standalone-project-required");
   const branch = settings.defaultBranch ?? "main";
   const remote = settings.remote ?? "origin";
+  const github =
+    settings.taskStore === undefined
+      ? undefined
+      : new GitHubTasks(settings.integration!.repository, settings.project.id, settings.taskStore);
   return {
     branch,
     clock: systemClock,
     env: io.env,
     git,
+    github,
     layout,
     remote,
     settings,
@@ -115,9 +121,10 @@ const task = verbFamily("task", (io, root) => {
 
 type Context = Parameters<Parameters<typeof task>[2]>[0];
 type Candidate = NonNullable<ProjectTask["candidate"]>;
+type TaskView = ProjectTask & { readonly issue?: IssueLink };
 
 function exactTask(store: Store, id: string): ProjectTask {
-  const record = readProjectTask(store.db, id);
+  const record = readProjectTask(store.index, id);
   ensure(record !== null && record !== undefined, "project-task-missing");
   return record;
 }
@@ -127,9 +134,36 @@ function candidateOf(record: ProjectTask): Candidate {
   return record.candidate;
 }
 
-async function mutate<T>(
+function taskView(context: Context, record: ProjectTask): TaskView {
+  return context.github === undefined
+    ? record
+    : { ...record, issue: context.github.link(record.id) };
+}
+
+function githubTasks(context: Context, local: Store): GitHubTasks | undefined {
+  if (context.github !== undefined) {
+    ensure(listProjectTasks(local.index).length === 0, "project-local-task-migration-required");
+  }
+  return context.github;
+}
+
+function withTasks<T>(context: Context, action: (tasks: Store, local: Store) => T): Promise<T> {
+  return withStore(
+    context,
+    (local) => {
+      const backend = githubTasks(context, local);
+      return backend === undefined
+        ? action(local, local)
+        : backend.read(context.clock, (tasks) => action(tasks, local));
+    },
+    { createMissing: false },
+  );
+}
+
+async function mutate<T extends { readonly task: ProjectTask }>(
   context: Context,
   values: Values,
+  id: string,
   action: (store: Store, actor: ReturnType<typeof resolveCaller>) => T | Promise<T>,
 ): Promise<T> {
   try {
@@ -148,13 +182,18 @@ async function mutate<T>(
             actor.worker === undefined,
           "project-actor-inactive",
         );
-        return withStore(context, (store) => {
+        return withStore(context, async (store) => {
           ensure(
             holdGuard(store, actor.role, resolveHarness(roles, actor.role), context.layout)
               .status === "clear",
             "project-role-held",
           );
-          return action(store, actor);
+          const backend = githubTasks(context, store);
+          if (backend === undefined) {
+            return action(store, actor);
+          }
+          const result = await backend.mutate(context.clock, actor, id, action);
+          return { ...result, task: taskView(context, result.task) };
         });
       },
       { nonBlocking: true },
@@ -349,9 +388,10 @@ function originalTarget(context: Context, candidate: Candidate): void {
 }
 
 export const taskList = task("task list", TASK_READ_OPTIONS, (context) =>
-  withStore(context, (store) => ({ schema: 1, tasks: listProjectTasks(store.db) }), {
-    createMissing: false,
-  }),
+  withTasks(context, (store) => ({
+    schema: 1,
+    tasks: listProjectTasks(store.index).map((record) => taskView(context, record)),
+  })),
 );
 
 function readIfAvailable<T>(read: () => T): T | null {
@@ -371,44 +411,39 @@ export const taskFind = task(
       ensure(context.settings.project.roles.includes(ownerRole), "project-owner-unconfigured");
     }
     try {
-      return await withStore(
-        context,
-        (store) => {
-          const repository = context.settings.project.id;
-          const records = listProjectTasks(store.db).filter(
-            (item) => ownerRole === undefined || item.owner === ownerRole,
+      return await withTasks(context, (store, local) => {
+        const repository = context.settings.project.id;
+        const records = listProjectTasks(store.index).filter(
+          (item) => ownerRole === undefined || item.owner === ownerRole,
+        );
+        const result = findNamedWork(query!, records, true);
+        if (result.matches.length === 0) {
+          return { schema: 1, ...result };
+        }
+        const pending = readIfAvailable(() => listQuestions(local, { states: ["pending"] }));
+        const matches = result.matches.map((item) => {
+          const ref = { id: item.id, repository };
+          const holds = readIfAvailable(() =>
+            storeHolds(local, ref, { game: null, owner: item.owner }),
           );
-          const result = findNamedWork(query!, records, true);
-          if (result.matches.length === 0) {
-            return { schema: 1, ...result };
-          }
-          const pending = readIfAvailable(() => listQuestions(store, { states: ["pending"] }));
-          const matches = result.matches.map((item) => {
-            const ref = { id: item.id, repository };
-            const holds = readIfAvailable(() =>
-              storeHolds(store, ref, { game: null, owner: item.owner }),
-            );
-            const questions =
-              pending?.filter(
-                (question) =>
-                  question.work === item.id ||
-                  question.codex?.dependsOn.some(
-                    (dependency) =>
-                      dependency.repository === repository && dependency.id === item.id,
-                  ),
-              ) ?? null;
-            return { ...item, holds, questions };
-          });
-          const complete = matches.every((item) => item.holds !== null && item.questions !== null);
-          return {
-            ...result,
-            matches,
-            schema: 1,
-            status: complete ? result.status : "unavailable",
-          };
-        },
-        { createMissing: false },
-      );
+          const questions =
+            pending?.filter(
+              (question) =>
+                question.work === item.id ||
+                question.codex?.dependsOn.some(
+                  (dependency) => dependency.repository === repository && dependency.id === item.id,
+                ),
+            ) ?? null;
+          return { ...taskView(context, item), holds, questions };
+        });
+        const complete = matches.every((item) => item.holds !== null && item.questions !== null);
+        return {
+          ...result,
+          matches,
+          schema: 1,
+          status: complete ? result.status : "unavailable",
+        };
+      });
     } catch {
       return { schema: 1, ...findNamedWork<ProjectTask>(query!, [], false) };
     }
@@ -421,9 +456,7 @@ export const taskShow = task(
   "task show",
   TASK_READ_OPTIONS,
   (context, _values, [id]) =>
-    withStore(context, (store) => ({ schema: 1, task: exactTask(store, id!) }), {
-      createMissing: false,
-    }),
+    withTasks(context, (store) => ({ schema: 1, task: taskView(context, exactTask(store, id!)) })),
   1,
 );
 
@@ -431,10 +464,9 @@ export const taskWorkFile = task(
   "task work-file",
   TASK_READ_OPTIONS,
   (context, _values, [id]) =>
-    withStore(
+    withTasks(
       context,
       (store) => `${approvedTaskFile(exactTask(store, id!), false)}${VERIFICATION_STUB}`,
-      { createMissing: false },
     ),
   1,
 );
@@ -443,7 +475,7 @@ export const taskPropose = task(
   "task propose",
   TASK_PROPOSE_OPTIONS,
   (context, values, [id]) =>
-    mutate(context, values, (store, actor) => {
+    mutate(context, values, id!, (store, actor) => {
       const assigned = projectRole(values, "owner", context.settings.project.roles);
       ensure(context.settings.project.roles.includes(assigned), "project-owner-unconfigured");
       return proposeProjectTask(store, actor, {
@@ -461,7 +493,7 @@ export const taskApprove = task(
   "task approve",
   TASK_APPROVE_OPTIONS,
   (context, values, [id]) =>
-    mutate(context, values, (store, actor) =>
+    mutate(context, values, id!, (store, actor) =>
       approveProjectTask(store, actor, id!, approval(context, values, actor.role)),
     ),
   1,
@@ -471,7 +503,7 @@ export const taskStart = task(
   "task start",
   TASK_WRITE_OPTIONS,
   (context, values, [id]) =>
-    mutate(context, values, (store, actor) => startProjectTask(store, actor, id!)),
+    mutate(context, values, id!, (store, actor) => startProjectTask(store, actor, id!)),
   1,
 );
 
@@ -479,7 +511,7 @@ export const taskClose = task(
   "task close",
   TASK_CLOSE_OPTIONS,
   (context, values, [id]) =>
-    mutate(context, values, async (store, actor) => {
+    mutate(context, values, id!, async (store, actor) => {
       const decision = approval(context, values, actor.role);
       const state = required(values, "as");
       if (state !== "declined" && state !== "cancelled") {
@@ -499,7 +531,7 @@ export const taskReplaceDependency = task(
   "task replace-dependency",
   TASK_REPLACE_OPTIONS,
   (context, values, [id]) =>
-    mutate(context, values, (store, actor) =>
+    mutate(context, values, id!, (store, actor) =>
       replaceProjectDependency(store, actor, id!, {
         approval: approval(context, values, actor.role),
         dependency: required(values, "dependency"),
@@ -513,7 +545,7 @@ export const taskReady = task(
   "task ready",
   TASK_READY_OPTIONS,
   (context, values, [id]) =>
-    mutate(context, values, async (store, actor) => {
+    mutate(context, values, id!, async (store, actor) => {
       const record = exactTask(store, id!);
       owner(record, actor.role);
       const branch = branchOf(context, values);
@@ -582,7 +614,7 @@ export const taskApproveReview = task(
   "task approve-review",
   TASK_REVIEW_APPROVE_OPTIONS,
   (context, values, [id]) =>
-    mutate(context, values, (store, actor) => {
+    mutate(context, values, id!, (store, actor) => {
       const record = exactTask(store, id!);
       changedPolicy(context, candidateOf(record));
       return approveProjectReview(
@@ -600,8 +632,9 @@ export const taskApproveReview = task(
 export const taskOpenReview = task(
   "task open-review",
   TASK_WRITE_OPTIONS,
-  (context, values, [id]) =>
-    mutate(context, values, async (store, actor) => {
+  (context, values, [id]) => {
+    ensure(context.github === undefined, "project-github-use-native-pr");
+    return mutate(context, values, id!, async (store, actor) => {
       const record = exactTask(store, id!);
       owner(record, actor.role);
       const candidate = candidateOf(record);
@@ -632,7 +665,8 @@ export const taskOpenReview = task(
       });
       checkReview(context, candidate, review);
       return linkProjectReview(store, actor, record.id, candidate.headSha, review);
-    }),
+    });
+  },
   1,
 );
 
@@ -640,7 +674,7 @@ export const taskLinkReview = task(
   "task link-review",
   TASK_LINK_OPTIONS,
   (context, values, [id]) =>
-    mutate(context, values, async (store, actor) => {
+    mutate(context, values, id!, async (store, actor) => {
       const record = exactTask(store, id!);
       owner(record, actor.role);
       const candidate = candidateOf(record);
@@ -709,8 +743,9 @@ async function verifyUnmerged(
 export const taskMerge = task(
   "task merge",
   TASK_WRITE_OPTIONS,
-  (context, values, [id]) =>
-    mutate(context, values, async (store, actor) => {
+  (context, values, [id]) => {
+    ensure(context.github === undefined, "project-github-use-native-pr");
+    return mutate(context, values, id!, async (store, actor) => {
       const record = exactTask(store, id!);
       owner(record, actor.role);
       const candidate = candidateOf(record);
@@ -746,7 +781,8 @@ export const taskMerge = task(
         "project-push-unverified",
       );
       return { submitted: true, task: record };
-    }),
+    });
+  },
   1,
 );
 
@@ -754,7 +790,7 @@ export const taskVerify = task(
   "task verify",
   TASK_VERIFY_OPTIONS,
   (context, values, [id]) =>
-    mutate(context, values, async (store, actor) => {
+    mutate(context, values, id!, async (store, actor) => {
       const record = exactTask(store, id!);
       owner(record, actor.role);
       if (record.state === "landed") {
@@ -767,8 +803,11 @@ export const taskVerify = task(
         review = await readLinkedReview(context, record, candidate);
         ensure(review.state === "merged" && review.mergeSha !== null, "project-review-not-merged");
       }
-      if (candidate.review === "chat") {
+      if (candidate.review === "chat" || context.github !== undefined) {
         exactApproval(record, candidate);
+      }
+      if (context.github !== undefined) {
+        changedPolicy(context, candidate);
       }
       refresh(context);
       const proof = landing(context, candidate, review);
