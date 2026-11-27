@@ -77,9 +77,6 @@ interface ChannelServer {
   readonly argv: readonly string[] | null;
 }
 
-/** The channel MCP config game-coordinator's Claude sessions launch with. */
-const CHANNEL_CONFIG = join("var", "claude-channel.mcp.json");
-
 /** `node <root>/node_modules/@andornaut/coordination-kit/dist/cli.js --root <root> claude channel`. */
 function stableChannelCommand(root: string): string[] {
   return [
@@ -101,7 +98,7 @@ function channelArgs(args: readonly unknown[]): boolean {
  * config is read, never written, and no server is contacted. Anything unreadable is unknown.
  */
 function channelCommand(layout: Layout): ChannelCommand {
-  const config = join(layout.root, CHANNEL_CONFIG);
+  const config = join(layout.varDir, "claude-channel.mcp.json");
   const expected = stableChannelCommand(layout.root);
   const base = { command: null, config, expected, server: null };
   if (!existsSync(config)) {
