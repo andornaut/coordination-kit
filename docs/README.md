@@ -43,7 +43,7 @@ docs/
   `docs/work/index/<area>.md` and link to the table from the design area. Existing inline
   tables remain valid.
 - Give each rule or procedure one authoritative page. Link to it from navigation, setup
-  guides and skills, with a short cue about when to use it.
+  guides, local agent instructions and skills, with a short cue about when to use it.
 - For a changed or reverted requirement, update its authoritative text and link the new
   decision to its predecessor with `supersedes`. For a documentation correction, verify
   the approved requirement before editing.

@@ -135,29 +135,37 @@ async function exactLanding(mode: "chat" | "pr-squash" | "pr-merge"): Promise<vo
     await ok(OWNER, "task", "start", TASK);
     git("checkout", "-b", "task/input");
     mkdirSync(join(repo, "docs", "work"), { recursive: true });
-    writeFileSync(join(repo, "docs", "work", `${TASK}.md`), await setup("task", "work-file", TASK));
+    const workFile = join(repo, "docs", "work", `${TASK}.md`);
+    const rendered = await setup("task", "work-file", TASK);
+    const verification = "\n\n## Verification\n\n";
+    expect(rendered).toContain(verification);
+    expect(rendered.indexOf("## Outcome")).toBeGreaterThan(rendered.indexOf("## Verification"));
+    const approved = rendered.slice(0, rendered.indexOf(verification));
+    writeFileSync(workFile, `${approved}\n`);
     writeFileSync(join(repo, "input.txt"), "first\n");
     git("add", "docs/work", "input.txt");
     git("commit", "-m", "Fix input");
 
+    const requestReady = (sha: string, task = TASK, branch = "task/input") =>
+      invoke(
+        OWNER,
+        "task",
+        "ready",
+        task,
+        "--branch",
+        branch,
+        "--head",
+        sha,
+        "--summary",
+        "Input validated",
+        "--evidence",
+        "checks:focused",
+      );
     const ready = async () => {
       const sha = git("rev-parse", "HEAD");
-      const packet = JSON.parse(
-        await ok(
-          OWNER,
-          "task",
-          "ready",
-          TASK,
-          "--branch",
-          "task/input",
-          "--head",
-          sha,
-          "--summary",
-          "Input validated",
-          "--evidence",
-          "checks:focused",
-        ),
-      );
+      const result = await requestReady(sha);
+      expect(result).toMatchObject({ code: 0, err: "" });
+      const packet = JSON.parse(result.out);
       expect(packet).toMatchObject({
         changedPaths: [`docs/work/${TASK}.md`, "input.txt"],
         task: { state: "ready" },
@@ -171,8 +179,40 @@ async function exactLanding(mode: "chat" | "pr-squash" | "pr-merge"): Promise<vo
     });
     await setup("task", "approve-review", TASK, "--head", first, "--approval", "chat:first-review");
 
+    const verifiedFile = [
+      `${approved}${verification}### Input checks`,
+      "",
+      "Reject blank input and preserve valid input.",
+      "",
+      "```text",
+      "## Example response",
+      "```",
+      "",
+      "## Outcome",
+      "",
+      "Both input checks passed.",
+      "",
+    ].join("\n");
+    if (mode === "chat") {
+      const rejectWorkFile = async (invalid: string) => {
+        writeFileSync(workFile, invalid);
+        git("add", workFile);
+        git("commit", "-m", "Change approved task record");
+        expect(await requestReady(git("rev-parse", "HEAD"))).toMatchObject({
+          code: 1,
+          err: "coordination-kit: project-work-file-mismatch\n",
+        });
+      };
+      await rejectWorkFile(verifiedFile.replace("Reject blank input.", "Accept blank input."));
+      await rejectWorkFile(verifiedFile.replace("## Outcome", "## Notes"));
+      await rejectWorkFile(`${verifiedFile}\n## Approved scope\nAccept blank input.\n`);
+      await rejectWorkFile(
+        `${verifiedFile}\nApproved scope\n--------------\nAccept blank input.\n`,
+      );
+    }
+    writeFileSync(workFile, verifiedFile);
     writeFileSync(join(repo, "input.txt"), "second\n");
-    git("add", "input.txt");
+    git("add", workFile, "input.txt");
     git("commit", "-m", "Cover another input case");
     const head = await ready();
     expect(await invoke(OWNER, "task", "merge", TASK)).toMatchObject({
@@ -346,6 +386,30 @@ async function exactLanding(mode: "chat" | "pr-squash" | "pr-merge"): Promise<vo
       expect(JSON.parse(await ok(OWNER, "task", "start", "dependent"))).toMatchObject({
         task: { dependsOn: [TASK], state: "in-progress" },
       });
+      git("checkout", "-b", "task/dependent", "refs/remotes/origin/main");
+      const dependentFile = join(repo, "docs", "work", "dependent.md");
+      const dependent = await setup("task", "work-file", "dependent");
+      const references = `\n\n## References\n\nDepends on: [${TASK}](${TASK}.md)`;
+      expect(dependent).toContain(references + verification);
+      const legacy = dependent
+        .slice(0, dependent.indexOf(references))
+        .replace(/^Approved: .+$/mu, (line) => `${line}\nDepends on: ${TASK}`);
+      writeFileSync(dependentFile, `${legacy}\n`);
+      git("add", dependentFile);
+      git("commit", "-m", "Preserve legacy dependency references");
+      const prepareDependent = () =>
+        requestReady(git("rev-parse", "HEAD"), "dependent", "task/dependent");
+      expect(await prepareDependent()).toMatchObject({ code: 0, err: "" });
+      const next = dependent
+        .replace("<!-- Describe the checks and expected results. -->", "Run the focused checks.")
+        .replace(
+          "<!-- Record exact-revision results and evidence when available. -->",
+          "Focused checks passed. Evidence was recorded in the task.",
+        );
+      writeFileSync(dependentFile, next);
+      git("add", dependentFile);
+      git("commit", "-m", "Link the dependency and fill in verification");
+      expect(await prepareDependent()).toMatchObject({ code: 0, err: "" });
     }
   } finally {
     rmSync(scratch, { force: true, recursive: true });

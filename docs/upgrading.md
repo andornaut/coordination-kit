@@ -2,10 +2,11 @@
 
 ## Coordination Kit 7.13
 
-New standalone work files include a Verification section for the task owner's plan.
-The [standalone workflow](standalone.md#approve-and-build) explains how to fill it in before
-building and record exact check results. Upgrade the CLI used for `task ready` before preparing a
-candidate that includes the new section. The 7.13 CLI also accepts the earlier work-file format.
+New standalone work files place Verification immediately before Outcome and link dependencies
+to their work files. The [standalone workflow](standalone.md#approve-and-build) explains how
+to plan verification before building and record exact check results. Upgrade the CLI used for
+`task ready` before preparing a candidate in the new format. The 7.13 CLI also accepts the
+earlier work-file format.
 Existing projects can [sync the managed lifecycle skill](commands.md#skills-sync) after upgrading.
 
 ## Coordination Kit 7.12

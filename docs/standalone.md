@@ -89,8 +89,12 @@ ck task start task-0001
 In a project with one configured role, `task propose` defaults to that owner. Pass `--owner`
 explicitly when the project has multiple roles.
 
-From the task worktree, create the approved work file using the canonical task record and
-commit it alongside the implementation. Fetch the default branch before preparing the review.
+From the task worktree, generate the work file from the approved task record. Fill in the
+[Verification plan](work-files.md#verification) before building. Keep the approved snapshot as
+rendered, including its dependency links. Edit Verification and Outcome as needed.
+Use `task ready` and `task verify`
+for evidence of the candidate checks and landing checks respectively. Commit the work file
+alongside the implementation and fetch the default branch before preparing the review.
 A dependency declared with repeatable `--depends-on TASK_ID` must already exist. An owner can
 start a dependent task once those tasks have landed.
 
@@ -108,6 +112,7 @@ ck task replace-dependency task-0003 --dependency task-0002 --replacement task-0
 ```sh
 mkdir -p docs/work
 ck --root "$primary" task work-file task-0001 > docs/work/task-0001.md
+# Fill in Verification before implementing and running the checks.
 git add docs/work/task-0001.md
 # Stage the implementation and commit it with the work file.
 git fetch origin

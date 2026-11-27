@@ -35,6 +35,7 @@ import {
 import { resolveCaller } from "../../store/sessions/identity.ts";
 import { ensure, StoreError } from "../../store/types.ts";
 import { projectBase, projectCandidate, projectLanding } from "../../work/projectGit.ts";
+import { proseLines } from "../../workfiles/docsAudit.ts";
 import {
   CALLER,
   callerOf,
@@ -239,22 +240,64 @@ function exactApproval(record: ProjectTask, candidate: Candidate): void {
   );
 }
 
-function taskFile(record: ProjectTask): string {
+const VERIFICATION_SECTION = "\n\n## Verification\n\n";
+const OUTCOME_HEADING = "## Outcome";
+const VERIFICATION_STUB = [
+  `${VERIFICATION_SECTION}<!-- Describe the checks and expected results. -->`,
+  "",
+  OUTCOME_HEADING,
+  "",
+  "<!-- Record exact-revision results and evidence when available. -->",
+  "",
+].join("\n");
+
+function approvedTaskFile(record: ProjectTask, legacy: boolean): string {
   ensure(record.state !== "declined" && record.state !== "cancelled", "project-task-closed");
   ensure(record.approval !== null, "project-build-approval-required");
+  const hasDependencies = record.dependsOn.length > 0;
   return [
     `# ${record.title}`,
     "",
     `Task: ${record.id}`,
     `Owner: ${record.owner}`,
     `Approved: ${record.approval.at.slice(0, 10)}`,
-    ...(record.dependsOn.length === 0 ? [] : [`Depends on: ${record.dependsOn.join(", ")}`]),
+    ...(legacy && hasDependencies ? [`Depends on: ${record.dependsOn.join(", ")}`] : []),
     "",
     "## Approved scope",
     "",
     record.scope,
-    "",
-  ].join("\n");
+    ...(!legacy && hasDependencies
+      ? [
+          "",
+          "## References",
+          "",
+          `Depends on: ${record.dependsOn.map((id) => `[${id}](${id}.md)`).join(", ")}`,
+        ]
+      : []),
+  ]
+    .join("\n")
+    .trim();
+}
+
+function validTaskFile(file: string, record: ProjectTask): boolean {
+  if (file === approvedTaskFile(record, true)) {
+    return true;
+  }
+  const prefix = approvedTaskFile(record, false) + VERIFICATION_SECTION;
+  if (!file.startsWith(prefix)) {
+    return false;
+  }
+  // A peer heading could make check prose look like another approved section.
+  const lines = proseLines(file.slice(prefix.length));
+  const outcome = lines.indexOf(OUTCOME_HEADING);
+  return (
+    outcome >= 0 &&
+    !lines.some(
+      (line, index) =>
+        (index !== outcome && /^ {0,3}(?:#{1,2}(?:[ \t]|$)|<h[12](?=[\s/>]))/iu.test(line)) ||
+        (/^ {0,3}(?:=+|-+)[ \t]*$/u.test(line) && Boolean(lines[index - 1]?.trim())),
+    )
+  );
 }
 
 function hashPolicy(fields: readonly unknown[]): string {
@@ -388,7 +431,11 @@ export const taskWorkFile = task(
   "task work-file",
   TASK_READ_OPTIONS,
   (context, _values, [id]) =>
-    withStore(context, (store) => `${taskFile(exactTask(store, id!))}\n`, { createMissing: false }),
+    withStore(
+      context,
+      (store) => `${approvedTaskFile(exactTask(store, id!), false)}${VERIFICATION_STUB}`,
+      { createMissing: false },
+    ),
   1,
 );
 
@@ -503,7 +550,7 @@ export const taskReady = task(
         ["show", `${headSha}:docs/work/${record.id}.md`],
         "project-work-file-required",
       );
-      ensure(file === taskFile(record).trim(), "project-work-file-mismatch");
+      ensure(validTaskFile(file, record), "project-work-file-mismatch");
       return {
         ...readyProjectTask(
           store,

@@ -1,10 +1,9 @@
 # Work files
 
-`work check` validates a repository's design index tables and work files against the work-file
-convention; `work report` lists each work item's milestone, joined with live protocol state when
-a coordinator root is available. The convention itself is in
-[docs/work/](https://github.com/andornaut/coordination-kit/blob/main/docs/work/README.md). Both
-commands only read. Each item's live progress is recorded with the `work` store verbs
+`work check` validates a repository's design index tables and work files. `work report` lists each
+work item's milestone, joined with live protocol state when a coordinator root is available.
+These commands read the repository's [indexed work records](https://github.com/andornaut/coordination-kit/blob/main/docs/work/README.md).
+Each item's live progress is recorded with the `work` store verbs
 ([work records](store.md#work-records)).
 
 This guide covers the indexed work-file convention used by shared workspaces. The
@@ -14,6 +13,62 @@ This guide covers the indexed work-file convention used by shared workspaces. Th
 `--root DIR` names the repository (default: the working directory). The coordinator root comes
 only from `COORDINATION_KIT_ROOT`, else `DELIVERY_KIT_ROOT`, so a session's coordinator variable
 never redirects which repository is checked.
+
+## Work-item structure
+
+Indexed work files have Scope, Criteria, Decisions, References, Verification and Outcome sections.
+Criteria describe the required behaviour. Decisions state what was decided and why. Use the
+[decision-line format](#decision-lines). Front matter identifies and indexes the item.
+In References, link to the design page and any related or superseded records using paths
+relative to the work file. Keep their IDs in front matter for tools that read the index.
+
+| Front matter | Content                                                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `id`         | The repository's prefix and a zero-padded sequence, such as `ck-0001` in Coordination Kit.                                |
+| `title`      | A short imperative title.                                                                                                 |
+| `status`     | `proposed`, `approved`, `done`, `declined`, `cancelled` or `superseded`.                                                  |
+| `approved`   | A short approval reference, such as `user, 2026-11-18`; for `proposed` and `declined`, the request or decision reference. |
+| `design`     | The design area in `docs/design/`.                                                                                        |
+| `related`    | A list of related work IDs.                                                                                               |
+| `supersedes` | The ID of the item this one replaces; omitted otherwise.                                                                  |
+| `owner`      | The registry role that owns the item, when the repository's roles leave it ambiguous; omitted otherwise.                  |
+
+## Verification
+
+For new approved implementation work, write the Verification section immediately above Outcome
+before building.
+Name the check or scenario, expected result, and evidence to record. Include failure and retry
+cases where relevant. Match the plan to the change. For a docs-only task, checking the changed
+links or validating the affected command example can be enough.
+
+Record what actually passed on the exact revision and identify any failed, skipped or pending
+checks in Outcome. Link durable evidence and keep the detailed logs at those references.
+Standalone tasks also record actual results through [task evidence](standalone.md#approve-and-build).
+Existing finished items keep their original record.
+
+For example, a work item that validates input might record the following.
+
+```markdown
+## Criteria
+
+Reject blank names and save valid names.
+
+## References
+
+- Design: [Coordination](../design/coordination.md)
+- Related: [ck-0001](ck-0001.md)
+- Supersedes: [ck-0047](ck-0047.md)
+
+## Verification
+
+Run the focused input checks. Expect a validation error and no write for a blank name.
+Retry with a valid name and expect it to be saved. Record the test report for the tested commit.
+
+## Outcome
+
+The blank-name and valid-retry cases passed on commit `0123456789abcdef0123456789abcdef01234567`.
+Evidence is recorded at `ci:run-42/input-checks`.
+```
 
 ## work check
 

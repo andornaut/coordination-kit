@@ -18,20 +18,20 @@ your project guides, requirements and work records easy to find.
 ## Get the CLI
 
 You need Node 24.21.0 or later, Git and `flock`. Download the archive and its verification files
-from the same [7.12.1 release][release]. Use a directory outside any repository.
+from the same [7.13.0 release][release]. Use a directory outside any repository.
 
 ```sh
-kit_dir="$HOME/.local/share/coordination-kit/7.12.1"
-kit_release="https://github.com/andornaut/coordination-kit/releases/download/v7.12.1"
+kit_dir="$HOME/.local/share/coordination-kit/7.13.0"
+kit_release="https://github.com/andornaut/coordination-kit/releases/download/v7.13.0"
 mkdir -p "$kit_dir"
 (
   set -e
   cd "$kit_dir"
-  for asset in coordination-kit-7.12.1.tgz SOURCE_COMMIT SHA256SUMS; do
+  for asset in coordination-kit-7.13.0.tgz SOURCE_COMMIT SHA256SUMS; do
     curl -fLO "$kit_release/$asset"
   done
   sha256sum -c SHA256SUMS
-  tar -xzf coordination-kit-7.12.1.tgz
+  tar -xzf coordination-kit-7.13.0.tgz
   cmp SOURCE_COMMIT package/SOURCE_COMMIT
 )
 ck() { node "$kit_dir/package/dist/cli.js" "$@"; }
@@ -39,7 +39,7 @@ ck --version
 ```
 
 Both checksum lines should say `OK`, the two `SOURCE_COMMIT` files should match, and the version
-should be `7.12.1`. Keep the `ck` function in the shell where you run the standalone example.
+should be `7.13.0`. Keep the `ck` function in the shell where you run the standalone example.
 A shared workspace can [pin the same release with npm](#set-up-an-app-workspace).
 Delivery Kit's runner uses that workspace pin for reviews and event ingests. Its bundled
 libraries have a [separate compatibility range](upgrading.md#coordination-kit-78).
@@ -88,9 +88,9 @@ state.
 ck --root "$primary" task find "Document the local checks"
 ```
 
-1. [Build and prepare an exact candidate](standalone.md#approve-and-build). Commit the work
-   file and implementation together, run the project checks, fetch the configured remote
-   and record the candidate with `task ready`.
+1. [Build and prepare an exact candidate](standalone.md#approve-and-build). Write the work
+   file's [Verification plan](work-files.md#verification) before building. Commit the work file and implementation together,
+   run the planned checks, fetch the configured remote and record the candidate with `task ready`.
 2. [Review and merge](standalone.md#review-and-merge). Under the example's `chat` policy,
    record the user's explicit approval for that exact head and run `task merge`.
    The `pr` policy requires pushing the candidate branch to the configured forge.
@@ -159,7 +159,7 @@ Install the checked release, commit `package.json` and `package-lock.json`, and 
 
 ```sh
 npm install --save-dev \
-  https://github.com/andornaut/coordination-kit/releases/download/v7.12.1/coordination-kit-7.12.1.tgz
+  https://github.com/andornaut/coordination-kit/releases/download/v7.13.0/coordination-kit-7.13.0.tgz
 workspace="$(pwd -P)"
 ck() { node "$workspace/node_modules/@andornaut/coordination-kit/dist/cli.js" --root "$workspace" "$@"; }
 ck --version
@@ -327,4 +327,4 @@ review.
 See the [command reference](commands.md) for syntax and the [documentation index](README.md)
 for the remaining guides.
 
-[release]: https://github.com/andornaut/coordination-kit/releases/tag/v7.12.1
+[release]: https://github.com/andornaut/coordination-kit/releases/tag/v7.13.0
