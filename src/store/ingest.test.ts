@@ -127,7 +127,7 @@ function messages(layout: Layout): StoredMessage[] {
     store.index
       .rows("messages")
       .toSorted((a, b) => Number(a.sent_seq) - Number(b.sent_seq))
-      .map(({ id, from_role, to_role, body, links }) => ({
+      .map(({ body, from_role, id, links, to_role }) => ({
         body: body as string,
         from_role: from_role as string,
         id: id as string,
