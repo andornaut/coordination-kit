@@ -1,7 +1,8 @@
 // Fake external tools for contract cases. Each PATH entry is a shell wrapper that runs
 // `node fake-tool.mjs <tool> ...args`. Every invocation is logged to DK_FAKE_DIR/calls.jsonl.
-// Only `claude agents --json` is modelled, from DK_FAKE_DIR/control.json read on every
-// invocation; the other tools exit 98 so an unexpected call fails visibly as well as being logged.
+// Claude fixture responses come from DK_FAKE_DIR/control.json. Git authority checks use its
+// scratch repository; every unmodelled invocation exits 98 after recording the call.
+import { spawnSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -29,6 +30,21 @@ function claude() {
   const agents = behaviour.agents ?? [];
   process.stdout.write(typeof agents === "string" ? agents : JSON.stringify(agents));
   return 0;
+}
+
+const gitArgs = args.slice(4);
+if (
+  tool === "git" &&
+  args[0] === "-c" &&
+  args[1] === "core.quotePath=false" &&
+  args[2] === "-c" &&
+  args[3] === "log.showSignature=false" &&
+  ["rev-parse", "check-ignore", "ls-files"].includes(gitArgs[0])
+) {
+  const PATH = process.env.PATH.split(":").slice(1).join(":");
+  process.exit(
+    spawnSync("git", args, { env: { ...process.env, PATH }, stdio: "inherit" }).status ?? 98,
+  );
 }
 
 if (tool !== "claude") {

@@ -1,5 +1,6 @@
 // Scratch workspace for every contract case: a game-coordinator root, one or more game
 // checkouts, scratch HOME and XDG state, and fake external tools on PATH.
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -133,6 +134,10 @@ export class Workspace {
   }
 
   private writeCoordinator(): void {
+    execFileSync("git", ["init", "--quiet", this.coordinator], {
+      env: { HOME: this.home, PATH: process.env.PATH },
+    });
+    writeFileSync(join(this.coordinator, ".gitignore"), "/var/\n");
     writeJson(join(this.coordinator, "config.json"), {
       schema: 1,
       timezone: "America/Toronto",
@@ -256,6 +261,7 @@ export class Workspace {
       XDG_STATE_HOME: this.xdgState,
       DK_FAKE_DIR: this.fakeDir,
       LANG: "C.UTF-8",
+      NODE_OPTIONS: "--no-experimental-sqlite",
     };
     return { ...env, ...this.env };
   }
