@@ -33,3 +33,4 @@ Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
 | ck-0073 | Package Coordination Kit lifecycle and status skills             | [ck-0073.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0073.md) |
 | ck-0075 | Package the agent cleanup skill                                  | [ck-0075.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0075.md) |
 | ck-0076 | Manage reusable skills from project setup                        | [ck-0076.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0076.md) |
+| ck-0079 | Document how agents start Coordination Kit sessions              | [ck-0079.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0079.md) |
