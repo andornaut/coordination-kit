@@ -5,6 +5,8 @@ on:
   pull_request:
 permissions:
   contents: read
+env:
+  NODE_OPTIONS: --no-experimental-sqlite
 jobs:
   # A push or pull request that changes only docs/ runs lint alone; build, test, contract and
   # package report as skipped. Anything it cannot classify runs every job.

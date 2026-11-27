@@ -12,7 +12,7 @@ DOCKER_RUN := docker run --rm --cpus 4 --memory 4g --pids-limit 512 \
 	--mount type=bind,src=$(CURDIR),dst=/source,readonly \
 	--tmpfs /work:exec,size=3g,uid=$(USER_ID),gid=$(GROUP_ID) \
 	--tmpfs /tmp:exec,size=1g,mode=1777 --env HOME=/tmp
-NODE_RUN = $(DOCKER_RUN) --workdir /work $(NODE_IMAGE) sh -ec '\
+NODE_RUN = $(DOCKER_RUN) --env NODE_OPTIONS=--no-experimental-sqlite --workdir /work $(NODE_IMAGE) sh -ec '\
 	tar -C /source --exclude=./.git --exclude=node_modules --exclude=./dist \
 		--exclude=./.worktrees --exclude=./.claude -cf - . | tar -xf -; \
 	npm ci --ignore-scripts --no-audit --no-fund; \
