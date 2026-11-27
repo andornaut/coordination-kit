@@ -1,6 +1,6 @@
 # Configuration
 
-The workspace root, its `config.json`, the fields of an app's `delivery-kit.json`
+The workspace root, its `coordination-kit.json`, the fields of an app's `delivery-kit.json`
 that coordination reads, and where the kit keeps mutable state.
 
 Configuration never holds secret values. Use the operator's existing authentication and credential
@@ -18,10 +18,17 @@ Commands that use the coordinator root resolve it in this order.
 The `work` commands read `--root` as the repository to inspect (default: the working directory)
 and take the coordinator root only from `COORDINATION_KIT_ROOT`, else `DELIVERY_KIT_ROOT`.
 
-## Workspace `config.json`
+## Workspace configuration
 
-Commit schema 1 in the primary workspace checkout. All checkout paths are relative to that
-root. Use exactly one of `apps` and `games`.
+Commit schema 1 as `coordination-kit.json` in the primary checkout. A config with a `project`
+field selects [standalone mode](../guides/standalone.md#install-and-initialize). A shared config
+uses exactly one of `apps` and `games`. All checkout paths are relative to that root.
+
+Without `coordination-kit.json`, existing shared installs load `config.json` and use `var/`.
+The canonical file takes precedence when present. The shared loader refuses coordination state
+in the alternate directory, including a journal, authority receipt, registry, route or
+state-root pointer. Follow the [in-place migration](../guides/upgrading.md#migrate-an-existing-workspace)
+to move an existing workspace.
 
 - `timezone` and `wakeMinutes` (integers 0 to 59): the scheduled review minutes. An empty
   `wakeMinutes` schedules no review.
@@ -34,10 +41,15 @@ root. Use exactly one of `apps` and `games`.
 - `permissions` is required with `apps`. Each listed role has a `workspace` array and an
   `apps` map of app IDs to grant arrays. An omitted role has no grants.
   [Permission checks](store.md#app-mode-permissions) describe how grants apply.
-- `appStateDir` is optional with `apps`. It defaults to `apps`. Use `games` for an in-place
-  migration that preserves runtime paths.
+- `appStateDir` is optional with `apps`. It selects the `apps/` or `games/` directory name
+  under the app state root. It defaults to `apps`. A `games` configuration always uses `games/`.
+- App state follows the workspace state directory by default. Set `appStateRoot: "var"`
+  in a shared config to keep per-app runtime state, including each Delivery Kit bus, under
+  `var/` when migrating. The journal, registry and coordinator review state follow the
+  selected workspace state directory.
 
 Registry entries, review routes and recipient references use the exact configured role keys.
+Keep GitHub workflows, issue forms and pull request templates in their native `.github/` paths.
 
 ## App `delivery-kit.json`
 
@@ -58,7 +70,7 @@ rules that delivery-kit loads its configuration with ([libraries](libraries.md))
 This kit uses only `reports`:
 
 - `project`: an optional legacy display name. Both readers still validate a supplied value.
-  Coordination reports take the display name from the app or game entry's `name` in `config.json`.
+  Coordination reports take the display name from the workspace entry's `name`.
 - `scheduledTicks`: whether the app's runner reports scheduled departure slots.
 - `recipient`: a registered role key. It receives the app's events and, when the app hosts the
   route, its scheduled reviews. `claude channel` defaults to it.
@@ -96,26 +108,29 @@ Grant `delivery:operate` only to an operator authorized for manual delivery. See
 1. Have the live workspace owner verify and adopt the compatible Coordination Kit reader
    before adopting an app-mode Delivery Kit writer. Use the existing owner, runner controls
    and scheduled cutover boundary.
-2. In `config.json`, replace `games` with `apps` and replace each legacy role name with its
+2. In the existing workspace config, replace `games` with `apps` and replace each role name with its
    current full registry key. For example, `games.dashboard.roles: ["tech"]` becomes
    `apps.dashboard.roles: ["dashboard/tech"]`. Set `appStateDir: "games"` and add explicit
    grants for the existing owners and the runner's verified binding.
 3. Retain the app IDs, checkout paths, registry bindings, `operations.<id>.busOwner`, route,
-   event and cursor files, and current store authority. The `games` state setting keeps
-   `var/games/<id>/bus/` and `var/game-dev/`. The live workspace owner adopts the config and
-   pins after verifying the exact bindings and their permissions.
+   event and cursor files, and current store authority. The `games` setting preserves the
+   `games/<id>/bus/` and `game-dev/` subdirectory names. The live workspace owner adopts the
+   config and pins after verifying the exact bindings and permissions.
+
+Adopting app mode is separate from [moving the workspace paths](../guides/upgrading.md#migrate-an-existing-workspace).
+An existing `games` config can move to `coordination-kit.json` without changing its role model.
 
 ## Start a fresh coordinator
 
-1. Prepare the primary Git checkout with a valid `config.json`, a pinned Coordination Kit
-   dependency and its lockfile, and an ignore rule for `var/`. Install the dependency with
+1. Prepare the primary Git checkout with a valid `coordination-kit.json`, a pinned Coordination Kit
+   dependency and its lockfile, and an ignore rule for `/.coordination-kit/`. Install the dependency with
    `npm ci`. The [minimal example](#registry-seed-example) starts with the coordinator role.
 2. Establish the actual role sessions and [seed the registry](#registry-seed-example) with the
    public [registry library](libraries.md#registry-library). It initializes revision 1 from
    the supplied bindings.
 3. From an active registered session, set `coordinator_root` to the absolute primary checkout
    path and run `session start`.
-   A successful first write initializes the filesystem journal at `var/coordination/`.
+   A successful first write initializes the filesystem journal at `.coordination-kit/coordination/`.
 
 ```sh
 node "$coordinator_root/node_modules/@andornaut/coordination-kit/dist/cli.js" \
@@ -124,7 +139,7 @@ node "$coordinator_root/node_modules/@andornaut/coordination-kit/dist/cli.js" \
 
 ### Registry seed example
 
-For a coordinator-only workspace, commit this `config.json` in the primary checkout.
+For a coordinator-only workspace, commit this `coordination-kit.json` in the primary checkout.
 
 ```json
 {
@@ -166,7 +181,7 @@ JS
 ## Add a game
 
 1. Add the game ID, display name, repository path and roles to the coordinator's committed
-   `config.json`. The game repository supplies its own committed `delivery-kit.json`.
+   `coordination-kit.json`. The game repository supplies its own committed `delivery-kit.json`.
 2. Register the exact role sessions and worktrees with the coordinator's revision-checked
    registry writer. Set `reports.recipient` to a registered role. Any optional review membership
    uses the same role keys in the coordinator's local [route](review.md#review-route).
@@ -176,37 +191,40 @@ JS
 
 ## State
 
-Standalone projects use `.coordination-kit/coordination/` for local coordination.
+The state directory is `.coordination-kit/` for standalone projects and canonical shared workspaces.
+Shared workspaces have one journal in the primary checkout. Legacy shared installs use `var/`
+until migration.
 An optional `taskStore` setting can select the
 [GitHub Issues active-task backend](../guides/standalone.md#use-github-issues-for-active-tasks).
 It requires the existing GitHub PR-review configuration and a control issue with trusted
 numeric writer account IDs. The registry and non-task records remain local.
 
-| Location                                                                                  | Git                  | Content                                                                                                 |
-| ----------------------------------------------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------- |
-| `config.json`, `package.json`, `package-lock.json` in the workspace                       | Tracked              | App or game definitions, role grants and the installed kit pin.                                         |
-| `delivery-kit.json` and project work files in each app repository                         | Tracked              | Delivery and reporting configuration, work definitions and decision lines.                              |
-| `var/registry.json`, `var/registry.lock`, `var/route.json`, `var/handoffs/`               | Ignored              | Local native bindings, review routing and role checkpoints.                                             |
-| `var/coordination/`, `var/coordination-authority.json`, `var/coordination-authority.lock` | Ignored              | [Filesystem journal and role records](store.md#filesystem-layout), authority receipt and switch lock.   |
-| `var/apps/<id>/bus/` or `var/games/<id>/bus/`                                             | Ignored              | Runner state and event logs, ingest cursor and quarantine, review result receipts and decision markers. |
-| `var/reviews/` or `var/game-dev/`                                                         | Ignored              | Local review and inbox diagnostics, acknowledgements and retentions.                                    |
-| `var/work-protocol.json`                                                                  | Ignored              | Optional external state root for channel and wake files and artifacts.                                  |
-| External state root and independent backups                                               | Outside the checkout | Transport state, artifacts, retirement archives and retained legacy database backups.                   |
+| Location                                                                                             | Git                  | Content                                                                                                 |
+| ---------------------------------------------------------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------- |
+| `coordination-kit.json`, `package.json`, `package-lock.json`                                         | Tracked              | Project or workspace definitions, role grants and the kit pin for npm installs.                         |
+| `delivery-kit.json` and app work files                                                               | Tracked              | Delivery and reporting configuration, work definitions and decision lines.                              |
+| `registry.json`, `registry.lock`, `route.json`, `handoffs/` in the state directory                   | Ignored              | Native bindings, review routing and role checkpoints.                                                   |
+| `coordination/`, `coordination-authority.json`, `coordination-authority.lock` in the state directory | Ignored              | [Filesystem journal and role records](store.md#filesystem-layout), authority receipt and switch lock.   |
+| `apps/<id>/bus/` or `games/<id>/bus/` under the app state root                                       | Ignored              | Runner state and event logs, ingest cursor and quarantine, review result receipts and decision markers. |
+| `reviews/` or `game-dev/` in the state directory                                                     | Ignored              | Local review and inbox diagnostics, acknowledgements and retentions.                                    |
+| `work-protocol.json` in the state directory                                                          | Ignored              | Optional external state root for channel and wake files and artifacts.                                  |
+| External state root and independent backups                                                          | Outside the checkout | Transport state, artifacts, retirement archives and retained backups.                                   |
 
 The state pointer is `{"schema":2,"stateRoot":"/abs"}`. The 2.1 shape (`schema` 1 with
 `workspaceId` and `generation`) is still read. The configured root must be absolute and outside
 every configured repository, registered worktree and Git checkout (`state-root-excluded`).
-A malformed pointer is `invalid-state-root-config`. Without a pointer, `wake/`, `channel/`, `artifacts/` and any retirement `archive/` are under
-`var/`. The journal stays in the primary checkout.
+A malformed pointer is `invalid-state-root-config`. Without a pointer, `wake/`,
+`channel/`, `artifacts/` and any retirement `archive/` are under the selected state directory.
+The journal stays in the primary checkout.
 
 Example app workspace and sibling repository. See the
 [filesystem layout](store.md#filesystem-layout) for journal and role records.
 
 ```text
 workspace/
-  .gitignore, config.json, package.json, package-lock.json  tracked
+  .gitignore, coordination-kit.json, package.json, package-lock.json  tracked
   node_modules/                                  ignored dependency install
-  var/                                           ignored
+  .coordination-kit/                             ignored
     registry.json, registry.lock, route.json, handoffs/
     coordination-authority.json, coordination/
     reviews/

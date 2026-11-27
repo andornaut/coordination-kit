@@ -2,11 +2,12 @@
 
 Choose how the repositories and roles work together.
 
-| If you want to                                                           | Start here                                                                                                   |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| Track work and review changes in one Git repository using its own checks | [Set up a standalone project](#set-up-a-standalone-project)                                                  |
-| Give one or more apps a shared registry and inbox                        | [Set up an app workspace](#set-up-an-app-workspace)                                                          |
-| Keep the state of an existing game coordinator while adopting app mode   | [Migrate a legacy coordinator in place](../reference/configuration.md#migrate-a-legacy-coordinator-in-place) |
+| If you want to                                                           | Start here                                                                                     |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| Track work and review changes in one Git repository using its own checks | [Set up a standalone project](#set-up-a-standalone-project)                                    |
+| Give one or more apps a shared registry and inbox                        | [Set up an app workspace](#set-up-an-app-workspace)                                            |
+| Adopt the new paths in an existing workspace                             | [Migrate an existing workspace](upgrading.md#migrate-an-existing-workspace)                    |
+| Adopt app roles and grants in an existing game coordinator               | [Adopt app mode in place](../reference/configuration.md#migrate-a-legacy-coordinator-in-place) |
 
 Both setups work with Codex or Claude. The examples use Codex and one role. Use the
 conversation ID of the actual session doing the work. The harness supplies it to commands
@@ -18,20 +19,20 @@ your project guides, requirements and work records easy to find.
 ## Get the CLI
 
 You need Node 24.21.0 or later, Git and `flock`. Download the archive and its verification files
-from the same [8.0.0 release][release]. Use a directory outside any repository.
+from the same [9.0.0 release][release]. Use a directory outside any repository.
 
 ```sh
-kit_dir="$HOME/.local/share/coordination-kit/8.0.0"
-kit_release="https://github.com/andornaut/coordination-kit/releases/download/v8.0.0"
+kit_dir="$HOME/.local/share/coordination-kit/9.0.0"
+kit_release="https://github.com/andornaut/coordination-kit/releases/download/v9.0.0"
 mkdir -p "$kit_dir"
 (
   set -e
   cd "$kit_dir"
-  for asset in coordination-kit-8.0.0.tgz SOURCE_COMMIT SHA256SUMS; do
+  for asset in coordination-kit-9.0.0.tgz SOURCE_COMMIT SHA256SUMS; do
     curl -fLO "$kit_release/$asset"
   done
   sha256sum -c SHA256SUMS
-  tar -xzf coordination-kit-8.0.0.tgz
+  tar -xzf coordination-kit-9.0.0.tgz
   cmp SOURCE_COMMIT package/SOURCE_COMMIT
 )
 ck() { node "$kit_dir/package/dist/cli.js" "$@"; }
@@ -39,7 +40,7 @@ ck --version
 ```
 
 Both checksum lines should say `OK`, the two `SOURCE_COMMIT` files should match, and the version
-should be `8.0.0`. Keep the `ck` function in the shell where you run the standalone example.
+should be `9.0.0`. Keep the `ck` function in the shell where you run the standalone example.
 A shared workspace can [pin the same release with npm](#set-up-an-app-workspace).
 Delivery Kit's runner uses that workspace pin for reviews and event ingests. Its bundled
 libraries have a [separate compatibility range](upgrading.md#coordination-kit-78).
@@ -155,17 +156,17 @@ add Delivery Kit when you need a runner.
 
 In the primary workspace, create `package.json` with `npm init -y` if it is absent.
 Install the checked release, commit `package.json` and `package-lock.json`, and use
-`npm ci` in subsequent checkouts. Ignore `/node_modules/` and `/var/`.
+`npm ci` in subsequent checkouts. Ignore `/node_modules/` and `/.coordination-kit/`.
 
 ```sh
 npm install --save-dev \
-  https://github.com/andornaut/coordination-kit/releases/download/v8.0.0/coordination-kit-8.0.0.tgz
+  https://github.com/andornaut/coordination-kit/releases/download/v9.0.0/coordination-kit-9.0.0.tgz
 workspace="$(pwd -P)"
 ck() { node "$workspace/node_modules/@andornaut/coordination-kit/dist/cli.js" --root "$workspace" "$@"; }
 ck --version
 ```
 
-Commit this `config.json` in the workspace. The `operator` role needs no privileged grants
+Commit this `coordination-kit.json` in the workspace. The `operator` role needs no privileged grants
 to start its session and handle its own inbox. `wakeMinutes: []` disables scheduled reviews.
 
 ```json
@@ -233,13 +234,13 @@ ck work find "Report latency" --scope app:dashboard
 
 ```text
 workspace/
-  .gitignore, package.json, package-lock.json, config.json  tracked
-  node_modules/                                            local dependency install
-  var/                                                      local and ignored
-    registry.json                                           native role bindings
-    coordination/                                          filesystem journal
-    route.json, reviews/                                    optional scheduled review state
-    apps/dashboard/bus/                                     optional delivery state
+  .gitignore, package.json, package-lock.json, coordination-kit.json  tracked
+  node_modules/                                                      local dependency install
+  .coordination-kit/                                                 local and ignored
+    registry.json                                                    native role bindings
+    coordination/                                                    shared filesystem journal
+    route.json, reviews/                                             optional scheduled review state
+    apps/dashboard/bus/                                              optional delivery state
 dashboard/
   delivery-kit.json                                         tracked if using a runner
   docs/work/                                                tracked if using work files
@@ -250,7 +251,7 @@ Keep the local state and back it up independently of Git. See
 pointer or an activated filesystem store. If you use Delivery Kit, configure explicit
 [runner grants](../reference/store.md#app-mode-permissions), the app's committed reporting settings,
 the local [review route](../reference/review.md#review-route) and a runner cadence. Use
-[workspace configuration](../reference/configuration.md#workspace-configjson) to add roles and set
+[workspace configuration](../reference/configuration.md#workspace-configuration) to add roles and set
 review minutes.
 
 ## Start or resume a registered session
@@ -327,4 +328,4 @@ review.
 See the [command reference](../reference/commands.md) for syntax and the [documentation index](../README.md)
 for the remaining guides.
 
-[release]: https://github.com/andornaut/coordination-kit/releases/tag/v8.0.0
+[release]: https://github.com/andornaut/coordination-kit/releases/tag/v9.0.0

@@ -1,12 +1,64 @@
 # Upgrading
 
-## App selectors
+## Coordination Kit 9.0
+
+New standalone and shared installs use `coordination-kit.json` and ignored
+`.coordination-kit/`. Existing standalone installs already use these paths. Shared
+installs with `config.json` continue to open their existing `var/` state until the operator
+moves it. Both the `apps` and `games` workspace schemas still work.
+
+### App selectors
 
 Update Coordination Kit callers to use `--app ID` and `app:ID` for new holds.
 Review and ingest responses identify the app as `appId`. Use a Delivery Kit runner that
 supports that command and response before changing the installed Coordination Kit pin.
 Existing journal records, workspace configurations and runner event files keep their
 original formats. Existing holds remain active until released through the ordinary commands.
+
+### Migrate an existing workspace
+
+The owner of the live workspace performs the cutover from its primary Git checkout.
+This is a path change for an existing file journal. For a workspace still on a legacy
+database, qualify file authority first using the [8.0 upgrade procedure](#coordination-kit-80).
+
+1. Inventory the active configuration, registry, journal, authority receipt, route,
+   state-root pointer and every consumer. Include role sessions, channel servers, tooling,
+   resident delivery runners and scheduled reviews. Qualify the exact new CLI and library
+   pins against a restore. Stage the newer reader on the legacy layout and adopt compatible
+   Delivery Kit runners before switching the shared CLI. Replace only authorized idle, drained
+   runners and verify each replacement still supports the installed reader.
+2. At the existing idle boundary, drain runner gates, events, cursors and scheduled review
+   transactions. Park all writers, including interactive sessions and any older automation
+   with the old root or pin. Resolve any in-progress store transaction or compaction reservation
+   through its owning procedure. Preserve every independent hold, question and approval.
+3. Record the exact selected journal sequence and hash and registry revision using
+   `store compaction-plan`. Take an independent backup outside the workspace, including the
+   active journal and its checkpoints, tails, companion records, keys, authority receipt and
+   source fence. Capture the registry, route, pointer and active transport and runner state.
+   Restore and verify the backup independently against the same journal head and bindings.
+4. Keep writers parked. Review the root `coordination-kit.json` and an ignore rule for
+   `/.coordination-kit/`. Preserve the config's `apps` or `games` mode and its existing role
+   references. Set `appStateRoot: "var"` to retain the old per-app bus paths, and keep `var/`
+   ignored while it contains local records. Remove the old shared `config.json` from the active
+   checkout and preserve it with the backup before moving the journal, so an older entry
+   point cannot initialize a new store at the old path.
+5. Move the selected journal directory and its authority receipt, registry, route and
+   `work-protocol.json` pointer, where present, from `var/` into `.coordination-kit/`. Move
+   the associated authority and registry lock files after verifying their owners are idle.
+   Preserve the receipt, source fence and committed records byte for byte. Keep the configured
+   external state root at its current absolute path. If there is no pointer, move the active
+   wake and channel state to the new default location and retain access to referenced
+   artifacts. Place current checkpoints and review state at the paths the new consumers
+   resolve. Preserve old evidence references under `var/` where they are still used.
+6. Select the reviewed canonical config and run read-only checks with the new pinned CLI
+   before letting any writer resume. Match the same journal sequence and hash, registry
+   revision, bindings, open holds, questions, approvals and pending work. Confirm there is
+   one discoverable coordination store. If a readback differs, keep writers parked and
+   reconcile the exact backup, paths and consumer pins.
+7. Resume the verified owners and existing runners on the qualified configuration and pins.
+   Check normal inbox, review and ingest paths, exact resident readbacks and the next genuine
+   scheduled review. Keep existing controls and schedules, and retain the backup and
+   readback evidence.
 
 ## Coordination Kit 8.0
 

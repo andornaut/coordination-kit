@@ -10,10 +10,12 @@ requests and the Phase 4 retirement. The design is in
 
 ## Location and settings
 
-The append-only filesystem journal is authoritative. Standalone projects use
-`.coordination-kit/coordination/`. Shared workspaces use `var/coordination/` under the explicit
-primary coordinator checkout. Read-only commands do not create state. The first write opens a
-fresh runtime by recording an authority receipt and its source-fence witness.
+The append-only filesystem journal is authoritative. Standalone projects and canonical
+shared workspaces keep one journal at `.coordination-kit/coordination/` in the primary
+checkout. Existing shared installations selected by `config.json` keep using
+`var/coordination/` until the [in-place layout migration](../guides/upgrading.md#migrate-an-existing-workspace).
+Read-only commands leave a fresh checkout untouched. The first successful write records an
+authority receipt and its source-fence witness.
 
 An already activated filesystem store reuses its journal and existing authority receipt.
 If a legacy database or sidecar exists without active file authority, the store refuses to
@@ -28,7 +30,7 @@ The following example shows filesystem records for Archie. Sequence numbers and
 record IDs are illustrative. Subdirectories appear as records are written.
 
 ```text
-var/coordination/
+.coordination-kit/coordination/
 ├── journal/
 │   ├── writer.lock
 │   ├── batches/0000000000000001.json
@@ -135,8 +137,9 @@ Use the existing scheduled review and operator approval lane.
    receipts or advance cursors after the journal commit. Preserve independent questions and holds.
    Reserve with a new operator request UUID and the exact planned head and registry revision.
    The reservation waits for the existing writer lock before recording the tuple and an
-   acquisition UUID (`nonce`) beside the selected journal. The first journal uses
-   `var/coordination/compaction-reservation.json`. A selected checkpoint uses the marker at the
+   acquisition UUID (`nonce`) beside the selected journal. The initial journal uses
+   `coordination/compaction-reservation.json` under the [state directory](configuration.md#state).
+   A selected checkpoint uses the marker at the
    root of its tail. The journal stays readable. Reservation-aware writes refuse with `compaction-reserved` before their
    journal transaction begins. Keep custody and preserve the registry revision and routing through
    activation or an exact retry. The reservation has no automatic expiration. An exact reserve
@@ -414,7 +417,7 @@ role, the variable of that role's effective harness: `CLAUDE_CODE_SESSION_ID` fo
 | `invalid-native-id`   | `--native-id` is not a canonical UUID.                                          |
 
 `harness select` rotates the binding, so the fence follows it with no other step. There are no
-epochs, claims or enrollment. Every send reads `var/registry.json`; nothing is cached. The one
+epochs, claims or enrollment. Every send reads `registry.json` in the selected state directory. The one
 exception that writes a binding is `session start`, which may
 [rebind a Claude role after /clear](#rebind-after-clear) before the fence admits the caller.
 
@@ -436,7 +439,7 @@ Legacy game mode also allows `store export` and `store rebuild` without a caller
 
 ### App-mode permissions
 
-In an [app workspace](configuration.md#workspace-configjson), privileged operations check
+In an [app workspace](configuration.md#workspace-configuration), privileged operations check
 the caller's exact current native binding and active ownership. Held bindings cannot exercise
 these grants. A workspace grant applies across the workspace. An app grant applies only to
 checks for that app ID. A workspace-only check requires a workspace grant.
@@ -644,7 +647,8 @@ contains numbered decisions. An absent store reads as empty.
 `session start` runs at a role's startup or resume. It resolves the caller through the fence,
 appends `session.started` with the role, harness, native ID, CLI version and cwd, and prints the
 role, harness and bound conversation, the registry revision, phase and ownership, the checkpoint
-`var/handoffs/<scope>/current.md` (`games/<game>/<role>`, `kits/<kit>` or `game-coordinator`),
+`handoffs/<scope>/current.md` under the selected state directory (`games/<game>/<role>`,
+`kits/<kit>` or `game-coordinator` in a workspace using `games`),
 counts of pending questions, active holds (including user policy holds for the role or game),
 and open inbox messages (`sent`, `delivered` and `retained`), and each open handoff that
 includes the role. A role whose phase is `held` or `source-held` is refused `session-held` with
@@ -724,8 +728,9 @@ node node_modules/@andornaut/coordination-kit/dist/cli.js events ingest --app da
 The schema-1 response identifies the app as `appId`. Omit the selector on `review show`
 to look across apps.
 
-The runner alone writes `var/apps/<id>/bus/events.jsonl`, or
-`var/games/<id>/bus/events.jsonl` with the legacy state layout
+The runner alone writes `apps/<id>/bus/events.jsonl`, or
+`games/<id>/bus/events.jsonl` with the `games` state directory name, under the
+[app state root](configuration.md#workspace-configuration)
 (one JSON object per line, `\n`-terminated, one
 `O_APPEND` write under 4096 bytes) and rotates it to `events.<epochSeconds>.jsonl` when the cursor
 offset equals its size and the size exceeds 1 MiB. Ingest is the only reader:
