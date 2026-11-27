@@ -54,3 +54,4 @@ Reference: [review](../reference/review.md#scheduled-review-seam), [libraries](.
 | ck-0077 | Audit CLI flags and default unambiguous choices            | [ck-0077.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0077.md) |
 | ck-0078 | Qualify the approved batch of closed message bodies        | [ck-0078.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0078.md) |
 | ck-0081 | Put a verification plan in approved work items             | [ck-0081.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0081.md) |
+| ck-0083 | Remove SQLite and add shared GitHub task storage           | [ck-0083.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0083.md) |
