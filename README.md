@@ -21,7 +21,7 @@ Verify and extract the [release archive](docs/getting-started.md#get-the-cli) fo
 workspace checkout. The CLI requires Node 24.21.0 or later. Delivery Kit's runner uses this
 workspace installation for reviews and event ingest. Its bundled build libraries have a
 separate compatibility range. See [7.8 upgrade notes](docs/upgrading.md#coordination-kit-78).
-Releases with the `skills install` command include the lifecycle and status skills in the archive.
+The archive bundles the lifecycle, status and agent cleanup skills for project installation.
 
 ## Start an assigned task
 
@@ -50,6 +50,14 @@ The read-only lookup reports exact IDs and evidence from local records. If sever
 confirm the exact ID before acting.
 See [task and work discovery](docs/commands.md#task-and-work-discovery).
 
+## Clean up agent-owned resources
+
+Use the `agent-cleanup` skill when cleanup is explicitly requested. Verify exact resource IDs
+or paths, ownership and present use before removing anything. Reuse existing evidence and backups
+by default. Remove bundles within scope unless there is a verified, specific reason to retain them
+beyond their absence from `main`. Preserve release artifacts and backups under their retention rules.
+See [cleanup skill setup](docs/getting-started.md#clean-up-agent-owned-resources).
+
 ## Usage
 
 Commands resolve the workspace from
@@ -64,7 +72,7 @@ defaulting to the working directory. They take the coordinator root only from
 | Group                     | Verbs                                                                                                  | Purpose                                                                                                  |
 | ------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
 | `init`, `project`, `task` | See [standalone project commands](docs/commands.md#command-forms)                                      | Set up one repository and track work from proposal to landing.                                           |
-| `skills`                  | `install`                                                                                              | Install bundled [lifecycle and status skills](docs/commands.md#skills-install).                          |
+| `skills`                  | `install`                                                                                              | Install [bundled skills](docs/commands.md#skills-install) in a project.                                  |
 | `msg`                     | `send`, `decide`, `done`, `retain`, `status`, `history`                                                | Deliver messages and record their handling or user decisions.                                            |
 | `inbox`                   | (none)                                                                                                 | Read your store inbox and record it delivered.                                                           |
 | `store`                   | `import`, `export`, `rebuild`, `retire`, `migration-status`, `migration-prepare`, `migration-activate` | Import, export, rebuild, retire, and qualify or activate filesystem authority.                           |

@@ -84,10 +84,11 @@ confirm approval and ownership before acting.
 `skills install SKILL --harness codex|claude --scope project` installs one skill bundled with
 the current CLI release. Both flags are required. Use `--root DIR` to select the project explicitly.
 
-| Skill       | Folder name              | What it covers                                        |
-| ----------- | ------------------------ | ----------------------------------------------------- |
-| `lifecycle` | `coordination-lifecycle` | Approved standalone tasks through verified landing.   |
-| `status`    | `coordination-status`    | Read-only status in standalone and shared workspaces. |
+| Skill           | Folder name              | What it covers                                         |
+| --------------- | ------------------------ | ------------------------------------------------------ |
+| `lifecycle`     | `coordination-lifecycle` | Approved standalone tasks through verified landing.    |
+| `status`        | `coordination-status`    | Read-only status in standalone and shared workspaces.  |
+| `agent-cleanup` | `agent-cleanup`          | Explicitly requested cleanup of agent-owned resources. |
 
 Codex skills go under `.agents/skills/` and Claude skills go under `.claude/skills/`, relative
 to the Git root. Each skill folder holds its `SKILL.md`.

@@ -15,20 +15,20 @@ through `CODEX_THREAD_ID` for Codex or `CLAUDE_CODE_SESSION_ID` for Claude.
 ## Get the CLI
 
 You need Node 24.21.0 or later, Git and `flock`. Download the archive and its verification files
-from the same [7.9.0 release][release]. Use a directory outside any repository.
+from the same [7.10.0 release][release]. Use a directory outside any repository.
 
 ```sh
-kit_dir="$HOME/.local/share/coordination-kit/7.9.0"
-kit_release="https://github.com/andornaut/coordination-kit/releases/download/v7.9.0"
+kit_dir="$HOME/.local/share/coordination-kit/7.10.0"
+kit_release="https://github.com/andornaut/coordination-kit/releases/download/v7.10.0"
 mkdir -p "$kit_dir"
 (
   set -e
   cd "$kit_dir"
-  for asset in coordination-kit-7.9.0.tgz SOURCE_COMMIT SHA256SUMS; do
+  for asset in coordination-kit-7.10.0.tgz SOURCE_COMMIT SHA256SUMS; do
     curl -fLO "$kit_release/$asset"
   done
   sha256sum -c SHA256SUMS
-  tar -xzf coordination-kit-7.9.0.tgz
+  tar -xzf coordination-kit-7.10.0.tgz
   cmp SOURCE_COMMIT package/SOURCE_COMMIT
 )
 ck() { node "$kit_dir/package/dist/cli.js" "$@"; }
@@ -36,7 +36,7 @@ ck --version
 ```
 
 Both checksum lines should say `OK`, the two `SOURCE_COMMIT` files should match, and the version
-should be `7.9.0`. Keep the `ck` function in the shell where you run the standalone example.
+should be `7.10.0`. Keep the `ck` function in the shell where you run the standalone example.
 A shared workspace can [pin the same release with npm](#set-up-an-app-workspace).
 
 ## Set up a standalone project
@@ -139,7 +139,7 @@ Install the checked release, commit `package.json` and `package-lock.json`, and 
 
 ```sh
 npm install --save-dev \
-  https://github.com/andornaut/coordination-kit/releases/download/v7.9.0/coordination-kit-7.9.0.tgz
+  https://github.com/andornaut/coordination-kit/releases/download/v7.10.0/coordination-kit-7.10.0.tgz
 workspace="$(pwd -P)"
 ck() { node "$workspace/node_modules/@andornaut/coordination-kit/dist/cli.js" --root "$workspace" "$@"; }
 ck --version
@@ -233,6 +233,25 @@ the local [review route](review.md#review-route) and a runner cadence. Use
 [workspace configuration](configuration.md#workspace-configjson) to add roles and set
 review minutes.
 
+## Clean up agent-owned resources
+
+To make the optional `agent-cleanup` skill available in a standalone or shared project, run this
+from the intended checkout with the archive's `ck` function.
+
+```sh
+ck --root . skills install agent-cleanup --harness codex --scope project
+```
+
+Use `--harness claude` for Claude. When installing in the app workspace with its `ck` function,
+omit `--root .` because that function already supplies the workspace root.
+
+Ask for `agent-cleanup` by name when authorizing a cleanup of agent-owned resources. Before removal,
+verify the exact resource ID or path, its owner and whether a task or session still needs it.
+Reuse existing evidence and backups by default. Remove bundles within scope unless there is a
+verified, specific retention reason beyond their absence from `main`. Honour the retention rules
+for release artifacts and existing backups. Report what was removed, retained or left for owner
+review.
+
 ## Troubleshooting
 
 | Symptom                                   | Check                                                                                                                    |
@@ -246,4 +265,4 @@ review minutes.
 See the [command reference](commands.md) for syntax and the [documentation index](README.md)
 for the remaining guides.
 
-[release]: https://github.com/andornaut/coordination-kit/releases/tag/v7.9.0
+[release]: https://github.com/andornaut/coordination-kit/releases/tag/v7.10.0
