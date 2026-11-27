@@ -1,4 +1,5 @@
 // Replay user-approved policy holds with their original issuer. Live grants can change over time.
+import { payloadText as text } from "../eventCodec.ts";
 import { ensure, type Projection, ROLE, type StoredEvent } from "../types.ts";
 
 export function recordedPolicyIssuer(event: StoredEvent): string | null {
@@ -14,44 +15,38 @@ export function recordedPolicyIssuer(event: StoredEvent): string | null {
 
 export const POLICY_HOLDS_PROJECTION: Projection = {
   apply: {
-    "hold.policy-released": (db, event) => {
-      const { approval, id } = event.payload;
+    "hold.policy-released": (index, event) => {
+      const id = text(event.payload, "id");
       ensure(recordedPolicyIssuer(event) !== null, "policy-issuer-unverified");
-      db.prepare(
-        `UPDATE policy_holds SET state = 'released', released_at = ?, release_approval = ?
-         WHERE id = ?`,
-      ).run(event.at, approval as string, id as string);
+      const previous = index.get("policy_holds", [id]);
+      if (previous !== undefined) {
+        index.put("policy_holds", [id], {
+          ...previous,
+          release_approval: text(event.payload, "approval"),
+          released_at: event.at,
+          state: "released",
+        });
+      }
     },
-    "hold.policy-set": (db, event) => {
-      const { approval, id, reason, scope } = event.payload;
+    "hold.policy-set": (index, event) => {
+      const p = event.payload;
+      const id = text(p, "id");
       const issuer = recordedPolicyIssuer(event);
       ensure(issuer !== null, "policy-issuer-unverified");
-      db.prepare(
-        `INSERT INTO policy_holds (id, issuer, scope, reason, approval, state, set_at, set_seq)
-         VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
-      ).run(
-        id as string,
+      ensure(index.get("policy_holds", [id]) === undefined, "duplicate-policy-hold");
+      index.put("policy_holds", [id], {
+        approval: text(p, "approval"),
+        id,
         issuer,
-        scope as string,
-        reason as string,
-        approval as string,
-        event.at,
-        event.seq,
-      );
+        reason: text(p, "reason"),
+        release_approval: null,
+        released_at: null,
+        scope: text(p, "scope"),
+        set_at: event.at,
+        set_seq: event.seq,
+        state: "active",
+      });
     },
   },
-  ddl: `CREATE TABLE IF NOT EXISTS policy_holds (
-    id TEXT PRIMARY KEY,
-    issuer TEXT NOT NULL,
-    scope TEXT NOT NULL,
-    reason TEXT NOT NULL,
-    approval TEXT NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('active', 'released')),
-    set_at TEXT NOT NULL,
-    set_seq INTEGER NOT NULL,
-    released_at TEXT,
-    release_approval TEXT
-  );
-  CREATE INDEX IF NOT EXISTS policy_holds_scope ON policy_holds (scope, state, set_seq);`,
   tables: ["policy_holds"],
 };

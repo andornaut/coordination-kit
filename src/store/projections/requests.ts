@@ -1,66 +1,50 @@
 // Requests imported from the retired request ledger and their closes.
-import type { DatabaseSync } from "node:sqlite";
-
 import { payloadText as text } from "../eventCodec.ts";
+import type { ProjectionIndex } from "../projectionIndex.ts";
 import type { JsonObject, Projection, StoredEvent } from "../types.ts";
 
-const DDL = `
-CREATE TABLE IF NOT EXISTS requests (
-  id TEXT PRIMARY KEY,
-  owner TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  summary TEXT NOT NULL,
-  state TEXT NOT NULL,
-  question TEXT,
-  source_origin TEXT,
-  source_reference TEXT,
-  work TEXT NOT NULL,
-  reason TEXT,
-  required_owner TEXT,
-  updated_at TEXT NOT NULL,
-  imported_at TEXT NOT NULL,
-  imported_seq INTEGER NOT NULL,
-  closed_at TEXT,
-  close_reason TEXT,
-  close_work TEXT
-);
-CREATE INDEX IF NOT EXISTS requests_owner ON requests (owner, closed_at);
-`;
-
-const imported = (db: DatabaseSync, event: StoredEvent): void => {
+const imported = (index: ProjectionIndex, event: StoredEvent): void => {
   const p = event.payload;
+  const id = text(p, "id");
   const source = (p.source ?? {}) as JsonObject;
-  db.prepare(
-    `INSERT OR IGNORE INTO requests (id, owner, kind, summary, state, question, source_origin,
-       source_reference, work, reason, required_owner, updated_at, imported_at, imported_seq)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    text(p, "id"),
-    text(p, "owner"),
-    text(p, "kind") ?? "request",
-    text(p, "summary") ?? "",
-    text(p, "state") ?? "open",
-    text(p, "question"),
-    text(source, "origin"),
-    text(source, "reference"),
-    JSON.stringify(Array.isArray(p.work) ? p.work : []),
-    text(p, "reason"),
-    text(p, "requiredOwner"),
-    text(p, "updatedAt") ?? event.at,
-    event.at,
-    event.seq,
-  );
+  if (index.get("requests", [id]) === undefined) {
+    index.put("requests", [id], {
+      close_reason: null,
+      close_work: null,
+      closed_at: null,
+      id,
+      imported_at: event.at,
+      imported_seq: event.seq,
+      kind: text(p, "kind") ?? "request",
+      owner: text(p, "owner"),
+      question: text(p, "question"),
+      reason: text(p, "reason"),
+      required_owner: text(p, "requiredOwner"),
+      source_origin: text(source, "origin"),
+      source_reference: text(source, "reference"),
+      state: text(p, "state") ?? "open",
+      summary: text(p, "summary") ?? "",
+      updated_at: text(p, "updatedAt") ?? event.at,
+      work: JSON.stringify(Array.isArray(p.work) ? p.work : []),
+    });
+  }
 };
 
-const closed = (db: DatabaseSync, event: StoredEvent): void => {
+const closed = (index: ProjectionIndex, event: StoredEvent): void => {
   const p = event.payload;
-  db.prepare(
-    `UPDATE requests SET closed_at = ?, close_reason = ?, close_work = ? WHERE id = ?`,
-  ).run(event.at, text(p, "reason"), text(p, "work"), text(p, "id"));
+  const key = [text(p, "id")];
+  const previous = index.get("requests", key);
+  if (previous !== undefined) {
+    index.put("requests", key, {
+      ...previous,
+      close_reason: text(p, "reason"),
+      close_work: text(p, "work"),
+      closed_at: event.at,
+    });
+  }
 };
 
 export const REQUESTS_PROJECTION: Projection = {
   apply: { "request.closed": closed, "request.imported": imported },
-  ddl: DDL,
   tables: ["requests"],
 };

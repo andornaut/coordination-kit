@@ -1,5 +1,3 @@
-import type { SQLInputValue } from "node:sqlite";
-
 import { isCanonicalUuid } from "../../core/ids.ts";
 import type { Store } from "../db.ts";
 import {
@@ -11,8 +9,7 @@ import {
 } from "../types.ts";
 import { checkRef } from "../work-records/work.ts";
 
-type Reader = Pick<Store, "db">;
-type Row = Record<string, SQLInputValue>;
+type Reader = Pick<Store, "index">;
 
 export interface CodexQuestion extends CodexQuestionInput {
   readonly attempt: number;
@@ -38,20 +35,8 @@ export function normalizeCodexQuestion(
   return { dependsOn, thread: input.thread };
 }
 
-function hasCodexQuestions(store: Reader): boolean {
-  return (
-    store.db
-      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'question_codex'")
-      .get() !== undefined
-  );
-}
-
 export function readCodexQuestion(store: Reader, id: string): CodexQuestion | undefined {
-  if (!hasCodexQuestions(store)) {
-    return undefined;
-  }
-  const row = store.db.prepare("SELECT * FROM question_codex WHERE id = ?").get(id) as
-    Row | undefined;
+  const row = store.index.get("question_codex", [id]);
   if (row === undefined) {
     return undefined;
   }
@@ -66,18 +51,15 @@ export function readCodexQuestion(store: Reader, id: string): CodexQuestion | un
 
 /** Work fencing uses only explicitly named repository and work pairs, regardless of work owner. */
 export function dependentQuestions(store: Reader, ref: WorkRef): string[] {
-  if (!hasCodexQuestions(store)) {
-    return [];
-  }
-  return store.db
-    .prepare(
-      `SELECT q.id FROM questions q JOIN question_codex c ON c.id = q.id
-     WHERE q.state = 'pending' AND EXISTS (
-       SELECT 1 FROM json_each(c.dependencies) AS dependency
-       WHERE json_extract(dependency.value, '$.id') = ?
-         AND json_extract(dependency.value, '$.repository') = ?
-     ) ORDER BY q.opened_seq`,
-    )
-    .all(ref.id, ref.repository)
+  return store.index
+    .rows("questions")
+    .filter((row) => {
+      const codex =
+        row.state === "pending" ? readCodexQuestion(store, row.id as string) : undefined;
+      return codex?.dependsOn.some(
+        ({ id, repository }) => id === ref.id && repository === ref.repository,
+      );
+    })
+    .sort((a, b) => Number(a.opened_seq) - Number(b.opened_seq))
     .map((row) => row.id as string);
 }

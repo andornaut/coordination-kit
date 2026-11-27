@@ -1,9 +1,8 @@
-import type { SQLInputValue } from "node:sqlite";
-
 import type { Layout } from "../../core/configuration/layout.ts";
 import { isPermitted } from "../../registry/permissions.ts";
 import type { Registry } from "../../registry/schema.ts";
 import type { Store } from "../db.ts";
+import type { ProjectionRow } from "../projectionIndex.ts";
 import { secretShape } from "../secrets.ts";
 import { requirePermission } from "../sessions/permissions.ts";
 import { type Actor, ROLE, StoreError, type WorkRef } from "../types.ts";
@@ -12,8 +11,8 @@ import { checkRef } from "../work-records/work.ts";
 const POLICY_ID = /^policy-[a-z0-9][a-z0-9-]{0,120}$/;
 const TOKEN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
-type Row = Record<string, SQLInputValue>;
-type Reader = Pick<Store, "db">;
+type Row = ProjectionRow;
+type Reader = Pick<Store, "index">;
 
 export type HoldState = "active" | "released";
 export const HOLD_STATES: readonly HoldState[] = ["active", "released"];
@@ -173,7 +172,7 @@ function policyView(row: Row): PolicyHoldView {
 }
 
 function policyRow(store: Reader, id: string): Row | undefined {
-  return store.db.prepare("SELECT * FROM policy_holds WHERE id = ?").get(id) as Row | undefined;
+  return store.index.get("policy_holds", [id]);
 }
 
 export function policyHoldIdExists(store: Reader, id: string): boolean {
@@ -208,7 +207,7 @@ export function setPolicyHold(
       }
       return { duplicate: true, hold: policyView(existing) };
     }
-    if (store.db.prepare("SELECT 1 FROM holds WHERE id = ?").get(id) !== undefined) {
+    if (store.index.get("holds", [id]) !== undefined) {
       throw new StoreError("id-conflict");
     }
     store.append({
@@ -253,25 +252,16 @@ export function releasePolicyHold(
   });
 }
 
-/** Preserve legacy read-only status before a writer has added the policy projection. */
+/** Policy holds in setting order. */
 export function policyHoldEntries(
   store: Reader,
   states: readonly HoldState[],
 ): { readonly hold: PolicyHoldView; readonly seq: number }[] {
-  const exists = store.db
-    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'policy_holds'")
-    .get();
-  if (exists === undefined) {
-    return [];
-  }
-  return (
-    store.db
-      .prepare(
-        `SELECT * FROM policy_holds WHERE state IN (${states.map(() => "?").join(",")})
-                ORDER BY set_seq`,
-      )
-      .all(...states) as Row[]
-  ).map((row) => ({ hold: policyView(row), seq: Number(row.set_seq) }));
+  return store.index
+    .rows("policy_holds")
+    .filter((row) => states.includes(row.state as HoldState))
+    .sort((a, b) => Number(a.set_seq) - Number(b.set_seq))
+    .map((row) => ({ hold: policyView(row), seq: Number(row.set_seq) }));
 }
 
 export function activePolicyHoldsForRole(store: Reader, role: string, layout?: Layout): number {

@@ -2,12 +2,12 @@
 // answering it records a typed decision linked to a work item. A hold is owned by the role that
 // set it and only that role releases it. Every writer trusts its `actor`: the CLI resolves it
 // through the registry fence first, and these functions refuse any other owner's record.
-import type { SQLInputValue } from "node:sqlite";
-
 import type { Layout } from "../../core/configuration/layout.ts";
 import type { Harness } from "../../registry/schema.ts";
 import type { Store } from "../db.ts";
 import { payloadText as text } from "../eventCodec.ts";
+import type { Cell, ProjectionRow } from "../projectionIndex.ts";
+import { handoffHoldId } from "../projections/handoffs.ts";
 import { holdOpen } from "../projections/questions.ts";
 import { secretShape } from "../secrets.ts";
 import {
@@ -99,7 +99,8 @@ export interface RecordedAnswer {
   };
 }
 
-type Row = Record<string, SQLInputValue>;
+type Row = ProjectionRow;
+type Reader = Pick<Store, "index">;
 
 function ownerOf(actor: Actor): string {
   ensure(actor.role !== null && ROLE.test(actor.role), "invalid-actor");
@@ -136,13 +137,25 @@ export function publicText(hostname: string, value: string): string {
   return value;
 }
 
-const QUESTION_SELECT = `SELECT q.*, a.at AS answer_at, a.by AS answer_by,
-  a.supersedes AS answer_supersedes, a.text AS answer_text, a.work AS answer_work,
-  a.status AS answer_status, a.reason AS answer_reason
-  FROM questions q LEFT JOIN question_answers a ON a.id = q.id`;
+function withAnswer(store: Reader, row: Row): Row {
+  const answer = store.index.get("question_answers", [row.id!]);
+  return answer === undefined
+    ? row
+    : {
+        ...row,
+        answer_at: answer.at!,
+        answer_by: answer.by!,
+        answer_reason: answer.reason!,
+        answer_status: answer.status!,
+        answer_supersedes: answer.supersedes!,
+        answer_text: answer.text!,
+        answer_work: answer.work!,
+      };
+}
 
-function questionRow(store: Store, id: string): Row | undefined {
-  return store.db.prepare(`${QUESTION_SELECT} WHERE q.id = ?`).get(id) as Row | undefined;
+function questionRow(store: Reader, id: string): Row | undefined {
+  const row = store.index.get("questions", [id]);
+  return row === undefined ? undefined : withAnswer(store, row);
 }
 
 function recordedAnswer(row: Row): RecordedAnswer | undefined {
@@ -162,11 +175,11 @@ function recordedAnswer(row: Row): RecordedAnswer | undefined {
   };
 }
 
-function parseOptions(value: SQLInputValue | undefined): QuestionOption[] | null {
+function parseOptions(value: Cell | undefined): QuestionOption[] | null {
   return value == null ? null : (JSON.parse(value as string) as QuestionOption[]);
 }
 
-function questionView(store: Pick<Store, "db">, row: Row): QuestionView {
+function questionView(store: Reader, row: Row): QuestionView {
   const nullable = (key: string) => (row[key] as string | null) ?? null;
   const answer = recordedAnswer(row);
   const codex = readCodexQuestion(store, row.id as string);
@@ -216,9 +229,7 @@ function optionsKey(options: readonly QuestionOption[] | null): string {
 /** The next role-scoped ID, `q-<role>-<n>`, with `/` in a game role written as `-`. */
 function nextQuestionId(store: Store, role: string): string {
   const prefix = `q-${role.replaceAll("/", "-")}-`;
-  const rows = store.db
-    .prepare("SELECT id FROM questions WHERE substr(id, 1, ?) = ?")
-    .all(prefix.length, prefix) as Row[];
+  const rows = store.index.rows("questions").filter((row) => (row.id as string).startsWith(prefix));
   let max = 0;
   for (const row of rows) {
     const rest = (row.id as string).slice(prefix.length);
@@ -370,10 +381,7 @@ function matchesAnswer(recorded: AnswerDetails | undefined, answer: AnswerDetail
 }
 
 function linkedDecision(store: Store, question: Row): Row | undefined {
-  return question.decision == null
-    ? undefined
-    : (store.db.prepare("SELECT * FROM decisions WHERE id = ?").get(question.decision) as
-        Row | undefined);
+  return question.decision == null ? undefined : store.index.get("decisions", [question.decision]);
 }
 
 /** Return the caller's numbered decision when it has already been allocated. */
@@ -451,19 +459,19 @@ function numberDecision(
     return { decision, duplicate: true, n: Number(recorded.n), question: questionView(store, row) };
   }
   ensure(row.state === "pending" || matchesAnswer(receipt, answer), "already-closed");
-  const predecessor = store.db
-    .prepare(
-      `SELECT a.id FROM question_answers a JOIN questions q ON q.id = a.id
-       WHERE a.work = ? AND q.decision IS NULL AND a.seq <
-         COALESCE((SELECT seq FROM question_answers WHERE id = ?), 9223372036854775807)
-       LIMIT 1`,
-    )
-    .get(answer.work, id);
-  ensure(predecessor === undefined, "decision-predecessor-pending");
-  const stored = store.db
-    .prepare("SELECT n FROM decisions WHERE work = ?")
-    .all(answer.work)
-    .map((item) => Number((item as Row).n));
+  const answerSeq = Number(store.index.get("question_answers", [id])?.seq ?? Infinity);
+  const predecessor = store.index.rows("question_answers").some((item) => {
+    if (item.work !== answer.work || Number(item.seq) >= answerSeq) {
+      return false;
+    }
+    const question = store.index.get("questions", [item.id!]);
+    return question !== undefined && question.decision == null;
+  });
+  ensure(!predecessor, "decision-predecessor-pending");
+  const stored = store.index
+    .rows("decisions")
+    .filter((item) => item.work === answer.work)
+    .map((item) => Number(item.n));
   const known = new Set([...stored, ...fileNumbers]);
   const superseded = answer.supersedes?.split("/D").at(-1);
   ensure(superseded === undefined || known.has(Number(superseded)), "invalid-supersedes");
@@ -617,42 +625,35 @@ export function closeLegacyQuestion(
 
 /** Questions in opening order, optionally of one owner and in the given states. */
 export function listQuestions(
-  store: Pick<Store, "db">,
+  store: Reader,
   filter: { readonly role?: string; readonly states?: readonly QuestionState[] } = {},
 ): QuestionView[] {
   const states = filter.states ?? QUESTION_STATES;
-  const tracked = store.db
-    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'question_answers'")
-    .get();
-  const select = tracked === undefined ? "SELECT q.* FROM questions q" : QUESTION_SELECT;
-  return (
-    store.db
-      .prepare(
-        `${select} WHERE (? IS NULL OR q.role = ?)
-           AND q.state IN (${states.map(() => "?").join(",")}) ORDER BY q.opened_seq`,
-      )
-      .all(filter.role ?? null, filter.role ?? null, ...states) as Row[]
-  ).map((row) => questionView(store, row));
+  return store.index
+    .rows("questions")
+    .filter(
+      (row) =>
+        (filter.role === undefined || filter.role === row.role) &&
+        states.includes(row.state as QuestionState),
+    )
+    .sort((a, b) => Number(a.opened_seq) - Number(b.opened_seq))
+    .map((row) => questionView(store, withAnswer(store, row)));
 }
 
 /** Decision records in recording order, optionally of one work item and one owning role. */
 export function listDecisions(
-  store: Pick<Store, "db">,
+  store: Reader,
   filter: { readonly work?: string; readonly role?: string } = {},
 ): DecisionRow[] {
-  return (
-    store.db
-      .prepare(
-        `SELECT * FROM decisions WHERE (? IS NULL OR work = ?) AND (? IS NULL OR role = ?)
-         ORDER BY seq`,
-      )
-      .all(
-        filter.work ?? null,
-        filter.work ?? null,
-        filter.role ?? null,
-        filter.role ?? null,
-      ) as Row[]
-  ).map(decisionRow);
+  return store.index
+    .rows("decisions")
+    .filter(
+      (row) =>
+        (filter.work === undefined || filter.work === row.work) &&
+        (filter.role === undefined || filter.role === row.role),
+    )
+    .sort((a, b) => Number(a.seq) - Number(b.seq))
+    .map(decisionRow);
 }
 
 /** Validate work, role and app hold scopes, including the legacy game spelling. */
@@ -669,7 +670,7 @@ export function holdScope(scope: string): string {
 }
 
 function holdRow(store: Store, id: string): Row | undefined {
-  return store.db.prepare("SELECT * FROM holds WHERE id = ?").get(id) as Row | undefined;
+  return store.index.get("holds", [id]);
 }
 
 function holdView(row: Row): HoldView {
@@ -744,17 +745,18 @@ export function releaseHold(store: Store, actor: Actor, id: string): HoldResult 
 
 /** Holds in setting order, optionally of one owner and in the given states. */
 export function listHolds(
-  store: Pick<Store, "db">,
+  store: Reader,
   filter: { readonly role?: string; readonly states?: readonly HoldState[] } = {},
   layout?: Layout,
 ): HoldView[] {
   const states = filter.states ?? HOLD_STATES;
-  const rows = store.db
-    .prepare(
-      `SELECT * FROM holds WHERE (? IS NULL OR role = ?)
-         AND state IN (${states.map(() => "?").join(",")})`,
-    )
-    .all(filter.role ?? null, filter.role ?? null, ...states) as Row[];
+  const rows = store.index
+    .rows("holds")
+    .filter(
+      (row) =>
+        (filter.role === undefined || filter.role === row.role) &&
+        states.includes(row.state as HoldState),
+    );
   const policy = policyHoldEntries(store, states).filter(
     ({ hold }) =>
       filter.role === undefined || policyTargetCoversRole(hold.policy.target, filter.role, layout),
@@ -785,18 +787,18 @@ export function questionHoldGuard(
   harness?: string | null,
   layout?: Layout,
 ): GuardResult {
-  const pending = store.db
-    .prepare(
-      "SELECT id FROM questions WHERE role = ? AND state = 'pending' ORDER BY opened_seq LIMIT 1",
-    )
-    .get(role) as { id: string } | undefined;
+  const pending = store.index
+    .rows("questions")
+    .filter((row) => row.role === role && row.state === "pending")
+    .sort((a, b) => Number(a.opened_seq) - Number(b.opened_seq))[0];
   if (pending === undefined) {
     return holdGuard(store, role, harness, layout);
   }
-  const native = readCodexQuestion(store, pending.id)?.native;
+  const id = pending.id as string;
+  const native = readCodexQuestion(store, id)?.native;
   return {
     blocker: {
-      id: pending.id,
+      id,
       kind: "question",
       owner: role,
       ...(native == null ? {} : { native: { itemId: native.item, turnId: native.turn } }),
@@ -824,20 +826,30 @@ export function holdGuard(
     };
   }
   // A handoff hold quiets the source. The target must be woken to release that hold.
-  const hold = store.db
-    .prepare(
-      `SELECT h.id FROM holds h WHERE h.role = ? AND h.scope = 'role' AND h.state = 'active'
-       AND NOT EXISTS (
-         SELECT 1 FROM handoff_roles r JOIN handoffs o ON o.id = r.handoff
-         WHERE r.role = h.role AND o.to_harness = ?
-           AND h.id = 'handoff-' || r.handoff || '-' || replace(r.role, '/', '-'))
-     ORDER BY h.set_seq LIMIT 1`,
+  const targetHolds = new Set(
+    store.index
+      .rows("handoff_roles")
+      .filter(
+        (row) =>
+          row.role === role &&
+          store.index.get("handoffs", [row.handoff!])?.to_harness === (harness ?? ""),
+      )
+      .map((row) => handoffHoldId(row.handoff as string, role)),
+  );
+  const hold = store.index
+    .rows("holds")
+    .filter(
+      (row) =>
+        row.role === role &&
+        row.scope === "role" &&
+        row.state === "active" &&
+        !targetHolds.has(row.id as string),
     )
-    .get(role, harness ?? "") as { id: string } | undefined;
+    .sort((a, b) => Number(a.set_seq) - Number(b.set_seq))[0];
   return hold === undefined
     ? { status: "clear" }
     : {
-        blocker: { id: hold.id, kind: "hold", owner: role },
+        blocker: { id: hold.id as string, kind: "hold", owner: role },
         reason: "recipient-hold-active",
         status: "blocked",
       };
@@ -849,7 +861,9 @@ export function holdGuard(
  * item's owner, and an app hold when it matches the item's repository.
  */
 export const storeHolds: HoldLookup = (store, ref, cover) => {
-  const local = (store.db.prepare("SELECT * FROM holds WHERE state = 'active'").all() as Row[])
+  const local = store.index
+    .rows("holds")
+    .filter((row) => row.state === "active")
     .filter((row) => {
       const scope = row.scope as string;
       if (scope === "role") {
@@ -912,7 +926,7 @@ export interface HoldCover {
  * `importedHolds` reads only the imported events.
  */
 export type HoldLookup = (
-  store: Pick<Store, "db" | "events">,
+  store: Pick<Store, "index" | "events">,
   ref: WorkRef,
   cover?: HoldCover,
 ) => readonly CoveringHold[];

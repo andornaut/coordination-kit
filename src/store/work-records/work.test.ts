@@ -15,7 +15,7 @@ const OWNER = "sample-kit";
 const ref = (id: string) => ({ id, repository: OWNER });
 
 function scratch(): string {
-  return join(mkdtempSync(join(tmpdir(), "store-work-")), "coordination.db");
+  return join(mkdtempSync(join(tmpdir(), "store-work-")), "coordination");
 }
 
 function code(action: () => unknown): string | null {
@@ -56,7 +56,7 @@ describe("work finish records", () => {
       expect(
         code(() => finishWork(store, ACTOR, { ...input, owner: OWNER, ref: ref("sk-0001") })),
       ).toBe(expected);
-      expect(readWorkRecord(store.db, ref("sk-0001"))).toBeNull();
+      expect(readWorkRecord(store, ref("sk-0001"))).toBeNull();
     } finally {
       store.close();
     }
@@ -78,7 +78,7 @@ describe("work finish records", () => {
     });
     finishWork(store, ACTOR, { owner: OWNER, ref: ref("sk-0003"), status: "cancelled" });
     const records = () =>
-      ["sk-0001", "sk-0002", "sk-0003"].map((id) => readWorkRecord(store.db, ref(id)));
+      ["sk-0001", "sk-0002", "sk-0003"].map((id) => readWorkRecord(store, ref(id)));
     const before = records();
     expect(
       before.map((record) => [record?.state, record?.finishedStatus, record?.successors]),
@@ -87,13 +87,15 @@ describe("work finish records", () => {
       ["finished", "superseded", ["sk-0004", "sk-0005"]],
       ["finished", "cancelled", []],
     ]);
-    store.db.exec("DELETE FROM work");
+    for (const id of ["sk-0001", "sk-0002", "sk-0003"]) {
+      store.index.remove("work", [OWNER, id]);
+    }
     expect(store.rebuild().events).toBe(store.events().length);
     expect(records()).toEqual(before);
     store.close();
     const reopened = Store.open(TEST_CLOCK, path);
     expect(reopened.verify().events).toBe(reopened.events().length);
-    expect(readWorkRecord(reopened.db, ref("sk-0002"))).toEqual(before[1]);
+    expect(readWorkRecord(reopened, ref("sk-0002"))).toEqual(before[1]);
     // Compaction keeps every work event, whatever its payload fields.
     const plan = planFileCompaction(reopened.events(), {
       registeredGames: new Set(),

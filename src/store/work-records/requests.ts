@@ -1,9 +1,8 @@
 // Requests imported from the retired request ledger (`store retire`). Each open ledger request is
 // one `request.imported` record owned by its role; `status` lists it as `requested` until its owner
 // maps it to a work file or closes it with `request close`, which only that owner can do.
-import type { DatabaseSync } from "node:sqlite";
-
 import type { Store } from "../db.ts";
+import type { ProjectionIndex, ProjectionRow } from "../projectionIndex.ts";
 import { secretShape } from "../secrets.ts";
 import { type Actor, ensure, type Json } from "../types.ts";
 
@@ -37,7 +36,7 @@ export interface RequestRecord {
 /** The `request.imported` payload: one open ledger request. */
 export type RequestImport = Omit<RequestRecord, "closed" | "importedAt">;
 
-type Row = Record<string, unknown>;
+type Row = ProjectionRow;
 
 function view(row: Row): RequestRecord {
   const string = (key: string): string | null => (row[key] as string | null) ?? null;
@@ -65,19 +64,15 @@ function view(row: Row): RequestRecord {
   };
 }
 
-/** Every imported request in import order; a store without the table has none. */
-export function readRequests(db: DatabaseSync): RequestRecord[] {
-  const present = db
-    .prepare(`SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'requests'`)
-    .get() as { n: number };
-  if (Number(present.n) === 0) {
-    return [];
-  }
-  return (db.prepare("SELECT * FROM requests ORDER BY imported_seq").all() as Row[]).map(view);
+/** Every imported request in import order. */
+export function readRequests(index: ProjectionIndex): RequestRecord[] {
+  return [...index.rows("requests")]
+    .sort((a, b) => Number(a.imported_seq) - Number(b.imported_seq))
+    .map(view);
 }
 
 function readRequest(store: Store, id: string): RequestRecord | undefined {
-  const row = store.db.prepare("SELECT * FROM requests WHERE id = ?").get(id) as Row | undefined;
+  const row = store.index.get("requests", [id]);
   return row === undefined ? undefined : view(row);
 }
 

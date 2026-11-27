@@ -1,68 +1,63 @@
-// The Codex thread, dependencies and native identity of each Codex-scoped question. No command
-// appends `question.native-linked` or `question.native-reasked`; replay still applies both, so a
-// store or journal that contains them rebuilds the same native identity and attempt.
-import type { CodexQuestionInput, NativeQuestionIdentity, Projection } from "../types.ts";
+// The Codex thread, dependencies and native identity of each Codex-scoped question. Historical
+// native links and reasks still rebuild the same native identity and attempt.
+import type { ProjectionIndex } from "../projectionIndex.ts";
+import {
+  type CodexQuestionInput,
+  ensure,
+  type NativeQuestionIdentity,
+  type Projection,
+  type StoredEvent,
+} from "../types.ts";
+import { updateQuestionRow } from "./questions.ts";
+
+function resolution(index: ProjectionIndex, event: StoredEvent): void {
+  if (event.payload.nativeResolution !== undefined) {
+    updateQuestionRow(index, "question_codex", event.payload.id as string, {
+      resolution: JSON.stringify(event.payload.nativeResolution),
+    });
+  }
+}
 
 export const QUESTION_CODEX_PROJECTION: Projection = {
   apply: {
-    "question.answer-recorded": (db, event) => {
-      if (event.payload.nativeResolution !== undefined) {
-        db.prepare("UPDATE question_codex SET resolution = ? WHERE id = ?").run(
-          JSON.stringify(event.payload.nativeResolution),
-          event.payload.id as string,
-        );
-      }
-    },
-    "question.cancelled": (db, event) => {
-      if (event.payload.nativeResolution !== undefined) {
-        db.prepare("UPDATE question_codex SET resolution = ? WHERE id = ?").run(
-          JSON.stringify(event.payload.nativeResolution),
-          event.payload.id as string,
-        );
-      }
-    },
-    "question.native-linked": (db, event) => {
+    "question.answer-recorded": resolution,
+    "question.cancelled": resolution,
+    "question.native-linked": (index, event) => {
       const { id, native, thread } = event.payload;
-      const { index, item, turn } = native as unknown as NativeQuestionIdentity;
-      db.prepare(
-        "INSERT INTO question_native_links (thread, turn, item, idx) VALUES (?, ?, ?, ?)",
-      ).run(thread as string, turn, item, index);
-      db.prepare("UPDATE question_codex SET native = ? WHERE id = ?").run(
-        JSON.stringify(native),
-        id as string,
+      const { index: idx, item, turn } = native as unknown as NativeQuestionIdentity;
+      const key = [thread as string, turn, item, idx];
+      ensure(
+        index.get("question_native_links", key) === undefined,
+        "duplicate-native-question-link",
       );
+      index.put("question_native_links", key, { idx, item, thread: thread as string, turn });
+      updateQuestionRow(index, "question_codex", id as string, { native: JSON.stringify(native) });
     },
-    "question.native-reasked": (db, event) => {
-      db.prepare(
-        "UPDATE question_codex SET attempt = attempt + 1, native = 'null' WHERE id = ?",
-      ).run(event.payload.id as string);
+    "question.native-reasked": (index, event) => {
+      const id = event.payload.id as string;
+      const previous = index.get("question_codex", [id]);
+      if (previous !== undefined) {
+        index.put("question_codex", [id], {
+          ...previous,
+          attempt: Number(previous.attempt) + 1,
+          native: "null",
+        });
+      }
     },
-    "question.opened": (db, event) => {
+    "question.opened": (index, event) => {
       const { codex, id } = event.payload;
       if (codex !== undefined) {
         const { dependsOn, thread } = codex as unknown as CodexQuestionInput;
-        db.prepare("INSERT INTO question_codex (id, dependencies, thread) VALUES (?, ?, ?)").run(
-          id as string,
-          JSON.stringify(dependsOn),
+        index.put("question_codex", [id as string], {
+          attempt: 1,
+          dependencies: JSON.stringify(dependsOn),
+          id: id as string,
+          native: "null",
+          resolution: "null",
           thread,
-        );
+        });
       }
     },
   },
-  ddl: `CREATE TABLE IF NOT EXISTS question_codex (
-    id TEXT PRIMARY KEY,
-    thread TEXT NOT NULL,
-    dependencies TEXT NOT NULL,
-    attempt INTEGER NOT NULL DEFAULT 1,
-    native TEXT NOT NULL DEFAULT 'null',
-    resolution TEXT NOT NULL DEFAULT 'null'
-  );
-  CREATE TABLE IF NOT EXISTS question_native_links (
-    thread TEXT NOT NULL,
-    turn TEXT NOT NULL,
-    item TEXT NOT NULL,
-    idx INTEGER NOT NULL,
-    PRIMARY KEY (thread, turn, item, idx)
-  );`,
   tables: ["question_codex", "question_native_links"],
 };

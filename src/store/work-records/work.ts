@@ -2,10 +2,10 @@
 // work item, keyed by (repository, work ID). Approval, owner and scope stay in the work file on the
 // repository's `main`; the store holds only live progress. Every function trusts its `actor`: the
 // CLI applies the registry fence and the repository owner check first (src/work/live.ts).
-import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
 import type { Store } from "../db.ts";
 import { payloadText as text, sha256 } from "../eventCodec.ts";
+import type { ProjectionIndex, ProjectionRow } from "../projectionIndex.ts";
 import { WORK_KINDS } from "../projections/work.ts";
 import { secretShape } from "../secrets.ts";
 import { type Actor, ensure, type JsonObject, type WorkRef } from "../types.ts";
@@ -69,7 +69,8 @@ export interface WorkRecord extends WorkRef {
   readonly updatedAt: string;
 }
 
-type Row = Record<string, SQLInputValue>;
+type Row = ProjectionRow;
+type Reader = Pick<Store, "index" | "event">;
 
 /** One line of free text: non-empty, bounded and not secret-shaped. */
 export function workText(value: string, code: string): string {
@@ -84,10 +85,8 @@ export function checkRef(ref: WorkRef): WorkRef {
   return { id: ref.id, repository: ref.repository };
 }
 
-function workRow(db: DatabaseSync, ref: WorkRef): Row | undefined {
-  return db
-    .prepare("SELECT * FROM work WHERE repository = ? AND id = ?")
-    .get(ref.repository, ref.id) as Row | undefined;
+function workRow(index: ProjectionIndex, ref: WorkRef): Row | undefined {
+  return index.get("work", [ref.repository, ref.id]);
 }
 
 const nullable = (row: Row, key: string): string | null => (row[key] as string | null) ?? null;
@@ -98,15 +97,13 @@ function finishKey(ref: WorkRef): string {
 
 /** The status and successors a finish event records; a payload without `status` is `done`. */
 function finishOutcome(
-  db: DatabaseSync,
+  store: Reader,
   ref: WorkRef,
 ): Pick<WorkRecord, "finishedStatus" | "successors"> {
-  const row = db.prepare("SELECT payload FROM events WHERE key = ?").get(finishKey(ref)) as
-    Row | undefined;
-  if (row === undefined) {
+  const payload = store.event(finishKey(ref))?.payload;
+  if (payload === undefined) {
     return { finishedStatus: "done", successors: [] };
   }
-  const payload = JSON.parse(row.payload as string) as JsonObject;
   const status = text(payload, "status") ?? "done";
   const successors = Array.isArray(payload.successors) ? payload.successors : [];
   return {
@@ -117,34 +114,60 @@ function finishOutcome(
   };
 }
 
-/** The record of one work item from an open database (the store's, or a read-only one). */
-export function readWorkRecord(db: DatabaseSync, ref: WorkRef): WorkRecord | null {
-  const row = workRow(db, ref);
+function workKey(repository: string, id: string): string {
+  return `${repository}\n${id}`;
+}
+
+function relatedWork(index: ProjectionIndex) {
+  const byWork = (rows: readonly Row[]) =>
+    Map.groupBy(rows, (row) => workKey(row.repository as string, row.id as string));
+  const evidence = byWork(
+    [...index.rows("work_evidence")].sort((a, b) => Number(a.seq) - Number(b.seq)),
+  );
+  const retained = byWork(
+    [...index.rows("work_retained")].sort((a, b) => Number(a.seq) - Number(b.seq)),
+  );
+  const order = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  const children = Map.groupBy(
+    index
+      .rows("work")
+      .filter(({ parent_id, parent_repository }) => parent_repository != null && parent_id != null)
+      .sort(
+        (a, b) =>
+          order(a.repository as string, b.repository as string) ||
+          order(a.id as string, b.id as string),
+      ),
+    (row) => workKey(row.parent_repository as string, row.parent_id as string),
+  );
+  return { children, evidence, retained };
+}
+
+/** The record of one work item from a verified store index. */
+export function readWorkRecord(store: Reader, ref: WorkRef): WorkRecord | null {
+  const row = workRow(store.index, ref);
   if (row === undefined) {
     return null;
   }
-  const evidenceRows = db
-    .prepare("SELECT * FROM work_evidence WHERE repository = ? AND id = ? ORDER BY seq")
-    .all(ref.repository, ref.id) as Row[];
-  const retainedRows = db
-    .prepare("SELECT * FROM work_retained WHERE repository = ? AND id = ? ORDER BY seq")
-    .all(ref.repository, ref.id) as Row[];
-  const children = db
-    .prepare(
-      `SELECT repository, id FROM work WHERE parent_repository = ? AND parent_id = ?
-       ORDER BY repository, id`,
-    )
-    .all(ref.repository, ref.id) as Row[];
+  return workView(store, row, ref, relatedWork(store.index));
+}
+
+function workView(
+  store: Reader,
+  row: Row,
+  ref: WorkRef,
+  related: ReturnType<typeof relatedWork>,
+): WorkRecord {
+  const key = workKey(ref.repository, ref.id);
   const parentRepository = nullable(row, "parent_repository");
   const parentId = nullable(row, "parent_id");
   const finishedAt = nullable(row, "finished_at");
   return {
     block: row.block == null ? null : (JSON.parse(row.block as string) as WorkBlock),
-    children: children.map((child) => ({
+    children: (related.children.get(key) ?? []).map((child) => ({
       id: child.id as string,
       repository: child.repository as string,
     })),
-    evidence: evidenceRows.map((item) => ({
+    evidence: (related.evidence.get(key) ?? []).map((item) => ({
       actor: nullable(item, "actor"),
       at: item.at as string,
       entry: nullable(item, "entry"),
@@ -154,7 +177,7 @@ export function readWorkRecord(db: DatabaseSync, ref: WorkRef): WorkRecord | nul
       stage: item.stage as WorkStage,
     })),
     finishedAt,
-    ...(finishedAt === null ? { finishedStatus: null, successors: [] } : finishOutcome(db, ref)),
+    ...(finishedAt === null ? { finishedStatus: null, successors: [] } : finishOutcome(store, ref)),
     id: ref.id,
     owner: nullable(row, "owner"),
     parent:
@@ -163,7 +186,7 @@ export function readWorkRecord(db: DatabaseSync, ref: WorkRef): WorkRecord | nul
         : { id: parentId, repository: parentRepository },
     readyAt: nullable(row, "ready_at"),
     repository: ref.repository,
-    retained: retainedRows.map((item) => ({
+    retained: (related.retained.get(key) ?? []).map((item) => ({
       at: item.at as string,
       entry: nullable(item, "entry"),
       nextBoundary: item.next_boundary as string,
@@ -178,14 +201,12 @@ export function readWorkRecord(db: DatabaseSync, ref: WorkRef): WorkRecord | nul
 }
 
 /** Every work record in the store, keyed `repository\nid`. */
-export function readWorkRecords(db: DatabaseSync): Map<string, WorkRecord> {
+export function readWorkRecords(store: Reader): Map<string, WorkRecord> {
   const records = new Map<string, WorkRecord>();
-  for (const row of db.prepare("SELECT repository, id FROM work").all() as Row[]) {
+  const related = relatedWork(store.index);
+  for (const row of store.index.rows("work")) {
     const ref = { id: row.id as string, repository: row.repository as string };
-    const record = readWorkRecord(db, ref);
-    if (record !== null) {
-      records.set(`${ref.repository}\n${ref.id}`, record);
-    }
+    records.set(workKey(ref.repository, ref.id), workView(store, row, ref, related));
   }
   return records;
 }
@@ -197,11 +218,11 @@ export interface WorkWrite {
 }
 
 function result(store: Store, ref: WorkRef, duplicate: boolean): WorkWrite {
-  return { duplicate, record: readWorkRecord(store.db, ref)! };
+  return { duplicate, record: readWorkRecord(store, ref)! };
 }
 
 function updatedSeq(store: Store, ref: WorkRef): number {
-  return Number(workRow(store.db, ref)?.updated_seq ?? 0);
+  return Number(workRow(store.index, ref)?.updated_seq ?? 0);
 }
 
 /** `work.started`, once per item. A repeat with the same parent is a duplicate. */
@@ -217,7 +238,7 @@ export function startWork(
     "invalid-parent",
   );
   return store.transaction(() => {
-    const existing = readWorkRecord(store.db, ref);
+    const existing = readWorkRecord(store, ref);
     if (existing?.startedAt != null) {
       const same =
         (existing.parent === null && parent === null) ||
@@ -300,7 +321,7 @@ export function blockWork(
   const ref = checkRef(input.ref);
   workText(input.reason, "invalid-reason");
   return store.transaction(() => {
-    const existing = readWorkRecord(store.db, ref);
+    const existing = readWorkRecord(store, ref);
     ensure(existing?.finishedAt == null, "work-finished");
     if (existing?.block?.reason === input.reason && existing.block.owner === input.owner) {
       return { duplicate: true, record: existing };
@@ -323,7 +344,7 @@ export function unblockWork(
 ): WorkWrite {
   const ref = checkRef(input.ref);
   return store.transaction(() => {
-    const existing = readWorkRecord(store.db, ref);
+    const existing = readWorkRecord(store, ref);
     ensure(existing !== null, "work-unknown");
     if (existing.block === null) {
       return { duplicate: true, record: existing };
@@ -342,7 +363,7 @@ export function unblockWork(
 export function readyWork(store: Store, actor: Actor, input: { readonly ref: WorkRef }): WorkWrite {
   const ref = checkRef(input.ref);
   return store.transaction(() => {
-    const existing = readWorkRecord(store.db, ref);
+    const existing = readWorkRecord(store, ref);
     ensure(existing?.startedAt != null, "work-not-started");
     ensure(existing.finishedAt === null, "work-finished");
     ensure(existing.block === null, "work-blocked");
@@ -451,20 +472,9 @@ export interface WorkHistoryEntry {
 /** Every work event of one item, in seq order. */
 export function workHistory(store: Store, ref: WorkRef): WorkHistoryEntry[] {
   checkRef(ref);
-  const rows = store.db
-    .prepare(
-      `SELECT seq FROM events WHERE kind LIKE 'work.%'
-         AND json_extract(payload, '$.repository') = ? AND json_extract(payload, '$.id') = ?
-       ORDER BY seq`,
-    )
-    .all(ref.repository, ref.id) as Row[];
-  const wanted = new Set(rows.map((row) => Number(row.seq)));
-  if (wanted.size === 0) {
-    return [];
-  }
   return store
-    .events({ afterSeq: Math.min(...wanted) - 1, kinds: WORK_KINDS })
-    .filter((event) => wanted.has(event.seq))
+    .events({ kinds: WORK_KINDS })
+    .filter(({ payload }) => payload.repository === ref.repository && payload.id === ref.id)
     .map((event) => ({
       actor: event.actor.role,
       at: event.at,

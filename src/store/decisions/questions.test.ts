@@ -308,7 +308,9 @@ describe("wake guard", () => {
     expect(await send()).toMatchObject({ status: "accepted" });
     expect(existsSync(wakeFilePath(layout, TECH_ROLE))).toBe(true);
     expect(readInbox(store, TECH_ACTOR).delivered).toBe(3);
-    const outcomes = store.db.prepare("SELECT outcome, detail FROM wakes ORDER BY seq").all();
+    const outcomes = [...store.index.rows("wakes")]
+      .sort((a, b) => Number(a.seq) - Number(b.seq))
+      .map(({ detail, outcome }) => ({ detail, outcome }));
     expect(outcomes).toEqual([
       { detail: "recipient-question-pending", outcome: "guarded" },
       { detail: "recipient-hold-active", outcome: "guarded" },
