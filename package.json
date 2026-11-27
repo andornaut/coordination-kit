@@ -1,6 +1,6 @@
 {
   "name": "@andornaut/coordination-kit",
-  "version": "7.9.0",
+  "version": "7.10.0",
   "description": "App and role coordination, durable messaging, agent task tracking and the delivery runner seam.",
   "license": "MIT",
   "type": "module",
@@ -52,6 +52,7 @@
     "docs/design/review.md",
     "docs/design/simplification.md",
     "docs/design/work-protocol.md",
+    "skills/agent-cleanup/SKILL.md",
     "skills/coordination-lifecycle/SKILL.md",
     "skills/coordination-status/SKILL.md",
     "LICENSE",

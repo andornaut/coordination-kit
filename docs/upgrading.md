@@ -1,5 +1,12 @@
 # Upgrading
 
+## Coordination Kit 7.10
+
+Install the bundled `agent-cleanup` skill with `skills install agent-cleanup` in a
+project checkout. The skill covers attributable work and confirmed orphans and requires
+a specific retention reason for Git bundles in the authorized cleanup scope. Existing
+state and project pins can stay in use. See the [skill installer](commands.md#skills-install).
+
 ## Coordination Kit 7.9
 
 The read-only `task find` and `work find` commands add description lookup to standalone

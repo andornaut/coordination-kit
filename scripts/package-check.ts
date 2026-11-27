@@ -81,8 +81,10 @@ export function inspectPackage(
     throw new Error("package CLI version differs from package.json");
   const skillsProject = join(proof, "skills-project");
   mkdirSync(skillsProject);
-  run(skillsProject, "git", ["init", "--quiet"]);
+  run(skillsProject, "git", ["init", "--quiet", "--initial-branch=main"]);
   for (const [skill, harness, base, name] of [
+    ["agent-cleanup", "codex", ".agents", "agent-cleanup"],
+    ["agent-cleanup", "claude", ".claude", "agent-cleanup"],
     ["lifecycle", "codex", ".agents", "coordination-lifecycle"],
     ["status", "claude", ".claude", "coordination-status"],
   ] as const) {

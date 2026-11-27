@@ -20,7 +20,11 @@ export const SKILLS_INSTALL_OPTIONS = {
   scope: { type: "string" },
 } as const;
 
-const SKILLS = { lifecycle: "coordination-lifecycle", status: "coordination-status" } as const;
+const SKILLS = new Map([
+  ["agent-cleanup", "agent-cleanup"],
+  ["lifecycle", "coordination-lifecycle"],
+  ["status", "coordination-status"],
+]);
 const DIRECTORIES = { claude: ".claude", codex: ".agents" } as const;
 
 function directory(parent: string, name: string): string {
@@ -75,10 +79,10 @@ function install(directory: string, bytes: Buffer): boolean {
 export const skillsInstall: Handler = (io, root, args) => {
   try {
     const { positionals, values } = parseOptions(SKILLS_INSTALL_OPTIONS, args, 1);
-    const [skill] = positionals;
+    const name = SKILLS.get(positionals[0]!);
     const harness = required(values, "harness");
-    if (skill !== "lifecycle" && skill !== "status") {
-      throw new Usage("choose the lifecycle or status skill");
+    if (name === undefined) {
+      throw new Usage(`choose a bundled skill: ${[...SKILLS.keys()].join(", ")}`);
     }
     if (harness !== "codex" && harness !== "claude") {
       throw new Usage("--harness must be codex or claude");
@@ -91,7 +95,6 @@ export const skillsInstall: Handler = (io, root, args) => {
       io.entry === undefined
         ? fileURLToPath(new URL("../../skills", import.meta.url))
         : join(dirname(io.entry), "..", "skills");
-    const name = SKILLS[skill];
     const bytes = readFileSync(join(assets, name, "SKILL.md"));
     const base = directory(checkout, DIRECTORIES[harness]);
     const target = directory(directory(base, "skills"), name);

@@ -18,7 +18,7 @@ Resolve provenance and current consumers before any stop or removal.
 - **Attributable work.** Confirm the owner and work ID, integration at the exact commit, and that
   the published ref contains that commit when publication applies. Verify durable evidence,
   including applicable review and delivery, and confirm actual owner release and absence of
-  consumers. Preserve dirty, unmerged, or unpublished work and any resource with a live
+  consumers. Preserve dirty, unmerged, or unpublished source work and any resource with a live
   dependency. Route work that still needs to land to its owner through the existing workflow.
 - **Confirmed orphan.** Check the registry and work records, branch and worktree provenance,
   archived and pending handoffs, jobs and processes, and container mounts or other consumers.
@@ -35,8 +35,7 @@ each exact remote ref.
 ## Preserve evidence and reconcile messages
 
 Use published Git, existing backups, and small receipts or essential review evidence. Keep the
-identifiers and references needed to reproduce the decision. Preserve active WIP, current
-distribution artifacts, and existing backups under their established protections.
+identifiers and references needed to reproduce the decision.
 
 Retain an individual Git bundle only for a verified reason, such as unique recovery, an active
 dependency, or required evidence. Record its exact owner, reason, and expiry under the
