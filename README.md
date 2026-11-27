@@ -27,7 +27,8 @@ Releases with the `skills install` command include the lifecycle and status skil
 
 Use the `coordination-lifecycle` skill when you pick up an assigned standalone task or resume one
 already in progress. It guides you from checking the task's recorded approval through verifying the
-landed revision. Start implementation once the task has recorded approval.
+exact landed revision and its required checks. Start implementation once the task has recorded
+approval.
 
 If the skill is missing from the checkout, use a CLI release that lists `lifecycle` in
 `skills install --help`. From the primary checkout, install it once for your harness.
@@ -41,16 +42,24 @@ archive setup. In your registered session, ask to use the `coordination-lifecycl
 give the assigned task ID. See [standalone setup](docs/getting-started.md#set-up-a-standalone-project)
 for registration.
 
+## Find work by description
+
+Use the `coordination-status` skill to find recorded work when you know its name or description.
+It uses `task find` in a standalone checkout and `work find` from a shared coordinator.
+The read-only lookup reports exact IDs and evidence from local records. If several records match,
+confirm the exact ID before acting.
+See [task and work discovery](docs/commands.md#task-and-work-discovery).
+
 ## Usage
 
 Commands resolve the workspace from
 `--root DIR` or `--root=DIR`, else `COORDINATION_KIT_ROOT`, else `DELIVERY_KIT_ROOT`, else the
 working directory. Pass the root at most once, before the `--` option terminator. The runner commands
 `review deliver`, `review show` and `events ingest` accept `--app ID` or `--game ID`.
-See [runner examples and compatibility](docs/store.md#runner-events). The `work` commands read
-`--root` as the repository to inspect and default to
-the working directory. They take the coordinator root only from `COORDINATION_KIT_ROOT` or
-`DELIVERY_KIT_ROOT`.
+See [runner examples and compatibility](docs/store.md#runner-events). Pass the shared coordinator
+as `--root` to `work find`. The other `work` commands use `--root` as the repository to inspect,
+defaulting to the working directory. They take the coordinator root only from
+`COORDINATION_KIT_ROOT` or `DELIVERY_KIT_ROOT`.
 
 | Group                     | Verbs                                                                                                  | Purpose                                                                                                  |
 | ------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
@@ -71,7 +80,7 @@ the working directory. They take the coordinator root only from `COORDINATION_KI
 | `review`                  | `deliver`, `show`                                                                                      | The runner seam: one slot's scheduled review, as one typed JSON line; show a stored brief.               |
 | `events`                  | `ingest`                                                                                               | The runner seam: one event log ingest, as one typed JSON line.                                           |
 | `status`                  | (none)                                                                                                 | Read-only status of every registered repository's work items, as JSON or a Markdown digest.              |
-| `work`                    | `check`, `report`, `start`, `evidence`, `block`, `unblock`, `ready`, `finish`, `show`, `history`       | Validate a repository's work files and report them; record each item's live progress in the store.       |
+| `work`                    | See [work commands](docs/commands.md#command-forms)                                                    | Find shared work, validate work files and record each item's progress.                                   |
 | `graph`                   | (none), `why`                                                                                          | The live decision graph and supersedes chains.                                                           |
 
 `coordination-kit --help` lists every command form. Use `coordination-kit COMMAND --help` for

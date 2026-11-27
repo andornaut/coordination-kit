@@ -51,6 +51,34 @@ reviewable changes. Both accept the repository as `--root`. See the [documentati
 
 Commands with an app selector also accept the legacy `--game` spelling. Use one spelling per invocation.
 
+## Task and work discovery
+
+Quote the description so it is one argument. Use a standalone primary checkout as the root
+for `task find DESCRIPTION [--owner ROLE]`. Use the shared coordinator as the root for
+`work find DESCRIPTION [--scope SCOPE] [--owner ROLE]`.
+
+```sh
+coordination-kit --root /path/to/project task find "Validate input" --owner implementation
+coordination-kit --root /path/to/coordinator work find "Report latency" --scope app:dashboard
+```
+
+Work discovery uses the same [scope names as status](#status), including `all`, `workspace`,
+`app:ID`, `kit:ID` and `role:KEY`. It defaults to `all`. Use `--owner ROLE` to narrow either
+command to an exact role.
+
+The JSON result has `schema: 1`. Its `status` is `match`, `ambiguous`, `no-match` or
+`unavailable`. The `match` field gives the best tier. An exact ID (`id`) takes precedence,
+then a title normalized for Unicode, case and spaces (`title`), then all query tokens in the title
+or ID (`tokens`). With no match type, `match` is `null`. The `matches` list contains the
+best tier only, sorted by canonical ID, with recorded evidence. Standalone results include the task
+records and scoped holds and questions. Shared results include status records with `workOwner`,
+plus top-level `pendingQuestions`, `activeHolds` and `availability`.
+
+Both commands read local records only, with no fetch. A complete lookup exits 0 for `match`,
+`ambiguous` or `no-match`. An incomplete source returns `unavailable` and exits 1. Any matches
+in that result are partial. Invalid usage exits 2. Resolve ambiguous matches to an exact ID, and
+confirm approval and ownership before acting.
+
 ## Skills install
 
 `skills install SKILL --harness codex|claude --scope project` installs one skill bundled with

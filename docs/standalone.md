@@ -54,6 +54,19 @@ Commit `coordination-kit.json` and the ignore rule through the normal repository
 Keep the runtime directory across agent sessions. Use the same primary checkout and state
 for all its task worktrees.
 
+## Find an existing task
+
+If you have a task name or description, run `task find` from the primary checkout. Add
+`--owner ROLE` when you know the recorded owner.
+
+```sh
+ck --root "$(pwd -P)" task find "Validate input" --owner implementation
+```
+
+Use the returned task ID with `task show ID` to inspect its current owner, state and approval.
+Resolve multiple matches to an exact ID before acting.
+See [discovery results](commands.md#task-and-work-discovery).
+
 ## Approve and build
 
 The maintainer records the user's approval to build. A reviewer can ask for revisions by
