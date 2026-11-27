@@ -1,6 +1,6 @@
-import type { DatabaseSync } from "node:sqlite";
-
+import type { Store } from "./db.ts";
 import type { CheckpointReceipt } from "./files/compaction/checkpoint.ts";
+import type { ProjectionIndex } from "./projectionIndex.ts";
 import type { Json, StoredEvent } from "./types.ts";
 
 interface FileRecord {
@@ -26,8 +26,9 @@ export interface FileProjection {
   readonly checkpoint?: { readonly value: unknown; readonly receipt: CheckpointReceipt };
   readonly journal: FileJournalPort;
   readonly records: (
-    index: DatabaseSync,
+    index: ProjectionIndex,
     previousSeq: number,
     events: readonly StoredEvent[],
+    history: Pick<Store, "events">,
   ) => readonly FileRecord[];
 }

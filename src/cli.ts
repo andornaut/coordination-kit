@@ -53,11 +53,6 @@ import {
   msgStatus,
 } from "./commands/store/messages.ts";
 import {
-  migrationActivate,
-  migrationPrepare,
-  migrationStatus,
-} from "./commands/store/migration.ts";
-import {
   decisionList,
   holdList,
   holdRelease,
@@ -188,9 +183,6 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "store compaction-reserve": compactionReserve,
   "store export": storeExportCommand,
   "store import": storeImportCommand,
-  "store migration-activate": migrationActivate,
-  "store migration-prepare": migrationPrepare,
-  "store migration-status": migrationStatus,
   "store rebuild": storeRebuildCommand,
   "store retire": storeRetireCommand,
   "task approve": taskApprove,

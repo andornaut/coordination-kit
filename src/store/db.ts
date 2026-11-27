@@ -1,116 +1,49 @@
-// The coordination store: one SQLite file with an append-only, hash-chained `events` table and
-// projections updated in the same transaction. Every write is one short `BEGIN IMMEDIATE`
-// transaction; projections can be dropped and rebuilt from the events at any time.
-import { chmodSync, existsSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+// The coordination journal is authoritative. Projections are disposable in-memory indexes.
+import { join } from "node:path";
 
 import type { Clock } from "../core/clock.ts";
 import type { Layout } from "../core/configuration/layout.ts";
 import { stateRoot } from "../core/configuration/stateRoot.ts";
 import { systemGit } from "../core/git.ts";
-import { canonicalJson, eventHash, rowEvent, sha256 } from "./eventCodec.ts";
+import { canonicalJson, eventHash, sha256 } from "./eventCodec.ts";
 import type { FileProjection } from "./fileProjection.ts";
 import { fileAuthority } from "./files/authority.ts";
 import {
   type CompactionCheckpoint,
   verifyCompactionCheckpoint,
 } from "./files/compaction/checkpoint.ts";
+import { openFileJournal } from "./files/journal.ts";
 import { fileLayoutProjection } from "./files/runtime.ts";
-import { PROJECTIONS, RETIRED_TABLES } from "./projections.ts";
+import { ProjectionIndex } from "./projectionIndex.ts";
+import { PROJECTIONS } from "./projections.ts";
 import {
   type Actor,
   type EventInput,
   GENESIS,
+  type Json,
   type JsonObject,
-  type Projection,
-  STORE_SCHEMA,
   type StoredEvent,
   StoreError,
 } from "./types.ts";
 
-export const STORE_FILE = "coordination.db";
-/** An in-memory store: nothing touches the filesystem. A dry run with no store file uses it. */
 export const MEMORY = ":memory:";
-const BUSY_TIMEOUT_MS = 5000;
 
-/**
- * The store's directory: the configured state root, else the coordinator's `var/`. The wake files
- * live beside it under `wake/`.
- */
+/** Wake files and exported evidence still use the configured state root. */
 export function storeRoot(layout: Layout): string {
   return stateRoot(layout);
 }
 
 export function storePath(layout: Layout): string {
-  return join(storeRoot(layout), STORE_FILE);
+  return join(layout.varDir, "coordination");
 }
 
-const EVENTS_DDL = `
-CREATE TABLE IF NOT EXISTS events (
-  seq INTEGER PRIMARY KEY,
-  key TEXT NOT NULL UNIQUE,
-  kind TEXT NOT NULL,
-  actor_role TEXT,
-  actor_native_id TEXT,
-  actor_worker TEXT,
-  at TEXT NOT NULL,
-  payload TEXT NOT NULL,
-  prev_hash TEXT NOT NULL,
-  hash TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS events_kind ON events (kind, seq);
-CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events
-  BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;
-CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events
-  BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;
-`;
-
-type Row = Record<string, SQLInputValue>;
-
-function tableExists(db: DatabaseSync, table: string): boolean {
-  return (
-    db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !==
-    undefined
-  );
-}
-
-/**
- * A store written before a projection existed gets its tables on open, filled from the events the
- * projection reads, in one transaction. The events and their hashes are untouched.
- */
-function addMissingProjections(db: DatabaseSync): void {
-  const missing = (): Projection[] =>
-    PROJECTIONS.filter((projection) => projection.tables.some((table) => !tableExists(db, table)));
-  if (missing().length === 0) {
-    return;
-  }
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    // Checked again under the write lock: another process may have added them meanwhile.
-    for (const projection of missing()) {
-      db.exec(projection.ddl);
-      const kinds = Object.keys(projection.apply);
-      const rows = db
-        .prepare(
-          `SELECT * FROM events WHERE kind IN (${kinds.map(() => "?").join(",")}) ORDER BY seq`,
-        )
-        .all(...kinds) as Row[];
-      for (const row of rows) {
-        const event = rowEvent(row);
-        projection.apply[event.kind]?.(db, event);
-      }
-    }
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+/** A legacy path is checked for pending authority only. Its bytes are never opened. */
+export function legacyStorePath(layout: Layout): string {
+  return join(storeRoot(layout), "coordination.db");
 }
 
 export interface AppendResult {
   readonly event: StoredEvent;
-  /** True when an event with this idempotency key already existed; nothing was written. */
   readonly duplicate: boolean;
 }
 
@@ -119,39 +52,50 @@ export interface VerifyResult {
   readonly head: { readonly seq: number; readonly hash: string };
 }
 
-/** What opening a layout's store reads: the clock for event times and the environment for Git. */
 export interface StoreContext {
   readonly clock: Clock;
   readonly env: NodeJS.ProcessEnv;
 }
 
-/** The clock of a store that never times an event: reading it refuses `store-read-only`. */
 export const READ_ONLY_CLOCK: Clock = () => {
   throw new StoreError("store-read-only");
 };
 
-/**
- * One open connection. Library callers trust their `Actor`: the CLI applies the registry fence
- * (see `resolveCaller`) before it calls a writer here.
- */
+interface EventsOptions {
+  readonly afterSeq?: number;
+  readonly kinds?: readonly string[];
+}
+
+function freezeJson(value: Json): void {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const member of Object.values(value)) {
+      freezeJson(member);
+    }
+    Object.freeze(value);
+  }
+}
+
+/** One view of a file journal, or a disposable replay used to inspect a detached snapshot. */
 export class Store {
-  readonly db: DatabaseSync;
   readonly path: string;
   readonly #clock: Clock;
   readonly #files: FileProjection | undefined;
+  readonly #events: StoredEvent[] = [];
+  readonly #keys = new Map<string, StoredEvent>();
+  readonly #kinds = new Map<string, StoredEvent[]>();
   readonly #checkpointHead: CompactionCheckpoint["head"] | undefined;
   readonly #reducedDigests = new Map<number, string>();
-  #depth = 0;
+  #index = new ProjectionIndex();
+  #writing = false;
+  #closed = false;
 
   private constructor(
     clock: Clock,
     path: string,
-    db: DatabaseSync,
     files?: FileProjection,
     checkpoint?: CompactionCheckpoint,
   ) {
     this.path = path;
-    this.db = db;
     this.#clock = clock;
     this.#files = files;
     this.#checkpointHead = checkpoint?.head;
@@ -162,134 +106,69 @@ export class Store {
     }
   }
 
-  /**
-   * Open or create the store at `path` with WAL, synchronous=FULL and foreign keys. `clock` times
-   * the events it appends.
-   */
+  /** Open a bare journal, or create a disposable in-memory store. */
   static open(clock: Clock, path: string): Store {
-    const memory = path === MEMORY;
-    const created = !memory && !existsSync(path);
-    if (!memory) {
-      mkdirSync(dirname(path), { mode: 0o700, recursive: true });
-    }
-    const db = new DatabaseSync(path, { timeout: BUSY_TIMEOUT_MS });
-    try {
-      if (created) {
-        chmodSync(path, 0o600);
-      }
-      db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
-      db.exec("PRAGMA journal_mode = WAL");
-      db.exec("PRAGMA synchronous = FULL");
-      db.exec("PRAGMA foreign_keys = ON");
-      const version = Number(
-        (db.prepare("PRAGMA user_version").get() as Row | undefined)?.user_version ?? 0,
-      );
-      if (version > STORE_SCHEMA) {
-        throw new StoreError("store-schema-newer");
-      }
-      if (version < STORE_SCHEMA) {
-        db.exec("BEGIN IMMEDIATE");
-        try {
-          db.exec(EVENTS_DDL);
-          for (const projection of PROJECTIONS) {
-            db.exec(projection.ddl);
-          }
-          db.exec(`PRAGMA user_version = ${STORE_SCHEMA}`);
-          db.exec("COMMIT");
-        } catch (error) {
-          db.exec("ROLLBACK");
-          throw error;
-        }
-      } else {
-        addMissingProjections(db);
-      }
-    } catch (error) {
-      db.close();
-      throw error;
-    }
-    return new Store(clock, path, db);
+    return path === MEMORY
+      ? new Store(clock, path)
+      : Store.openFileProjection(clock, path, {
+          journal: openFileJournal(path),
+          records: () => [],
+        });
   }
 
-  /** Open or create the layout's selected authority. */
+  /** Independently validate and replay detached events, without writing a local journal. */
+  static fromEvents(clock: Clock, events: readonly StoredEvent[]): Store {
+    const store = Store.open(clock, MEMORY);
+    store.#replay(events);
+    return store;
+  }
+
   static forLayout(
     context: StoreContext,
     layout: Layout,
     options: { readonly createMissing?: boolean } = {},
   ): Store {
-    const selected = fileAuthority(systemGit(context.env), layout, storePath(layout));
-    if (selected.kind === "files") {
-      return Store.#openSelectedFiles(context.clock, layout, selected);
-    }
-    const path = selected.path;
-    return Store.open(
-      context.clock,
-      options.createMissing === false && !existsSync(path) ? MEMORY : path,
-    );
+    const selected = fileAuthority(systemGit(context.env), layout, legacyStorePath(layout), {
+      create: options.createMissing !== false,
+    });
+    return selected === null
+      ? Store.open(context.clock, MEMORY)
+      : Store.#openSelectedFiles(context.clock, layout, selected);
   }
 
-  /**
-   * Open an existing authority for queries without creating or repairing its disk state. Its clock
-   * is `READ_ONLY_CLOCK`.
-   */
   static readLayout(context: Pick<StoreContext, "env">, layout: Layout): Store | null {
-    const selected = fileAuthority(systemGit(context.env), layout, storePath(layout));
-    const path = selected.path;
-    if (selected.kind === "files") {
-      const store = Store.#openSelectedFiles(READ_ONLY_CLOCK, layout, selected);
-      store.db.exec("PRAGMA query_only = ON");
-      return store;
-    }
-    return existsSync(path)
-      ? new Store(
-          READ_ONLY_CLOCK,
-          path,
-          new DatabaseSync(path, { readOnly: true, timeout: BUSY_TIMEOUT_MS }),
-        )
-      : null;
+    const selected = fileAuthority(systemGit(context.env), layout, legacyStorePath(layout));
+    return selected === null ? null : Store.#openSelectedFiles(READ_ONLY_CLOCK, layout, selected);
   }
 
   static #openSelectedFiles(
     clock: Clock,
     layout: Layout,
-    selected: Extract<ReturnType<typeof fileAuthority>, { kind: "files" }>,
+    { path, receipt }: NonNullable<ReturnType<typeof fileAuthority>>,
   ): Store {
-    const { path, receipt } = selected;
     const store = Store.openFileProjection(clock, path, fileLayoutProjection(layout, path));
     const { hash, seq } = receipt.head;
-    try {
-      if (
-        seq !== 0 &&
-        store.db.prepare("SELECT hash FROM events WHERE seq = ?").get(seq)?.hash !== hash
-      ) {
-        throw new StoreError("migration-file-origin-mismatch");
-      }
-      return store;
-    } catch (error) {
-      store.close();
-      throw error;
+    if (seq !== 0 && store.eventAt(seq)?.hash !== hash) {
+      throw new StoreError("migration-file-origin-mismatch");
     }
+    return store;
   }
 
-  /** Rebuild the compatibility query index from the authoritative committed file events. */
   static openFileProjection(clock: Clock, path: string, files: FileProjection): Store {
     const proof = files.checkpoint;
     const checkpoint = proof && verifyCompactionCheckpoint(proof.value, proof.receipt);
-    const index = Store.open(clock, MEMORY);
-    const store = new Store(clock, path, index.db, files, checkpoint);
-    try {
-      if (checkpoint !== undefined) {
-        store.#replay(
-          checkpoint.entries.map(({ event }) => event),
-          true,
-        );
-        store.#verifyCheckpointHead();
-      }
-      store.#replay(files.journal.events(checkpoint?.head.seq));
-      return store;
-    } catch (error) {
-      store.close();
-      throw error;
+    const store = new Store(clock, path, files, checkpoint);
+    if (checkpoint !== undefined) {
+      store.#replay(checkpoint.entries.map(({ event }) => event), true);
+      store.#verifyCheckpointHead();
     }
+    store.#replay(files.journal.events(checkpoint?.head.seq));
+    return store;
+  }
+
+  get index(): ProjectionIndex {
+    this.#ensureOpen();
+    return this.#index;
   }
 
   get fileBacked(): boolean {
@@ -301,17 +180,26 @@ export class Store {
   }
 
   close(): void {
-    this.db.close();
+    this.#closed = true;
   }
 
-  /** The store clock's instant in `toISOString` form. */
+  #ensureOpen(): void {
+    if (this.#closed) {
+      throw new StoreError("store-closed");
+    }
+  }
+
   now(): string {
     return this.#clock().toISOString();
   }
 
-  /** Run `body` in one `BEGIN IMMEDIATE` transaction; nested calls join the outer one. */
+  /** Nested operations join the outer transaction and its journal writer lock. */
   transaction<T>(body: () => T): T {
-    if (this.#depth > 0) {
+    this.#ensureOpen();
+    if (this.#clock === READ_ONLY_CLOCK) {
+      throw new StoreError("store-read-only");
+    }
+    if (this.#writing) {
       return body();
     }
     const files = this.#files;
@@ -328,7 +216,7 @@ export class Store {
         }
         const events = this.events({ afterSeq: before });
         if (events.length > 0) {
-          writer.commit(events, files.records(this.db, before, events));
+          writer.commit(events, files.records(this.#index, before, events, this));
         }
         return result;
       });
@@ -336,39 +224,36 @@ export class Store {
   }
 
   #transaction<T>(body: () => T): T {
-    this.db.exec("BEGIN IMMEDIATE");
-    this.#depth++;
+    const index = this.#index;
+    const length = this.#events.length;
+    this.#writing = true;
     try {
-      const value = body();
-      this.db.exec("COMMIT");
-      return value;
+      return index.transaction(body);
     } catch (error) {
-      if (this.db.isTransaction) {
-        this.db.exec("ROLLBACK");
+      while (this.#events.length > length) {
+        const event = this.#events.pop()!;
+        this.#keys.delete(event.key);
+        this.#kinds.get(event.kind)!.pop();
       }
+      this.#index = index;
       throw error;
     } finally {
-      this.#depth--;
+      this.#writing = false;
     }
   }
 
   #verifyCheckpointHead(): void {
     const head = this.#checkpointHead;
-    if (
-      head !== undefined &&
-      head.seq > 0 &&
-      this.db.prepare("SELECT hash FROM events WHERE seq = ?").get(head.seq)?.hash !== head.hash
-    ) {
+    if (head !== undefined && head.seq > 0 && this.eventAt(head.seq)?.hash !== head.hash) {
       throw new StoreError("checkpoint-proof-mismatch");
     }
   }
 
   #authentic(event: StoredEvent, allowReduced: boolean): boolean {
     const reducedDigest = allowReduced ? this.#reducedDigests.get(event.seq) : undefined;
-    if (reducedDigest !== undefined) {
-      return sha256(canonicalJson(event)) === reducedDigest;
-    }
-    return eventHash(event) === event.hash;
+    return reducedDigest === undefined
+      ? eventHash(event) === event.hash
+      : sha256(canonicalJson(event)) === reducedDigest;
   }
 
   #replay(events: readonly StoredEvent[], allowReduced = false): void {
@@ -393,22 +278,25 @@ export class Store {
   }
 
   head(): { readonly seq: number; readonly hash: string } {
-    const row = this.db.prepare("SELECT seq, hash FROM events ORDER BY seq DESC LIMIT 1").get() as
-      Row | undefined;
-    return row === undefined
-      ? { hash: GENESIS, seq: 0 }
-      : { hash: row.hash as string, seq: Number(row.seq) };
+    this.#ensureOpen();
+    const last = this.#events.at(-1);
+    return last === undefined ? { hash: GENESIS, seq: 0 } : { hash: last.hash, seq: last.seq };
   }
 
   eventByKey(key: string): StoredEvent | undefined {
-    const row = this.db.prepare("SELECT * FROM events WHERE key = ?").get(key) as Row | undefined;
-    return row === undefined ? undefined : rowEvent(row);
+    this.#ensureOpen();
+    return this.#keys.get(key);
   }
 
-  /**
-   * Append one event and apply its projections, in the caller's transaction or a new one. An
-   * existing idempotency key returns the stored event unchanged with `duplicate: true`.
-   */
+  event(key: string): StoredEvent | undefined {
+    return this.eventByKey(key);
+  }
+
+  eventAt(seq: number): StoredEvent | undefined {
+    this.#ensureOpen();
+    return this.#events[seq - 1];
+  }
+
   append(input: EventInput): AppendResult {
     if (!/^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$/.test(input.kind) || input.key === "") {
       throw new StoreError("invalid-event");
@@ -441,71 +329,55 @@ export class Store {
   }
 
   #insert(event: StoredEvent): void {
-    this.db
-      .prepare(
-        `INSERT INTO events (seq, key, kind, actor_role, actor_native_id, actor_worker, at,
-           payload, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        event.seq,
-        event.key,
-        event.kind,
-        event.actor.role,
-        event.actor.nativeId,
-        event.actor.worker ?? null,
-        event.at,
-        canonicalJson(event.payload),
-        event.prevHash,
-        event.hash,
-      );
-    this.project(event);
+    if (this.#keys.has(event.key)) {
+      throw new StoreError("duplicate-event-key", `at seq ${event.seq}`);
+    }
+    freezeJson(event.payload);
+    Object.freeze(event.actor);
+    Object.freeze(event);
+    this.#events.push(event);
+    this.#keys.set(event.key, event);
+    const kind = this.#kinds.get(event.kind);
+    if (kind === undefined) {
+      this.#kinds.set(event.kind, [event]);
+    } else {
+      kind.push(event);
+    }
+    this.#project(this.#index, event);
   }
 
-  private project(event: StoredEvent): void {
+  #project(index: ProjectionIndex, event: StoredEvent): void {
     let projected = event;
     if (this.#reducedDigests.has(event.seq)) {
       if (event.kind === "session.started") {
-        // The qualified window preserves subsequent starts for the same role.
         return;
       }
       if (event.kind === "msg.sent" || event.kind === "msg.imported") {
-        // The query index requires text. Exact body reads inspect the original event payload.
         projected = { ...event, payload: { ...event.payload, body: "" } };
       }
     }
     for (const projection of PROJECTIONS) {
-      projection.apply[projected.kind]?.(this.db, projected);
+      projection.apply[projected.kind]?.(index, projected);
     }
   }
 
-  /** Events in seq order after `afterSeq`, optionally of the given kinds. */
-  events(
-    options: { readonly afterSeq?: number; readonly kinds?: readonly string[] } = {},
-  ): StoredEvent[] {
-    const kinds = options.kinds ?? [];
-    const filter = kinds.length === 0 ? "" : ` AND kind IN (${kinds.map(() => "?").join(",")})`;
-    return (
-      this.db
-        .prepare(`SELECT * FROM events WHERE seq > ?${filter} ORDER BY seq`)
-        .all(options.afterSeq ?? 0, ...kinds) as Row[]
-    ).map(rowEvent);
+  /** Events in sequence order after the cursor, optionally of the given kinds. */
+  events({ afterSeq = 0, kinds = [] }: EventsOptions = {}): StoredEvent[] {
+    this.#ensureOpen();
+    if (kinds.length === 0) {
+      return this.#events.slice(Math.max(0, Math.floor(afterSeq)));
+    }
+    return [...new Set(kinds)]
+      .flatMap((kind) => this.#kinds.get(kind)?.filter(({ seq }) => seq > afterSeq) ?? [])
+      .sort((a, b) => a.seq - b.seq);
   }
 
-  /** Recompute every link of the chain; throws `chain-broken` at the first mismatch. */
   verify(): VerifyResult {
     this.#verifyCheckpointHead();
     let prev = GENESIS;
     let seq = 0;
-    for (const row of this.db
-      .prepare("SELECT * FROM events ORDER BY seq")
-      .iterate() as Iterable<Row>) {
-      const event = rowEvent(row);
-      if (
-        event.seq !== seq + 1 ||
-        event.prevHash !== prev ||
-        !this.#authentic(event, true) ||
-        canonicalJson(event.payload) !== row.payload
-      ) {
+    for (const event of this.events()) {
+      if (event.seq !== seq + 1 || event.prevHash !== prev || !this.#authentic(event, true)) {
         throw new StoreError("chain-broken", `at seq ${event.seq}`);
       }
       prev = event.hash;
@@ -514,22 +386,14 @@ export class Store {
     return { events: seq, head: { hash: prev, seq } };
   }
 
-  /** Verify the chain, then drop and recreate every projection from the same transaction. */
   rebuild(): VerifyResult {
     return this.transaction(() => {
       const verified = this.verify();
-      for (const table of RETIRED_TABLES) {
-        this.db.exec(`DROP TABLE IF EXISTS ${table}`);
+      const index = new ProjectionIndex();
+      for (const event of this.#events) {
+        this.#project(index, event);
       }
-      for (const projection of PROJECTIONS) {
-        for (const table of projection.tables) {
-          this.db.exec(`DROP TABLE IF EXISTS ${table}`);
-        }
-        this.db.exec(projection.ddl);
-      }
-      for (const row of this.db.prepare("SELECT * FROM events ORDER BY seq").all() as Row[]) {
-        this.project(rowEvent(row));
-      }
+      this.#index = index;
       return verified;
     });
   }

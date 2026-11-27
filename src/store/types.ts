@@ -1,5 +1,5 @@
 // Shared store types and errors.
-import type { DatabaseSync } from "node:sqlite";
+import type { ProjectionIndex } from "./projectionIndex.ts";
 
 export const STORE_SCHEMA = 1;
 /** A registry role key: a shared role, or a game and its role joined by `/`. */
@@ -49,13 +49,11 @@ export interface EventInput {
 }
 
 /**
- * A table set derived from the events, updated in the append transaction and rebuilt by
- * `Store.rebuild`: its tables, their DDL and one applier per event kind.
+ * A set of indexes derived from the events and rebuilt by `Store.rebuild`.
  */
 export interface Projection {
   readonly tables: readonly string[];
-  readonly ddl: string;
-  readonly apply: Readonly<Record<string, (db: DatabaseSync, event: StoredEvent) => void>>;
+  readonly apply: Readonly<Record<string, (index: ProjectionIndex, event: StoredEvent) => void>>;
 }
 
 export interface StoredEvent {

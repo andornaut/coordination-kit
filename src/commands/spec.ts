@@ -45,11 +45,6 @@ import {
   MSG_STATUS_OPTIONS,
 } from "./store/messages.ts";
 import {
-  MIGRATION_ACTIVATE_OPTIONS,
-  MIGRATION_PREPARE_OPTIONS,
-  MIGRATION_STATUS_OPTIONS,
-} from "./store/migration.ts";
-import {
   DECISION_LIST_OPTIONS,
   HOLD_LIST_OPTIONS,
   HOLD_RELEASE_OPTIONS,
@@ -487,26 +482,6 @@ export const SPECS = {
     group: "store",
     options: STORE_RETIRE_OPTIONS,
     summary: "preview retirement by default or apply with --apply",
-  },
-  "store migration-status": {
-    forms: [[]],
-    group: "store",
-    options: MIGRATION_STATUS_OPTIONS,
-    summary: "read the current authority and any prepared or pending cutover receipt",
-  },
-  "store migration-prepare": {
-    forms: [["backup", "restore", "native-id?"]],
-    group: "store",
-    options: MIGRATION_PREPARE_OPTIONS,
-    summary: "compare the candidate against an independently restored SQLite backup",
-    values: { backup: "ABSOLUTE_FILE", restore: "ABSOLUTE_FILE" },
-  },
-  "store migration-activate": {
-    forms: [["id", "native-id?"]],
-    group: "store",
-    options: MIGRATION_ACTIVATE_OPTIONS,
-    summary: "freeze the legacy source and select the exact verified file candidate",
-    values: { id: "RECEIPT_ID" },
   },
   "question open": {
     forms: [

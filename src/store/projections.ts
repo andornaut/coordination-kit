@@ -1,5 +1,5 @@
-// Projections: tables derived from the events, updated in the append transaction and rebuilt by
-// `Store.rebuild`. Each projection lists its tables, their DDL and one applier per event kind.
+// Projections are derived from events and rebuilt by `Store.rebuild`.
+// Each projection lists its tables and one applier per event kind.
 // Kinds without an applier are stored and chained but project nothing, so a later projection can
 // add appliers for existing kinds and pick them up on the next rebuild.
 import { QUESTION_CODEX_PROJECTION } from "./projections/codexQuestions.ts";
@@ -27,14 +27,4 @@ export const PROJECTIONS: readonly Projection[] = [
   HANDOFFS_PROJECTION,
   REQUESTS_PROJECTION,
   PROJECT_TASKS_PROJECTION,
-];
-
-/**
- * Tables of retired projections that an older store may still hold. Rebuild drops them; their
- * events (`reminder.claimed`, `reminder.settled`) stay in the journal and project nothing.
- */
-export const RETIRED_TABLES: readonly string[] = [
-  "pending_notices",
-  "reminder_claims",
-  "reminder_originals",
 ];

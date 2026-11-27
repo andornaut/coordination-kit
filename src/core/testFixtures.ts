@@ -1,4 +1,5 @@
 // Scratch game-coordinator trees for tests. Every fixture lives under a fresh temporary directory.
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -114,6 +115,8 @@ export function makeFixture(): Fixture {
   const base = mkdtempSync(join(tmpdir(), "coordination-kit-"));
   const root = join(base, "game-coordinator");
   mkdirSync(root);
+  execFileSync("git", ["init", "-q", "--initial-branch=main"], { cwd: root });
+  writeFileSync(join(root, ".gitignore"), "/var/\n");
   writeJson(join(root, "config.json"), coordinatorConfig());
   for (const [game, project] of [
     ["archies-dog-walks", "Archie"],

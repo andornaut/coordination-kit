@@ -1,13 +1,12 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
 import { clockAt, TEST_CLOCK, TEST_CONTEXT } from "../core/testFixtures.ts";
 import { Store, storePath } from "./db.ts";
-import { canonicalJson } from "./eventCodec.ts";
+import { canonicalJson, eventHash } from "./eventCodec.ts";
 import { closeMessage, readInbox, retainMessage, sendMessage } from "./messages/messages.ts";
 import { storeFixture } from "./testStore.ts";
 import { GENESIS } from "./types.ts";
@@ -19,7 +18,7 @@ const RECIPIENT = {
 };
 
 function scratch(): string {
-  return join(mkdtempSync(join(tmpdir(), "store-db-")), "coordination.db");
+  return join(mkdtempSync(join(tmpdir(), "store-db-")), "coordination");
 }
 
 function uuid(n: number): string {
@@ -27,7 +26,7 @@ function uuid(n: number): string {
 }
 
 function messages(store: Store): unknown[] {
-  return store.db.prepare("SELECT * FROM messages ORDER BY id").all();
+  return [...store.index.rows("messages")].sort((a, b) => String(a.id).localeCompare(String(b.id)));
 }
 
 function populate(store: Store): void {
@@ -87,21 +86,18 @@ describe("Store", () => {
     }
   });
 
-  it("opens with WAL, synchronous FULL, a 5 s busy timeout, foreign keys and owner-only mode", () => {
-    const store = Store.open(TEST_CLOCK, scratch());
-    const pragma = (name: string) =>
-      Object.values(store.db.prepare(`PRAGMA ${name}`).get() ?? {})[0];
-    expect(pragma("journal_mode")).toBe("wal");
-    expect(pragma("synchronous")).toBe(2);
-    expect(pragma("busy_timeout")).toBe(5000);
-    expect(pragma("foreign_keys")).toBe(1);
-    expect(pragma("user_version")).toBe(1);
+  it("creates the journal on the first durable append", () => {
+    const path = scratch();
+    const store = Store.open(TEST_CLOCK, path);
+    expect(existsSync(path)).toBe(false);
+    store.append({ actor: SENDER, key: "test:1", kind: "test.noted", payload: {} });
+    expect(existsSync(join(path, "journal", "batches", "0000000000000001.json"))).toBe(true);
     store.close();
   });
 
   it("places the store under var/ without an active work protocol", () => {
     const { layout, root } = storeFixture();
-    expect(storePath(layout)).toBe(join(root, "var", "coordination.db"));
+    expect(storePath(layout)).toBe(join(root, "var", "coordination"));
   });
 
   it("chains every event to the previous hash from the genesis value", () => {
@@ -117,13 +113,11 @@ describe("Store", () => {
     store.close();
   });
 
-  it("refuses updates and deletes of events", () => {
+  it("keeps returned events immutable", () => {
     const store = Store.open(TEST_CLOCK, scratch());
     populate(store);
-    expect(() => store.db.exec("UPDATE events SET kind = 'x.y' WHERE seq = 1")).toThrow(
-      "append-only",
-    );
-    expect(() => store.db.exec("DELETE FROM events WHERE seq = 1")).toThrow("append-only");
+    expect(Object.isFrozen(store.eventAt(1))).toBe(true);
+    expect(Object.isFrozen(store.eventAt(1)?.payload)).toBe(true);
     store.close();
   });
 
@@ -132,13 +126,11 @@ describe("Store", () => {
     const store = Store.open(TEST_CLOCK, path);
     populate(store);
     store.close();
-    const raw = new DatabaseSync(path);
-    raw.exec("DROP TRIGGER events_no_update");
-    raw.exec(`UPDATE events SET payload = replace(payload, 'body 2', 'body X') WHERE seq = 2`);
-    raw.close();
     const reopened = Store.open(TEST_CLOCK, path);
-    expect(() => reopened.verify()).toThrow("chain-broken: at seq 2");
-    expect(() => reopened.rebuild()).toThrow("chain-broken");
+    const events = reopened.events();
+    const event = events[1]!;
+    events[1] = { ...event, payload: { ...event.payload, body: "body X" } };
+    expect(() => Store.fromEvents(TEST_CLOCK, events)).toThrow("chain-broken: at seq 2");
     reopened.close();
   });
 
@@ -146,22 +138,21 @@ describe("Store", () => {
     const store = Store.open(TEST_CLOCK, scratch());
     populate(store);
     const before = messages(store);
-    const wakes = store.db.prepare("SELECT * FROM wake_state").all();
-    store.db.exec("UPDATE messages SET state = 'handled', body = 'lost'");
-    store.db.exec("DELETE FROM wake_state");
+    const wakes = store.index.rows("wake_state");
+    const original = store.index.get("messages", [uuid(1)])!;
+    store.index.put("messages", [uuid(1)], { ...original, body: "lost" });
+    for (const wake of wakes) {
+      store.index.remove("wake_state", [wake.role!]);
+    }
     const result = store.rebuild();
     expect(result.events).toBe(store.events().length);
     expect(messages(store)).toEqual(before);
-    expect(store.db.prepare("SELECT * FROM wake_state").all()).toEqual(wakes);
+    expect(store.index.rows("wake_state")).toEqual(wakes);
     store.close();
   });
 
   it("rebuilds a journal holding retired reminder, notice and attention events", () => {
     const store = Store.open(TEST_CLOCK, scratch());
-    // An older store also holds the retired projections' tables.
-    store.db.exec(`CREATE TABLE pending_notices (id TEXT PRIMARY KEY);
-      CREATE TABLE reminder_claims (id TEXT PRIMARY KEY);
-      CREATE TABLE reminder_originals (claim_id TEXT, original_id TEXT)`);
     const system = { nativeId: null, role: null };
     const coordinator = { nativeId: null, role: "game-coordinator" };
     const codex = "00000000-0000-4000-8000-0000000000d3";
@@ -261,21 +252,18 @@ describe("Store", () => {
       },
     });
     const before = messages(store);
-    const wakes = store.db.prepare("SELECT * FROM wake_state ORDER BY role").all();
+    const wakes = store.index.rows("wake_state");
     expect(wakes).toContainEqual({ outstanding: null, pending: 1, role: RECIPIENT.role });
     expect(store.rebuild().events).toBe(store.events().length);
     expect(messages(store)).toEqual(before);
-    expect(store.db.prepare("SELECT * FROM wake_state ORDER BY role").all()).toEqual(wakes);
-    expect(
-      store.db.prepare("SELECT state, delivered_at FROM messages WHERE id = ?").get(uuid(2)),
-    ).toEqual({ delivered_at: null, state: "handled" });
-    expect(
-      store.db
-        .prepare(
-          "SELECT name FROM sqlite_master WHERE name IN ('pending_notices', 'reminder_claims', 'reminder_originals')",
-        )
-        .all(),
-    ).toEqual([]);
+    expect(store.index.rows("wake_state")).toEqual(wakes);
+    expect(store.index.get("messages", [uuid(2)])).toMatchObject({
+      delivered_at: null,
+      state: "handled",
+    });
+    expect(store.index.rows("pending_notices")).toEqual([]);
+    expect(store.index.rows("reminder_claims")).toEqual([]);
+    expect(store.index.rows("reminder_originals")).toEqual([]);
     store.close();
   });
 
@@ -297,25 +285,22 @@ describe("Store", () => {
     const store = Store.open(TEST_CLOCK, scratch());
     expect(() =>
       store.transaction(() => {
-        store.append({
-          actor: { nativeId: null, role: null },
-          key: "k",
-          kind: "test.noted",
-          payload: {},
-        });
+        sendMessage(store, SENDER, { body: "Discard this message", id: uuid(1), intent: "queue", to: RECIPIENT.role });
         throw new Error("abort");
       }),
     ).toThrow("abort");
     expect(store.head()).toEqual({ hash: GENESIS, seq: 0 });
+    expect(store.index.rows("messages")).toEqual([]);
     store.close();
   });
 
-  it("refuses a store written by a newer schema", () => {
+  it("rejects a duplicate event key when replaying a detached journal", () => {
     const path = scratch();
-    Store.open(TEST_CLOCK, path).close();
-    const raw = new DatabaseSync(path);
-    raw.exec("PRAGMA user_version = 2");
-    raw.close();
-    expect(() => Store.open(TEST_CLOCK, path)).toThrow("store-schema-newer");
+    const store = Store.open(TEST_CLOCK, path);
+    const { event } = store.append({ actor: SENDER, key: "k", kind: "test.noted", payload: {} });
+    const repeated = { ...event, prevHash: event.hash, seq: 2 };
+    expect(() => Store.fromEvents(TEST_CLOCK, [event, { ...repeated, hash: eventHash(repeated) }]))
+      .toThrow("duplicate-event-key");
+    store.close();
   });
 });

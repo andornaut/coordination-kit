@@ -1,8 +1,7 @@
-// The canonical forms events are stored, hashed and compared in: canonical JSON, the chained event
-// hash, normalized link sets and the events row codec.
+// Canonical JSON, chained event hashes and normalized link sets.
 import { createHash } from "node:crypto";
-import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
+import type { Store } from "./db.ts";
 import {
   ensure,
   type JsonObject,
@@ -11,8 +10,6 @@ import {
   type StoredEvent,
   StoreError,
 } from "./types.ts";
-
-type Row = Record<string, SQLInputValue>;
 
 /** A link or record reference: one token of at most 512 characters. */
 export const REF = /^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{0,511}$/;
@@ -84,32 +81,9 @@ export function eventHash(event: Omit<StoredEvent, "hash">): string {
   );
 }
 
-export function rowEvent(row: Row): StoredEvent {
-  const worker = row.actor_worker;
-  return {
-    actor: {
-      nativeId: (row.actor_native_id as string | null) ?? null,
-      role: (row.actor_role as string | null) ?? null,
-      ...(typeof worker === "string" ? { worker } : {}),
-    },
-    at: row.at as string,
-    hash: row.hash as string,
-    key: row.key as string,
-    kind: row.kind as string,
-    payload: JSON.parse(row.payload as string) as JsonObject,
-    prevHash: row.prev_hash as string,
-    seq: Number(row.seq),
-  };
-}
-
 export function latestStoreReview(
-  index: DatabaseSync,
+  history: Pick<Store, "events">,
   throughSeq = Number.MAX_SAFE_INTEGER,
 ): StoredEvent | undefined {
-  const row = index
-    .prepare(
-      "SELECT * FROM events WHERE kind = 'review.brief' AND seq <= ? ORDER BY seq DESC LIMIT 1",
-    )
-    .get(throughSeq) as Row | undefined;
-  return row === undefined ? undefined : rowEvent(row);
+  return history.events({ kinds: ["review.brief"] }).findLast(({ seq }) => seq <= throughSeq);
 }
