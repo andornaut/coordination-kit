@@ -57,3 +57,4 @@ Reference: [review](../reference/review.md#scheduled-review-seam), [libraries](.
 | ck-0083 | Remove SQLite and add shared GitHub task storage           | [ck-0083.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0083.md) |
 | ck-0084 | Remove legacy game aliases from Coordination Kit           | [ck-0084.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0084.md) |
 | ck-0085 | Unify Coordination Kit workspace paths                     | [ck-0085.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0085.md) |
+| ck-0086 | Correct stale paths after the Coordination Kit 9 migration | [ck-0086.md](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0086.md) |
