@@ -27,7 +27,7 @@ export interface ProjectConfig {
   readonly git: { readonly main: string; readonly remote: string; readonly github: string };
   readonly schedule: {
     readonly departures: readonly string[];
-    /** Defaults to the game-coordinator config.json timezone when omitted. */
+    /** Defaults to the workspace timezone when omitted. */
     readonly timezone?: string;
   };
   /**

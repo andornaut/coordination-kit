@@ -103,7 +103,7 @@ describe("app operations", () => {
         operations: { dashboard: { busOwner: "dashboard/operator" } },
         roles: { "dashboard/operator": operator },
       }),
-    ).toThrow("/roles/dashboard/operator: is not a role in config.json");
+    ).toThrow("/roles/dashboard/operator: is not a configured workspace role");
   });
 
   it("rejects unknown apps and unregistered bus owners without changing the operations format", () => {

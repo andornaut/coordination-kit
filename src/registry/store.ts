@@ -1,4 +1,4 @@
-// Reads and revision-checked writes of var/registry.json under var/registry.lock.
+// Read and revision-check writes to the registry and lock selected by the workspace layout.
 import { mkdirSync, readdirSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -14,12 +14,12 @@ import { LockError, type LockHandle, withLock } from "../core/files/lock.ts";
 import { type Registry, type RegistryDraft, validateRegistry } from "./schema.ts";
 
 export interface UpdateOptions {
-  /** Seconds to wait for var/registry.lock before failing with LockBusy. Default 30. */
+  /** Seconds to wait for the workspace registry lock before failing with LockBusy. Default 30. */
   readonly timeoutSeconds?: number;
   /** Test hook passed to the durable write. */
   readonly onStage?: (stage: DurableStage, tempPath: string) => void;
   /**
-   * var/registry.lock as the caller already holds it. The write runs under that lock instead of
+   * the workspace registry lock as the caller already holds it. The write runs under that lock instead of
    * taking a second descriptor, which would wait on the caller's own lock.
    */
   readonly held?: LockHandle;
@@ -121,7 +121,7 @@ function persist(
 }
 
 /**
- * Apply `mutate` to a private copy of the current registry under var/registry.lock.
+ * Apply `mutate` to a private copy of the current registry under the workspace registry lock.
  * Rejects with RevisionConflict when the stored revision is not `expectedRevision`, and with a
  * ValidationError when the result is invalid; either way the file is unchanged. `mutate` may
  * change the draft in place or return a replacement; revision and updatedAt, from `clock`, are set

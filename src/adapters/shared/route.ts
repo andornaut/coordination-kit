@@ -1,6 +1,5 @@
-// The role-name review route, var/route.json schema 2. It names roles only; every send resolves
-// them through var/registry.json for each role's selected harness at that moment. The review's
-// recipient is the host app's reports.recipient.
+// The schema 2 review route names roles. Each send resolves their current harness through the
+// workspace registry. The review recipient comes from the host app's reports.recipient.
 import { existsSync } from "node:fs";
 
 import { loadReportsConfig } from "../../core/configuration/delivery.ts";
@@ -33,10 +32,10 @@ const ROUTE_KEYS = ["host", "schema", "state", "targets"];
 
 /** The edit a schema 1 route needs. */
 export const ROUTE_SCHEMA_1 =
-  'var/route.json schema 1 is not supported: remove "monitor" and set "schema" to 2; ' +
-  "scheduled reviews go to the host game's reports.recipient";
+  'review route schema 1 is not supported: remove "monitor" and set "schema" to 2; ' +
+  "scheduled reviews go to the host app's reports.recipient";
 
-/** Validate a schema 2 route against config.json; throws RouteError when it is not one. */
+/** Validate a schema 2 route against the workspace configuration. */
 export function validateRoleRoute(
   config: GameCoordinatorConfig,
   value: unknown,
@@ -59,7 +58,7 @@ export function validateRoleRoute(
   }
   const targets = value.targets as unknown[];
   if (targets.some((target) => typeof target !== "string" || !roles.has(target))) {
-    throw new RouteError("every route target must be a role in config.json");
+    throw new RouteError("every route target must be a configured workspace role");
   }
   const names = targets as string[];
   if (new Set(names).size !== names.length) {
@@ -71,7 +70,7 @@ export function validateRoleRoute(
   return { host: value.host, schema: 2, state: value.state, targets: names };
 }
 
-/** Read and validate var/route.json against config.json; null when no route is declared. */
+/** Read the workspace review route and validate it against the loaded configuration. */
 export function readRoleRoute(layout: Layout): RoleRoute | null {
   if (!existsSync(layout.routeFile)) {
     return null;
@@ -98,7 +97,7 @@ export function configuredReviewRecipient(layout: Layout, appId: string): string
     ? [...appRoleKeys(layout.config, appId), ...layout.config.sharedRoles]
     : roleKeys(layout.config);
   if (!roles.includes(recipient)) {
-    const scope = appMode ? `app ${appId} or sharedRoles` : "config.json";
+    const scope = appMode ? `app ${appId} or sharedRoles` : "the workspace configuration";
     throw new RouteError(`the route recipient ${recipient} is not a role in ${scope}`);
   }
   return recipient;

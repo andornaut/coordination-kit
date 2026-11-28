@@ -1,4 +1,4 @@
-// var/registry.json schema version 1, shared by coordination-kit, delivery-kit and the game-sessions skills.
+// Workspace registry schema version 1, shared by coordination-kit, delivery-kit and the game-sessions skills.
 // The skills own every field except operations.*.lastAdoption, reserved for supported resident-adoption recording.
 // Registry state records ownership; it never proves activation on its own.
 import {
@@ -28,7 +28,7 @@ export type TransferPhase = (typeof TRANSFER_PHASES)[number];
 
 export interface Activation {
   readonly marker: string;
-  /** Path relative to game-coordinator, for example var/handoffs/<file>. */
+  /** Path relative to the workspace root. */
   readonly checkpoint?: string;
 }
 
@@ -269,7 +269,7 @@ function checkStructure(issues: Issues, value: unknown): value is Registry {
   return issues.list.length === 0;
 }
 
-/** Keys and names must agree with config.json: roles, apps and role references. */
+/** Check roles, apps and role references against the workspace configuration. */
 function checkAgainstConfig(
   issues: Issues,
   config: GameCoordinatorConfig,
@@ -278,12 +278,12 @@ function checkAgainstConfig(
   const keys = new Set(roleKeys(config));
   for (const key of Object.keys(registry.roles)) {
     if (!keys.has(key)) {
-      issues.add(`/roles/${key}`, "is not a role in config.json");
+      issues.add(`/roles/${key}`, "is not a configured workspace role");
     }
   }
   for (const [app, operation] of Object.entries(registry.operations)) {
     if (!Object.hasOwn(config.apps ?? config.games, app)) {
-      issues.add(`/operations/${app}`, "is not an app in config.json");
+      issues.add(`/operations/${app}`, "is not a configured workspace app");
     }
     if (!Object.hasOwn(registry.roles, operation.busOwner)) {
       issues.add(`/operations/${app}/busOwner`, "is not a registered role");
@@ -292,13 +292,13 @@ function checkAgainstConfig(
   registry.transfers.forEach((transfer, index) =>
     transfer.roles.forEach((role, roleIndex) => {
       if (!keys.has(role)) {
-        issues.add(`/transfers/${index}/roles/${roleIndex}`, "is not a role in config.json");
+        issues.add(`/transfers/${index}/roles/${roleIndex}`, "is not a configured workspace role");
       }
     }),
   );
 }
 
-/** Validate a version 1 registry; with `config`, also check its keys against config.json. */
+/** Validate a version 1 registry and check its keys against `config` when supplied. */
 export function validateRegistry(
   config: GameCoordinatorConfig | undefined,
   value: unknown,
