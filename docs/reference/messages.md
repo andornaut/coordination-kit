@@ -27,6 +27,11 @@ coordination-kit msg retain 00000000-0000-4000-8000-000000000003 --reason "check
   --until 2026-11-22T18:30:00Z
 ```
 
+For `--evidence`, cite a durable artifact, commit, or retained receipt. References start with an
+alphanumeric character. Keep the proof in a dated file under the configured artifact directory
+and reference it as `artifact:OWNER/ITEM/receipt.json`. A live `current.md` is a navigation
+checkpoint and changes as work progresses.
+
 - States are `sent`, `delivered` (the recipient's own `inbox` read), then `handled`, `superseded`
   or `retained`. The recipient alone closes an original.
 - `msg send` stores the original, marks the recipient wake-pending and attempts at most one

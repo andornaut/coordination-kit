@@ -115,7 +115,7 @@ describe("app operations", () => {
     ).toThrow(
       expect.objectContaining({
         issues: [
-          "/operations/unknown: is not an app in config.json",
+          "/operations/unknown: is not a configured workspace app",
           "/operations/unknown/busOwner: is not a registered role",
         ],
       }),
