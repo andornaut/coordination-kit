@@ -1,6 +1,6 @@
 # Registry
 
-`var/registry.json` records each role's ownership, worktree and conversation ID per harness.
+The [registry](../reference/registry.md) records each role's ownership, worktree and conversation ID per harness.
 Every writer holds `registry.lock`, rejects a changed revision and writes durably. Each send
 resolves the recipient's effective harness from its role override or the registry default, then
 that harness's conversation ID, and caches nothing. A missing ID is `unavailable`, never

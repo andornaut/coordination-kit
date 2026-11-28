@@ -1,12 +1,12 @@
 # Review route, scheduled review and the Claude channel
 
-The scheduled review route `var/route.json`, the seam between delivery-kit's runner and this
-kit, the stored brief, wake files, the Claude channel server and its status file.
+Scheduled review routing, the Delivery Kit runner seam, stored briefs and Claude wake delivery.
 
 ## Review route
 
-`var/route.json` (schema 2) names the scheduled review's host app and its targets by role.
-This solo app has no additional targets.
+`route.json` (schema 2) names the scheduled review's host app and its targets by role.
+Keep it in the [workspace state directory](configuration.md#state), normally
+`.coordination-kit/`. This `apps` workspace has no additional targets.
 
 ```json
 {
@@ -19,12 +19,12 @@ This solo app has no additional targets.
 
 - `state` is `active` or `held`. A held route, or no route, delivers no scheduled review, and a
   held route also defers events addressed to its recipient.
-- `host` is the app whose runner dispatches scheduled reviews at the `config.json`
-  `wakeMinutes`. In app mode the host's `reports.recipient` must be an exact role key in
+- `host` is the app whose runner dispatches scheduled reviews at the configured
+  `wakeMinutes`. In an `apps` workspace, the host's `reports.recipient` must be an exact role key in
   the host app's `roles` or in the workspace's `sharedRoles`.
-- Every target must be a distinct role key in `config.json`. An active route's targets
-  exclude its recipient. App mode accepts an empty target list. Legacy game mode requires
-  at least one target for an active route.
+- Every target must be a distinct role key in the [workspace configuration](configuration.md#workspace-configuration).
+  An active route's targets exclude its recipient. An `apps` workspace accepts an empty target
+  list. A `games` workspace requires at least one target for an active route.
 - The file has exactly these four keys. A schema 1 route is refused with the edit it needs.
 
 ## Scheduled review seam
@@ -49,7 +49,7 @@ exactly one stdout line, shown expanded here:
   "status": "delivered",
   "reason": null,
   "detail": "TEXT",
-  "cli": { "version": "3.0.0", "distSha256": "HEX" }
+  "cli": { "version": "VERSION", "distSha256": "HEX" }
 }
 ```
 
@@ -87,16 +87,16 @@ it, a timeout or unparsable output as no delivery claimed, with the `cli-error` 
 | `outbox-unreadable`     | The ingest cursor cannot be read, so nothing is consumed.              |
 | `compaction-reserved`   | A manual compaction reservation is deferring journal writes.           |
 
-`review deliver` records each typed result at `var/games/<g>/bus/unblock/review-deliver/<slot>.json`,
-where `<slot>` is the slot start in epoch seconds, under that directory's `deliver.lock`. A repeated
-call for the same game and slot prints the recorded `status`, `reason` and `detail` with the
-current `cli` and calls nothing else. Contention on another call's `deliver.lock` is `deferred`
+`review deliver` records each typed result at `unblock/review-deliver/<slot>.json` under the
+[app's bus directory](configuration.md#state). `<slot>` is the slot start in epoch seconds.
+The call holds that directory's `deliver.lock`. A repeated call for the same app and slot
+returns the recorded `status`, `reason` and `detail` with the current `cli` identity. Contention on another call's `deliver.lock` is `deferred`
 with `recipient-busy` and is not recorded. An unreadable record is an internal failure.
 
 A write refused with `compaction-reserved` leaves the refusal out of the recorded review
-results. The CLI can retry that exact slot after the reservation ends. Delivery Kit 8.4.0
-automatically retries this typed deferral. A generic interruption requires an explicit call for
-the same slot before a newer brief is stored. Refused ingest leaves the files and cursor at
+results. The CLI can retry that exact slot after the reservation ends. Compatible Delivery Kit
+runners automatically retry this typed deferral. A generic interruption requires an explicit
+call for the same slot before a newer brief is stored. Refused ingest leaves the files and cursor at
 their previous position for the runner's next ingest call. Journal keys deduplicate any
 records committed before the refusal.
 
@@ -248,8 +248,8 @@ A missing brief exits 1 with `brief-missing`.
 ## Wake files
 
 A wake tells a Claude session that messages wait, without carrying them. Each role has one file,
-`<stateRoot>/wake/roles/<role>.json` with a configured state root and `var/wake/roles/` without
-one; a game role's file is `<game>/<role>.json` there:
+`<stateRoot>/wake/roles/<role>.json`. The [state root](configuration.md#state) defaults to the
+selected workspace state directory. A game role's file is `<game>/<role>.json` under `wake/roles/`.
 
 ```json
 { "schema": 1, "seq": 3, "role": "game-coordinator", "count": 2 }
@@ -264,9 +264,10 @@ the channel. A Codex recipient's wake is one guarded control-socket queue add.
 
 ## Claude channel
 
-`coordination-kit claude channel` is the stdio MCP server the recipient session launches; see
-`examples/claude-channel.mcp.json`. A session reads that configuration only at launch, and `/mcp`
-reconnect restarts the launch-time command. A command that runs `node
+`coordination-kit claude channel` is the stdio MCP server the recipient session launches.
+See the [channel configuration example](https://github.com/andornaut/coordination-kit/blob/v9.0.0/examples/claude-channel.mcp.json).
+A session reads that configuration only at launch, and `/mcp` reconnect restarts the launch-time
+command. A command that runs `node
 <gc>/node_modules/@andornaut/coordination-kit/dist/cli.js --root <gc> claude channel` stays the
 same across kit releases, so an upgrade needs `npm ci` at the root and a reconnect, not a
 relaunch.
@@ -298,9 +299,9 @@ payload: the recipient reads its messages with `coordination-kit inbox`.
 
 ## Channel status file
 
-`claude channel` writes `<stateRoot>/channel/roles/<role>.json` (`var/channel/roles/` without a
-configured state root) when it resolves its binding. At most once a minute it checks for a
-replacement. A running channel updates the file only after verifying `/clear` lineage from its
+`claude channel` writes `<stateRoot>/channel/roles/<role>.json` when it resolves its binding.
+The channel uses the same [state root](configuration.md#state) as wake files. It checks for
+a replacement at most once a minute. A running channel updates the file only after verifying `/clear` lineage from its
 previously proven conversation to the new binding. An unrelated replacement leaves the earlier
 conversation reported until a channel connects for the new binding. On an update, `pid`,
 `startedAt` and `argv` stay those of the running server. A game role's file is `<game>/<role>.json`

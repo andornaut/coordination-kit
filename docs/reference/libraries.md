@@ -67,7 +67,7 @@ come first and the subject last.
 - `readRegistry(layout)`: a validated snapshot carrying its `revision`; `RegistryMissing` when
   absent.
 - `updateRegistry(clock, layout, expectedRevision, mutate, options)` and
-  `createRegistry(clock, layout, initial, options)`: hold `var/registry.lock` (30 s by default), reject a
+  `createRegistry(clock, layout, initial, options)`: hold `layout.registryLock` (30 s by default), reject a
   changed revision with `RevisionConflict` or an existing file with `RegistryExists`, validate,
   write durably, increment `revision` and set `updatedAt` from `clock`. An invalid result throws
   `ValidationError` and leaves the file unchanged. Pass `options.held` when the caller already

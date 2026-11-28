@@ -81,7 +81,7 @@ so `@typescript-eslint/no-import-type-side-effects` requires it as `import type`
 | Layer | Directory                     | Holds                                                                                                                          |
 | ----- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | 1     | `core/`                       | Identifiers, the persisted JSON form, validation, durable files, locks, the layout, Git reads, the clock, the command contract |
-| 2     | `registry/`                   | `var/registry.json`: schema, guarded updates, resolution and harness selection                                                 |
+| 2     | `registry/`                   | Registry schema, guarded updates, resolution and harness selection                                                             |
 | 3     | `workfiles/`                  | The work-file convention: front matter, decision lines, `work check` and `work report`                                         |
 | 4     | `adapters/`                   | Claude and Codex transports and collectors, the review route, decision markers and endpoint selection                          |
 | 5     | `store/`                      | The event store, its projections and file authority, the records over it, wakes and the store services                         |
@@ -106,8 +106,8 @@ runner contracts. Within `commands/`, `harness/`, `project/`, and `store/` group
 ## Compatibility and releases
 
 `VERSION` and `package.json` carry the version, and `pack` refuses a mismatch. The CLI, the build
-API subpaths, `config.json`, the registry and route schemas and every on-disk format follow semver:
-an incompatible change needs a major version.
+API subpaths, workspace configuration, registry and route schemas, and on-disk formats follow
+semver. An incompatible change needs a major version.
 
 A release is three files from `pack`:
 

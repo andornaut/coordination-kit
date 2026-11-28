@@ -1,7 +1,7 @@
 # Review
 
-`var/route.json` names the scheduled review's host app and its target roles. When the host
-app's runner reaches a `config.json` `wakeMinutes` slot, this kit composes the review and records
+The [review route](../reference/review.md#review-route) names the host app and target roles.
+When the host app's runner reaches a configured `wakeMinutes` slot, this kit composes the review and records
 it for that app's `reports.recipient`. Each app's event messages go to its own `reports.recipient`. A
 held route, or no route, delivers no scheduled review.
 

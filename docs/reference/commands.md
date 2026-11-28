@@ -296,9 +296,10 @@ coordinator state is read once. `--root` names the coordinator, as for the other
 commands.
 
 - **Repositories:** each role's registered worktree resolves with `git rev-parse` to its common Git
-  directory, whose parent is the repository; when the worktree is missing, the role's game or kit
-  path in `config.json` is tried. Roles sharing a repository are listed together. A repository is a
-  `game` or `kit` by its `config.json` path, `coordinator` for the coordinator root, else `other`.
+  directory, whose parent is the repository; when the worktree is missing, the role's app or
+  kit path in the [workspace configuration](configuration.md#workspace-configuration) is tried.
+  Roles sharing a repository are listed together. The repository kind is `game` for a configured
+  app, `kit` for a configured kit, `coordinator` for the coordinator root, else `other`.
 - **Reads:** per repository, one `git log` over `main` and `origin/main` (parents, committer dates,
   messages, changes against the first parent with rename detection, and release tags) and one
   first-parent `git log -p` over `docs/work/` on `main` with unbounded context, whose diffs show
@@ -352,7 +353,7 @@ commands.
   - A game's successful runner deploy event is read from the store using its exact SHA and event
     time. A skipped deployment remains a distinct runner outcome. Historical COMPLETE events are
     read from the store or legacy outbox. The runner's last deployed SHA
-    (`var/games/<g>/bus/last-deploy.sha`) is timed by the epoch seconds in `last-deploy`, or has a
+    (`last-deploy.sha` in the [app's bus directory](configuration.md#state)) is timed by the epoch seconds in `last-deploy`, or has a
     null time when that file is missing.
   - A successful deploy or legacy COMPLETE event can list work IDs. A listed ID has deployment
     evidence even without a landing match (`deployed.matched` is `work-list`, otherwise `landing`).

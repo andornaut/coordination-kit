@@ -1,10 +1,8 @@
 # Registry
 
-The shared role registry `var/registry.json`, scoped harness selection, send-time conversation resolution, the readiness probe and the scoped harness doctor.
-
-`var/registry.json` (schema 1) is the local app or legacy workspace registry. It records
-ownership and the conversation ID of each role per harness. It never proves activation on its
-own: `transfers` carries the hold, acceptance and activation markers.
+`registry.json` (schema 1) records each role's ownership and conversation ID per harness.
+It lives in the [workspace state directory](configuration.md#state), normally
+`.coordination-kit/`. The `transfers` field carries the hold, acceptance and activation markers.
 
 | Field                             | Content                                                                                                                                                                                            |
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -19,7 +17,7 @@ own: `transfers` carries the hold, acceptance and activation markers.
 - Role references (`busOwner`, `reports.recipient`, `reports.workerParents`, `--requester`,
   `--role`, `--recipient`, `--parent`) use registered role keys; explicit inbox conversation UUID
   selectors follow the [inbox validation rules](commands.md#command-semantics). There are no role aliases.
-- Every writer holds `var/registry.lock`, rejects a changed `revision`, validates the result,
+- Every writer holds the sibling `registry.lock`, rejects a changed `revision`, validates the result,
   writes durably and increments `revision`.
 - The skills own every field except `operations.*.lastAdoption`, which is reserved for
   supported resident-adoption recording. The harness-selection CLI changes only selected roles' `harness` overrides and
@@ -31,7 +29,7 @@ own: `transfers` carries the hold, acceptance and activation markers.
 ## Create and extend a registry
 
 The [registry library](libraries.md#registry-library) provides `createRegistry` for a new
-`var/registry.json` and `updateRegistry` for revision-checked changes to an existing registry.
+`registry.json` and `updateRegistry` for revision-checked changes to an existing registry.
 Creation sets revision 1 and refuses an existing file. Supply the actual coordinator project and
 native conversation IDs from the workspace owner. A null conversation marks an unbound harness.
 
@@ -68,20 +66,19 @@ coordination-kit harness select \
   --app chibis-way-home
 ```
 
-Each `--app` selects every configured role for that app.
-Use one selector spelling per invocation. Repeat `--role` to select additional
-registered role names; the union is changed once. Missing or invalid roles,
-an unknown game, an unavailable selected conversation ID, or a changed revision refuse the entire mutation. At least one scope is
-required, so this command never implicitly switches the global default. `--harness default`
-removes only the selected overrides. Unselected games, shared roles, conversation IDs, worktrees,
+Each `--app` selects every configured role for that app. Repeat `--role` to add registered
+roles to the selection. Missing or invalid roles, an unknown app, an unavailable selected
+conversation ID or a changed revision refuse the entire mutation. At least one scope is
+required. `--harness default` removes the selected overrides. Unselected apps, shared roles,
+conversation IDs, worktrees,
 activation markers, operations, delivery state and schedules remain unchanged. No provider is
 started and no runner is restarted by selection.
 
 ## Send-time resolution
 
 Route, configuration, briefs and events name roles, never conversation IDs. Each send, wake and
-readiness probe reads `var/registry.json` when it
-sends: the role's optional `harness` override, otherwise the registry default, selects the adapter;
+readiness probe reads the current registry. The role's optional `harness` override selects
+the adapter, with the registry default as the fallback.
 `roles.<role>.conversations.<effective harness>` gives the ID.
 Nothing is cached across sends. A missing or null ID is reported `unavailable` for that role,
 never as clearance.
@@ -179,10 +176,11 @@ owner; doctor never probes authenticated HTTP ports or opens private configurati
 
 Each Claude row also carries two read-only channel checks; Codex rows carry `null` for both.
 
-- `channel_command` compares the channel MCP server in `<root>/var/claude-channel.mcp.json` (the
-  first server whose arguments include `claude channel`) with the stable command
-  `node <root>/node_modules/@andornaut/coordination-kit/dist/cli.js --root <root> claude channel`,
-  further arguments allowed. `status` is `stable` (`stable_path`), `unstable`
+- `channel_command` compares the channel MCP server in `claude-channel.mcp.json` in the
+  [workspace state directory](configuration.md#state) with the stable command below. It picks
+  the first server whose arguments include `claude channel`. The stable command is
+  `node <root>/node_modules/@andornaut/coordination-kit/dist/cli.js --root <root> claude channel`.
+  Additional arguments are allowed. `status` is `stable` (`stable_path`), `unstable`
   (`command_not_stable_path`, such as an `npx` command, which needs a relaunch to change) or
   `unknown` (`channel_config_missing`, `channel_config_unreadable` or
   `channel_server_not_configured`). It reports the config path, server name, configured command
